@@ -16,6 +16,21 @@
 
 ---
 
+## 2026-09-30 · 工作包 1-3 · Opus 5.5
+- 完成：plan 阶段 1 第 7–9 项。`server/core/runner.ts`（Runner / RunningProcess / PidRegistry / LoadError）、`residue.ts`（cleanupResidue、runStartupCleanup）、`scheduler.ts`；`server/plugins/residue.ts` 启动时跑清理。测试 `tests/core/{scheduler,runner,residue}.test.ts`，假 llama-server `tests/fixtures/fake-llama-server.ts`。
+- 验证：`bun test` 89 通过（连跑 3 次）；`bun run typecheck` 通过；`bun run build` 通过。真机：真实 llama-server b10809 + 27B Q4（`-c 4096`），scheduler → runner 加载 37 秒、/health 200、对话 200；停止 3.6 秒，进程树（含其子进程）全灭、端口释放、pids.json 清空；残留清理杀掉运行目录下的真实进程、放过目录外的。临时脚本在仓库外，已删除。
+- 剩余：无。「单元测试」项仍未打勾（路由解析在 1-4）。强杀 llama-web 后的残留场景留到 1-6。
+- 决定 / 坑：
+  - runner 用 `node:child_process`（不用 Bun.spawn），这样 `nuxt dev` 的 Node 服务器下也能用。停止 = `taskkill /T /F`，没有温和退出。`'exit'` 后等 `'close'`（最多 1 秒）再结算，保证失败时的最后几行日志完整。
+  - runner 本身不懂 settings：`start({ exe, args: port => [...], tag, loadTimeoutMs, onLine })`，args 由调用方用 args.ts 按端口生成。端口按范围从小到大找第一个能 listen 的，同进程内已分配的端口跳过。
+  - scheduler 通过注入的 `launch(target) => ModelProcess` 工作（RunningProcess 结构上符合）。目标 = 模型 + 方案；换方案 = 另一个目标 = 重启。所有加载经一个 FIFO 队列串行执行；ready 的目标直接给 lease。
+  - 请求必须 `lease.release()`；转发正常结束时传 `'ok'`。lease.signal 在强制卸载 / 崩溃时 abort，1-4 的转发要监听它取消上游。
+  - **需要用户确认的细节**：「崩溃后最多自动重载一次」实现为：崩溃 → crashed，下一个请求自动重载；重载失败或重载后还没有任何请求 `release('ok')` 就再次崩溃 → failed；重载后成功服务过请求，之后再崩溃仍可再自动重载一次。手动启动不算自动重载。
+  - 手动 `stop(modelId)`：拒绝排队请求（code `stopped`）、中止加载中的进程、ready 的先 drain（`force` 直接杀）、清掉 failed。draining 中的模型不接新请求，新请求排到队尾。
+  - 等待中的请求 abort 后移除；未开始的切换没人等就丢弃；已开始的切换会做完。
+  - 1-4 接线：先 `await runStartupCleanup(dataDir)` 再建 scheduler；退出时 `scheduler.shutdown()`。错误都是 code（SchedulerError / LoadError），中文文案还没加进 i18n。
+- 下一步：工作包 1-4（Opus 5.5）。
+
 ## 2026-09-30 · 工作包 1-2 · Sonnet 5.5
 - 完成：plan 阶段 1 第 3–6 项。`server/core/` 下 store.ts、gguf.ts、scanner.ts、args.ts、types.ts（FileRef / ModelDir）；测试在 `tests/core/`，假 GGUF 构造器 `tests/fixtures/gguf-builder.ts`。
 - 验证：`bun test` 52 通过（连跑 3 次）；`bun run typecheck` 通过（只覆盖 `server/` 和 `app/`，不含 `tests/`）。全部用自造的假文件和临时目录，没碰真实模型或配置。
