@@ -1,0 +1,17 @@
+# runtime data: configs, secrets, logs, llama.cpp binaries
+data/
+
+# dependencies / build output
+node_modules/
+.nuxt/
+.output/
+.nitro/
+.cache/
+dist/
+
+# env / local
+.env
+.env.*
+*.log
+.DS_Store
+Thumbs.db

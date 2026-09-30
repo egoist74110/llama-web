@@ -1,0 +1,548 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>llama-web 开发计划</title>
+<!--
+  维护说明（给人和 AI）：
+  - 任务完成时，把对应 <li class="task" data-done="false"> 改成 data-done="true"，
+    并在 <span class="when"></span> 里填完成日期（YYYY-MM-DD）。进度条会自动计算。
+  - 新增任务直接在对应阶段的 <ul class="tasks"> 里加 <li class="task" data-done="false">。
+  - 决定有变化时，改「关键决定」表并在「变更记录」里加一行，不要悄悄改正文。
+  - 本文件会进入公开仓库：不要写入个人路径、域名、API key。
+-->
+<style>
+:root{
+  --bg:#f6f7f9;--panel:#ffffff;--text:#1f2328;--muted:#5b6470;--line:#e3e6ea;
+  --accent:#3b6fd8;--accent-soft:#e8effc;--ok:#2f8a57;--ok-soft:#e5f4ec;
+  --warn:#b7791f;--warn-soft:#fbf1df;--code:#f0f2f5;--radius:10px;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#1b1d21;--panel:#23262b;--text:#d7dbe0;--muted:#8e96a1;--line:#33373e;
+    --accent:#7aa2f0;--accent-soft:#2a3345;--ok:#5fbf8a;--ok-soft:#243329;
+    --warn:#d9a74a;--warn-soft:#3a3122;--code:#2b2f35;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#1b1d21;--panel:#23262b;--text:#d7dbe0;--muted:#8e96a1;--line:#33373e;
+  --accent:#7aa2f0;--accent-soft:#2a3345;--ok:#5fbf8a;--ok-soft:#243329;
+  --warn:#d9a74a;--warn-soft:#3a3122;--code:#2b2f35;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.7 system-ui,-apple-system,"Segoe UI","Microsoft YaHei UI","PingFang SC",sans-serif}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code,pre{font-family:ui-monospace,"Cascadia Code",Consolas,monospace;font-size:13px}
+code{background:var(--code);padding:1px 5px;border-radius:4px}
+pre{background:var(--code);padding:12px 14px;border-radius:8px;overflow-x:auto;line-height:1.55;margin:10px 0}
+.layout{display:grid;grid-template-columns:220px minmax(0,1fr);gap:28px;max-width:1180px;margin:0 auto;padding:28px 16px 80px}
+nav{position:sticky;top:20px;align-self:start}
+nav .brand{font-weight:650;font-size:17px;margin-bottom:4px}
+nav .sub{color:var(--muted);font-size:13px;margin-bottom:16px}
+nav a{display:block;padding:5px 10px;border-radius:6px;color:var(--muted);font-size:14px}
+nav a:hover{background:var(--accent-soft);color:var(--text);text-decoration:none}
+.overall{margin-top:18px;padding:12px;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);font-size:13px}
+.bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden;margin-top:6px}
+.bar i{display:block;height:100%;background:var(--ok);width:0;transition:width .3s}
+main section{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:22px 26px;margin-bottom:20px}
+h1{font-size:24px;margin:0 0 6px}
+h2{font-size:19px;margin:0 0 14px;padding-bottom:10px;border-bottom:1px solid var(--line)}
+h3{font-size:16px;margin:22px 0 8px}
+p{margin:8px 0}
+.lead{color:var(--muted);margin:0}
+table{width:100%;border-collapse:collapse;font-size:14px;margin:10px 0}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-weight:600;background:var(--bg)}
+td:first-child{white-space:nowrap;color:var(--muted)}
+.tag{display:inline-block;font-size:12px;padding:1px 8px;border-radius:999px;background:var(--accent-soft);color:var(--accent);margin-right:4px}
+.tag.slot{background:var(--warn-soft);color:var(--warn)}
+.note{border-left:3px solid var(--warn);background:var(--warn-soft);padding:10px 14px;border-radius:0 8px 8px 0;margin:12px 0;font-size:14px}
+.stage-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.stage-head h2{border:0;padding:0;margin:0}
+.stage-meta{font-size:13px;color:var(--muted);min-width:180px}
+.stage-goal{margin:12px 0 4px;padding:10px 14px;background:var(--bg);border-radius:8px;font-size:14px}
+ul.tasks{list-style:none;padding:0;margin:10px 0}
+li.task{display:flex;gap:10px;padding:7px 4px;border-bottom:1px dashed var(--line);font-size:14px}
+li.task:last-child{border-bottom:0}
+li.task::before{content:"";flex:0 0 16px;height:16px;margin-top:3px;border:1.5px solid var(--muted);border-radius:4px}
+li.task[data-done="true"]::before{background:var(--ok);border-color:var(--ok);
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 8.5l2.5 2.5L12 5.5' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-size:100%}
+li.task[data-done="true"] .t{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}
+li.task .t{flex:1}
+li.task .when{color:var(--ok);font-size:12px;white-space:nowrap}
+.accept{margin-top:14px}
+.accept h3{margin-top:10px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.card{border:1px solid var(--line);border-radius:8px;padding:12px 14px}
+.card b{display:block;margin-bottom:4px}
+@media (max-width:860px){
+  .layout{grid-template-columns:1fr;padding:16px}
+  nav{position:static}
+  .grid2{grid-template-columns:1fr}
+  main section{padding:18px 16px}
+  td:first-child{white-space:normal}
+}
+</style>
+</head>
+<body>
+<div class="layout">
+<nav>
+  <div class="brand">llama-web</div>
+  <div class="sub">本地私有 LLM 控制台 · 开发计划</div>
+  <a href="#goal">目标与范围</a>
+  <a href="#arch">架构</a>
+  <a href="#decisions">关键决定</a>
+  <a href="#behavior">核心行为规则</a>
+  <a href="#data">配置与数据</a>
+  <a href="#api">接口</a>
+  <a href="#ui">界面</a>
+  <a href="#s1">阶段 1 · 核心</a>
+  <a href="#s2">阶段 2 · 界面</a>
+  <a href="#s3">阶段 3 · 可观测性</a>
+  <a href="#s4">阶段 4 · 公网与更新</a>
+  <a href="#verify">验收方式</a>
+  <a href="#slots">坑位（暂不实现）</a>
+  <a href="#risks">风险与待验证</a>
+  <a href="#migrate">旧环境迁移</a>
+  <a href="#changelog">变更记录</a>
+  <div class="overall">总进度 <span id="overall-text">0/0</span><div class="bar"><i id="overall-bar"></i></div></div>
+</nav>
+
+<main>
+<section id="goal">
+  <h1>llama-web 开发计划</h1>
+  <p class="lead">一个 Nuxt + Bun 的单体项目，替代「llama-swap + 图片代理 + 配置生成脚本」这一堆拼起来的东西。</p>
+  <h3>要解决的问题</h3>
+  <ul>
+    <li>原来一个请求要经过 图片代理 → llama-swap → llama-server 三层，出了问题不知道是哪一层。</li>
+    <li>llama-swap 界面是英文的，而且「同时只能在线 1 个」这类规则是隐含的默认行为，界面和配置里都看不到。</li>
+    <li>模型扫描目录写死在脚本里，改个参数要改 JSON、重新生成 YAML、再重启。</li>
+    <li>看不到模型实时日志、加载进度、生成速度，崩溃了也不知道原因。</li>
+  </ul>
+  <h3>做成什么样</h3>
+  <ul>
+    <li><b>一个进程</b>：自己启动和管理 <code>llama-server.exe</code>，同时提供 OpenAI 兼容 API 和中文管理界面。</li>
+    <li><b>一个主端口</b> <code>:5001</code>（本机与局域网，完整功能），外加一个只给 Cloudflare 隧道用的 <code>:8080</code>（只开放 <code>/v1/*</code>，强制校验 key）。</li>
+    <li><b>手动启动</b>：双击 <code>start.bat</code>，关闭窗口即停止服务并结束所有 llama-server。</li>
+  </ul>
+  <h3>不做什么</h3>
+  <ul>
+    <li>不支持 vLLM 等其他后端（只留接口）。</li>
+    <li>不做开机自启、系统托盘、桌面程序。</li>
+    <li>不做多用户和登录。</li>
+    <li>不做历史统计图表（只显示实时速度）。</li>
+  </ul>
+</section>
+
+<section id="arch">
+  <h2>架构</h2>
+<pre>客户端（酒馆 / 手机 / 其他）                Cloudflare Tunnel（cloudflared）
+        │ http://&lt;本机&gt;:5001/v1                     │ http://127.0.0.1:8080/v1
+        ▼                                           ▼
+┌──────────────────────── llama-web（bun 运行的一个进程）────────────────────────┐
+│  :5001  Nitro 主服务（0.0.0.0）         :8080  公网入口（仅 127.0.0.1）         │
+│   ├─ 前端页面（Nuxt UI，中文）            └─ 只允许 /v1/*，校验 API key，        │
+│   ├─ /api/*   管理接口                        转交主服务并标记来源 = 公网       │
+│   ├─ /api/stream  SSE 实时推送（状态 / 日志 / 速度 / 显存）                     │
+│   └─ /v1/*    OpenAI 兼容转发                                                   │
+│        └─ 请求预处理链：[图片压缩] → …（以后可加步骤）                          │
+│                                                                                 │
+│  调度器 Scheduler：模型状态机、排队切换、在线上限 X（固定 1）                   │
+│  进程管理 Runner：spawn / 健康检查 / 杀进程树 / 残留清理 / 日志采集             │
+│  扫描器 Scanner：多目录递归、GGUF 头部元数据、分片合并、mmproj/mtp 候选         │
+│  更新器 Updater：启动时拉取官方最新 Release → 版本目录，保留 2 个可回退         │
+│  配置 Store：data/*.json，原子写入 + 备份，文件变化自动重载                     │
+└─────────────────────────────────────────────────────────────────────────────────┘
+        │ spawn（参数数组，不经过 shell）
+        ▼
+ llama-server.exe  --host 127.0.0.1 --port 71xx …    ← data/runtime/llama.cpp/bNNNNN/</pre>
+  <h3>技术栈</h3>
+  <table>
+    <tr><th>项</th><th>选择</th><th>说明</th></tr>
+    <tr><td>框架</td><td>Nuxt 4（Nitro，<code>bun</code> preset）+ TypeScript</td><td>前后端一体</td></tr>
+    <tr><td>运行时 / 包管理</td><td>Bun</td><td>开发和生产都用 bun</td></tr>
+    <tr><td>UI</td><td>Nuxt UI（Tailwind）</td><td>跟随系统深浅色，深色用灰底不用纯黑</td></tr>
+    <tr><td>实时推送</td><td>SSE（Nitro <code>createEventStream</code>）</td><td>单向推送足够，比 WebSocket 简单</td></tr>
+    <tr><td>图片处理</td><td>sharp</td><td>需在阶段 1 首先验证 Bun + Windows 下可用</td></tr>
+    <tr><td>参数拆分</td><td><code>string-argv</code> 或同类库</td><td>「额外参数」文本框按 shell 规则拆成数组，处理引号</td></tr>
+    <tr><td>测试</td><td><code>bun test</code></td><td>纯逻辑单元测试 + 每阶段真机冒烟</td></tr>
+    <tr><td>文案</td><td>集中在 <code>i18n/zh-CN.ts</code></td><td>只做中文，但文本不写死在组件里</td></tr>
+  </table>
+  <h3>目录结构（计划）</h3>
+<pre>llama-web/
+├─ AGENTS.md              给 AI 的项目说明（CLAUDE.md 指向它）
+├─ docs/plan.html         本文件
+├─ start.bat              双击启动
+├─ app/                   前端：pages/ components/ composables/
+├─ i18n/zh-CN.ts          所有界面文案
+├─ server/
+│  ├─ api/                管理接口
+│  ├─ routes/v1/          OpenAI 兼容转发
+│  ├─ core/
+│  │  ├─ scheduler.ts     状态机 + 排队切换
+│  │  ├─ runner.ts        进程启动 / 停止 / 健康检查 / 日志
+│  │  ├─ args.ts          参数合并（全局 → 模型 → 方案）与命令拼接
+│  │  ├─ scanner.ts       目录扫描
+│  │  ├─ gguf.ts          GGUF 头部解析
+│  │  ├─ preprocess/      请求预处理步骤（image.ts …）
+│  │  ├─ errors.ts        llama-server 报错 → 中文提示
+│  │  ├─ updater.ts       llama.cpp 更新 / 回退
+│  │  ├─ gpu.ts           nvidia-smi 采样
+│  │  ├─ store.ts         配置读写
+│  │  └─ backends/        后端模板：llama-server.ts（vllm 留坑）
+│  └─ plugins/            启动时：残留清理、配置加载、更新检查、:8080 入口
+├─ scripts/
+│  └─ pre-commit          提交前检查（见阶段 4）
+├─ tests/
+└─ data/                  ← .gitignore，运行数据全部在这里
+</pre>
+</section>
+
+<section id="decisions">
+  <h2>关键决定</h2>
+  <p class="lead">来自需求问答，改动时同步更新「变更记录」。</p>
+  <table>
+    <tr><th>#</th><th>问题</th><th>决定</th></tr>
+    <tr><td>1</td><td>替换还是包装 llama-swap</td><td>彻底替换，自己管理 llama-server 进程</td></tr>
+    <tr><td>1b</td><td>技术栈</td><td>Nuxt 前后端一体，Bun 管理</td></tr>
+    <tr><td>2</td><td>运行方式</td><td>手动启动；关窗口 = 全部停止；启动时清理上次残留</td></tr>
+    <tr><td>—</td><td>端口</td><td>只用 <code>:5001</code>，客户端地址不变；5002 / 5003 废弃</td></tr>
+    <tr><td>3</td><td>公网</td><td>纳入；独立端口 <code>:8080</code> 只给隧道用，只开放 <code>/v1/*</code>，必须带 key</td></tr>
+    <tr><td>4</td><td>vLLM</td><td>后端抽象成「启动模板」，只实现 llama-server，vLLM 留坑</td></tr>
+    <tr><td>5</td><td>扫描到的模型</td><td>白名单：扫描只负责发现，手动「启用」；mmproj / mtp 只作为候选，默认不选，由人决定</td></tr>
+    <tr><td>6</td><td>参数编辑</td><td>常用项中文表单（可继承全局）+ 额外参数文本框 + 实时完整命令预览 + 重复参数警告</td></tr>
+    <tr><td>6b</td><td>变体</td><td>一个模型下多个「配置方案」，界面切换当前方案，切换即重启</td></tr>
+    <tr><td>7</td><td>客户端选方案</td><td><code>模型名</code> = 当前方案；<code>模型名:方案名</code> 可直接调用；请求未运行的模型 → 自动切换（公网请求也可以触发）</td></tr>
+    <tr><td>8</td><td>切换时旧请求还在跑</td><td>排队等旧请求结束，期间旧模型不再接新请求；超时强制中断；加载期间对流式请求发 SSE 心跳</td></tr>
+    <tr><td>9</td><td>在线上限 X</td><td>配置项存在，界面只读，固定 1；满了卸载最久未用的；常驻 / 空闲卸载 / 显存判断留坑</td></tr>
+    <tr><td>10</td><td>日志</td><td>「模型输出 / 事件 / 请求」三个标签；模型输出按次存文件，其他按天存；实时 t/s，不做历史平均</td></tr>
+    <tr><td>11</td><td>图片预处理</td><td>做成预处理步骤链，第一版只有图片压缩，参数按模型可覆盖；模型没配 mmproj 时收到图片 → 中文报错</td></tr>
+    <tr><td>11b</td><td>reasoning-debug 日志</td><td>并入请求记录的「参数摘要」</td></tr>
+    <tr><td>12</td><td>配置存储</td><td>JSON 文件，<code>data/</code> 目录，原子写入 + 备份，手改也会自动重载</td></tr>
+    <tr><td>12b</td><td>API key</td><td>明文存在 <code>data/secrets.json</code>，界面默认打码显示</td></tr>
+    <tr><td>13</td><td>扫描</td><td>多目录（各自可停用、限深度），递归；启动时 + 手动按钮；不做实时监听；读 GGUF 头；分片合并</td></tr>
+    <tr><td>13b</td><td>模型路径</td><td>存「目录 ID + 相对路径」，挪盘只改目录</td></tr>
+    <tr><td>14</td><td>llama.cpp 版本</td><td>只用官方最新版；项目内置更新；解压到版本目录，保留 2 个；CUDA 版本是设置项</td></tr>
+    <tr><td>15</td><td>更新时机</td><td>每次打开项目时自动检查 + 下载 + 设为当前（后台，不阻塞启动）；运行期间不检查；界面可回退</td></tr>
+    <tr><td>16</td><td>旧目录</td><td>首次启动导入旧 <code>swap-config.json</code> 和聊天模板；旧目录原样保留，由用户手动归档</td></tr>
+    <tr><td>—</td><td>名字 / 仓库</td><td><code>llama-web</code>，GitHub <b>公开</b>仓库</td></tr>
+    <tr><td>17–19</td><td>敏感信息</td><td>代码不含个人路径、域名、key；公网域名 / 隧道名 / key 全部做成配置项；只靠 <code>.gitignore</code> 排除 <code>data/</code>；旧 key 不导入，由用户重新生成</td></tr>
+    <tr><td>18</td><td>界面语言</td><td>只做中文，文案集中在一个文件</td></tr>
+    <tr><td>20</td><td>局域网权限</td><td>局域网完整权限、免 key；只有 <code>:8080</code> 公网入口要 key</td></tr>
+    <tr><td>21</td><td>界面</td><td>Nuxt UI；总览 / 模型 / 日志 / 设置 四页；简洁、留白、分组卡片；显存每 2 秒采样</td></tr>
+    <tr><td>22</td><td>加载失败 / 崩溃</td><td>不自动重试；中文原因 + 最后 30 行日志；崩溃后下一个请求最多自动重载一次，再失败需手动重试；加载超时默认 600 秒</td></tr>
+    <tr><td>23</td><td>启动时加载</td><td>不自动加载，等第一个请求</td></tr>
+    <tr><td>24</td><td>交付方式</td><td>4 个阶段，每阶段做完停下来让用户试用确认，再继续</td></tr>
+  </table>
+</section>
+
+<section id="behavior">
+  <h2>核心行为规则</h2>
+  <h3>模型状态机</h3>
+<pre>stopped ──请求/手动启动──▶ loading ──健康检查通过──▶ ready
+   ▲                         │ 失败/超时                 │ 需要切换到别的模型
+   │                         ▼                           ▼
+   │                      failed（等手动重试）        draining（不接新请求，等在途请求结束，超时强杀）
+   │                                                     │
+   └──────────────────────── unloading ◀─────────────────┘
+ready ──进程意外退出──▶ crashed ──下一个请求──▶ loading（最多自动一次，再失败 → failed）</pre>
+  <h3>请求路由</h3>
+  <ol>
+    <li>从请求体读取 <code>model</code>；形如 <code>名字:方案</code> 时拆成模型 + 方案，否则使用该模型的「当前方案」。没有 <code>model</code> 字段时使用当前正在运行的模型。</li>
+    <li>目标（模型 + 方案）正在 ready → 直接转发。</li>
+    <li>否则进入切换队列：当前模型进入 draining → unloading → 目标 loading → ready，然后转发。多个等待同一目标的请求共享同一次加载。</li>
+    <li>等待期间，如果是流式请求，每 15 秒发送一次 SSE 注释行 <code>: loading 63%</code> 保持连接。</li>
+    <li>目标模型没有配置 mmproj，但请求里有图片 → 直接返回 400 和中文说明，不去加载模型。</li>
+    <li><code>GET /v1/models</code> 由 llama-web 自己返回：已启用模型的基础名 + 每个 <code>名字:方案</code>。</li>
+  </ol>
+  <h3>参数合并</h3>
+  <p>最终参数 = 全局默认 ← 模型设置 ← 当前方案的覆盖 ← 方案的「额外参数」。表单项每一项都有「继承 / 自定义」两种状态。额外参数里出现了表单已经管理的参数（例如 <code>-c</code>、<code>--jinja</code>）时给出警告，以额外参数为准。<code>--host</code> / <code>--port</code> 由 llama-web 分配，不允许用户覆盖。</p>
+  <h3>来源识别</h3>
+  <p><code>:5001</code> 来的请求 = 本机或局域网，免 key。<code>:8080</code> 来的请求 = 公网：只允许 <code>/v1/*</code>，校验 <code>Authorization: Bearer &lt;key&gt;</code>，转交主服务时附带一个每次启动随机生成的内部头来标记来源，外部无法伪造。其他路径一律 404。</p>
+</section>
+
+<section id="data">
+  <h2>配置与数据</h2>
+  <p>全部在 <code>data/</code>（已加入 <code>.gitignore</code>）。位置可以用环境变量 <code>LLAMA_WEB_DATA</code> 改。以下示例是结构，不是真实值。</p>
+<pre>data/
+├─ settings.json      全局设置
+├─ models.json        已启用的模型和配置方案
+├─ secrets.json       API key（明文，界面打码）
+├─ templates/         聊天模板 .jinja
+├─ runtime/llama.cpp/b10809/ …   llama.cpp 版本目录（最多保留 2 个）
+├─ run/pids.json      当前子进程记录，用于残留清理
+├─ backups/           配置保存时的历史备份
+└─ logs/
+   ├─ models/&lt;模型&gt;/2026-09-30_14-02.log   每次启动一个文件，保留最近 N 个
+   ├─ events/2026-09-30.jsonl
+   └─ requests/2026-09-30.jsonl            不记录对话内容</pre>
+<pre>// settings.json
+{
+  "version": 1,
+  "server":   { "host": "0.0.0.0", "port": 5001 },
+  "public":   { "enabled": false, "port": 8080, "domain": "", "tunnelName": "" },
+  "modelDirs": [ { "id": "main", "path": "X:\\models", "enabled": true, "maxDepth": 4 } ],
+  "llamacpp": { "cudaRuntime": "13.3", "current": "b10809", "keepVersions": 2, "autoUpdate": true },
+  "scheduler": {
+    "maxLoaded": 1,              // 界面只读
+    "loadTimeoutSec": 600,
+    "drainTimeoutSec": 300,
+    "heartbeatSec": 15,
+    "portRange": [7100, 7199]
+  },
+  "defaults": {                  // 全局默认启动参数
+    "ctxSize": 262144, "cacheTypeK": "q4_0", "cacheTypeV": "q4_0",
+    "flashAttn": "on", "gpuLayers": 999, "batchSize": 2048, "ubatchSize": 1024,
+    "parallel": 1, "reasoning": "on", "reasoningFormat": "auto", "reasoningBudget": -1,
+    "extraArgs": "--jinja --no-prefill-assistant --props --slots --load-mode mlock -cb"
+  },
+  "preprocess": { "image": { "enabled": true, "maxEdge": 896, "format": "jpeg", "quality": 90 } },
+  "logs": { "keepRunsPerModel": 20, "keepDays": 14 },
+  "gpu":  { "sampleSec": 2 }
+}
+
+// models.json
+{
+  "version": 1,
+  "models": [{
+    "id": "qwen-27b",
+    "name": "Qwen3.8-27B",                  // 客户端看到的名字
+    "backend": "llama-server",              // 以后可以是 vllm（留坑）
+    "file":   { "dirId": "main", "rel": "qwen/Qwen3.8-27B-UD-Q4_K_XL.gguf" },
+    "mmproj": { "dirId": "main", "rel": "qwen/mmproj-BF16.gguf" },   // 可为 null
+    "draft":  null,                                                   // mtp/草稿模型，可为 null
+    "activeProfile": "默认",
+    "profiles": {
+      "默认": { "overrides": {}, "extraArgs": "--spec-type draft-mtp --spec-draft-n-max 3",
+                "chatTemplate": null, "preprocess": {} },
+      "RP":   { "overrides": { "ctxSize": 32768, "reasoning": "off" }, "extraArgs": "" }
+    },
+    "reserved": { "pinned": false, "idleUnloadMin": 0 }   // 留坑，不生效
+  }]
+}
+
+// secrets.json
+{ "apiKeys": [ { "id": "k1", "name": "手机", "key": "…", "createdAt": "…",
+                 "revoked": false, "allowSwitch": true /* 留坑 */ } ] }</pre>
+</section>
+
+<section id="api">
+  <h2>接口</h2>
+  <table>
+    <tr><th>路径</th><th>用途</th></tr>
+    <tr><td><code>/v1/*</code></td><td>OpenAI 兼容：chat/completions、completions、embeddings、models 等；按 <code>model</code> 路由</td></tr>
+    <tr><td><code>/upstream/:model/*</code></td><td>直通当前运行的 llama-server（例如它自带的网页、<code>/props</code>、<code>/slots</code>），仅 :5001</td></tr>
+    <tr><td><code>GET /api/state</code></td><td>整体状态快照：模型状态、队列、版本、显存</td></tr>
+    <tr><td><code>GET /api/stream</code></td><td>SSE：状态变化、日志行、实时速度、显存采样</td></tr>
+    <tr><td><code>/api/models</code></td><td>已启用模型的增删改；启动 / 停止 / 重试 / 切换方案；命令预览</td></tr>
+    <tr><td><code>/api/scan</code></td><td>触发扫描；返回发现的文件及元数据、候选 mmproj / draft</td></tr>
+    <tr><td><code>/api/settings</code></td><td>读写设置</td></tr>
+    <tr><td><code>/api/keys</code></td><td>API key 列表（打码）/ 查看明文 / 新建 / 吊销</td></tr>
+    <tr><td><code>/api/logs</code></td><td>历史日志列表与读取</td></tr>
+    <tr><td><code>/api/llamacpp</code></td><td>版本列表、更新状态、回退</td></tr>
+    <tr><td><code>/api/import</code></td><td>从旧 <code>swap-config.json</code> 导入</td></tr>
+  </table>
+</section>
+
+<section id="ui">
+  <h2>界面</h2>
+<pre>┌ 顶栏：llama-web │ Qwen3.8-27B [默认] ● 运行中 · 42.3 t/s │ llama.cpp b10809 │ 更新/告警提示
+├ 侧栏
+│  总览   当前模型卡片（状态、加载进度、prompt/生成速度）、显存条、排队情况、最近事件
+│  模型   已启用：卡片列表（启动 / 停止 / 方案下拉 / 编辑）
+│         扫描发现：未启用文件（架构 · 参数量 · 量化 · 原生上下文 · 大小）→「启用」
+│         编辑抽屉：文件区 / 常用参数表单（每项旁有中文说明）/ 额外参数 / 命令预览
+│  日志   模型输出 │ 事件 │ 请求 —— 实时滚动、暂停、搜索、按模型筛选
+│  设置   模型目录 · llama.cpp 版本 · 全局默认参数 · 图片预处理 · 端口 · 公网与 key · 调度（上限 X 只读）</pre>
+  <div class="grid2">
+    <div class="card"><b>视觉</b>跟随系统深浅色；深色用 #1b1d21 这类灰底，文字不用纯白；只有一种强调色；状态色只出现在圆点和标签上。</div>
+    <div class="card"><b>排版</b>设置按主题分组成卡片，每组有标题和一句说明；表单项旁边给中文解释；危险操作（吊销 key、回退版本）要二次确认。</div>
+  </div>
+</section>
+
+<section id="s1" class="stage">
+  <div class="stage-head"><h2>阶段 1 · 核心</h2><div class="stage-meta"><span class="count"></span><div class="bar"><i></i></div></div></div>
+  <div class="stage-goal">做完后：<b>完全替代 llama-swap + 图片代理</b>，酒馆连 <code>:5001</code> 直接可用。这一阶段只有一个最简单的状态页，配置可以先手改 JSON。</div>
+  <ul class="tasks">
+    <li class="task" data-done="false"><span class="t">初始化 Nuxt 4 + Bun + TypeScript 项目、<code>.gitignore</code>（含 <code>data/</code>）、GitHub 公开仓库 <code>llama-web</code></span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">技术验证：Bun + Windows 下 sharp 可用；Nitro 在 bun preset 下 SSE 流式转发不缓冲；<code>Bun.spawn</code> 启动 llama-server 并能杀掉进程树</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">store：<code>data/</code> 下 JSON 读写、原子写入（临时文件 + 改名）、备份、文件变化自动重载、版本号字段</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">gguf.ts：读取 GGUF 头部元数据（架构、参数量、量化、原生上下文、是否内嵌模板）</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">scanner.ts：多目录递归扫描、深度限制、分片合并、识别 mmproj / mtp 候选</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">args.ts：全局 → 模型 → 方案的参数合并；额外参数按 shell 规则拆分；重复参数检测；生成完整命令预览</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">runner.ts：分配端口、spawn（参数数组）、健康检查（<code>/health</code>）、加载超时、停止（杀进程树）、stdout/stderr 采集、pids.json 记录</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">启动时残留清理：按 pids.json 结束上次遗留、且可执行文件位于 <code>data/runtime</code> 下的 llama-server</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">scheduler.ts：状态机、切换队列、draining 超时、多个请求共享同一次加载、崩溃后最多自动重载一次、在线上限 X（固定 1，LRU）</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t"><code>/v1/*</code> 转发：按 <code>model</code> 与 <code>名字:方案</code> 路由；流式直通；加载期间 SSE 心跳；<code>/v1/models</code> 自己返回</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">预处理链 + 图片压缩步骤（按模型可覆盖）；无 mmproj 时收到图片返回中文 400；请求体上限</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t"><code>/upstream/:model/*</code> 直通</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">从旧 <code>swap-config.json</code> 导入：模型、参数、额外参数、聊天模板文件（复制到 data/templates），不导入 API key</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">llama.cpp 初始获取：<code>data/runtime</code> 为空时从官方 Release 下载（完整更新流程在阶段 4）</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">最简状态页：当前模型、状态、已启用模型列表</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t"><code>start.bat</code>：启动服务，关窗口即停止</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">单元测试：gguf、scanner、args、scheduler 状态机、路由解析</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">真机冒烟（见「验收方式」）并如实报告</span><span class="when"></span></li>
+  </ul>
+  <div class="accept"><h3>验收标准</h3>
+    <ul>
+      <li>关掉旧的 llama-swap，只运行 llama-web，酒馆原地址不改就能对话，流式正常。</li>
+      <li>在酒馆里换模型，能看到旧模型被卸载、新模型加载，请求不超时。</li>
+      <li>一个长回复进行中，另一个客户端请求别的模型：先等长回复结束再切换。</li>
+      <li>带图片的请求正常，日志里能看到压缩前后尺寸；给没有 mmproj 的模型发图，得到中文报错。</li>
+      <li>关闭 start.bat 窗口后，任务管理器里没有残留的 llama-server；强杀 llama-web 后再启动，残留会被清理。</li>
+    </ul>
+  </div>
+</section>
+
+<section id="s2" class="stage">
+  <div class="stage-head"><h2>阶段 2 · 界面</h2><div class="stage-meta"><span class="count"></span><div class="bar"><i></i></div></div></div>
+  <div class="stage-goal">做完后：<b>不再需要手动改 JSON</b>，所有配置都能在中文界面上完成。</div>
+  <ul class="tasks">
+    <li class="task" data-done="false"><span class="t">Nuxt UI 接入、布局（顶栏 + 侧栏）、深浅色主题、<code>i18n/zh-CN.ts</code></span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t"><code>/api/stream</code> SSE 推送状态，前端统一的实时状态 composable</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">总览页：当前模型卡片、加载进度、排队情况、最近事件</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">模型页 · 已启用：卡片列表、启动 / 停止 / 重试、方案下拉切换、文件丢失标红</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">模型页 · 扫描发现：元数据展示、重新扫描按钮、一键启用</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">模型编辑：文件区（主模型 / mmproj / draft 下拉，同目录提示但默认不选）、聊天模板选择</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">参数表单：继承 / 自定义切换、每项中文说明、额外参数、重复参数警告、实时命令预览 + 复制</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">配置方案：新建 / 复制 / 重命名 / 删除 / 设为当前</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">设置页：模型目录（增删、启停、深度）、全局默认参数、图片预处理、端口、调度（上限 X 只读展示）</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">首次启动向导：设置模型目录 / 从旧配置导入</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">真机试用并如实报告</span><span class="when"></span></li>
+  </ul>
+  <div class="accept"><h3>验收标准</h3>
+    <ul>
+      <li>往模型目录里放一个新 gguf → 点重新扫描 → 启用 → 选 mmproj → 保存 → 酒馆里能直接用。</li>
+      <li>给同一个模型新建一个「RP」方案，在界面切换后模型自动重启；酒馆里用 <code>名字:RP</code> 也能调用。</li>
+      <li>命令预览复制到命令行手动执行，结果和 llama-web 启动的一致。</li>
+      <li>深色模式下长时间看不刺眼，各页面分组清楚。</li>
+    </ul>
+  </div>
+</section>
+
+<section id="s3" class="stage">
+  <div class="stage-head"><h2>阶段 3 · 可观测性</h2><div class="stage-meta"><span class="count"></span><div class="bar"><i></i></div></div></div>
+  <div class="stage-goal">做完后：<b>能看清楚正在发生什么</b>，出错时知道原因。</div>
+  <ul class="tasks">
+    <li class="task" data-done="false"><span class="t">日志落盘：模型输出按次存文件、事件和请求按天存 jsonl、按保留策略清理</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">请求记录：时间、来源（本机 / 局域网 / 公网 key 名）、模型与方案、耗时、token 数、图片压缩前后、参数摘要（reasoning 等）；不记录对话内容</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">日志页：三个标签、实时滚动、暂停、搜索、按模型筛选、查看历史文件</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">实时速度：流式时按 chunk 估算 t/s，结束后用 llama-server 返回的 <code>timings</code> 修正；显示 prompt 与生成速度</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">加载进度：解析 llama-server 输出估算进度</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">gpu.ts：每 2 秒采样 nvidia-smi，总览页显存条；没有 nvidia-smi 时隐藏</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">errors.ts：常见报错识别（显存不足、文件找不到、未知参数、mmproj 不匹配…）→ 中文提示 + 建议</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">失败 / 崩溃卡片：原因 + 最后 30 行日志 + 跳转完整日志 + 手动重试</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">真机试用（包括故意把 ctx 设大制造显存不足）并如实报告</span><span class="when"></span></li>
+  </ul>
+  <div class="accept"><h3>验收标准</h3>
+    <ul>
+      <li>生成时顶栏和总览页能看到实时 t/s，结束后数字与 llama-server 自身统计一致。</li>
+      <li>故意把 ctx 调到放不下：界面显示中文「显存不足」和建议，不会反复重试。</li>
+      <li>重启 llama-web 后仍能查看上一次崩溃前的模型日志。</li>
+    </ul>
+  </div>
+</section>
+
+<section id="s4" class="stage">
+  <div class="stage-head"><h2>阶段 4 · 公网与更新</h2><div class="stage-meta"><span class="count"></span><div class="bar"><i></i></div></div></div>
+  <div class="stage-goal">做完后：<b>功能完整</b>，可以换掉旧的公网方案。</div>
+  <ul class="tasks">
+    <li class="task" data-done="false"><span class="t"><code>:8080</code> 公网入口：仅绑定 127.0.0.1、只允许 <code>/v1/*</code>、Bearer key 校验、内部来源标记、其余 404</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">API key 管理：新建（随机生成）、命名、打码列表、查看 / 复制、吊销（二次确认）</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">公网设置：启用开关、域名、隧道名；显示需要手动执行的 <code>cloudflared tunnel route dns</code> 命令</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">updater.ts：启动时后台检查官方最新 Release（nightly-tag 解析）、下载 CUDA 构建与 cudart、SHA-256 校验、解压到版本目录、设为当前</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">更新不阻塞启动；网络失败只记事件；下载未完成时本次加载用旧版本</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">版本管理：保留最近 2 个、界面一键回退（二次确认）、新版本加载失败时提示回退</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t"><code>scripts/pre-commit</code>：拒绝提交 <code>data/</code> 下的文件和疑似密钥（长十六进制串等）</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">README（中文）：安装、启动、配置说明、隧道设置步骤</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">真机试用：经隧道带 key / 不带 key / 访问管理路径；更新与回退，并如实报告</span><span class="when"></span></li>
+  </ul>
+  <div class="accept"><h3>验收标准</h3>
+    <ul>
+      <li>经隧道访问：带有效 key 能对话；不带 key 或 key 已吊销返回 401；访问管理界面或 <code>/api/*</code> 返回 404。</li>
+      <li>打开 llama-web 时如有新版自动下载安装；回退后模型用旧版本正常加载。</li>
+      <li>尝试 <code>git add data/</code> 或提交包含 key 的文件会被拒绝。</li>
+    </ul>
+  </div>
+</section>
+
+<section id="verify">
+  <h2>验收方式</h2>
+  <ul>
+    <li><b>单元测试</b>（<code>bun test</code>）：参数合并与命令拼接、GGUF 解析、扫描、调度状态机、路由解析、公网鉴权规则。</li>
+    <li><b>真机冒烟</b>：每阶段结束时用真实模型跑一遍：加载、切换、流式输出、带图片请求、并发排队。会实际占用显卡，跑之前先告知，跑的时候不要开其他吃显存的程序。</li>
+    <li><b>如实报告</b>：给出实际日志、耗时、失败项，没跑的步骤明确说没跑。</li>
+    <li><b>阶段关口</b>：每阶段完成后提交并推送，然后停下来等用户试用确认，确认后才开始下一阶段。</li>
+  </ul>
+</section>
+
+<section id="slots">
+  <h2>坑位（暂不实现）</h2>
+  <p class="lead">数据结构或接口里预留位置，但不做界面和逻辑。</p>
+  <table>
+    <tr><th>坑位</th><th>预留方式</th></tr>
+    <tr><td><span class="tag slot">后端</span></td><td>vLLM 等其他后端：<code>backend</code> 字段 + <code>server/core/backends/</code> 模板接口</td></tr>
+    <tr><td><span class="tag slot">调度</span></td><td>在线上限 X 可修改：<code>scheduler.maxLoaded</code> 已存在，界面只读</td></tr>
+    <tr><td><span class="tag slot">调度</span></td><td>常驻模型、空闲自动卸载：<code>reserved.pinned</code> / <code>reserved.idleUnloadMin</code></td></tr>
+    <tr><td><span class="tag slot">调度</span></td><td>按显存判断能否共存：<code>gpu.ts</code> 采样数据已有</td></tr>
+    <tr><td><span class="tag slot">公网</span></td><td>按 key 禁止触发切换：<code>apiKeys[].allowSwitch</code></td></tr>
+    <tr><td><span class="tag slot">公网</span></td><td>界面一键配置隧道 DNS</td></tr>
+    <tr><td><span class="tag slot">界面</span></td><td>英文界面：新增 <code>i18n/en.ts</code></td></tr>
+    <tr><td><span class="tag slot">运行</span></td><td>开机自启服务：加一个注册脚本即可，架构不变</td></tr>
+    <tr><td><span class="tag slot">安全</span></td><td>数据目录挪到项目外：<code>LLAMA_WEB_DATA</code> 环境变量已支持</td></tr>
+  </table>
+</section>
+
+<section id="risks">
+  <h2>风险与待验证</h2>
+  <table>
+    <tr><th>风险</th><th>应对</th></tr>
+    <tr><td>关窗口时子进程是否一定退出</td><td>Windows 下同一控制台的子进程通常一起收到关闭事件；兜底是启动时按 pids.json 清理。阶段 1 实测，不可靠时考虑 Job Object。</td></tr>
+    <tr><td>sharp 在 Bun + Windows 下的兼容性</td><td>阶段 1 第二项先验证；不行则图片处理改为 Node 子进程或换库。</td></tr>
+    <tr><td>Nitro 在 bun 下流式响应被缓冲</td><td>阶段 1 验证逐 chunk 到达；必要时 <code>/v1</code> 转发改用 Bun 原生处理。</td></tr>
+    <tr><td>llama.cpp 参数改名导致启动失败</td><td>更新后首次加载失败时提示回退；errors.ts 识别「未知参数」。</td></tr>
+    <tr><td>Release 资产命名变化</td><td>更新失败只记事件，不影响现有版本使用。</td></tr>
+    <tr><td>data/secrets.json 明文</td><td>用户已接受；只靠 .gitignore + pre-commit；需要时可以挪出项目目录。</td></tr>
+  </table>
+</section>
+
+<section id="migrate">
+  <h2>旧环境迁移</h2>
+  <ul>
+    <li>首次启动向导里指定旧的 <code>swap-config.json</code>，导入模型、参数、额外参数，聊天模板复制到 <code>data/templates/</code>。</li>
+    <li>旧 API key <b>不导入</b>；用户在新界面重新生成，并自行吊销旧 key、更换域名。</li>
+    <li>旧环境与新项目都使用 <code>:5001</code>，不能同时运行。</li>
+    <li>旧目录原样保留作为备用，确认新项目稳定后由用户手动归档或删除。</li>
+  </ul>
+</section>
+
+<section id="changelog">
+  <h2>变更记录</h2>
+  <table>
+    <tr><th>日期</th><th>内容</th></tr>
+    <tr><td>2026-09-30</td><td>初版：根据 24 轮需求问答整理</td></tr>
+  </table>
+</section>
+</main>
+</div>
+
+<script>
+(function(){
+  let all=0, done=0;
+  document.querySelectorAll('section.stage').forEach(function(s){
+    const tasks=s.querySelectorAll('li.task');
+    const d=s.querySelectorAll('li.task[data-done="true"]').length;
+    all+=tasks.length; done+=d;
+    const c=s.querySelector('.count'); if(c) c.textContent=d+' / '+tasks.length+' 完成';
+    const b=s.querySelector('.bar i'); if(b) b.style.width=(tasks.length? d/tasks.length*100:0)+'%';
+  });
+  document.getElementById('overall-text').textContent=done+' / '+all;
+  document.getElementById('overall-bar').style.width=(all? done/all*100:0)+'%';
+})();
+</script>
+</body>
+</html>
