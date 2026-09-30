@@ -331,16 +331,33 @@ describe('failures', () => {
     expect(procs.length).toBe(2)
   })
 
-  test('after the reloaded model served a request, a later crash may auto-reload again', async () => {
+  test('a crash after the auto reload -> failed, even if the reloaded process served requests', async () => {
     const { sched, procs } = setup({ autoReady: true })
     ;(await sched.acquire(A)).release('ok')
     procs[0]!.crash()
     await until(() => sched.stateOf(A) === 'crashed')
-    ;(await sched.acquire(A)).release('ok') // reload proved healthy
+    ;(await sched.acquire(A)).release('ok') // auto reload, served fine
     procs[1]!.crash()
+    await until(() => sched.stateOf(A) !== 'ready')
+    expect(sched.stateOf(A)).toBe('failed')
+    expect((await settled(sched.acquire(A))).ok).toBe(false)
+    expect(procs.length).toBe(2)
+  })
+
+  test('manual retry after that grants a new automatic reload', async () => {
+    const { sched, procs } = setup({ autoReady: true })
+    ;(await sched.acquire(A)).release('ok')
+    procs[0]!.crash()
     await until(() => sched.stateOf(A) === 'crashed')
+    ;(await sched.acquire(A)).release('ok')
+    procs[1]!.crash()
+    await until(() => sched.stateOf(A) === 'failed')
+    await sched.retry(A)
+    procs[2]!.crash()
+    await until(() => sched.stateOf(A) !== 'ready')
+    expect(sched.stateOf(A)).toBe('crashed')
     ;(await sched.acquire(A)).release()
-    expect(procs.length).toBe(3)
+    expect(procs.length).toBe(4)
   })
 
   test('manual start after a crash is not counted as the automatic reload', async () => {

@@ -6,6 +6,7 @@
 //   stopped -> loading -> ready -> draining -> unloading -> stopped
 //   loading -> failed (manual retry only)
 //   ready -> crashed -> (next request) loading, auto at most once; failing again -> failed
+//   ("once" = per process started by a manual start/retry or a normal load; decision 22)
 //
 // A target is model + profile; switching profile means a restart. All loads run one at a
 // time through a FIFO job queue. Requests for a ready target are served directly.
@@ -60,8 +61,8 @@ export interface Lease {
   /** Aborted when the model is force-unloaded (drain timeout) or crashes. */
   readonly signal: AbortSignal
   /**
-   * 'ok' = the upstream response completed normally; this is what proves a reloaded model
-   * healthy again after a crash. Omit when unknown (client aborted, upstream error, ...).
+   * 'ok' = the upstream response completed normally. Omit when unknown (client aborted,
+   * upstream error, ...). Informational only: it does not reset the auto-reload allowance.
    */
   release(outcome?: LeaseOutcome): void
 }
@@ -122,8 +123,6 @@ interface Instance {
   error: unknown
   /** Launched by the automatic post-crash reload. */
   autoReloaded: boolean
-  /** At least one request completed normally on this process. */
-  servedOk: boolean
   stopRequested: boolean
   evicting: Promise<void> | null
   forceNow: (() => void) | null
@@ -323,7 +322,6 @@ export class Scheduler {
     const inst = lease.inst
     inst.inflight.delete(lease)
     this.touch(inst)
-    if (outcome === 'ok' && inst.state === 'ready') inst.servedOk = true
     if (inst.inflight.size === 0) {
       for (const w of inst.drainWaiters.splice(0)) w()
     }
@@ -430,7 +428,7 @@ export class Scheduler {
   private newInstance(target: Target, autoReloaded: boolean, prev: ModelState = 'stopped'): Instance {
     const inst: Instance = {
       key: keyOf(target), target, state: prev, proc: null, inflight: new Set(),
-      useSeq: ++this.seq, lastUsedAt: null, error: null, autoReloaded, servedOk: false,
+      useSeq: ++this.seq, lastUsedAt: null, error: null, autoReloaded,
       stopRequested: false, evicting: null, forceNow: null, drainWaiters: [], loadWaiters: [],
     }
     this.instances.set(inst.key, inst)
@@ -443,8 +441,8 @@ export class Scheduler {
     for (const l of inst.inflight) l.controller.abort(new ModelCrashError(exit))
     inst.proc = null
     inst.error = new ModelCrashError(exit)
-    // A crash right after the automatic reload, before any request succeeded: give up.
-    const next: ModelState = inst.autoReloaded && !inst.servedOk ? 'failed' : 'crashed'
+    // The automatic reload is used up: any later crash of this process needs a manual retry.
+    const next: ModelState = inst.autoReloaded ? 'failed' : 'crashed'
     this.setState(inst, next, inst.error)
   }
 

@@ -72,6 +72,9 @@ test('imports scanned models with old semantics: aliases, exclude, mmproj pairin
   expect(q.id).toBe('qwen-27b')
   expect(q.file).toEqual({ dirId: 'main', rel: 'qwen/Qwen-27B-UD-Q4_K_XL.gguf' })
   expect(q.mmproj).toEqual({ dirId: 'main', rel: 'qwen/mmproj-F16.gguf' })
+  // The preview shows which projector was paired (decision 5 import exception).
+  expect(report.imported.find(m => m.name === 'Qwen-27B')!.mmproj).toBe('qwen/mmproj-F16.gguf')
+  expect(report.imported.find(m => m.name === 'Gemma-it')!.mmproj).toBeNull()
   expect(q.activeProfile).toBe('默认')
   // Global defaults come from the old file; only differences become overrides.
   expect(settings.defaults.ctxSize).toBe(8192)

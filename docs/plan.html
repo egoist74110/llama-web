@@ -219,7 +219,7 @@ li.task .when{color:var(--ok);font-size:12px;white-space:nowrap}
     <tr><td>—</td><td>端口</td><td>只用 <code>:5001</code>，客户端地址不变；5002 / 5003 废弃</td></tr>
     <tr><td>3</td><td>公网</td><td>纳入；独立端口 <code>:8080</code> 只给隧道用，只开放 <code>/v1/*</code>，必须带 key</td></tr>
     <tr><td>4</td><td>vLLM</td><td>后端抽象成「启动模板」，只实现 llama-server，vLLM 留坑</td></tr>
-    <tr><td>5</td><td>扫描到的模型</td><td>白名单：扫描只负责发现，手动「启用」；mmproj / mtp 只作为候选，默认不选，由人决定</td></tr>
+    <tr><td>5</td><td>扫描到的模型</td><td>白名单：扫描只负责发现，手动「启用」；mmproj / mtp 只作为候选，默认不选，由人决定。<b>例外</b>：导入旧 swap-config 时沿用旧生成器规则，按目录自动配对 mmproj（同目录，优先 BF16/F16/F32），导入预览显示所选文件；只适用于导入，手动启用仍默认不选</td></tr>
     <tr><td>6</td><td>参数编辑</td><td>常用项中文表单（可继承全局）+ 额外参数文本框 + 实时完整命令预览 + 重复参数警告</td></tr>
     <tr><td>6b</td><td>变体</td><td>一个模型下多个「配置方案」，界面切换当前方案，切换即重启</td></tr>
     <tr><td>7</td><td>客户端选方案</td><td><code>模型名</code> = 当前方案；<code>模型名:方案名</code> 可直接调用；请求未运行的模型 → 自动切换（公网请求也可以触发）</td></tr>
@@ -240,7 +240,7 @@ li.task .when{color:var(--ok);font-size:12px;white-space:nowrap}
     <tr><td>18</td><td>界面语言</td><td>只做中文，文案集中在一个文件</td></tr>
     <tr><td>20</td><td>局域网权限</td><td>局域网完整权限、免 key；只有 <code>:8080</code> 公网入口要 key</td></tr>
     <tr><td>21</td><td>界面</td><td>Nuxt UI；总览 / 模型 / 日志 / 设置 四页；简洁、留白、分组卡片；显存每 2 秒采样</td></tr>
-    <tr><td>22</td><td>加载失败 / 崩溃</td><td>不自动重试；中文原因 + 最后 30 行日志；崩溃后下一个请求最多自动重载一次，再失败需手动重试；加载超时默认 600 秒</td></tr>
+    <tr><td>22</td><td>加载失败 / 崩溃</td><td>不自动重试；中文原因 + 最后 30 行日志；崩溃后下一个请求最多自动重载一次，再失败需手动重试（额度按进程计：自动重载出来的进程再崩溃即 failed，不因成功服务过请求而重置；手动启动 / 重试后重新获得一次）；加载超时默认 600 秒</td></tr>
     <tr><td>23</td><td>启动时加载</td><td>不自动加载，等第一个请求</td></tr>
     <tr><td>24</td><td>交付方式</td><td>4 个阶段，每阶段做完停下来让用户试用确认，再继续</td></tr>
     <tr><td>25</td><td>HTTP 入口</td><td>不用 Nitro 自带的 bun 入口，改用自定义 Bun 入口：<code>/v1/*</code>、<code>/upstream/*</code> 由 Bun 原生处理；其余交给 Nitro，并把断开信号和客户端 IP 传给处理函数；关闭每个请求的空闲超时（原因见「风险与待验证」）</td></tr>
@@ -256,7 +256,7 @@ li.task .when{color:var(--ok);font-size:12px;white-space:nowrap}
    │                      failed（等手动重试）        draining（不接新请求，等在途请求结束，超时强杀）
    │                                                     │
    └──────────────────────── unloading ◀─────────────────┘
-ready ──进程意外退出──▶ crashed ──下一个请求──▶ loading（最多自动一次，再失败 → failed）</pre>
+ready ──进程意外退出──▶ crashed ──下一个请求──▶ loading（最多自动一次，再失败 → failed；手动启动 / 重试后重新计）</pre>
   <h3>请求路由</h3>
   <ol>
     <li>从请求体读取 <code>model</code>；形如 <code>名字:方案</code> 时拆成模型 + 方案，否则使用该模型的「当前方案」。没有 <code>model</code> 字段时使用当前正在运行的模型。</li>
@@ -538,6 +538,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
     <tr><td>2026-09-30</td><td>工作包 1-4：/v1 转发、预处理链（图片压缩）、/upstream 直通、自定义 Bun 入口落地；请求体上限定为 100 MB（代码常量，未进设置）；目录结构补充 <code>server/entry.ts</code>、<code>server/service/</code>；更新「风险与待验证」</td></tr>
     <tr><td>2026-09-30</td><td>工作包 1-5：旧配置导入（<code>server/core/importer.ts</code>，<code>POST /api/import</code>，支持 dryRun）、llama.cpp 初始获取（<code>server/core/llamacpp.ts</code>，只在 data/runtime 没有可用版本且 <code>llamacpp.autoUpdate</code> 为真时下载）、最简状态页（<code>GET /api/state</code>）、<code>start.bat</code>。导入按旧生成器的行为还原：mmproj 按目录自动配对、<code>-md</code> 草稿模型转成 draft 字段、旧全局参数里没写的项视为「不传」；<code>public</code> 段整体不导入。「llama.cpp 初始获取」「start.bat」两项未打勾，原因见 handoff</td></tr>
     <tr><td>2026-09-30</td><td>工作包 1-6：阶段 1 真机验收。官方 Release 的 CUDA 版本从 13.3 升到 13.4，下载改为「优先 <code>llamacpp.cudaRuntime</code> 精确版本，没有时选同一主版本里最新的次版本（必须同时有 cudart）」，不会跨主版本；<code>start.bat</code> 修正 <code>&gt;/dev/null</code> 为 <code>&gt;nul</code>、运行行加 <code>call</code>；更新「风险与待验证」中关窗口 / 强杀的结论</td></tr>
+    <tr><td>2026-09-30</td><td>阶段 1 审查意见处理（用户确认）：关键决定 5 增加「导入旧配置时自动配对 mmproj」的例外，导入预览显示所选文件；关键决定 22 明确自动重载额度按进程计，自动重载出来的进程再崩溃即 failed，手动启动 / 重试后重新计；<code>scheduler.maxLoaded</code> 在配置读取时固定为 1；管理接口 <code>/api/*</code> 的写请求拒绝跨来源和非 JSON 请求体</td></tr>
   </table>
 </section>
 </main>

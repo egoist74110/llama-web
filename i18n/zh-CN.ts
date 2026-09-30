@@ -52,6 +52,7 @@ export default {
     model: '{name}（mmproj：{mmproj}）',
     yes: '有',
     no: '无',
+    mmprojAuto: 'mmproj 按旧配置的规则自动配对（同目录，优先 BF16/F16/F32）。如需更换或去掉，导入后编辑 data/models.json 里该模型的 mmproj（阶段 2 起可在模型页修改）。',
     defaultsApplied: '全局默认参数已按旧配置设置。',
     defaultsKept: '已有模型，保留现有全局默认参数。',
     errors: {

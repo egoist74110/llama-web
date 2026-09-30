@@ -16,6 +16,15 @@
 
 ---
 
+## 2026-09-30 · 阶段 1 审查意见 · 用户决定落地 · Opus 5.5
+- 完成：用户决定 CR-010 选 A、CR-011 选 B、CR-003 余项留到阶段 2。CR-010：计划关键决定 5 加导入例外；导入结果 `mmproj` 改为所选文件相对路径，状态页导入结果显示文件名并提示如何更换。CR-011：scheduler 去掉 `servedOk`，自动重载出来的进程再崩溃即 failed，手动 start/retry 后重新计；计划关键决定 22、状态机图、变更记录已同步。审查文件对应条目已更新。
+- 验证：`bun test` 178 通过；`bun run typecheck` 通过。没有 build（用户的 start.bat 仍在运行，见下一条）。
+- 剩余：CR-003 余项（配置错误的手动恢复入口）→ 阶段 2 模型页 / 失败卡片。等 Codex 复审结论。
+- 决定 / 坑：`Lease.release('ok')` 现在只作记录，不影响重载额度。
+- 下一步：Codex 复审阶段 1 修复；通过且用户试用确认后开始 2-1。
+
+---
+
 ## 2026-09-30 · 阶段 1 审查意见处理 · Opus 5.5
 - 完成：逐条核实 `docs/reviews/stage-1-codex.md`，每条后面写了「处理」。已修复 CR-001/002/004/005/006/007/008/009；CR-003 部分修复；CR-010、CR-011 需要用户决定。没有打勾（按指南）。
   - 001 冷加载流：租约随 abort 立即释放，循环的每次写入都和断连竞争。002 runner：先装 exit 处理器再写 pids.json，写失败 → `register-failed` 并杀进程。003 scheduler 新增 `isPrecondition`，`no-runtime` 不再锁 failed。004/005 导入拆成 `readImportSource` + 同步的 `commitImport`（按最新文档规划、失败回滚 settings 和新建模板）。006 备份按（时间戳, 数值序号）排序、命名取最大序号 +1。007 新增 `server/core/origin.ts` + `server/middleware/admin-origin.ts`（/api 写请求：跨来源 403、非 JSON 415）。008 `maxLoaded` 归一化为 1。009 测试注入 platform / 用宿主绝对路径。

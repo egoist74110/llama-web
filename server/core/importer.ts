@@ -329,7 +329,8 @@ export interface ImportOptions {
 export interface ImportReport {
   dirId: string
   modelsRoot: string
-  imported: Array<{ id: string, name: string, mmproj: boolean, draft: boolean, chatTemplate: string | null }>
+  /** `mmproj`: relative path of the automatically paired projector (decision 5, import exception). */
+  imported: Array<{ id: string, name: string, mmproj: string | null, draft: boolean, chatTemplate: string | null }>
   templatesCopied: string[]
   defaultsApplied: boolean
   warnings: ImportWarning[]
@@ -448,7 +449,7 @@ export function buildImport(src: ImportSource, opts: { dataDir: string, settings
       dirId: dir.id,
       modelsRoot: config.modelsRoot,
       imported: plan.models.map(m => ({
-        id: m.id, name: m.name, mmproj: !!m.mmproj, draft: !!m.draft, chatTemplate: m.profiles['默认']!.chatTemplate ?? null,
+        id: m.id, name: m.name, mmproj: m.mmproj?.rel ?? null, draft: !!m.draft, chatTemplate: m.profiles['默认']!.chatTemplate ?? null,
       })),
       templatesCopied: copied,
       defaultsApplied: plan.defaultsApplied,

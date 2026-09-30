@@ -36,7 +36,7 @@ const result = ref<{ text: string, lines: string[], failed: boolean } | null>(nu
 async function runImport(dryRun: boolean) {
   busy.value = true
   try {
-    const r = await $fetch<{ imported: Array<{ name: string, mmproj: boolean }>, defaultsApplied: boolean, warnings: string[] }>('/api/import', {
+    const r = await $fetch<{ imported: Array<{ name: string, mmproj: string | null }>, defaultsApplied: boolean, warnings: string[] }>('/api/import', {
       method: 'POST', body: { path: path.value, dryRun },
     })
     const c = String(r.imported.length)
@@ -44,7 +44,8 @@ async function runImport(dryRun: boolean) {
       failed: false,
       text: fmt(dryRun ? t.import.previewDone : t.import.done, { count: c }),
       lines: [
-        ...r.imported.map(m => fmt(t.import.model, { name: m.name, mmproj: m.mmproj ? t.import.yes : t.import.no })),
+        ...r.imported.map(m => fmt(t.import.model, { name: m.name, mmproj: m.mmproj ?? t.import.no })),
+        ...(r.imported.some(m => m.mmproj) ? [t.import.mmprojAuto] : []),
         ...(r.imported.length ? [r.defaultsApplied ? t.import.defaultsApplied : t.import.defaultsKept] : []),
         ...r.warnings,
       ],
