@@ -28,6 +28,8 @@ export interface Settings {
   preprocess: { image: ImagePreprocess }
   logs: { keepRunsPerModel: number, keepDays: number }
   gpu: { sampleSec: number }
+  /** First-run wizard: `done` is set when it is finished or skipped. */
+  setup: { done: boolean }
 }
 
 export interface Profile {
@@ -73,6 +75,7 @@ export function defaultSettings(): Settings {
     preprocess: { image: { enabled: true, maxEdge: 896, format: 'jpeg', quality: 90 } },
     logs: { keepRunsPerModel: 20, keepDays: 14 },
     gpu: { sampleSec: 2 },
+    setup: { done: false },
   }
 }
 

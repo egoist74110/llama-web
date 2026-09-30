@@ -1,7 +1,8 @@
 <script setup lang="ts">
-// Import of the old swap-config.json (moves into the first-run wizard in 2-4).
+// Import of the old swap-config.json: used by the first-run wizard and kept on the settings page.
 import t from '~~/i18n/zh-CN'
 
+const emit = defineEmits<{ imported: [] }>()
 const path = ref('')
 const busy = ref(false)
 const result = ref<{ text: string, lines: string[], failed: boolean } | null>(null)
@@ -12,6 +13,7 @@ async function runImport(dryRun: boolean) {
     const r = await $fetch<{ imported: Array<{ name: string, mmproj: string | null }>, defaultsApplied: boolean, warnings: string[] }>('/api/import', {
       method: 'POST', body: { path: path.value, dryRun },
     })
+    if (!dryRun) emit('imported')
     result.value = {
       failed: false,
       text: fmt(dryRun ? t.import.previewDone : t.import.done, { count: r.imported.length }),

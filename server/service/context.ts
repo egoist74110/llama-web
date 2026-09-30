@@ -13,10 +13,13 @@ import { createProxy, type Proxy, type ProxyEvent } from '../core/proxy'
 import { runStartupCleanup } from '../core/residue'
 import { PidRegistry, Runner } from '../core/runner'
 import { Scheduler, type SchedulerEvent } from '../core/scheduler'
+import { isFirstRun } from '../core/settings-admin'
 import { JsonStore, resolveDataDir, type VersionedDoc } from '../core/store'
 
 export interface AppContext {
   dataDir: string
+  /** Port configured when the process started (the listening port only changes on restart). */
+  bootPort: number
   getSettings(): Settings
   getModels(): ModelsDoc
   /** Save through the store (backup + atomic write) and make the change visible to getters. */
@@ -127,6 +130,7 @@ function createContext(): AppContext {
       models: describeModels(getModels(), { dirs: getSettings().modelDirs }),
       queue: scheduler.snapshot().queue.map(q => ({ modelId: q.modelId, profile: q.profile, started: q.started, waiting: q.waiting })),
       llamacpp: { current: getSettings().llamacpp.current, runtime: runtimeStatus },
+      firstRun: isFirstRun(getSettings(), getModels()),
     }),
   })
   const scheduler: Scheduler = new Scheduler({
@@ -164,7 +168,7 @@ function createContext(): AppContext {
 
   let closing: Promise<void> | null = null
   return {
-    dataDir, getSettings, getModels, updateSettings: settingsRef.update, updateModels: modelsRef.update,
+    dataDir, bootPort: getSettings().server.port, getSettings, getModels, updateSettings: settingsRef.update, updateModels: modelsRef.update,
     refresh: () => { settingsRef.refresh(); modelsRef.refresh() },
     getRuntimeStatus: () => runtimeStatus, runner, scheduler, proxy, live, cleanupDone,
     shutdown() {

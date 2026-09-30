@@ -33,6 +33,8 @@ export interface StateDoc {
   }>
   queue: Array<{ modelId: string, profile: string, started: boolean, waiting: number }>
   llamacpp: { current: string, runtime: RuntimeStatus }
+  /** Nothing configured yet and the setup wizard has not been dismissed. */
+  firstRun: boolean
 }
 
 export type ActivityEvent =
@@ -58,7 +60,7 @@ export type LiveMessage =
   | { type: 'activity', event: ActivityEvent }
 
 export interface LiveHubOptions {
-  snapshot(): Omit<StateDoc, 'now'> & { scheduler: SchedulerSnapshot }
+  snapshot(): Omit<StateDoc, 'now' | 'firstRun'> & { scheduler: SchedulerSnapshot, firstRun?: boolean }
   /** How many recent activity events to keep. */
   historySize?: number
   now?: () => number
@@ -117,7 +119,7 @@ export class LiveHub {
   }
 
   snapshot(): StateDoc {
-    const { scheduler, models, queue, llamacpp } = this.opts.snapshot()
+    const { scheduler, models, queue, llamacpp, firstRun } = this.opts.snapshot()
     return {
       now: this.now(),
       models: models.map(m => ({
@@ -129,7 +131,7 @@ export class LiveHub {
             since: this.since.get(instKey(m.id, s.profile)) ?? null,
           })),
       })),
-      queue, llamacpp,
+      queue, llamacpp, firstRun: firstRun === true,
     }
   }
 

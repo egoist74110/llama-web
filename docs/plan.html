@@ -418,9 +418,9 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
     <li class="task" data-done="true"><span class="t">模型编辑：文件区（主模型 / mmproj / draft 下拉，同目录提示但默认不选）、聊天模板选择</span><span class="when">2026-09-30</span></li>
     <li class="task" data-done="true"><span class="t">参数表单：继承 / 自定义切换、每项中文说明、额外参数、重复参数警告、实时命令预览 + 复制</span><span class="when">2026-09-30</span></li>
     <li class="task" data-done="true"><span class="t">配置方案：新建 / 复制 / 重命名 / 删除 / 设为当前</span><span class="when">2026-09-30</span></li>
-    <li class="task" data-done="false"><span class="t">设置页：模型目录（增删、启停、深度）、全局默认参数、图片预处理、端口、调度（上限 X 只读展示）</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">首次启动向导：设置模型目录 / 从旧配置导入</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">真机试用并如实报告</span><span class="when"></span></li>
+    <li class="task" data-done="true"><span class="t">设置页：模型目录（增删、启停、深度）、全局默认参数、图片预处理、端口、调度（上限 X 只读展示）</span><span class="when">2026-09-30</span></li>
+    <li class="task" data-done="true"><span class="t">首次启动向导：设置模型目录 / 从旧配置导入</span><span class="when">2026-09-30</span></li>
+    <li class="task" data-done="true"><span class="t">真机试用并如实报告</span><span class="when">2026-09-30</span></li>
   </ul>
   <div class="accept"><h3>验收标准</h3>
     <ul>
@@ -541,6 +541,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
     <tr><td>2026-09-30</td><td>工作包 1-6：阶段 1 真机验收。官方 Release 的 CUDA 版本从 13.3 升到 13.4，下载改为「优先 <code>llamacpp.cudaRuntime</code> 精确版本，没有时选同一主版本里最新的次版本（必须同时有 cudart）」，不会跨主版本；<code>start.bat</code> 修正 <code>&gt;/dev/null</code> 为 <code>&gt;nul</code>、运行行加 <code>call</code>；更新「风险与待验证」中关窗口 / 强杀的结论</td></tr>
     <tr><td>2026-09-30</td><td>阶段 1 审查意见处理（用户确认）：关键决定 5 增加「导入旧配置时自动配对 mmproj」的例外，导入预览显示所选文件；关键决定 22 明确自动重载额度按进程计，自动重载出来的进程再崩溃即 failed，手动启动 / 重试后重新计；<code>scheduler.maxLoaded</code> 在配置读取时固定为 1；管理接口 <code>/api/*</code> 的写请求拒绝跨来源和非 JSON 请求体</td></tr>
       <tr><td>2026-09-30</td><td>工作包 2-1：接入 Nuxt UI，顶栏 + 侧栏布局、深浅色、总览页；<code>GET /api/stream</code> 由自定义入口原生处理（不做内部请求 ID）；前端改为纯 SPA（<code>ssr: false</code>）；新增 <code>server/core/live.ts</code>；旧配置导入表单暂放设置页</td></tr>
+      <tr><td>2026-09-30</td><td>工作包 2-4：设置页（模型目录 / 全局默认参数 / 图片预处理 / 端口与调度）、首次启动向导 <code>/setup</code>；新增 <code>GET/POST /api/settings</code>；<code>settings.json</code> 增加 <code>setup.done</code>（向导完成或跳过标记，旧文件缺省补 false，无需迁移）；快照增加 <code>firstRun</code>；模型目录被已启用模型引用时不能删除（可停用或改路径）；监听端口修改需重启才生效；旧配置导入卡片保留在设置页</td></tr>
   </table>
 </section>
 </main>

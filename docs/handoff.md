@@ -16,6 +16,20 @@
 
 ---
 
+## 2026-09-30 · 工作包 2-4 · Sonnet 5.5
+- 完成：plan 阶段 2 第 9–11 项。设置页四张卡片（`SettingsDirs` / `SettingsDefaults` / `SettingsImage` / `SettingsServer`，各自保存）；首次启动向导 `/setup`（llama.cpp 状态、添加目录并扫描、旧配置导入，完成或跳过写 `settings.setup.done`）。后端校验在 `server/core/settings-admin.ts`（`applySettingsPatch` 等纯函数），接口 `GET/POST /api/settings`（补丁按段：modelDirs / defaults / image / server / setupDone，整个补丁校验通过才写）。快照新增 `firstRun`，布局在首次快照为 firstRun 时跳一次 `/setup`。
+- 验证：`bun test` 247 通过（新增 `tests/core/settings-admin.test.ts`、`live.test.ts` 1 条）；`bun run typecheck`、`bun run build` 通过。构建产物 + 编译的假 llama-server（临时数据目录，已删）在内置浏览器实测：向导重定向、相对路径被拒（中文）、添加目录并扫描、旧配置导入、设置页四段保存（settings.json 与备份落盘）、端口改后的重启提示、删除被引用目录 409、全局默认值进入命令预览、手机宽度 + 深色。**真机**（临时数据目录 + 端口 5094，复用 b11146 的拷贝，`autoUpdate=false`，模型目录只读扫描，测完进程已停、显存回到基线、临时目录已删）：向导添加真实目录扫出 3 个模型；UI 启用 Qwen3.8-27B；mmproj 选择、RP 方案复制、方案切换、全局 ctx 改 32768 用接口完成（对应界面 2-3 已用假进程测过）；`qwen3.8-27b:RP` 经 `/v1/chat/completions` 真实加载并流式 / 非流式回复；切换当前方案触发自动重启（RP → 默认）；**预览命令与 `Get-CimInstance` 读到的真实 llama-server 命令行逐字一致**（端口 7100 也一致）。
+- 剩余：无代码剩余。**没测**：酒馆（SillyTavern）实际连接；往目录里新放一个 gguf 再扫描（用了已存在的文件）；把预览命令复制到命令行手动跑一遍（只比对了字符串和真实进程命令行）；长时间看深色界面是否刺眼（需要用户判断）；`nuxt dev` 下的 `/api/settings`；设置页在真实浏览器里的 Tab 键盘操作。
+- 决定 / 坑：
+  - 新增 `settings.setup.done`（加性字段，`normalizeSettings` 补默认，未写迁移）。向导只在「没目录、没模型、没标记完成」时出现。
+  - 监听端口改动只在重启后生效；`ctx.bootPort` 记的是进程启动时读到的 `settings.server.port`，若用 `PORT` / `NITRO_PORT` 环境变量覆盖了端口，提示里的「当前进程使用」会不准。
+  - 被已启用模型（file / mmproj / draft）引用的目录不能删，只能停用或改路径；目录 id 保持不变（模型记的是 id）。
+  - 调度卡片只开放监听端口、llama-server 端口范围、加载超时、切换等待上限；上限 X 只读显示 1；公网端口 / key / llama.cpp 版本留给阶段 4。
+  - Bash 工具的 heredoc 遇到中文 + 引号混合偶尔整条失败，长文件用 Write 工具；Bash 里 `sed` 会吃反斜杠，改含 `\` 的 i18n 用 Edit。
+- 下一步：**阶段关口 2**：用户试用界面（重点看好不好用、刺不刺眼）→ Codex 审查（阶段号 2）→ Claude 处理意见 → 确认后开始 3-1。
+
+---
+
 ## 2026-09-30 · 工作包 2-3 · Sonnet 5.5
 - 完成：plan 阶段 2 第 6–8 项（模型编辑：文件区 + 聊天模板；参数表单 + 命令预览；配置方案增删改）。后端纯函数在 `server/core/models-admin.ts`（`applyFiles` / `saveProfile` / `createProfile` / `renameProfile` / `deleteProfile` / `sanitizeForm` / `listTemplates`），命令预览 `previewLaunch`（`server/core/launch.ts`，和 `planLaunch` 用同一个 `buildLaunchArgs`，缺文件 / 缺 runtime 不抛错而是报 `missing`）。接口：`GET /api/models/:id`（配置 + 全局默认 + 模板列表 + 在跑的方案）、`POST /api/models/:id/{files,preview,profiles}`。前端：`ModelEditor`（抽屉：文件区 + 方案管理）、`ProfileForm`（每个方案一份，常驻挂载，切换方案不丢未保存修改）、`useParamFields`。
 - 验证：`bun test` 227 通过（新增 `tests/core/models-edit.test.ts`、`launch.test.ts` 的 previewLaunch 5 条）；`bun run typecheck`、`bun run build` 通过。构建产物 + 编译成 exe 的假 llama-server（临时数据目录、端口 5098，用完已停、已删）在内置浏览器实测：选 mmproj 保存（models.json 写入）、新建方案、继承 / 自定义切换后预览实时变化、额外参数重复 / 保留参数警告、保存方案；**真实进程命令行与预览逐字一致**（仅端口由预览示例值 7100 对应实际分配）；运行中保存并重启、改名 / 删除被拒（中文提示）；手机宽度 + 深色。**没测**：真实 llama-server / GPU；`nuxt dev` 下的新接口；草稿模型下拉（只测了 mmproj）；聊天模板在界面上的选择（接口测了，`--chat-template-file` 进了命令）。

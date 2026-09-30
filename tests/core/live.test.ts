@@ -23,6 +23,13 @@ function setup() {
 const wait = (ms: number) => new Promise(r => setTimeout(r, ms))
 
 describe('LiveHub', () => {
+  test('carries the first-run flag (false unless the snapshot source says so)', () => {
+    const { hub } = setup()
+    expect(hub.snapshot().firstRun).toBe(false)
+    const first = new LiveHub({ snapshot: () => ({ scheduler: { models: [], queue: [] }, models: [], queue: [], llamacpp: { current: '', runtime: { state: 'idle' } }, firstRun: true }) })
+    expect(first.snapshot().firstRun).toBe(true)
+  })
+
   test('tracks when an instance entered its state and lists only running instances', () => {
     const { hub, sched, target, tick } = setup()
     expect(hub.snapshot().models[0]!.instances).toEqual([])

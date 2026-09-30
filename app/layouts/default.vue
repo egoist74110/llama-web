@@ -6,6 +6,14 @@ onMounted(connect)
 onBeforeUnmount(disconnect)
 
 const route = useRoute()
+// Nothing configured yet: send the user to the setup wizard once per visit.
+const offeredSetup = useState('setup-offered', () => false)
+watch(() => state.value?.firstRun, (first) => {
+  if (first && !offeredSetup.value) {
+    offeredSetup.value = true
+    if (route.path !== '/setup') void navigateTo('/setup')
+  }
+}, { immediate: true })
 const nav = [
   { to: '/', label: t.nav.overview, icon: 'i-lucide-layout-dashboard' },
   { to: '/models', label: t.nav.models, icon: 'i-lucide-boxes' },
