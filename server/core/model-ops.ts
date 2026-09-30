@@ -4,7 +4,7 @@
 // only starts its profile if nothing newer has been asked for since (latest action wins).
 import type { ModelState, Scheduler, Target } from './scheduler'
 
-export type OpsScheduler = Pick<Scheduler, 'snapshot' | 'start' | 'stop' | 'retry'>
+export type OpsScheduler = Pick<Scheduler, 'snapshot' | 'start' | 'stop' | 'retry' | 'cancelManual'>
 
 /** Has a process that is (or will be) serving: stays up unless someone stops it. */
 const LIVE: ReadonlySet<ModelState> = new Set(['loading', 'ready'])
@@ -82,12 +82,17 @@ export class ModelOps {
    * the background work (null when there is none).
    */
   switchTo(modelId: string, profile: string): { restarted: boolean, work: Promise<void> | null } {
+    // A manual start / retry of another profile that is still queued (e.g. waiting for another
+    // model to drain) is an older intent: withdraw it and start the new profile instead.
+    // Queued client requests keep the profile they asked for.
+    const withdrawn = this.sched.cancelManual(modelId, p => p !== profile)
     const mine = this.instances(modelId)
     const up = mine.filter(s => UP.has(s.state))
     const pending = this.pending.get(modelId)
     const settled = !pending && up.length > 0 && up.every(s => LIVE.has(s.state) && s.profile === profile)
     if (settled) return { restarted: false, work: null }
     if (up.length || pending) return { restarted: true, work: this.restart(modelId, profile) }
+    if (withdrawn) return { restarted: true, work: this.start({ modelId, profile }) }
     return { restarted: false, work: mine.length ? this.stop(modelId) : null }
   }
 

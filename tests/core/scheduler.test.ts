@@ -373,6 +373,26 @@ describe('failures', () => {
 })
 
 describe('cancellation and manual control', () => {
+  test('cancelManual withdraws manual starters only; a job left with requests still loads', async () => {
+    const { sched, procs } = setup({ autoReady: true })
+    const la = await sched.acquire(A)
+    const B2: Target = { modelId: 'b', profile: 'other' }
+    const manualB = settled(sched.start(B)) // becomes the running job, waiting for A to drain
+    const reqB = sched.acquire(B) // joins the same job
+    const manualB2 = settled(sched.start(B2)) // queued behind it, manual only
+    await until(() => sched.stateOf(A) === 'draining')
+    expect(sched.cancelManual('b')).toBe(2)
+    const [rb, rb2] = await Promise.all([manualB, manualB2])
+    expect(rb.ok || rb.error.code).toBe('stopped')
+    expect(rb2.ok || rb2.error.code).toBe('stopped')
+    expect(sched.snapshot().queue.map(q => q.profile)).toEqual(['默认']) // B2 dropped, B kept for the request
+    la.release()
+    ;(await reqB).release()
+    await tick(10)
+    expect(procs.map(p => `${p.target.modelId}:${p.target.profile}`)).toEqual(['a:默认', 'b:默认'])
+    expect(sched.cancelManual('b')).toBe(0)
+  })
+
   test('aborted waiter is removed; a queued switch nobody waits for is dropped', async () => {
     const { sched, procs } = setup({ autoReady: true })
     const la = await sched.acquire(A)

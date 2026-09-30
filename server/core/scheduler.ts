@@ -271,6 +271,28 @@ export class Scheduler {
     await Promise.all(pending)
   }
 
+  /**
+   * Withdraw the manual start()/retry() callers of this model's queued or running load jobs
+   * (profiles matching `which`); they are rejected with `stopped`. Request waiters stay queued.
+   * A job nobody waits for any more is dropped (a running one stops before it launches; one
+   * already launched becomes an instance and is handled by stop()). Returns how many were withdrawn.
+   */
+  cancelManual(modelId: string, which: (profile: string) => boolean = () => true): number {
+    let n = 0
+    for (const job of [this.current, ...this.queue]) {
+      if (!job || job.cancelled || job.target.modelId !== modelId || !which(job.target.profile)) continue
+      const manual = job.waiters.filter(w => w.manual)
+      if (!manual.length) continue
+      for (const w of manual) job.waiters.splice(job.waiters.indexOf(w), 1)
+      for (const w of manual) w.reject(new SchedulerError('stopped', job.target))
+      n += manual.length
+      if (job.waiters.length) continue
+      if (job === this.current) job.cancelled = true
+      else this.queue.splice(this.queue.indexOf(job), 1)
+    }
+    return n
+  }
+
   /** Reject everything and kill all processes. */
   async shutdown(): Promise<void> {
     this.shuttingDown = true
@@ -297,7 +319,8 @@ export class Scheduler {
       lastUsedAt: i.lastUsedAt,
       error: i.error,
     }))
-    const jobs = this.current ? [this.current, ...this.queue] : [...this.queue]
+    // A cancelled running job (manual stop, withdrawn start) only winds down; it will not load.
+    const jobs = (this.current ? [this.current, ...this.queue] : [...this.queue]).filter(j => !j.cancelled)
     const queue: QueueSnapshot[] = jobs.map(j => ({
       modelId: j.target.modelId,
       profile: j.target.profile,

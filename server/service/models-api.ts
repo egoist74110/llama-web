@@ -1,6 +1,7 @@
 // Shared by the per-model action routes.
 import { fmt, t } from '../core/i18n'
 import { FilesError, ProfileError } from '../core/models-admin'
+import { SchedulerError } from '../core/scheduler'
 import { getContext } from './context'
 
 export function requireModel(id: string | undefined) {
@@ -52,5 +53,9 @@ export function editError(e: unknown, vars: Record<string, string> = {}): never 
 
 /** Run a slow scheduler operation without holding the HTTP request; the outcome shows up in the live state. */
 export function background(what: string, job: () => Promise<unknown>): void {
-  job().catch(e => console.error(`[llama-web] ${what}:`, (e as Error)?.message ?? e))
+  job().catch((e) => {
+    // Stopped or superseded by a later action (manual stop, profile switch): not an error.
+    if (e instanceof SchedulerError && e.code === 'stopped') return
+    console.error(`[llama-web] ${what}:`, (e as Error)?.message ?? e)
+  })
 }

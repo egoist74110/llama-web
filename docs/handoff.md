@@ -16,6 +16,15 @@
 
 ---
 
+## 2026-09-30 · 阶段 2 第二轮复审处理 · Opus 5.5
+- 完成：`docs/reviews/stage-2-codex-r2.md` 的 CR-001 / CR-005 余项已修复，CR-007 已核实（Windows 实测不构成错误）并加固，CR-004 的边界说明已认可，各条已标注。CR-001：`Scheduler.cancelManual()` 只撤回手动 start/retry 调用方；`ModelOps.switchTo` 撤回其他方案的排队手动启动并按新方案启动；`snapshot().queue` 不列已取消的任务；后台日志不再把 `stopped` 记成错误。CR-005：新增 `quoteCmdProgram`，程序路径含空白或 `( ) & | < > ^ % ! ; , =` 时用普通双引号。CR-007：参数里的括号也加 `^`。
+- 验证：`bun test` 271 通过（新增 model-ops 3 条、scheduler 1 条、真实 cmd.exe 测试 2 条：只含括号的参数 / `; , =`，以及程序路径含空格与元字符）；`bun run typecheck`、`bun run build` 通过。构建产物 + 慢响应假 llama-server（临时数据目录、端口 5097，已停已删）经真实接口复现审查场景：其他模型 drain 中手动启动 mmm、再切 RP → 队列 `[mmm:RP]`、`inUse` 只有 RP、最终 `mmm:RP ready`，从未启动 `mmm:默认`，日志无错误。**没测**：`cmd /v:on`；交互式 CMD 窗口里手动粘贴；macOS / Linux 上的全量测试；GPU。
+- 剩余：plan 阶段 2 的「下拉空值选项不显示」任务仍未做（上一条交接）。
+- 决定 / 坑：客户端请求已经排队等方案 A 时切到 B，这个请求仍加载 A（请求时已选定方案），切换只取代管理操作（手动启动 / 重试 / 重启）。以后要改成「切换也取消排队请求」，需要先和用户确认。
+- 下一步：用户决定是否再让 Codex 复审（`stage-2-codex-r3.md`）→ 修下拉空值问题 → 阶段 2 确认后开始 3-1。
+
+---
+
 ## 2026-09-30 · 阶段 2 审查意见处理 · Opus 5.5
 - 完成：`docs/reviews/stage-2-codex.md` 6 条全部核实成立并修复，每条后已标注「处理」。CR-001/003：新增 `server/core/model-ops.ts`（`ctx.ops`），管理操作按模型递增代数，后发起的操作使等待 drain 的旧重启失效；draining 不再算「已在该方案运行」；改名 / 删除检查实例 + 调度队列 + 待重启目标（`GET /api/models/:id` 新增 `inUse`，抽屉按它禁用按钮）。CR-002：深度输入在 `update:model-value` 转字符串。CR-004：`handleStream` 每连接有界（最新快照合并、activity ≤200 超限断开、背压时跳过心跳、`pull()` 补发）。CR-005：Windows 预览改 `formatCmdCommand`（CMD 转义），界面注明粘贴到 CMD。CR-006：设置测试改用宿主绝对路径，大小写专项仅 Windows。
 - 验证：`bun test` 265 通过（新增 model-ops 9 条、live 背压 3 条、args 1 条、`tests/platform/cmd-preview.test.ts` 4 条，后者用真实 cmd.exe 回读参数数组）；`bun run typecheck`、`bun run build` 通过。构建产物 + 慢响应假 llama-server（临时数据目录、端口 5097，用完已停、已删）经真实接口复现 CR-001（A→B→A drain 中，最终默认 ready、没有启动 RP）和 CR-003（排队中的 RP 删除 409、改名中文提示）；内置浏览器测了设置页深度输入（键入、步进、超限、清空、保存落盘）。**没测**：macOS / Linux 上的全量测试；真实 llama-server / GPU；把预览命令粘贴到真实 llama-server 手动运行；编辑抽屉在排队时按钮禁用的界面效果（只测了接口）。

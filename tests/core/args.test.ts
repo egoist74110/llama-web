@@ -157,8 +157,15 @@ test('quoteCmdArg: plain stays plain, spaces are quoted, cmd metacharacters get 
   expect(quoteCmdArg('X:\\a b\\A&B (1).gguf')).toBe('^"X:\\a b\\A^&B ^(1^).gguf^"')
   expect(quoteCmdArg('{"a":1}')).toBe('^"{\\^"a\\^":1}^"')
   expect(quoteCmdArg('trail space\\')).toBe('"trail space\\\\"')
+  expect(quoteCmdArg('X:\\models\\A(1).gguf')).toBe('X:\\models\\A^(1^).gguf')
+  expect(quoteCmdArg(')')).toBe('^)')
+  expect(quoteCmdArg('a;b,c=d')).toBe('a;b,c=d')
   expect(formatCmdCommand('C:\\Program Files\\llama\\llama-server.exe', ['--model', 'X:\\m.gguf']))
     .toBe('"C:\\Program Files\\llama\\llama-server.exe" --model X:\\m.gguf')
+  // The program path is always plain-quoted when unusual (^-escaped quotes do not group it for cmd).
+  expect(formatCmdCommand('X:\\a b&c (x)\\llama-server.exe', [])).toBe('"X:\\a b&c (x)\\llama-server.exe"')
+  expect(formatCmdCommand('X:\\semi;co\\llama-server.exe', [])).toBe('"X:\\semi;co\\llama-server.exe"')
+  expect(formatCmdCommand('X:\\plain\\llama-server.exe', [])).toBe('X:\\plain\\llama-server.exe')
 })
 
 test('default defaults match the plan and produce a sane command', () => {

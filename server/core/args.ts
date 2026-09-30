@@ -314,17 +314,29 @@ export function formatCommand(exe: string, args: string[]): string {
  * program's C runtime undoes (CommandLineToArgvW rules: quotes around whitespace / quotes / empty,
  * backslashes doubled only before a quote), then, if the argument holds a cmd metacharacter or a
  * quote, every metacharacter (quotes included) is escaped with ^ so cmd passes it through as is.
+ * Parentheses alone pass through a plain command line, but are escaped too so the line also
+ * survives inside a ( … ) block.
  */
 export function quoteCmdArg(arg: string): string {
   let q = arg
   if (arg === '' || /[\s"]/.test(arg)) {
     q = `"${arg.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, '$1$1')}"`
   }
-  if (/[&|<>^%!"]/.test(arg)) q = q.replace(/[()%!^"<>&|]/g, '^$&')
+  if (/[()&|<>^%!"]/.test(arg)) q = q.replace(/[()%!^"<>&|]/g, '^$&')
   return q
+}
+
+/**
+ * The program path for cmd.exe. cmd finds the program name by its own rules: ^-escaped quotes do
+ * not group it and ; , = split it, so it is always put in plain quotes when it holds anything
+ * unusual (a Windows path cannot contain a quote). Limitation: a %NAME% pair naming a defined
+ * variable would still be expanded.
+ */
+export function quoteCmdProgram(exe: string): string {
+  return /[\s()&|<>^%!;,=]/.test(exe) || exe === '' ? `"${exe}"` : exe
 }
 
 /** Command line for the UI preview, ready to paste into cmd.exe. */
 export function formatCmdCommand(exe: string, args: string[]): string {
-  return [exe, ...args].map(quoteCmdArg).join(' ')
+  return [quoteCmdProgram(exe), ...args.map(quoteCmdArg)].join(' ')
 }

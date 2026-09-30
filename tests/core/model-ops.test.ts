@@ -80,6 +80,44 @@ describe('ModelOps.switchTo', () => {
     await sched.shutdown()
   })
 
+  test('a manual start still queued (another model draining) is replaced by the new profile', async () => {
+    const { sched, ops, launched, states } = setup()
+    const other: Target = { modelId: 'other', profile: 'A' }
+    await sched.start(other)
+    const lease = await sched.acquire(other)
+    const started = ops.start(at('A')).catch(e => e)
+    await tick()
+    expect(sched.snapshot().queue.map(q => `${q.modelId}:${q.profile}`)).toEqual(['m:A'])
+    expect(states()).toEqual([])
+
+    const { restarted, work } = ops.switchTo('m', 'B')
+    expect(restarted).toBe(true)
+    await tick()
+    // The withdrawn job no longer shows as queued, nor blocks renaming A.
+    expect(sched.snapshot().queue.map(q => `${q.modelId}:${q.profile}`)).toEqual(['m:B'])
+    expect(ops.inUseProfiles('m')).toEqual(['B'])
+    lease.release()
+    await work
+    expect((await started as SchedulerError).code).toBe('stopped')
+    expect(states()).toEqual(['B:ready'])
+    expect(launched).toEqual(['A', 'B']) // other:A, then m:B — m:A never launched
+    await sched.shutdown()
+  })
+
+  test('a queued request (not a manual start) keeps its profile when the current one changes', async () => {
+    const { sched, ops, states } = setup()
+    const other: Target = { modelId: 'other', profile: 'A' }
+    await sched.start(other)
+    const lease = await sched.acquire(other)
+    const request = sched.acquire(at('A'))
+    await tick()
+    expect(ops.switchTo('m', 'B')).toEqual({ restarted: false, work: null })
+    lease.release()
+    ;(await request).release()
+    expect(states()).toEqual(['A:ready'])
+    await sched.shutdown()
+  })
+
   test('ready on another profile restarts onto the new one', async () => {
     const { sched, ops, states } = setup()
     await sched.start(at('A'))
@@ -145,6 +183,21 @@ describe('ModelOps.restartIfUp', () => {
     await Promise.all([work, again])
     expect(states()).toEqual(['B:ready'])
     expect(launched).toEqual(['A', 'A', 'B'])
+    await sched.shutdown()
+  })
+
+  test('a manual start still queued needs no restart after a save: it launches with the saved config', async () => {
+    const { sched, ops, launched, states } = setup()
+    const other: Target = { modelId: 'other', profile: 'A' }
+    await sched.start(other)
+    const lease = await sched.acquire(other)
+    const started = ops.start(at('A'))
+    await tick()
+    expect(ops.restartIfUp('m', 'A')).toBeNull()
+    lease.release()
+    await started
+    expect(states()).toEqual(['A:ready'])
+    expect(launched).toEqual(['A', 'A']) // other:A, m:A
     await sched.shutdown()
   })
 
