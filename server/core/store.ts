@@ -67,6 +67,8 @@ export interface StoreOptions<T extends VersionedDoc> {
   validate?: (doc: T) => T
   /** Backups kept per file (default 20). */
   keepBackups?: number
+  /** Clock used for backup names (tests). */
+  now?: () => Date
 }
 
 function pad(n: number, w = 2) {
@@ -75,6 +77,11 @@ function pad(n: number, w = 2) {
 
 function timestamp(d = new Date()) {
   return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}-${pad(d.getMilliseconds(), 3)}`
+}
+
+/** Sort key for a backup name: timestamp, then numeric collision suffix (none = 0). */
+function backupKey(stamp: string, suffix: string | undefined): [string, number] {
+  return [stamp, suffix ? Number(suffix) : 0]
 }
 
 function escapeRegExp(s: string) {
@@ -212,14 +219,22 @@ export class JsonStore<T extends VersionedDoc> {
 
   private backup() {
     mkdirSync(this.backupDir, { recursive: true })
-    const stamp = timestamp()
-    let target = join(this.backupDir, `${this.baseName}.${stamp}.json`)
-    for (let i = 1; existsSync(target); i++) target = join(this.backupDir, `${this.baseName}.${stamp}-${i}.json`)
-    copyFileSync(this.file, target)
-    const re = new RegExp(`^${escapeRegExp(this.baseName)}\\.\\d{8}-\\d{6}-\\d{3}(-\\d+)?\\.json$`)
-    const all = readdirSync(this.backupDir).filter(f => re.test(f)).sort()
+    const re = new RegExp(`^${escapeRegExp(this.baseName)}\\.(\\d{8}-\\d{6}-\\d{3})(?:-(\\d+))?\\.json$`)
+    const list = () => readdirSync(this.backupDir)
+      .map(f => ({ f, m: re.exec(f) }))
+      .filter((x): x is { f: string, m: RegExpExecArray } => x.m !== null)
+      .map(({ f, m }) => ({ f, key: backupKey(m[1]!, m[2]) }))
+      // Oldest first: same-millisecond collisions order by numeric suffix, not as strings.
+      .sort((a, b) => a.key[0] < b.key[0] ? -1 : a.key[0] > b.key[0] ? 1 : a.key[1] - b.key[1])
+    const stamp = timestamp(this.opts.now?.())
+    // Next suffix is one past the highest existing one for this stamp, so a pruned
+    // low slot is never reused for a newer backup.
+    const used = list().filter(b => b.key[0] === stamp).map(b => b.key[1])
+    const seq = used.length ? Math.max(...used) + 1 : 0
+    copyFileSync(this.file, join(this.backupDir, `${this.baseName}.${stamp}${seq ? `-${seq}` : ''}.json`))
+    const all = list()
     for (const old of all.slice(0, Math.max(0, all.length - this.keep))) {
-      try { unlinkSync(join(this.backupDir, old)) } catch { /* ignore */ }
+      try { unlinkSync(join(this.backupDir, old.f)) } catch { /* ignore */ }
     }
   }
 }

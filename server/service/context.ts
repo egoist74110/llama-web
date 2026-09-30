@@ -6,7 +6,7 @@ import {
   defaultModels, defaultSettings, MODELS_VERSION, normalizeModels, normalizeSettings, SETTINGS_VERSION,
   type ModelsDoc, type Settings,
 } from '../core/config'
-import { planLaunch } from '../core/launch'
+import { LaunchConfigError, planLaunch } from '../core/launch'
 import { ensureRuntime, type RuntimeStatus } from '../core/llamacpp'
 import { createProxy, type Proxy, type ProxyEvent } from '../core/proxy'
 import { runStartupCleanup } from '../core/residue'
@@ -110,6 +110,8 @@ function createContext(): AppContext {
     maxLoaded: getSettings().scheduler.maxLoaded,
     get drainTimeoutMs() { return getSettings().scheduler.drainTimeoutSec * 1000 },
     onEvent: logSchedulerEvent,
+    // Initial llama.cpp download still running (or not installed yet): not a model failure.
+    isPrecondition: e => e instanceof LaunchConfigError && e.code === 'no-runtime',
     launch: async (target) => {
       await cleanupDone
       const plan = planLaunch(target, { dataDir, settings: getSettings(), models: getModels(), host: runner.host })

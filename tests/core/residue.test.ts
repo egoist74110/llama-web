@@ -33,6 +33,7 @@ describe('cleanupResidue (injected process table)', () => {
     registry.add(rec(104)) // alive but path unreadable -> skip
     const killed: number[] = []
     const r = await cleanupResidue(registry, runtime, {
+      platform: 'win32',
       isAlive: pid => pid !== 102,
       getExePaths: async pids => {
         expect(pids).toEqual([101, 103, 104])
@@ -54,6 +55,7 @@ describe('cleanupResidue (injected process table)', () => {
     registry.add(rec(201, 'X:\\tools\\llama-server.exe'))
     const killed: number[] = []
     await cleanupResidue(registry, runtime, {
+      platform: 'win32',
       isAlive: () => true,
       getExePaths: async () => new Map([[201, 'X:\\tools\\llama-server.exe']]),
       killTree: async (pid) => { killed.push(pid) },

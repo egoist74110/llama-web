@@ -53,6 +53,8 @@ export interface ResidueDeps {
   getExePaths?: (pids: number[]) => Promise<Map<number, string>>
   killTree?: (pid: number) => Promise<void>
   isAlive?: (pid: number) => boolean
+  /** Path semantics for comparing exe paths (tests); defaults to the host platform. */
+  platform?: NodeJS.Platform
 }
 
 /**
@@ -72,7 +74,7 @@ export async function cleanupResidue(registry: PidRegistry, runtimeDir: string, 
   const exes = live.length ? await exePaths(live.map(r => r.pid)) : new Map<number, string>()
   for (const r of live) {
     const actual = exes.get(r.pid) ?? null
-    if (actual && isInsideDir(actual, runtimeDir)) {
+    if (actual && isInsideDir(actual, runtimeDir, deps.platform)) {
       await kill(r.pid)
       result.killed.push(r)
     } else if (actual) {

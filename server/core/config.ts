@@ -100,6 +100,8 @@ export function normalizeSettings(doc: Settings): Settings {
   if (!Array.isArray(pr) || pr.length !== 2 || !pr.every((p: unknown) => Number.isInteger(p)) || pr[0] > pr[1]) {
     throw new Error('"scheduler.portRange" must be [from, to]')
   }
+  // Placeholder (decision 9): the field exists but the online limit stays fixed at 1.
+  out.scheduler.maxLoaded = 1
   return out as Settings
 }
 

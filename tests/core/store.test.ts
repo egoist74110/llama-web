@@ -48,15 +48,26 @@ test('writeFileAtomic cleans up the temp file when the rename fails', () => {
   expect(readdirSync(dir).filter(f => f.endsWith('.tmp'))).toEqual([])
 })
 
-test('every overwrite keeps a backup of the previous content; old backups are pruned', async () => {
-  const s = make({ keepBackups: 3 })
+const backupItems = () => readdirSync(join(dir, 'backups'))
+  .map(f => JSON.parse(readFileSync(join(dir, 'backups', f), 'utf8')).items[0] as string)
+  .sort((a, b) => Number(a) - Number(b))
+
+test('every overwrite keeps a backup of the previous content; old backups are pruned', () => {
+  let t = Date.parse('2026-01-01T00:00:00Z')
+  const s = make({ keepBackups: 3, now: () => new Date(t += 5) })
   s.load()
   for (let i = 1; i <= 6; i++) s.save({ version: 1, items: [String(i)] })
-  const backups = readdirSync(join(dir, 'backups')).sort()
-  expect(backups.length).toBe(3)
-  // Newest backup holds the content from before the last save.
-  const newest = JSON.parse(readFileSync(join(dir, 'backups', backups.at(-1)!), 'utf8'))
-  expect(newest.items).toEqual(['5'])
+  // Backups hold the content from before each of the last three saves.
+  expect(backupItems()).toEqual(['3', '4', '5'])
+})
+
+test('same-millisecond backups are pruned oldest first, including two-digit suffixes', () => {
+  const fixed = new Date('2026-01-01T00:00:00Z')
+  const s = make({ keepBackups: 3, now: () => fixed })
+  s.load()
+  s.save({ version: 1, items: ['0'] })
+  for (let i = 1; i <= 13; i++) s.save({ version: 1, items: [String(i)] })
+  expect(backupItems()).toEqual(['10', '11', '12'])
 })
 
 test('backups of different files do not prune each other', () => {

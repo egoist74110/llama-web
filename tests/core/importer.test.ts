@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { defaultModels, defaultSettings } from '../../server/core/config'
-import { aliasOf, ImportError, importSwapConfig, parseSwapConfig } from '../../server/core/importer'
+import { defaultModels, defaultSettings, type ModelsDoc, type Settings } from '../../server/core/config'
+import { aliasOf, commitImport, ImportError, ImportSaveError, importSwapConfig, parseSwapConfig, readImportSource } from '../../server/core/importer'
 import { mmprojSpec, modelSpec, writeGguf } from '../fixtures/gguf-builder'
 
 let tmp: string
@@ -182,4 +182,98 @@ test('unknown model root warns; unreadable and invalid files throw', async () =>
   const bad = join(tmp, 'bad.json')
   writeFileSync(bad, '{nope')
   await expect(run(bad)).rejects.toMatchObject({ code: 'invalid-json' })
+})
+
+// ---------------------------------------------------------------------------------------
+// commitImport: plans against the latest documents, saves both, undoes partial writes.
+
+function memoryTarget(opts: { failModels?: boolean, failSettingsAfter?: number } = {}) {
+  let settings = defaultSettings()
+  let models = defaultModels()
+  let settingsWrites = 0
+  return {
+    dataDir: data,
+    getSettings: () => settings,
+    getModels: () => models,
+    updateSettings(fn: () => Settings) {
+      if (opts.failSettingsAfter !== undefined && settingsWrites >= opts.failSettingsAfter) throw new Error('settings locked')
+      settingsWrites++
+      settings = structuredClone(fn())
+    },
+    updateModels(fn: () => ModelsDoc) {
+      if (opts.failModels) throw new Error('models locked')
+      models = structuredClone(fn())
+    },
+  }
+}
+
+test('concurrent imports of different roots both survive (planned against the latest documents)', async () => {
+  const rootB = join(tmp, 'models-b')
+  writeGguf(join(root, 'A-Q4_0.gguf'), modelSpec())
+  writeGguf(join(rootB, 'B-Q4_0.gguf'), modelSpec())
+  const target = memoryTarget()
+  // Both scans start from the same (empty) snapshot, as two overlapping requests would.
+  const [srcA, srcB] = await Promise.all([
+    readImportSource({ configPath: writeConfig({}, 'a.json'), settings: target.getSettings() }),
+    readImportSource({ configPath: writeConfig({ models_root: rootB }, 'b.json'), settings: target.getSettings() }),
+  ])
+  commitImport(srcA, target)
+  commitImport(srcB, target)
+  expect(target.getSettings().modelDirs.map(d => [d.id, d.path])).toEqual([['main', root], ['main2', rootB]])
+  expect(target.getModels().models.map(m => [m.name, m.file.dirId])).toEqual([['A', 'main'], ['B', 'main2']])
+})
+
+test('a settings change made during the scan (llama.cpp current) is not overwritten', async () => {
+  writeGguf(join(root, 'A-Q4_0.gguf'), modelSpec())
+  const target = memoryTarget()
+  const src = await readImportSource({ configPath: writeConfig(), settings: target.getSettings() })
+  target.updateSettings(() => ({ ...target.getSettings(), llamacpp: { ...target.getSettings().llamacpp, current: 'b1' } }))
+  commitImport(src, target)
+  expect(target.getSettings().llamacpp.current).toBe('b1')
+  expect(target.getModels().models).toHaveLength(1)
+})
+
+test('models save failure restores settings and removes only the templates this import created', async () => {
+  writeGguf(join(root, 'A-Q4_0.gguf'), modelSpec())
+  writeGguf(join(root, 'B-Q4_0.gguf'), modelSpec())
+  const fresh = join(tmp, 'fresh.jinja')
+  const shared = join(tmp, 'shared.jinja')
+  writeFileSync(fresh, 'fresh')
+  writeFileSync(shared, 'shared')
+  mkdirSync(join(data, 'templates'), { recursive: true })
+  writeFileSync(join(data, 'templates', 'shared.jinja'), 'shared') // identical: reused, must stay
+  const target = memoryTarget({ failModels: true })
+  const before = structuredClone(target.getSettings())
+  const src = await readImportSource({ configPath: writeConfig({ models: { A: { chat_template_file: fresh }, B: { chat_template_file: shared } } }), settings: before })
+  const e = (() => { try { commitImport(src, target) } catch (x) { return x } })() as ImportSaveError
+  expect(e).toBeInstanceOf(ImportSaveError)
+  expect(e.rolledBack).toBe(true)
+  expect(target.getSettings()).toEqual(before)
+  expect(target.getModels().models).toEqual([])
+  expect(existsSync(join(data, 'templates', 'fresh.jinja'))).toBe(false)
+  expect(readFileSync(join(data, 'templates', 'shared.jinja'), 'utf8')).toBe('shared')
+})
+
+test('a failed rollback is reported as not rolled back', async () => {
+  writeGguf(join(root, 'A-Q4_0.gguf'), modelSpec())
+  const target = memoryTarget({ failModels: true, failSettingsAfter: 1 })
+  const src = await readImportSource({ configPath: writeConfig(), settings: target.getSettings() })
+  const e = (() => { try { commitImport(src, target) } catch (x) { return x } })() as ImportSaveError
+  expect(e.rolledBack).toBe(false)
+})
+
+test('a template copy failing midway removes the templates already copied', async () => {
+  writeGguf(join(root, 'A-Q4_0.gguf'), modelSpec())
+  writeGguf(join(root, 'B-Q4_0.gguf'), modelSpec())
+  const good = join(tmp, 'good.jinja')
+  writeFileSync(good, 'ok')
+  const bad = join(tmp, 'bad.jinja')
+  mkdirSync(bad) // exists, but reading it fails
+  const target = memoryTarget()
+  const src = await readImportSource({ configPath: writeConfig({ models: { A: { chat_template_file: good }, B: { chat_template_file: bad } } }), settings: target.getSettings() })
+  const e = (() => { try { commitImport(src, target) } catch (x) { return x } })() as ImportSaveError
+  expect(e).toBeInstanceOf(ImportSaveError)
+  expect(e.rolledBack).toBe(true)
+  expect(existsSync(join(data, 'templates', 'good.jinja'))).toBe(false)
+  expect(target.getModels().models).toEqual([])
 })

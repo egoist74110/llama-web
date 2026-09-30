@@ -16,6 +16,19 @@
 
 ---
 
+## 2026-09-30 · 阶段 1 审查意见处理 · Opus 5.5
+- 完成：逐条核实 `docs/reviews/stage-1-codex.md`，每条后面写了「处理」。已修复 CR-001/002/004/005/006/007/008/009；CR-003 部分修复；CR-010、CR-011 需要用户决定。没有打勾（按指南）。
+  - 001 冷加载流：租约随 abort 立即释放，循环的每次写入都和断连竞争。002 runner：先装 exit 处理器再写 pids.json，写失败 → `register-failed` 并杀进程。003 scheduler 新增 `isPrecondition`，`no-runtime` 不再锁 failed。004/005 导入拆成 `readImportSource` + 同步的 `commitImport`（按最新文档规划、失败回滚 settings 和新建模板）。006 备份按（时间戳, 数值序号）排序、命名取最大序号 +1。007 新增 `server/core/origin.ts` + `server/middleware/admin-origin.ts`（/api 写请求：跨来源 403、非 JSON 415）。008 `maxLoaded` 归一化为 1。009 测试注入 platform / 用宿主绝对路径。
+- 验证：`bun test` 177 通过；`bun run typecheck` 通过。proxy 测试连跑 3 次通过；新的背压测试在旧代码上失败、新代码通过。`nuxt dev`（临时数据目录、端口 5099，用完已停、已删）实测 origin 中间件：跨来源表单/JSON 403，无来源表单 415，同源 JSON 预览 200。
+  - **`bun run build` 失败**：用户的 start.bat 正在运行，`.output` 里 sharp 的 dll 被占用；构建在失败前已经删掉了 `.output` 里其他文件。运行中的实例 /v1、/api 仍可用，状态页静态资源 500。用户关掉 start.bat 重开会自动重新构建。本次 build 没有验证。
+  - 没在 macOS/Linux 跑测试（CR-009 只在 Windows 验证）；没做 GPU 真机测试。
+- 剩余：CR-003 的其余配置错误（file-missing 等）改配置后仍要重启才能恢复，手动重试入口在阶段 2（模型页、失败卡片）。CR-010（导入自动配 mmproj）、CR-011（崩溃重载额度的重置条件）等用户决定。
+- 决定 / 坑：
+  - Bun：在 `req.signal` 的 abort 回调里同步 `writer.abort()` SSE 的 TransformStream，Bun 服务器读响应体时会报未处理的拒绝；改为让等待和断连 Promise 竞争。
+  - 手改文件后 100 ms 防抖内的任何保存会覆盖手改（store 通用限制）；origin 检查不防 DNS 重绑定。
+  - 用户的 start.bat 在跑时别 `bun run build`，会删掉 `.output`。
+- 下一步：用户决定 CR-010 / CR-011（及 CR-003 余项），重启 start.bat 试用，确认后开始 2-1。
+
 ## 2026-09-30 · 工作包 1-6 · Opus 5.5
 - 完成：plan 阶段 1 剩余三项（llama.cpp 初始获取、start.bat、真机冒烟）打勾，阶段 1 全部完成。修复：`llamacpp.ts` 新增 `pickCudaVersion`（官方已从 CUDA 13.3 换成 13.4，原来写死精确版本导致 `asset-missing`）；`start.bat` 的 `>/dev/null` 改 `>nul`、运行行加 `call`（bun 是 bun.cmd）、工作区改回 CRLF。新增测试 `tests/platform/start-bat.test.ts`、llamacpp 两条。
 - 验证：`bun test` 159 通过；`typecheck`、`build` 通过。真机（仓库 `data/`，RTX 5090，b11146）逐条验收，全部通过：

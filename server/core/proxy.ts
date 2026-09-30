@@ -284,34 +284,53 @@ export function createProxy(deps: ProxyDeps) {
       }
       const { res, ac, cleanup } = up
       let ok = false
+      let released = false
+      const finish = () => {
+        if (released) return
+        released = true
+        cleanup()
+        lease.release(ok ? 'ok' : undefined)
+      }
+      // Client gone or model unloaded: release the lease now, like forward(). The loop below
+      // may be parked on writer.ready / write() when the client stopped reading; aborting the
+      // upstream fetch does not wake that, so every wait there also races the disconnect.
+      ac.signal.addEventListener('abort', finish, { once: true })
+      const goneP = new Promise<never>((_, reject) => {
+        if (gone.signal.aborted) reject(gone.signal.reason)
+        gone.signal.addEventListener('abort', () => reject(gone.signal.reason), { once: true })
+      })
+      goneP.catch(() => {})
+      const orGone = <T>(p: Promise<T>) => {
+        p.catch(() => {})
+        return Promise.race([p, goneP])
+      }
       try {
         if (!res.ok || !res.body) {
           // Headers are already sent as SSE; report the upstream error as an event.
           const text = await res.text()
-          await send(`data: ${text || JSON.stringify({ error: { message: res.statusText, code: res.status } })}\n\n`)
+          await orGone(send(`data: ${text || JSON.stringify({ error: { message: res.statusText, code: res.status } })}\n\n`))
           ok = res.status < 500
         } else {
           const reader = res.body.getReader()
           for (;;) {
             const { done, value } = await reader.read()
             if (done) break
-            await writer.ready
-            await writer.write(value)
+            await orGone(writer.ready)
+            await orGone(writer.write(value))
           }
           ok = true
         }
-        await writer.close()
+        await orGone(writer.close())
       } catch (e) {
         ac.abort(e)
         if (!gone.signal.aborted && lease.signal.aborted) {
-          await sendError(errorResponse(503, 'model_interrupted', fmt(t.api.interrupted, { model: modelName })))
+          await orGone(sendError(errorResponse(503, 'model_interrupted', fmt(t.api.interrupted, { model: modelName })))).catch(() => {})
         } else {
           writer.abort(e).catch(() => {})
         }
       } finally {
-        cleanup()
         req.signal.removeEventListener('abort', onClient)
-        lease.release(ok ? 'ok' : undefined)
+        finish()
       }
     })()
 

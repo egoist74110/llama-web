@@ -76,6 +76,12 @@ export interface SchedulerOptions {
   maxLoaded?: number
   drainTimeoutMs: number
   onEvent?: (e: SchedulerEvent) => void
+  /**
+   * Launch errors that are an unmet precondition rather than a failed load (e.g. llama.cpp
+   * is still being downloaded). The waiting requests fail, but the target goes back to
+   * `stopped` instead of `failed`, so a later request tries again.
+   */
+  isPrecondition?: (e: unknown) => boolean
 }
 
 export interface ModelSnapshot {
@@ -171,7 +177,7 @@ export class Scheduler {
   readonly maxLoaded: number
 
   constructor(private opts: SchedulerOptions) {
-    this.maxLoaded = Math.max(1, opts.maxLoaded ?? 1)
+    this.maxLoaded = Number.isInteger(opts.maxLoaded) && opts.maxLoaded! >= 1 ? opts.maxLoaded! : 1
   }
 
   /** Current state of a target (`stopped` when unknown). */
@@ -406,6 +412,11 @@ export class Scheduler {
         this.setState(inst, 'stopped')
         this.instances.delete(key)
         return this.rejectAll(job, this.shuttingDown ? 'shutdown' : 'stopped')
+      }
+      if (!proc && this.opts.isPrecondition?.(e)) {
+        this.setState(inst, 'stopped', e)
+        this.instances.delete(key)
+        return this.failAll(job, e)
       }
       inst.error = e
       inst.proc = null

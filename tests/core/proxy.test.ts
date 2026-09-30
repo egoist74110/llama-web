@@ -344,6 +344,44 @@ describe('client disconnect', () => {
     })
   }
 
+  // Client read one heartbeat, then stopped pulling: the forward loop is parked on a
+  // backpressured write when the disconnect arrives through req.signal only.
+  test('signal-only disconnect while the cold-load stream is backpressured: lease released at once', async () => {
+    const { ups, inflight, proxy } = setup({ chunks: 100, gapMs: 5 })
+    const ac = new AbortController()
+    const req = new Request('http://x/v1/chat/completions', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, signal: ac.signal,
+      body: JSON.stringify({ model: 'Alpha', stream: true }),
+    })
+    const res = await proxy.handleV1(req)
+    const reader = res.body!.getReader()
+    expect(new TextDecoder().decode((await reader.read()).value)).toContain(': loading')
+    await until(() => inflight() === 1)
+    await Bun.sleep(200) // upstream chunks pile up until the writer blocks
+    expect(inflight()).toBe(1)
+    ac.abort()
+    await until(() => inflight() === 0, 500)
+    await until(() => ups[0]!.aborted)
+  })
+
+  test('drain timeout while the cold-load stream is backpressured: lease released, switch proceeds', async () => {
+    const { inflight, proxy, sched } = setup({ chunks: 100, gapMs: 5, drainTimeoutMs: 100 })
+    const req = new Request('http://x/v1/chat/completions', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'Alpha', stream: true }),
+    })
+    const res = await proxy.handleV1(req)
+    const reader = res.body!.getReader()
+    await reader.read()
+    await until(() => inflight() === 1)
+    await Bun.sleep(200)
+    const lease = await sched.acquire({ modelId: 'b', profile: 'main' })
+    expect(sched.stateOf({ modelId: 'a', profile: 'default' })).toBe('stopped')
+    expect(inflight()).toBe(1) // only the new lease on b
+    lease.release()
+    await reader.cancel().catch(() => {})
+  })
+
   test('while waiting for a load (non-stream): no lease left behind', async () => {
     const { post, ups, sched, inflight } = setup({ autoReady: false })
     const ac = new AbortController()

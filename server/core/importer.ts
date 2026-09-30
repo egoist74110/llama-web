@@ -3,7 +3,7 @@
 // `exclude` list, with `global` defaults and per-model overrides. The import reproduces that:
 // scan the root, derive the same aliases, map settings to launch parameters. API keys, domain
 // and tunnel settings are deliberately not imported (plan「旧环境迁移」).
-import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, unlinkSync } from 'node:fs'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path'
 import { DEFAULT_LAUNCH_DEFAULTS, PARAM_DEFS, quoteArg, splitArgs, type LaunchDefaults, type ParamKey, type ParamValue } from './args'
 import type { ModelConfig, ModelsDoc, Settings } from './config'
@@ -16,6 +16,14 @@ export class ImportError extends Error {
   constructor(public code: ImportErrorCode, message: string) {
     super(message)
     this.name = 'ImportError'
+  }
+}
+
+/** Writing the import failed. `rolledBack`: everything this import wrote was undone. */
+export class ImportSaveError extends Error {
+  constructor(public rolledBack: boolean, public override cause: unknown) {
+    super((cause as Error)?.message ?? String(cause))
+    this.name = 'ImportSaveError'
   }
 }
 
@@ -287,9 +295,10 @@ export function planImport(input: PlanInput): PlanResult {
 
 /**
  * Copy a template into `data/templates/`. Returns the file name actually used: the original
- * name when free or identical, otherwise `<stem>-imported<ext>` (numbered if needed).
+ * name when free or identical, otherwise `<stem>-imported<ext>` (numbered if needed), and
+ * whether a new file was written.
  */
-export function copyTemplate(dataDir: string, source: string): string {
+export function copyTemplate(dataDir: string, source: string): { name: string, created: boolean } {
   const dir = join(dataDir, 'templates')
   mkdirSync(dir, { recursive: true })
   const name = basename(source)
@@ -301,9 +310,9 @@ export function copyTemplate(dataDir: string, source: string): string {
     const dest = join(dir, candidate)
     if (!existsSync(dest)) {
       copyFileSync(source, dest)
-      return candidate
+      return { name: candidate, created: true }
     }
-    if (readFileSync(dest).equals(data)) return candidate
+    if (readFileSync(dest).equals(data)) return { name: candidate, created: false }
   }
 }
 
@@ -330,10 +339,23 @@ export interface ImportResult {
   settings: Settings
   models: ModelsDoc
   report: ImportReport
+  /** Template files this import newly wrote into data/templates/ (for rollback). */
+  createdTemplates: string[]
 }
 
-/** Read the old config, scan its model root and build the new settings / models documents. */
-export async function importSwapConfig(opts: ImportOptions): Promise<ImportResult> {
+/** The slow, read-only half of an import: parse the old file and scan its model root. */
+export interface ImportSource {
+  configPath: string
+  config: SwapConfig
+  scan: ScanResult
+}
+
+/** Directory id used while scanning; entries are re-labelled once the real id is known. */
+const SCAN_DIR_ID = '\0import'
+
+const samePath = (a: string, b: string) => relative(resolve(a), resolve(b)) === ''
+
+export async function readImportSource(opts: { configPath: string, settings: Settings, scan?: typeof scanModelDirs }): Promise<ImportSource> {
   let text: string
   try {
     text = readFileSync(opts.configPath, 'utf8')
@@ -341,33 +363,78 @@ export async function importSwapConfig(opts: ImportOptions): Promise<ImportResul
     throw new ImportError('unreadable', (e as Error).message)
   }
   const config = parseSwapConfig(text)
+  const known = opts.settings.modelDirs.find(d => samePath(d.path, config.modelsRoot))
+  // Scan with the directory enabled and deep enough to match the old unlimited recursion.
+  const scanDir: ModelDir = { id: SCAN_DIR_ID, path: config.modelsRoot, enabled: true, maxDepth: Math.max(known?.maxDepth ?? 0, 10) }
+  const scan = await (opts.scan ?? scanModelDirs)([scanDir])
+  return { configPath: opts.configPath, config, scan }
+}
 
+function relabel(scan: ScanResult, dirId: string): ScanResult {
+  const ref = (r: FileRef): FileRef => (r.dirId === SCAN_DIR_ID ? { ...r, dirId } : r)
+  return {
+    entries: scan.entries.map(e => ({
+      ...e,
+      ref: ref(e.ref),
+      candidates: { mmproj: e.candidates.mmproj.map(ref), draft: e.candidates.draft.map(ref) },
+    })),
+    warnings: scan.warnings.map(w => (w.dirId === SCAN_DIR_ID ? { ...w, dirId } : w)),
+  }
+}
+
+/** Delete templates this import created. True when all of them are gone. */
+function removeTemplates(dataDir: string, names: string[]): boolean {
+  let ok = true
+  for (const n of names) {
+    try {
+      unlinkSync(join(dataDir, 'templates', n))
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') ok = false
+    }
+  }
+  return ok
+}
+
+/**
+ * The fast, synchronous half: plan against the given documents and copy templates (unless
+ * dryRun). Being synchronous, it can run against the latest documents right before saving.
+ */
+export function buildImport(src: ImportSource, opts: { dataDir: string, settings: Settings, models: ModelsDoc, dryRun?: boolean }): ImportResult {
+  const { config } = src
   const settings = structuredClone(opts.settings)
-  const same = (a: string, b: string) => relative(resolve(a), resolve(b)) === ''
-  let dir = settings.modelDirs.find(d => same(d.path, config.modelsRoot))
+  let dir = settings.modelDirs.find(d => samePath(d.path, config.modelsRoot))
   const isNewDir = !dir
   if (!dir) {
     let id = 'main'
     for (let n = 2; settings.modelDirs.some(d => d.id === id); n++) id = `main${n}`
     dir = { id, path: config.modelsRoot, enabled: true, maxDepth: 10 }
   }
-  // Scan with the directory enabled and deep enough to match the old unlimited recursion.
   const scanDir: ModelDir = { ...dir, enabled: true, maxDepth: Math.max(dir.maxDepth, 10) }
-  const scan = await (opts.scan ?? scanModelDirs)([scanDir])
+  const scan = relabel(src.scan, dir.id)
   const warnings: ImportWarning[] = scan.warnings.filter(w => w.rel === '').map(() => ({ code: 'models-root-missing' as const, subject: config.modelsRoot }))
 
   const plan = planImport({
-    config, dir: scanDir, scan, settings, existing: opts.models, configDir: dirname(resolve(opts.configPath)),
+    config, dir: scanDir, scan, settings, existing: opts.models, configDir: dirname(resolve(src.configPath)),
   })
   warnings.push(...plan.warnings)
 
   const models = structuredClone(opts.models)
   const copied: string[] = []
-  for (const t of plan.templates) {
-    const m = plan.models[t.modelIndex]!
-    const name = opts.dryRun ? basename(t.source) : copyTemplate(opts.dataDir, t.source)
-    m.profiles['默认']!.chatTemplate = name
-    if (!copied.includes(name)) copied.push(name)
+  const created: string[] = []
+  try {
+    for (const t of plan.templates) {
+      const m = plan.models[t.modelIndex]!
+      let name = basename(t.source)
+      if (!opts.dryRun) {
+        const r = copyTemplate(opts.dataDir, t.source)
+        name = r.name
+        if (r.created) created.push(r.name)
+      }
+      m.profiles['默认']!.chatTemplate = name
+      if (!copied.includes(name)) copied.push(name)
+    }
+  } catch (e) {
+    throw new ImportSaveError(removeTemplates(opts.dataDir, created), e)
   }
   models.models.push(...plan.models)
   if (isNewDir && plan.models.length > 0) settings.modelDirs.push(dir)
@@ -376,6 +443,7 @@ export async function importSwapConfig(opts: ImportOptions): Promise<ImportResul
   return {
     settings,
     models,
+    createdTemplates: created,
     report: {
       dirId: dir.id,
       modelsRoot: config.modelsRoot,
@@ -387,4 +455,49 @@ export async function importSwapConfig(opts: ImportOptions): Promise<ImportResul
       warnings,
     },
   }
+}
+
+/** Read the old config, scan its model root and build the new settings / models documents. */
+export async function importSwapConfig(opts: ImportOptions): Promise<ImportResult> {
+  const src = await readImportSource({ configPath: opts.configPath, settings: opts.settings, scan: opts.scan })
+  return buildImport(src, opts)
+}
+
+/** Where a real import is saved (the app context in production). */
+export interface ImportTarget {
+  dataDir: string
+  getSettings(): Settings
+  getModels(): ModelsDoc
+  updateSettings(fn: () => Settings): unknown
+  updateModels(fn: () => ModelsDoc): unknown
+}
+
+/**
+ * Plan against the *latest* documents and save both, all synchronously, so no other config
+ * change can land between planning and saving (a concurrent import, the llama.cpp download
+ * setting `current`, a reloaded hand edit). If a save fails, whatever this import already
+ * wrote is undone; ImportSaveError.rolledBack says whether that worked.
+ */
+export function commitImport(src: ImportSource, target: ImportTarget): ImportResult {
+  const prevSettings = structuredClone(target.getSettings())
+  const result = buildImport(src, { dataDir: target.dataDir, settings: target.getSettings(), models: target.getModels() })
+  if (result.report.imported.length === 0) return result
+  let settingsSaved = false
+  try {
+    // Settings first: models reference the directory id that may be new.
+    target.updateSettings(() => result.settings)
+    settingsSaved = true
+    target.updateModels(() => result.models)
+  } catch (e) {
+    let rolledBack = removeTemplates(target.dataDir, result.createdTemplates)
+    if (settingsSaved) {
+      try {
+        target.updateSettings(() => prevSettings)
+      } catch {
+        rolledBack = false
+      }
+    }
+    throw new ImportSaveError(rolledBack, e)
+  }
+  return result
 }

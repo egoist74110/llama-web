@@ -110,6 +110,7 @@ export async function allocatePort(range: [number, number], exclude: Iterable<nu
 export type LoadErrorCode =
   | 'no-port' // no free port in the configured range
   | 'spawn-failed' // the executable could not be started
+  | 'register-failed' // started, but pids.json could not be written; the process was killed
   | 'exited' // the process exited before /health reported ready
   | 'timeout' // /health did not report ready within the load timeout
   | 'aborted' // stop() was called while loading
@@ -266,9 +267,6 @@ export class RunningProcess {
     })
     if (this.pid === null) return
 
-    this.runner.registry?.add({
-      pid: this.pid, exe, port: this.port, tag: this.spec.tag, startedAt: this.startedAt.toISOString(),
-    })
     this.pipeLines(child.stdout!, 'stdout')
     this.pipeLines(child.stderr!, 'stderr')
     // 'exit' can arrive before the last output is read; wait for 'close' (pipes drained),
@@ -292,6 +290,18 @@ export class RunningProcess {
       exit ??= { code, signal }
       done()
     })
+
+    // Register only after the exit handlers are in place, so a failed write can still
+    // kill the process and settle `ready` / `exited` normally.
+    try {
+      this.runner.registry?.add({
+        pid: this.pid, exe, port: this.port, tag: this.spec.tag, startedAt: this.startedAt.toISOString(),
+      })
+    } catch (e) {
+      this.failLoad(new LoadError('register-failed', `Cannot record pid: ${(e as Error).message}`))
+      void this.stop()
+      return
+    }
 
     this.loadTimer = setTimeout(() => {
       if (this.settled) return

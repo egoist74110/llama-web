@@ -121,6 +121,27 @@ describe('runner', () => {
     expect(e.code).toBe('aborted')
   }, 30000)
 
+  test('pids.json write failure -> LoadError(register-failed); process killed, port freed, nothing left', async () => {
+    class BrokenRegistry extends PidRegistry {
+      override add(): void { throw new Error('disk full') }
+    }
+    const broken = new Runner({ portRange: RANGE, registry: new BrokenRegistry(join(dir, 'run', 'pids.json')), healthIntervalMs: 50 })
+    const p = await broken.start({
+      exe: process.execPath,
+      args: port => [fixture, '--fake-mode', 'hang', '--host', '127.0.0.1', '--port', String(port)],
+      tag: 'test:broken',
+      loadTimeoutMs: 15000,
+    })
+    const e = await p.ready.catch(e => e)
+    expect(e).toBeInstanceOf(LoadError)
+    expect(e.code).toBe('register-failed')
+    await p.exited
+    expect(await waitDead(p.pid!)).toBe(true)
+    expect(broken.list()).toEqual([])
+    await broken.stopAll() // must not hang
+    expect(await isPortFree(p.port)).toBe(true)
+  }, 30000)
+
   test('missing executable -> LoadError(spawn-failed)', async () => {
     const p = await runner.start({ exe: join(dir, 'nope', 'llama-server.exe'), args: () => [], tag: 't', loadTimeoutMs: 5000 })
     const e = await p.ready.catch(e => e)

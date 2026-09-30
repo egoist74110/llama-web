@@ -60,7 +60,8 @@ export default {
       unreadable: '无法读取该文件：{detail}',
       'invalid-json': '文件不是有效的 JSON：{detail}',
       'no-models-root': '文件里没有 models_root，不像是旧的 swap-config.json。',
-      saveFailed: '保存配置失败：{detail}',
+      saveFailed: '保存配置失败，已恢复到导入前的状态：{detail}',
+      saveFailedPartial: '保存配置失败，而且没能完全恢复导入前的状态。请检查 data/settings.json、data/models.json 和 data/templates/（旧版本在 data/backups/）：{detail}',
     },
     warnings: {
       'models-root-missing': '模型目录不存在或无法读取：{subject}',
@@ -71,6 +72,11 @@ export default {
       'bad-extra-args': '「{subject}」的额外参数无法解析，已忽略：{detail}',
       'draft-outside-root': '「{subject}」的 -md 草稿模型不在模型目录内，保留在额外参数里：{detail}',
     },
+  },
+  // Management API (/api/*) guard.
+  admin: {
+    crossOrigin: '拒绝来自其他网站的管理请求。请直接在 llama-web 页面里操作。',
+    jsonRequired: '管理接口只接受 JSON 请求体（Content-Type: application/json）。',
   },
   // Error messages returned by /v1/* and /upstream/* (OpenAI error format).
   api: {
@@ -93,6 +99,7 @@ export default {
   loadError: {
     'no-port': '端口范围内没有空闲端口',
     'spawn-failed': '无法启动 llama-server 可执行文件',
+    'register-failed': '无法写入进程记录（data/run/pids.json），已结束刚启动的进程',
     'exited': 'llama-server 在就绪前退出了',
     'timeout': '加载超时',
     'aborted': '加载被中止',

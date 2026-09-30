@@ -1,12 +1,14 @@
 import { describe, expect, test } from 'bun:test'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { defaultSettings, normalizeModels, normalizeSettings, type ModelsDoc, type Settings } from '../../server/core/config'
 import { LaunchConfigError, llamaServerExe, planLaunch } from '../../server/core/launch'
 
-const dataDir = join('X:', 'data')
+// Host-absolute placeholder root, so path resolution behaves the same on every platform.
+const root = resolve('/X')
+const dataDir = join(root, 'data')
 const settings = (): Settings => ({
   ...defaultSettings(),
-  modelDirs: [{ id: 'main', path: join('X:', 'models'), enabled: true, maxDepth: 4 }],
+  modelDirs: [{ id: 'main', path: join(root, 'models'), enabled: true, maxDepth: 4 }],
   llamacpp: { ...defaultSettings().llamacpp, current: 'b1234' },
 })
 const models = (): ModelsDoc => ({
@@ -29,7 +31,7 @@ describe('planLaunch', () => {
     const plan = planLaunch({ modelId: 'm', profile: 'default' }, { dataDir, settings: settings(), models: models(), host: '127.0.0.1', exists: all, platform: 'win32' })
     expect(plan.exe).toBe(join(dataDir, 'runtime', 'llama.cpp', 'b1234', 'llama-server.exe'))
     const args = plan.args(7123)
-    expect(args.slice(0, 4)).toEqual(['--model', join('X:', 'models', 'q', 'm.gguf'), '--mmproj', join('X:', 'models', 'q', 'mm.gguf')])
+    expect(args.slice(0, 4)).toEqual(['--model', join(root, 'models', 'q', 'm.gguf'), '--mmproj', join(root, 'models', 'q', 'mm.gguf')])
     expect(args).toContain('--jinja')
     expect(args[args.indexOf('--ctx-size') + 1]).toBe('4096')
     expect(args.slice(-4)).toEqual(['--host', '127.0.0.1', '--port', '7123'])
@@ -74,6 +76,12 @@ describe('config normalisation', () => {
     expect(s.scheduler.portRange).toEqual([7100, 7199])
     expect(s.preprocess.image.maxEdge).toBe(896)
     expect(s.server.port).toBe(5001)
+  })
+
+  test('scheduler.maxLoaded is a placeholder pinned to 1 (decision 9)', () => {
+    for (const v of [2, 'abc', 0, 1.5, 1]) {
+      expect(normalizeSettings({ version: 1, scheduler: { maxLoaded: v } } as any).scheduler.maxLoaded).toBe(1)
+    }
   })
 
   test('rejects wrong shapes', () => {

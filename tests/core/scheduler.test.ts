@@ -204,7 +204,48 @@ describe('switching', () => {
   })
 })
 
+test('invalid maxLoaded falls back to 1', () => {
+  for (const v of [Number.NaN, 0, 1.5, 'x' as any]) expect(new Scheduler({ launch: async () => { throw new Error('unused') }, maxLoaded: v }).maxLoaded).toBe(1)
+})
+
 describe('failures', () => {
+  test('precondition launch errors fail the request but leave the target stopped, not failed', async () => {
+    class NoRuntime extends Error {}
+    let installed = false
+    let calls = 0
+    const sched = new Scheduler({
+      drainTimeoutMs: 1000,
+      isPrecondition: e => e instanceof NoRuntime,
+      launch: async (target) => {
+        calls++
+        if (!installed) throw new NoRuntime('llama.cpp still downloading')
+        const p = new FakeProc(target, 7100)
+        queueMicrotask(() => p.succeed())
+        return p
+      },
+    })
+    const e = await sched.acquire(A).catch(x => x)
+    expect(e).toBeInstanceOf(SchedulerError)
+    expect(e.code).toBe('failed')
+    expect(e.cause).toBeInstanceOf(NoRuntime)
+    expect(sched.stateOf(A)).toBe('stopped')
+    installed = true
+    const lease = await sched.acquire(A)
+    expect(sched.stateOf(A)).toBe('ready')
+    expect(calls).toBe(2)
+    lease.release()
+  })
+
+  test('other launch errors still leave the target failed', async () => {
+    const sched = new Scheduler({
+      drainTimeoutMs: 1000,
+      isPrecondition: () => false,
+      launch: async () => { throw new Error('bad config') },
+    })
+    await sched.acquire(A).catch(() => {})
+    expect(sched.stateOf(A)).toBe('failed')
+  })
+
   test('load failure -> failed; waiters rejected; no auto retry until manual retry', async () => {
     const { sched, procs } = setup()
     const p1 = settled(sched.acquire(A))

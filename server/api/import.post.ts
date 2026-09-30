@@ -1,9 +1,12 @@
 // Import from the old swap-config.json: { path: string, dryRun?: boolean }.
 // The LAN interface has full permissions by design (plan 关键决定 20); the public :8080 entry
-// only ever forwards /v1/*, so this is not reachable from there.
+// only ever forwards /v1/*, so this is not reachable from there. Cross-site writes are refused
+// by middleware/admin-origin.ts.
 import { extname } from 'node:path'
 import { fmt, t } from '../core/i18n'
-import { ImportError, importSwapConfig, type ImportWarning } from '../core/importer'
+import {
+  buildImport, commitImport, ImportError, ImportSaveError, readImportSource, type ImportWarning,
+} from '../core/importer'
 import { getContext } from '../service/context'
 
 export default defineEventHandler(async (event) => {
@@ -16,24 +19,21 @@ export default defineEventHandler(async (event) => {
   const ctx = getContext()
   let result
   try {
-    result = await importSwapConfig({
-      dataDir: ctx.dataDir, configPath: path, settings: ctx.getSettings(), models: ctx.getModels(), dryRun,
-    })
+    // Slow part (read + scan) first; then plan against the latest documents and save in one
+    // synchronous step, so config changes made during the scan are not overwritten.
+    const src = await readImportSource({ configPath: path, settings: ctx.getSettings() })
+    result = dryRun
+      ? buildImport(src, { dataDir: ctx.dataDir, settings: ctx.getSettings(), models: ctx.getModels(), dryRun: true })
+      : commitImport(src, ctx)
   } catch (e) {
     if (e instanceof ImportError) {
       throw createError({ statusCode: 400, message: fmt(t.import.errors[e.code], { detail: e.message }) })
     }
-    throw e
-  }
-
-  if (!dryRun && result.report.imported.length > 0) {
-    try {
-      // Settings first: models reference the directory id that may be new.
-      ctx.updateSettings(() => result.settings)
-      ctx.updateModels(() => result.models)
-    } catch (e) {
-      throw createError({ statusCode: 500, message: fmt(t.import.errors.saveFailed, { detail: (e as Error).message }) })
+    if (e instanceof ImportSaveError) {
+      const msg = e.rolledBack ? t.import.errors.saveFailed : t.import.errors.saveFailedPartial
+      throw createError({ statusCode: 500, message: fmt(msg, { detail: e.message }) })
     }
+    throw e
   }
 
   const warn = (w: ImportWarning) => fmt(t.import.warnings[w.code], { subject: w.subject, detail: w.detail ?? '' })
