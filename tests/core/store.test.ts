@@ -172,3 +172,37 @@ test('refresh / update refuse to overwrite a broken hand edit', () => {
   expect(() => s.update(d => { d.items.push('x') })).toThrow(StoreError)
   expect(readFileSync(s.file, 'utf8')).toBe('{ half-typed')
 })
+
+test('a hand edit picked up by refresh is reported even when the following save fails', async () => {
+  const s = make()
+  s.load()
+  const seen: string[][] = []
+  s.watch(next => seen.push(next.items))
+  try {
+    writeFileSync(join(dir, 'backups'), 'not a directory') // backup (and so the save) fails
+    writeFileSync(s.file, JSON.stringify({ version: 1, items: ['hand'] }))
+    expect(() => s.update(d => { d.items.push('mine') })).toThrow()
+    expect(seen).toEqual([['hand']]) // reported at once, not left to the watcher
+    await sleep(300)
+    expect(seen).toEqual([['hand']]) // and not twice
+    expect(JSON.parse(readFileSync(s.file, 'utf8')).items).toEqual(['hand'])
+  } finally {
+    s.close()
+  }
+})
+
+test('context openStore: after a failed save the getter still shows the valid hand edit', async () => {
+  const { openStore } = await import('../../server/service/context')
+  const store = make()
+  const ref = openStore(store, () => ({ version: 1, items: [] }))
+  try {
+    writeFileSync(join(dir, 'backups'), 'not a directory')
+    writeFileSync(store.file, JSON.stringify({ version: 1, items: ['hand'] }))
+    expect(() => ref.update(d => { d.items.push('mine') })).toThrow()
+    expect(ref.get().items).toEqual(['hand'])
+    await sleep(300)
+    expect(ref.get().items).toEqual(['hand'])
+  } finally {
+    store.close()
+  }
+})

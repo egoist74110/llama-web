@@ -36,8 +36,8 @@ export interface AppContext {
 const log = (...a: unknown[]) => console.info('[llama-web]', ...a)
 const logError = (...a: unknown[]) => console.error('[llama-web]', ...a)
 
-/** A store whose last good value is kept when the file becomes unreadable. */
-function openStore<T extends VersionedDoc>(store: JsonStore<T>, fallback: () => T) {
+/** A store whose last good value is kept when the file becomes unreadable. Exported for tests. */
+export function openStore<T extends VersionedDoc>(store: JsonStore<T>, fallback: () => T) {
   let value: T
   try {
     value = store.load()

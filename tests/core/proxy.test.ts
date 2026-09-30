@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import sharp from 'sharp'
 import { defaultSettings, type ModelsDoc, type Settings } from '../../server/core/config'
 import { LoadError } from '../../server/core/runner'
-import { bounded, createProxy, type ProxyEvent } from '../../server/core/proxy'
+import { activeBoundedWaits, bounded, createProxy, type ProxyEvent } from '../../server/core/proxy'
 import { Scheduler, type ModelProcess, type Target } from '../../server/core/scheduler'
 
 // ---------------------------------------------------------------------------------------
@@ -21,7 +21,7 @@ interface Upstream {
   crash(): void
 }
 
-function makeUpstream(target: Target, opts: { chunks?: number, gapMs?: number }): Upstream {
+function makeUpstream(target: Target, opts: { chunks?: number, gapMs?: number, holdHeaders?: boolean }): Upstream {
   let res!: () => void
   let rej!: (e: unknown) => void
   let exit!: () => void
@@ -46,6 +46,8 @@ function makeUpstream(target: Target, opts: { chunks?: number, gapMs?: number })
         up.requests.push({ path: url.pathname + url.search, headers: req.headers, body })
         if (url.pathname === '/props') return Response.json({ model: target.modelId, profile: target.profile })
         if (url.pathname === '/boom') return Response.json({ error: { message: 'bad', code: 500 } }, { status: 500 })
+        // Accept the request but never send response headers (until the server is stopped).
+        if (body?.stream && opts.holdHeaders) return new Promise<Response>(() => {})
         if (body?.stream) {
           const n = opts.chunks ?? 3
           const gap = opts.gapMs ?? 50
@@ -98,7 +100,7 @@ afterEach(async () => {
   for (const c of cleanups.splice(0)) await c()
 })
 
-function setup(opts: { autoReady?: boolean, chunks?: number, gapMs?: number, heartbeatMs?: number, maxBodyBytes?: number, drainTimeoutMs?: number, finalEventTimeoutMs?: number } = {}) {
+function setup(opts: { autoReady?: boolean, chunks?: number, gapMs?: number, heartbeatMs?: number, maxBodyBytes?: number, drainTimeoutMs?: number, finalEventTimeoutMs?: number, holdHeaders?: boolean } = {}) {
   const ups: Upstream[] = []
   const events: ProxyEvent[] = []
   const settings: Settings = defaultSettings()
@@ -412,31 +414,35 @@ describe('client disconnect', () => {
     await reader.cancel().catch(() => {})
   })
 
-  test('long cold-load stream read normally: abort waiters stay bounded and are all removed', async () => {
-    const proto = AbortSignal.prototype as any
-    const add = proto.addEventListener
-    const remove = proto.removeEventListener
-    let active = 0
+  test('model crash before the response headers, client stalled: the error event is bounded and the task ends', async () => {
+    const { inflight, proxy, sched, ups } = setup({ holdHeaders: true, finalEventTimeoutMs: 100 })
+    const { reader, exited } = await stalledColdStream(proxy, inflight)
+    expect(ups[0]!.requests.length).toBe(1) // request sent, headers pending
+    ups[0]!.crash()
+    await until(() => inflight() === 0, 1000)
+    expect(sched.stateOf({ modelId: 'a', profile: 'default' })).toBe('crashed')
+    await until(() => exited() === 1, 1000)
+    // The undeliverable error event did not stay queued: the response was aborted.
+    expect(await reader.read().then(() => 'data', () => 'aborted')).toBe('aborted')
+  })
+
+  test('long cold-load stream read normally: bounded() waiters stay bounded and are all removed', async () => {
+    const before = activeBoundedWaits()
+    const { post } = setup({ chunks: 200, gapMs: 1 })
+    const res = await post('/v1/chat/completions', { model: 'Alpha', stream: true })
+    const reader = res.body!.getReader()
+    const dec = new TextDecoder()
+    let text = ''
     let peak = 0
-    proto.addEventListener = function (this: AbortSignal, type: string, ...rest: any[]) {
-      if (type === 'abort') peak = Math.max(peak, ++active)
-      return add.call(this, type, ...rest)
+    for (;;) {
+      const { done, value } = await reader.read()
+      peak = Math.max(peak, activeBoundedWaits() - before)
+      if (done) break
+      text += dec.decode(value)
     }
-    proto.removeEventListener = function (this: AbortSignal, type: string, ...rest: any[]) {
-      if (type === 'abort') active--
-      return remove.call(this, type, ...rest)
-    }
-    try {
-      const { post } = setup({ chunks: 200, gapMs: 1 })
-      const res = await post('/v1/chat/completions', { model: 'Alpha', stream: true })
-      const text = await res.text()
-      expect(text).toContain('data: {"i":199}')
-      // Waiters are per chunk wait and removed right after; 400 waits must not pile up.
-      expect(peak).toBeLessThan(40)
-    } finally {
-      proto.addEventListener = add
-      proto.removeEventListener = remove
-    }
+    expect(text).toContain('data: {"i":199}')
+    expect(peak).toBeLessThanOrEqual(1) // one wait at a time, not one per chunk
+    await until(() => activeBoundedWaits() === before, 1000)
   }, 20000)
 
   test('while waiting for a load (non-stream): no lease left behind', async () => {
@@ -543,6 +549,7 @@ describe('bounded()', () => {
     expect(await bounded(Promise.reject(new Error('x')), ac.signal).catch(e => e.message)).toBe('x')
     expect(added).toBe(1001)
     expect(removed).toBe(1001)
+    expect(activeBoundedWaits()).toBe(0)
   })
 
   test('rejects early on abort or timeout', async () => {

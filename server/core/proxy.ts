@@ -30,16 +30,30 @@ export type ProxyEvent =
 export function bounded<T>(p: Promise<T>, signal: AbortSignal, ms?: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     let timer: ReturnType<typeof setTimeout> | undefined
+    let listening = false
     const onAbort = () => { done(); reject(signal.reason) }
     const done = () => {
-      signal.removeEventListener('abort', onAbort)
+      if (listening) {
+        listening = false
+        activeWaits--
+        signal.removeEventListener('abort', onAbort)
+      }
       if (timer) clearTimeout(timer)
     }
     p.then((v) => { done(); resolve(v) }, (e) => { done(); reject(e) })
     if (signal.aborted) return onAbort()
     signal.addEventListener('abort', onAbort, { once: true })
+    listening = true
+    activeWaits++
     if (ms !== undefined) timer = setTimeout(() => { done(); reject(new Error(`timed out after ${ms} ms`)) }, ms)
   })
+}
+
+let activeWaits = 0
+
+/** Number of bounded() waits currently holding an abort listener (tests). */
+export function activeBoundedWaits(): number {
+  return activeWaits
 }
 
 export interface ProxyDeps {
@@ -264,14 +278,20 @@ export function createProxy(deps: ProxyDeps) {
     req.signal.addEventListener('abort', onClient, { once: true })
     writer.closed.catch(() => gone.abort(new Error('client disconnected')))
     const send = (text: string) => writer.write(enc.encode(text))
-    const sendError = async (r: Response) => {
-      try {
-        await send(`data: ${await r.text()}\n\n`)
-        await writer.close()
-      } catch { /* client gone */ }
-    }
     const heartbeatMs = deps.heartbeatMs ?? deps.getSettings().scheduler.heartbeatSec * 1000
     const finalEventMs = deps.finalEventTimeoutMs ?? 5000
+    /**
+     * Last event of the stream (an error), then close. Every ending path uses this: it never
+     * waits forever for a client that stopped reading; on disconnect or timeout the response
+     * is aborted instead.
+     */
+    const sendFinal = async (r: Response) => {
+      const told = await bounded((async () => {
+        await send(`data: ${await r.text()}\n\n`)
+        await writer.close()
+      })(), gone.signal, finalEventMs).then(() => true, () => false)
+      if (!told) writer.abort().catch(() => {})
+    }
     const beat = () => {
       const p = deps.progressOf?.(target)
       send(p == null ? ': loading\n\n' : `: loading ${Math.round(p)}%\n\n`).catch(() => {})
@@ -285,9 +305,9 @@ export function createProxy(deps: ProxyDeps) {
         lease = await deps.scheduler.acquire(target, { signal: gone.signal })
       } catch (e) {
         clearInterval(timer)
-        req.signal.removeEventListener('abort', onClient)
         if (gone.signal.aborted) writer.abort().catch(() => {})
-        else await sendError(schedulerErrorResponse(e, modelName))
+        else await sendFinal(schedulerErrorResponse(e, modelName))
+        req.signal.removeEventListener('abort', onClient)
         return
       }
       clearInterval(timer)
@@ -299,9 +319,10 @@ export function createProxy(deps: ProxyDeps) {
       try {
         up = await callUpstream({ lease, req: fakeReq, path, body, headers: forwardRequestHeaders(req.headers) })
       } catch (e) {
-        req.signal.removeEventListener('abort', onClient)
         lease.release()
-        if (!gone.signal.aborted) await sendError(upstreamFailure(e, lease, modelName))
+        if (gone.signal.aborted) writer.abort().catch(() => {})
+        else await sendFinal(upstreamFailure(e, lease, modelName))
+        req.signal.removeEventListener('abort', onClient)
         return
       }
       const { res, ac, cleanup } = up
@@ -338,13 +359,8 @@ export function createProxy(deps: ProxyDeps) {
       } catch (e) {
         ac.abort(e)
         if (!gone.signal.aborted && lease.signal.aborted) {
-          // Model gone, client still connected: try to tell it, but never wait forever for a
-          // client that does not read; give up after a while and end the response.
-          const told = await bounded(
-            sendError(errorResponse(503, 'model_interrupted', fmt(t.api.interrupted, { model: modelName }))),
-            gone.signal, finalEventMs,
-          ).then(() => true, () => false)
-          if (!told) writer.abort(e).catch(() => {})
+          // Model gone, client still connected: try to tell it (bounded, see sendFinal).
+          await sendFinal(errorResponse(503, 'model_interrupted', fmt(t.api.interrupted, { model: modelName })))
         } else {
           writer.abort(e).catch(() => {})
         }

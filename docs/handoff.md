@@ -16,6 +16,15 @@
 
 ---
 
+## 2026-09-30 · 阶段 1 第三轮复审处理 · Opus 5.5
+- 完成：`docs/reviews/stage-1-codex-r3.md` 的 CR-001 剩余、CR-013 已修复，各条后写了「处理」。proxy 冷加载流所有结束路径改用有界的 `sendFinal()`（删 `sendError`）；`bounded()` 增加 `activeBoundedWaits()` 计数。store 的 `refresh()` 读到新内容时立即调用 watch 回调；context 的 `openStore` 导出供测试。
+- 验证：`bun test` 189 通过（全量 2 次）；`bun run typecheck` 通过；三条新测试在上一版代码上确认失败。Codex 首跑时 scheduler「crash -> crashed」的一次失败在 Windows 上连跑 30 次未复现；已去掉会替换全局 `AbortSignal.prototype` 的测试写法，原因仍未确认。没有 build（用户 start.bat 在运行）。
+- 剩余：无（CR-003 余项按用户决定在阶段 2）。
+- 决定 / 坑：测试里不要替换全局原型（AbortSignal 等），bun test 同一进程跑所有文件。
+- 下一步：Codex 第四轮复审；通过且用户试用确认后开始 2-1。
+
+---
+
 ## 2026-09-30 · 阶段 1 第二轮复审处理 · Opus 5.5
 - 完成：`docs/reviews/stage-1-codex-r2.md` 的 CR-001 剩余、CR-004 剩余、CR-012 全部修复，各条后写了「处理」。
   - proxy：新增导出 `bounded(p, signal, ms?)`（每次等待一个 abort 监听，结束即移除）；冷加载转发循环所有等待以 `ac.signal` 为界（客户端断开 + 租约 abort）；模型中止后的最后错误事件最多等 `finalEventTimeoutMs`（默认 5 秒）。

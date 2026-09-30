@@ -96,6 +96,7 @@ export class JsonStore<T extends VersionedDoc> {
   private current: T | null = null
   private lastWritten: string | null = null
   private watcher: FSWatcher | null = null
+  private onChange: ((next: T, prev: T | null) => void) | null = null
   private timer: ReturnType<typeof setTimeout> | null = null
 
   constructor(private opts: StoreOptions<T>) {
@@ -134,10 +135,19 @@ export class JsonStore<T extends VersionedDoc> {
     const text = readFileSync(this.file, 'utf8')
     if (text === this.lastWritten) return this.current
     const { doc, migrated } = this.parse(text)
+    const prev = this.current
     this.current = doc
+    this.lastWritten = text
+    // This read replaces the watcher's own reload of the same text (it now sees it as known),
+    // so report it the same way, before anything else (a migration save, the caller's save)
+    // can fail.
+    this.notify(doc, prev)
     if (migrated) this.save(doc)
-    else this.lastWritten = text
     return doc
+  }
+
+  private notify(next: T, prev: T | null) {
+    try { this.onChange?.(next, prev) } catch { /* listener errors must not break the store */ }
   }
 
   /** Replace the document. The previous file is backed up first. */
@@ -158,6 +168,7 @@ export class JsonStore<T extends VersionedDoc> {
   /** Watch the file for external edits. Own writes are ignored. Failed reloads keep the old value. */
   watch(onChange: (next: T, prev: T | null) => void, onError?: (e: unknown) => void): void {
     this.close()
+    this.onChange = onChange
     mkdirSync(this.opts.dataDir, { recursive: true })
     this.watcher = watch(this.opts.dataDir, { persistent: false }, (_event, filename) => {
       if (filename !== this.opts.name) return
@@ -186,6 +197,7 @@ export class JsonStore<T extends VersionedDoc> {
     this.timer = null
     this.watcher?.close()
     this.watcher = null
+    this.onChange = null
   }
 
   private serialize(doc: T) {
