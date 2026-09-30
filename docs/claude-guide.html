@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>llama-web 开发指南</title>
+<!--
+  维护说明：
+  - 这是「怎么开会话、用什么模型、发什么提示词」的指南；做什么、做到哪里看 docs/plan.html。
+  - 工作包范围调整时，同步修改这里的卡片和 plan.html 的任务列表。
+  - 公开仓库：不要写入个人路径、域名、key。
+-->
+<style>
+:root{
+  --bg:#f6f7f9;--panel:#ffffff;--text:#1f2328;--muted:#5b6470;--line:#e3e6ea;
+  --accent:#3b6fd8;--accent-soft:#e8effc;--ok:#2f8a57;--ok-soft:#e5f4ec;
+  --warn:#b7791f;--warn-soft:#fbf1df;--code:#f0f2f5;--radius:10px;
+  --opus:#7a4fd1;--opus-soft:#efe9fb;--sonnet:#2f7f8a;--sonnet-soft:#e3f2f3;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#1b1d21;--panel:#23262b;--text:#d7dbe0;--muted:#8e96a1;--line:#33373e;
+    --accent:#7aa2f0;--accent-soft:#2a3345;--ok:#5fbf8a;--ok-soft:#243329;
+    --warn:#d9a74a;--warn-soft:#3a3122;--code:#2b2f35;
+    --opus:#b39af0;--opus-soft:#342c47;--sonnet:#6cc3cc;--sonnet-soft:#223638;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#1b1d21;--panel:#23262b;--text:#d7dbe0;--muted:#8e96a1;--line:#33373e;
+  --accent:#7aa2f0;--accent-soft:#2a3345;--ok:#5fbf8a;--ok-soft:#243329;
+  --warn:#d9a74a;--warn-soft:#3a3122;--code:#2b2f35;
+  --opus:#b39af0;--opus-soft:#342c47;--sonnet:#6cc3cc;--sonnet-soft:#223638;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.7 system-ui,-apple-system,"Segoe UI","Microsoft YaHei UI","PingFang SC",sans-serif}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code,pre{font-family:ui-monospace,"Cascadia Code",Consolas,monospace;font-size:13px}
+code{background:var(--code);padding:1px 5px;border-radius:4px}
+pre{background:var(--code);padding:12px 14px;border-radius:8px;overflow-x:auto;line-height:1.6;margin:0;white-space:pre-wrap;word-break:break-word}
+.layout{display:grid;grid-template-columns:220px minmax(0,1fr);gap:28px;max-width:1180px;margin:0 auto;padding:28px 16px 80px}
+nav{position:sticky;top:20px;align-self:start}
+nav .brand{font-weight:650;font-size:17px;margin-bottom:4px}
+nav .sub{color:var(--muted);font-size:13px;margin-bottom:16px}
+nav a{display:block;padding:5px 10px;border-radius:6px;color:var(--muted);font-size:14px}
+nav a:hover{background:var(--accent-soft);color:var(--text);text-decoration:none}
+nav .grp{margin:12px 10px 2px;font-size:12px;color:var(--muted);opacity:.8}
+main section{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:22px 26px;margin-bottom:20px}
+h1{font-size:24px;margin:0 0 6px}
+h2{font-size:19px;margin:0 0 14px;padding-bottom:10px;border-bottom:1px solid var(--line)}
+h3{font-size:16px;margin:20px 0 8px}
+p{margin:8px 0}
+.lead{color:var(--muted);margin:0}
+table{width:100%;border-collapse:collapse;font-size:14px;margin:10px 0}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-weight:600;background:var(--bg)}
+.note{border-left:3px solid var(--warn);background:var(--warn-soft);padding:10px 14px;border-radius:0 8px 8px 0;margin:12px 0;font-size:14px}
+.m{display:inline-block;font-size:12px;font-weight:600;padding:1px 9px;border-radius:999px;white-space:nowrap}
+.m.opus{background:var(--opus-soft);color:var(--opus)}
+.m.sonnet{background:var(--sonnet-soft);color:var(--sonnet)}
+.m.other{background:var(--accent-soft);color:var(--accent)}
+.m.gate{background:var(--warn-soft);color:var(--warn)}
+.pkg{border:1px solid var(--line);border-radius:8px;padding:14px 16px;margin:12px 0}
+.pkg-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+.pkg-head b{font-size:15px}
+.pkg .scope{font-size:14px;color:var(--muted);margin:4px 0 10px}
+.pkg .scope li{margin:2px 0}
+.prompt{position:relative}
+.prompt button{position:absolute;top:8px;right:8px;font:12px system-ui,sans-serif;padding:3px 10px;border-radius:6px;
+  border:1px solid var(--line);background:var(--panel);color:var(--muted);cursor:pointer}
+.prompt button:hover{color:var(--text)}
+.prompt pre{padding-right:64px}
+.gatebox{border:1px dashed var(--warn);border-radius:8px;padding:12px 16px;margin:14px 0;background:var(--warn-soft);font-size:14px}
+ol.steps li{margin:4px 0}
+@media (max-width:860px){
+  .layout{grid-template-columns:1fr;padding:16px}
+  nav{position:static}
+  main section{padding:18px 16px}
+}
+</style>
+</head>
+<body>
+<div class="layout">
+<nav>
+  <div class="brand">llama-web</div>
+  <div class="sub">Claude 开发指南</div>
+  <a href="#how">怎么用这份指南</a>
+  <a href="#session">会话规则</a>
+  <a href="#models">模型怎么选</a>
+  <a href="#wrap">会话收尾流程</a>
+  <div class="grp">工作包</div>
+  <a href="#st1">阶段 1 · 核心</a>
+  <a href="#st2">阶段 2 · 界面</a>
+  <a href="#st3">阶段 3 · 可观测性</a>
+  <a href="#st4">阶段 4 · 公网与更新</a>
+  <div class="grp">其他提示词</div>
+  <a href="#cont">接续未完成的工作包</a>
+  <a href="#review">阶段审查（Codex）</a>
+  <a href="#fix">处理审查意见</a>
+  <a href="#bug">试用时发现问题</a>
+  <a href="#fallback">Claude 用量用完</a>
+  <a href="#save">省 token 的习惯</a>
+</nav>
+
+<main>
+<section id="how">
+  <h1>Claude 开发指南</h1>
+  <p class="lead">做什么、做到哪里看 <a href="plan.html">plan.html</a>；这份指南只管：开几个会话、每个会话用什么模型、发什么提示词。</p>
+  <h3>一个工作包 = 一个新会话</h3>
+  <ol class="steps">
+    <li>在 Claude 应用里<b>新建会话</b>，工作目录选 <code>llama-web</code> 项目根目录（这样才会自动加载 <code>CLAUDE.md</code> → <code>AGENTS.md</code>）。</li>
+    <li>在模型选择器里选好下面卡片标注的模型。</li>
+    <li>复制卡片里的提示词发出去。</li>
+    <li>会话结束时，Claude 会告诉你下一个工作包的编号、模型和提示词。照着开下一个会话即可。</li>
+    <li>遇到 <span class="m gate">阶段关口</span> 时先停下来，自己试用，然后按关口里的步骤做审查。</li>
+  </ol>
+  <div class="note">为什么不全程一个对话：每一轮都会带上之前的全部上下文，对话越长每一轮越贵，而且会被自动压缩，早期细节会丢失。为什么不是每个勾一个会话：每个新会话都有两三万 token 的"读文档热身"成本，紧密相关的任务拆开写也容易接不上。</div>
+</section>
+
+<section id="session">
+  <h2>会话规则</h2>
+  <p class="lead">这些规则写给 Claude；你不用记，提示词会让它自己读。</p>
+  <ul>
+    <li><b>开始时</b>：读 <code>AGENTS.md</code>、本指南中当前工作包的卡片、<code>docs/handoff.md</code> 最新一条交接、<code>docs/plan.html</code> 中相关任务与行为规则。用 <code>git log --oneline -10</code> 和 <code>git status</code> 确认起点干净。</li>
+    <li><b>范围</b>：只做当前工作包列出的任务。发现需要额外的工作，写进交接记录并告诉用户，不要顺手做。</li>
+    <li><b>需要问用户时</b>：遇到计划里没定、会影响行为的问题（改规则、改配置结构、加依赖），先问再做。实现细节自己决定。</li>
+    <li><b>测试</b>：纯逻辑模块边写边补 <code>bun test</code>。需要占用 GPU 的真机测试，先告诉用户再运行。</li>
+    <li><b>上下文快用完 / 做不完</b>：停在一个能通过测试的干净点，按收尾流程写交接，交接里写清剩下什么，然后让用户用「接续」提示词开新会话。不要硬撑到被自动压缩。</li>
+    <li><b>如实</b>：没跑的验证就说没跑，失败就给出输出。</li>
+  </ul>
+</section>
+
+<section id="models">
+  <h2>模型怎么选</h2>
+  <table>
+    <tr><th>模型</th><th>用在</th><th>原因</th></tr>
+    <tr><td><span class="m opus">Opus 5.5</span></td><td>并发、进程、状态机、流式转发、鉴权、下载更新；阶段 1 真机验收</td><td>时序类、安全类 bug 隐蔽，做错了后面都要返工，值得用更强的模型</td></tr>
+    <tr><td><span class="m sonnet">Sonnet 5.5</span></td><td>纯函数模块、界面、日志、文案、修审查意见、小修小补</td><td>照着计划写、有测试兜底的活，Sonnet 足够，而且省用量</td></tr>
+    <tr><td><span class="m other">Codex（GPT）</span></td><td>每个阶段关口的代码审查</td><td>换一个模型来看，容易发现同一模型自己看不出来的问题；它会读取 <code>AGENTS.md</code></td></tr>
+    <tr><td><span class="m other">Gemini CLI</span></td><td>Claude 用量用完时接手</td><td>读了 <code>AGENTS.md</code> 和交接记录就能接上</td></tr>
+    <tr><td><span class="m other">本地 Qwen</span></td><td>不在开发流程里</td><td>和项目抢同一张显卡，真机测试时会被卸载</td></tr>
+  </table>
+</section>
+
+<section id="wrap">
+  <h2>会话收尾流程</h2>
+  <p class="lead">每个工作包结束时 Claude 必须按顺序做完这些。</p>
+  <ol class="steps">
+    <li>运行 <code>bun test</code>（以及类型检查），全部通过。不通过就修，修不好就如实说明并停下。</li>
+    <li>在 <code>docs/plan.html</code> 里只给<b>已完成并验证</b>的任务打勾，填日期。</li>
+    <li>在 <code>docs/handoff.md</code> <b>顶部</b>追加一条交接（格式见该文件），控制在 30 行以内。</li>
+    <li>提交并推送（提交信息里写工作包编号，例如 <code>1-2: store, gguf, scanner, args</code>）。</li>
+    <li>给用户的最后一条回复包含：做了什么、验证结果（实际运行的命令和结论）、没做完的部分、<b>下一个工作包的编号 + 模型 + 提示词</b>（从本指南里原样复制）。如果下一个是阶段关口，改为告诉用户该怎么试用。</li>
+  </ol>
+</section>
+
+<!-- ============================ 阶段 1 ============================ -->
+<section id="st1">
+  <h2>阶段 1 · 核心</h2>
+  <p class="lead">目标：完全替代 llama-swap + 图片代理。</p>
+
+  <div class="pkg" id="p1-1">
+    <div class="pkg-head"><b>1-1 脚手架 + 技术验证</b><span class="m opus">Opus 5.5</span></div>
+    <ul class="scope">
+      <li>plan 阶段 1 第 1–2 项：初始化 Nuxt 4 + Bun + TS 项目；验证 sharp、SSE 流式不缓冲、spawn + 杀进程树。</li>
+      <li>验证结论会决定后面的实现方式；有任何一项不可行，停下来和用户讨论替代方案，把结论写进 plan「风险与待验证」。</li>
+      <li>补全 <code>AGENTS.md</code> 里的常用命令。</li>
+    </ul>
+    <div class="prompt"><button type="button">复制</button><pre>执行工作包 1-1。
+按 AGENTS.md 的规则开始：先读 docs/claude-guide.html 里「工作包 1-1」的卡片和「会话规则」，再读 docs/handoff.md 最新交接和 docs/plan.html 相关部分。
+只做这个工作包，做完按指南的「会话收尾流程」结束。</pre></div>
+  </div>
+
+  <div class="pkg" id="p1-2">
+    <div class="pkg-head"><b>1-2 纯逻辑模块：store / gguf / scanner / args</b><span class="m sonnet">Sonnet 5.5</span></div>
+    <ul class="scope">
+      <li>plan 阶段 1 第 3–6 项。全部写成不依赖 Nitro 的纯模块，每个都要有单元测试。</li>
+      <li>测试用自己构造的假 GGUF 文件和假目录，不能用用户真实的模型或配置。</li>
+      <li>args 的合并顺序与重复参数规则以 plan「核心行为规则 · 参数合并」为准。</li>
+    </ul>
+    <div class="prompt"><button type="button">复制</button><pre>执行工作包 1-2。
+按 AGENTS.md 的规则开始：先读 docs/claude-guide.html 里「工作包 1-2」的卡片和「会话规则」，再读 docs/handoff.md 最新交接和 docs/plan.html 相关部分。
+只做这个工作包，做完按指南的「会话收尾流程」结束。</pre></div>
+  </div>
+
+  <div class="pkg" id="p1-3">
+    <div class="pkg-head"><b>1-3 进程管理与调度：runner / 残留清理 / scheduler</b><span class="m opus">Opus 5.5</span></div>
+    <ul class="scope">
+      <li>plan 阶段 1 第 7–9 项。这是整个项目最容易出隐蔽 bug 的部分。</li>
+      <li>scheduler 状态机要有覆盖以下情况的测试（用假的 runner）：排队切换、draining 超时、多个请求共享一次加载、加载失败、崩溃后只自动重载一次。</li>
+      <li>最后用一个真实的小模型实测一次启动 / 停止 / 杀进程树（先告诉用户）。</li>
+    </ul>
+    <div class="prompt"><button type="button">复制</button><pre>执行工作包 1-3。
+按 AGENTS.md 的规则开始：先读 docs/claude-guide.html 里「工作包 1-3」的卡片和「会话规则」，再读 docs/handoff.md 最新交接和 docs/plan.html 相关部分（特别是「核心行为规则」）。
+只做这个工作包，做完按指南的「会话收尾流程」结束。</pre></div>
+  </div>
+
+  <div class="pkg" id="p1-4">
+    <div class="pkg-head"><b>1-4 API 转发：/v1 / 预处理与图片 / upstream</b><span class="m opus">Opus 5.5</span></div>
+    <ul class="scope">
+      <li>plan 阶段 1 第 10–12 项。路由规则以 plan「核心行为规则 · 请求路由」为准。</li>
+      <li>重点：流式直通不缓冲；等待加载时的 SSE 心跳；客户端中途断开时要正确计数在途请求（否则 draining 永远等不完）。</li>
+    </ul>
+    <div class="prompt"><button type="button">复制</button><pre>执行工作包 1-4。
+按 AGENTS.md 的规则开始：先读 docs/claude-guide.html 里「工作包 1-4」的卡片和「会话规则」，再读 docs/handoff.md 最新交接和 docs/plan.html 相关部分（特别是「核心行为规则」）。
+只做这个工作包，做完按指南的「会话收尾流程」结束。</pre></div>
+  </div>
+
+  <div class="pkg" id="p1-5">
+    <div class="pkg-head"><b>1-5 导入 / llama.cpp 初始获取 / 状态页 / start.bat</b><span class="m sonnet">Sonnet 5.5</span></div>
+    <ul class="scope">
+      <li>plan 阶段 1 第 13–16 项。</li>
+      <li>导入逻辑用假的旧配置做测试；旧 API key 不导入。</li>
+      <li>状态页只要最简单能看，界面在阶段 2 才正式做。</li>
+    </ul>
+    <div class="prompt"><button type="button">复制</button><pre>执行工作包 1-5。
+按 AGENTS.md 的规则开始：先读 docs/claude-guide.html 里「工作包 1-5」的卡片和「会话规则」，再读 docs/handoff.md 最新交接和 docs/plan.html 相关部分。
+只做这个工作包，做完按指南的「会话收尾流程」结束。</pre></div>
+  </div>
+
+  <div class="pkg" id="p1-6">
+    <div class="pkg-head"><b>1-6 补测试 + 阶段 1 真机验收</b><span class="m opus">Opus 5.5</span></div>
+    <ul class="scope">
+      <li>plan 阶段 1 第 17–18 项：补齐遗漏的单元测试，然后按阶段 1 的「验收标准」逐条真机验证。</li>
+      <li>真机验证前告诉用户：会占用 GPU，并且需要先关掉旧的 llama-swap。</li>
+      <li>给出一份逐条验收结果表（通过 / 失败 / 未验证 + 证据）。</li>
+    </ul>
+    <div class="prompt"><button type="button">复制</button><pre>执行工作包 1-6（阶段 1 验收）。
+按 AGENTS.md 的规则开始：先读 docs/claude-guide.html 里「工作包 1-6」的卡片和「会话规则」，再读 docs/handoff.md 最新交接和 docs/plan.html 阶段 1 的验收标准。
+真机测试前先告诉我。做完按指南的「会话收尾流程」结束。</pre></div>
+  </div>
+
+  <div class="gatebox"><span class="m gate">阶段关口 1</span>
+    <ol class="steps">
+      <li>你自己试用：关掉旧 llama-swap，用 <code>start.bat</code> 启动，酒馆照常聊天、换模型、发图片。</li>
+      <li>用 Codex 审查（提示词见 <a href="#review">阶段审查</a>，阶段号填 1）。</li>
+      <li>把审查意见交给 Claude 处理（见 <a href="#fix">处理审查意见</a>）。</li>
+      <li>你确认没问题后，开始 2-1。</li>
+    </ol>
+  </div>
+</section>
+
+<!-- ============================ 阶段 2 ============================ -->
+<section id="st2">
+  <h2>阶段 2 · 界面</h2>
+  <p class="lead">目标：不再需要手动改 JSON。界面风格要求见 plan「界面」和 AGENTS.md。</p>
+
+  <div class="pkg" id="p2-1">
+    <div class="pkg-head"><b>2-1 界面基础 + 实时推送 + 总览页</b><span class="m sonnet">Sonnet 5.5</span></div>
+    <ul class="scope">
+      <li>plan 阶段 2 第 1–3 项：Nuxt UI、布局、深浅色、i18n 文件、<code>/api/stream</code>、总览页。</li>
+      <li>先把配色、间距、卡片样式定成统一的基础组件，后面的页面都复用。</li>
+    </ul>
+    <div class="prompt"><button type="button">复制</button><pre>执行工作包 2-1。
+按 AGENTS.md 的规则开始：先读 docs/claude-guide.html 里「工作包 2-1」的卡片和「会话规则」，再读 docs/handoff.md 最新交接和 docs/plan.html 相关部分（特别是「界面」）。
+只做这个工作包，做完按指南的「会话收尾流程」结束。</pre></div>
+  </div>
+
+  <div class="pkg" id="p2-2">
+    <div class="pkg-head"><b>2-2 模型页：已启用列表 + 扫描发现</b><span class="m sonnet">Sonnet 5.5</span></div>
+    <ul class="scope"><li>plan 阶段 2 第 4–5 项。</li></ul>
+    <div class="prompt"><button type="button">复制</button><pre>执行工作包 2-2。
+按 AGENTS.md 的规则开始：先读 docs/claude-guide.html 里「工作包 2-2」的卡片和「会话规则」，再读 docs/handoff.md 最新交接和 docs/plan.html 相关部分。
+只做这个工作包，做完按指南的「会话收尾流程」结束。</pre></div>
+  </div>
+
+  <div class="pkg" id="p2-3">
+    <div class="pkg-head"><b>2-3 模型编辑：文件区 / 参数表单 / 命令预览 / 配置方案</b><span class="m sonnet">Sonnet 5.5</span></div>
+    <ul class="scope">
+      <li>plan 阶段 2 第 6–8 项。</li>
+      <li>命令预览必须调用后端 args 模块生成，不能在前端另写一套拼接逻辑。</li>
+    </ul>
+    <div class="prompt"><button type="button">复制</button><pre>执行工作包 2-3。
+按 AGENTS.md 的规则开始：先读 docs/claude-guide.html 里「工作包 2-3」的卡片和「会话规则」，再读 docs/handoff.md 最新交接和 docs/plan.html 相关部分。
+只做这个工作包，做完按指南的「会话收尾流程」结束。</pre></div>
+  </div>
+
+  <div class="pkg" id="p2-4">
+    <div class="pkg-head"><b>2-4 设置页 + 首次启动向导 + 阶段 2 试用</b><span class="m sonnet">Sonnet 5.5</span></div>
+    <ul class="scope"><li>plan 阶段 2 第 9–11 项；最后按阶段 2 验收标准逐条验证并给出结果表。</li></ul>
+    <div class="prompt"><button type="button">复制</button><pre>执行工作包 2-4（含阶段 2 验收）。
+按 AGENTS.md 的规则开始：先读 docs/claude-guide.html 里「工作包 2-4」的卡片和「会话规则」，再读 docs/handoff.md 最新交接和 docs/plan.html 阶段 2 的任务与验收标准。
+需要真机测试前先告诉我。做完按指南的「会话收尾流程」结束。</pre></div>
+  </div>
+
+  <div class="gatebox"><span class="m gate">阶段关口 2</span> 你试用界面（重点看好不好用、刺不刺眼）→ Codex 审查（阶段号 2）→ Claude 处理意见 → 你确认后开始 3-1。</div>
+</section>
+
+<!-- ============================ 阶段 3 ============================ -->
+<section id="st3">
+  <h2>阶段 3 · 可观测性</h2>
+
+  <div class="pkg" id="p3-1">
+    <div class="pkg-head"><b>3-1 日志落盘 + 请求记录 + 日志页</b><span class="m sonnet">Sonnet 5.5</span></div>
+    <ul class="scope"><li>plan 阶段 3 第 1–3 项。请求记录绝不能包含对话内容和 Authorization。</li></ul>
+    <div class="prompt"><button type="button">复制</button><pre>执行工作包 3-1。
+按 AGENTS.md 的规则开始：先读 docs/claude-guide.html 里「工作包 3-1」的卡片和「会话规则」，再读 docs/handoff.md 最新交接和 docs/plan.html 相关部分。
+只做这个工作包，做完按指南的「会话收尾流程」结束。</pre></div>
+  </div>
+
+  <div class="pkg" id="p3-2">
+    <div class="pkg-head"><b>3-2 实时速度 + 加载进度 + 显存</b><span class="m sonnet">Sonnet 5.5</span></div>
+    <ul class="scope"><li>plan 阶段 3 第 4–6 项。速度统计不能拖慢流式转发。</li></ul>
+    <div class="prompt"><button type="button">复制</button><pre>执行工作包 3-2。
+按 AGENTS.md 的规则开始：先读 docs/claude-guide.html 里「工作包 3-2」的卡片和「会话规则」，再读 docs/handoff.md 最新交接和 docs/plan.html 相关部分。
+只做这个工作包，做完按指南的「会话收尾流程」结束。</pre></div>
+  </div>
+
+  <div class="pkg" id="p3-3">
+    <div class="pkg-head"><b>3-3 报错识别 + 失败卡片 + 阶段 3 试用</b><span class="m sonnet">Sonnet 5.5</span></div>
+    <ul class="scope"><li>plan 阶段 3 第 7–9 项；最后按阶段 3 验收标准逐条验证（包括故意制造显存不足），给出结果表。</li></ul>
+    <div class="prompt"><button type="button">复制</button><pre>执行工作包 3-3（含阶段 3 验收）。
+按 AGENTS.md 的规则开始：先读 docs/claude-guide.html 里「工作包 3-3」的卡片和「会话规则」，再读 docs/handoff.md 最新交接和 docs/plan.html 阶段 3 的任务与验收标准。
+真机测试前先告诉我。做完按指南的「会话收尾流程」结束。</pre></div>
+  </div>
+
+  <div class="gatebox"><span class="m gate">阶段关口 3</span> 你试用 → Codex 审查（阶段号 3）→ Claude 处理意见 → 你确认后开始 4-1。</div>
+</section>
+
+<!-- ============================ 阶段 4 ============================ -->
+<section id="st4">
+  <h2>阶段 4 · 公网与更新</h2>
+
+  <div class="pkg" id="p4-1">
+    <div class="pkg-head"><b>4-1 公网入口 + API key 管理 + 公网设置</b><span class="m opus">Opus 5.5</span></div>
+    <ul class="scope">
+      <li>plan 阶段 4 第 1–3 项。鉴权与来源识别规则以 plan「核心行为规则 · 来源识别」为准，每条规则都要有测试。</li>
+      <li>确认 <code>:8080</code> 下所有非 <code>/v1/*</code> 路径（包括页面、<code>/api/*</code>、<code>/upstream/*</code>、静态资源）都返回 404。</li>
+    </ul>
+    <div class="prompt"><button type="button">复制</button><pre>执行工作包 4-1。
+按 AGENTS.md 的规则开始：先读 docs/claude-guide.html 里「工作包 4-1」的卡片和「会话规则」，再读 docs/handoff.md 最新交接和 docs/plan.html 相关部分（特别是「来源识别」）。
+只做这个工作包，做完按指南的「会话收尾流程」结束。</pre></div>
+  </div>
+
+  <div class="pkg" id="p4-2">
+    <div class="pkg-head"><b>4-2 llama.cpp 自动更新 + 版本回退</b><span class="m opus">Opus 5.5</span></div>
+    <ul class="scope">
+      <li>plan 阶段 4 第 4–6 项。下载必须校验 SHA-256；下载或解压中途失败不能留下半个版本目录被当成可用版本。</li>
+      <li>不能删除当前正在被运行中的模型使用的版本目录。</li>
+    </ul>
+    <div class="prompt"><button type="button">复制</button><pre>执行工作包 4-2。
+按 AGENTS.md 的规则开始：先读 docs/claude-guide.html 里「工作包 4-2」的卡片和「会话规则」，再读 docs/handoff.md 最新交接和 docs/plan.html 相关部分。
+只做这个工作包，做完按指南的「会话收尾流程」结束。</pre></div>
+  </div>
+
+  <div class="pkg" id="p4-3">
+    <div class="pkg-head"><b>4-3 pre-commit + README + 阶段 4 试用</b><span class="m sonnet">Sonnet 5.5</span></div>
+    <ul class="scope"><li>plan 阶段 4 第 7–9 项；最后按阶段 4 验收标准逐条验证，给出结果表。</li></ul>
+    <div class="prompt"><button type="button">复制</button><pre>执行工作包 4-3（含阶段 4 验收）。
+按 AGENTS.md 的规则开始：先读 docs/claude-guide.html 里「工作包 4-3」的卡片和「会话规则」，再读 docs/handoff.md 最新交接和 docs/plan.html 阶段 4 的任务与验收标准。
+真机测试前先告诉我。做完按指南的「会话收尾流程」结束。</pre></div>
+  </div>
+
+  <div class="gatebox"><span class="m gate">阶段关口 4</span> 你试用（经隧道带 key / 不带 key）→ Codex 审查（阶段号 4）→ Claude 处理意见 → 完成。之后自行吊销旧 key、归档旧目录。</div>
+</section>
+
+<!-- ============================ 其他提示词 ============================ -->
+<section id="cont">
+  <h2>接续未完成的工作包</h2>
+  <p class="lead">上一个会话没做完、交接里写了「剩余」时用。模型用原工作包的模型。</p>
+  <div class="prompt"><button type="button">复制</button><pre>接续工作包 X-X（把 X-X 换成编号）。
+按 AGENTS.md 的规则开始：先读 docs/handoff.md 最新一条交接里的「剩余」，再读 docs/claude-guide.html 里该工作包的卡片和「会话规则」。
+只做剩余部分，做完按指南的「会话收尾流程」结束。</pre></div>
+</section>
+
+<section id="review">
+  <h2>阶段审查（Codex）</h2>
+  <p class="lead">在 Codex CLI 里、项目根目录下运行。把 N 换成阶段号。它只写审查报告，不改代码。</p>
+  <div class="prompt"><button type="button">复制</button><pre>审查 llama-web 阶段 N 的代码，只审查、不要修改任何文件。
+先读 AGENTS.md 和 docs/plan.html（特别是「核心行为规则」和阶段 N 的验收标准），再用 git log 找出阶段 N 的提交范围。
+重点检查：与计划规则不一致的行为、并发和时序问题（排队、draining、断开连接、进程清理）、资源泄漏、错误处理缺失、安全问题（公网鉴权、敏感信息进入仓库或日志）、缺失的测试。
+每条意见给出：编号、严重程度（高/中/低）、文件和行号、问题描述、触发场景、建议修改。没有把握的标注为「待确认」。
+结果写到 docs/reviews/stage-N-codex.md，不要提交。</pre></div>
+</section>
+
+<section id="fix">
+  <h2>处理审查意见</h2>
+  <p class="lead">用 <span class="m sonnet">Sonnet 5.5</span>；如果意见集中在并发、鉴权这类难点上，改用 <span class="m opus">Opus 5.5</span>。</p>
+  <div class="prompt"><button type="button">复制</button><pre>处理阶段 N 的审查意见：docs/reviews/stage-N-codex.md。
+按 AGENTS.md 的规则开始。逐条先对照代码核实是否成立，不要盲目照改；成立的修复并补测试，不成立的写明理由。
+在审查文件每条意见后面标注：已修复 / 不成立（理由）/ 需要用户决定。然后按 docs/claude-guide.html 的「会话收尾流程」结束（这次不需要打勾，交接里写处理结果）。</pre></div>
+</section>
+
+<section id="bug">
+  <h2>试用时发现问题</h2>
+  <p class="lead">一般用 <span class="m sonnet">Sonnet 5.5</span>；进程、切换、流式相关的问题用 <span class="m opus">Opus 5.5</span>。</p>
+  <div class="prompt"><button type="button">复制</button><pre>llama-web 有个问题：（描述你做了什么、期望什么、实际发生了什么）
+相关日志在：（文件路径，不要把大段日志贴进来）
+按 AGENTS.md 的规则开始，先复现并找到原因，再修复并补一个能复现这个问题的测试。做完按 docs/claude-guide.html 的「会话收尾流程」结束。</pre></div>
+</section>
+
+<section id="fallback">
+  <h2>Claude 用量用完</h2>
+  <p class="lead">在 Gemini CLI 里、项目根目录下运行，接着当前的工作包做。</p>
+  <div class="prompt"><button type="button">复制</button><pre>你将接手 llama-web 项目的开发。先读 AGENTS.md（项目规则），再读 docs/handoff.md 最新一条交接，然后读 docs/claude-guide.html 里对应工作包的卡片、「会话规则」和「会话收尾流程」——这些规则同样适用于你。
+继续执行工作包 X-X（把 X-X 换成编号）。只做这个工作包，做完按「会话收尾流程」结束。</pre></div>
+</section>
+
+<section id="save">
+  <h2>省 token 的习惯</h2>
+  <ul>
+    <li>一个工作包做完就结束会话，不要在同一个会话里接着做下一个。</li>
+    <li>报问题时给文件路径，不要把大段日志贴进对话。</li>
+    <li>会话中途插入的无关问题（比如问 llama.cpp 参数含义）另开一个会话问。</li>
+    <li>会话里 Claude 已经读过的文件，不需要你再贴一遍。</li>
+    <li>交接记录保持简短（30 行以内），它是每个新会话都要读的内容。</li>
+  </ul>
+</section>
+</main>
+</div>
+
+<script>
+document.querySelectorAll('.prompt button').forEach(function(btn){
+  btn.addEventListener('click', function(){
+    const text = btn.parentElement.querySelector('pre').innerText;
+    const done = function(){ btn.textContent='已复制'; setTimeout(function(){ btn.textContent='复制'; }, 1500); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, fallback);
+    } else { fallback(); }
+    function fallback(){
+      const ta=document.createElement('textarea'); ta.value=text; document.body.appendChild(ta);
+      ta.select(); try{ document.execCommand('copy'); done(); }catch(e){} document.body.removeChild(ta);
+    }
+  });
+});
+</script>
+</body>
+</html>
