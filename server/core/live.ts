@@ -189,48 +189,87 @@ export interface StreamOptions {
   heartbeatMs?: number
   /** Re-check the snapshot this often (in-flight counts and queue changes emit no event). */
   pollMs?: number
+  /** Chunks the stream buffers for a reader before holding events back. */
+  highWaterMark?: number
+  /** Held-back activity events per connection; more and the connection is closed. */
+  maxPendingActivity?: number
 }
 
 /**
  * GET /api/stream: Server-Sent Events. Sends `snapshot` (full state) right away and after
  * every change, `activity` for each new event, and `history` once on connect. Closing the
  * connection (req.signal) unsubscribes.
+ *
+ * Bounded per connection: once the reader falls behind (the stream's queue is full), only the
+ * latest snapshot is held back, activity events queue up to `maxPendingActivity` (beyond that
+ * the connection is closed; EventSource reconnects and gets `history`), and heartbeats are skipped.
  */
 export function handleStream(req: Request, opts: StreamOptions): Response {
   const enc = new TextEncoder()
   const { hub } = opts
+  const maxPending = opts.maxPendingActivity ?? 200
   let cleanup = () => {}
+  let flush = () => {}
   const body = new ReadableStream<Uint8Array>({
     start(controller) {
       let closed = false
       let unsub = () => {}
       let hb: ReturnType<typeof setInterval> | undefined
       let poll: ReturnType<typeof setInterval> | undefined
-      const send = (chunk: string) => {
+      let heldSnapshot: string | null = null
+      const heldActivity: string[] = []
+      const write = (chunk: string) => {
         if (closed) return
         try { controller.enqueue(enc.encode(chunk)) } catch { cleanup() }
       }
-      const frame = (event: string, data: unknown) => send(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
+      const room = () => (controller.desiredSize ?? 0) > 0
+      const backedUp = () => !room() || heldSnapshot !== null || heldActivity.length > 0
+      const frame = (event: string, data: unknown) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
+      // Called when the reader takes a chunk: held activity first (in order), then the latest snapshot.
+      flush = () => {
+        while (!closed && room() && heldActivity.length) write(heldActivity.shift()!)
+        if (!closed && room() && !heldActivity.length && heldSnapshot !== null) {
+          const chunk = heldSnapshot
+          heldSnapshot = null
+          write(chunk)
+        }
+      }
+      const onMessage = (m: LiveMessage) => {
+        if (closed) return
+        if (m.type === 'snapshot') {
+          const chunk = frame('snapshot', m.state)
+          if (backedUp()) heldSnapshot = chunk // only the latest state matters
+          else write(chunk)
+        } else {
+          const chunk = frame('activity', m.event)
+          if (!backedUp()) return write(chunk)
+          heldActivity.push(chunk)
+          if (heldActivity.length > maxPending) cleanup()
+        }
+      }
       cleanup = () => {
         if (closed) return
         closed = true
         unsub()
         clearInterval(hb)
         clearInterval(poll)
+        heldSnapshot = null
+        heldActivity.length = 0
         req.signal.removeEventListener('abort', cleanup)
         try { controller.close() } catch { /* already closed */ }
       }
       if (req.signal.aborted) return cleanup()
       req.signal.addEventListener('abort', cleanup, { once: true })
-      send('retry: 2000\n\n')
-      frame('history', hub.recent())
-      frame('snapshot', hub.snapshot())
-      unsub = hub.subscribe(m => m.type === 'snapshot' ? frame('snapshot', m.state) : frame('activity', m.event))
-      hb = setInterval(() => send(': keep-alive\n\n'), opts.heartbeatMs ?? 15_000)
+      write('retry: 2000\n\n')
+      write(frame('history', hub.recent()))
+      write(frame('snapshot', hub.snapshot()))
+      unsub = hub.subscribe(onMessage)
+      hb = setInterval(() => { if (!backedUp()) write(': keep-alive\n\n') }, opts.heartbeatMs ?? 15_000)
       poll = setInterval(() => hub.notify(), opts.pollMs ?? 2000)
     },
+    pull() { flush() },
     cancel() { cleanup() },
-  })
+  }, new CountQueuingStrategy({ highWaterMark: opts.highWaterMark ?? 16 }))
   return new Response(body, {
     headers: {
       'content-type': 'text/event-stream; charset=utf-8',

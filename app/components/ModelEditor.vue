@@ -10,7 +10,7 @@ import type { FileRef } from '~~/server/core/types'
 const props = defineProps<{ modelId: string }>()
 const open = defineModel<boolean>('open', { default: false })
 
-type Detail = { model: ModelConfig, defaults: LaunchDefaults, templates: string[], up: string[] }
+type Detail = { model: ModelConfig, defaults: LaunchDefaults, templates: string[], up: string[], inUse: string[] }
 type ScanDoc = { entries: Array<ScanEntry & { enabledAs: string | null }> }
 
 const edit = t.models.edit
@@ -58,13 +58,18 @@ watch(open, (o) => {
 
 // Keep "which profiles are up" fresh while the drawer is open (live state changes).
 const { state: live } = useLive()
-watch(() => live.value?.models.find(m => m.id === props.modelId)?.instances.map(i => `${i.profile}:${i.state}`).join(','), () => {
+// Queued loads count too: a profile a request is waiting for cannot be renamed or deleted.
+watch(() => [
+  live.value?.models.find(m => m.id === props.modelId)?.instances.map(i => `${i.profile}:${i.state}`).join(','),
+  live.value?.queue.filter(q => q.modelId === props.modelId).map(q => q.profile).join(','),
+].join('|'), () => {
   if (open.value && detail.value) void loadDetail()
 })
 
 const model = computed(() => detail.value?.model ?? null)
 const profileNames = computed(() => Object.keys(model.value?.profiles ?? {}))
 const isUp = (name: string) => !!detail.value?.up.includes(name)
+const isInUse = (name: string) => isUp(name) || !!detail.value?.inUse.includes(name)
 const anyUp = computed(() => !!detail.value?.up.length)
 
 // ---- Files -----------------------------------------------------------------------------------
@@ -260,7 +265,7 @@ const pendingTitle = computed(() => {
             <UButton size="xs" color="neutral" variant="outline" icon="i-lucide-copy" @click="startOp('duplicate')">
               {{ edit.profiles.duplicate }}
             </UButton>
-            <UButton size="xs" color="neutral" variant="outline" icon="i-lucide-pencil" :disabled="isUp(selected)" :title="isUp(selected) ? edit.profiles.inUse : ''" @click="startOp('rename')">
+            <UButton size="xs" color="neutral" variant="outline" icon="i-lucide-pencil" :disabled="isInUse(selected)" :title="isInUse(selected) ? edit.profiles.inUse : ''" @click="startOp('rename')">
               {{ edit.profiles.rename }}
             </UButton>
             <UButton
@@ -268,8 +273,8 @@ const pendingTitle = computed(() => {
               color="error"
               variant="outline"
               icon="i-lucide-trash-2"
-              :disabled="isUp(selected) || profileNames.length <= 1"
-              :title="profileNames.length <= 1 ? edit.profiles.lastOne : isUp(selected) ? edit.profiles.inUse : ''"
+              :disabled="isInUse(selected) || profileNames.length <= 1"
+              :title="profileNames.length <= 1 ? edit.profiles.lastOne : isInUse(selected) ? edit.profiles.inUse : ''"
               @click="pending = { kind: 'remove' }"
             >
               {{ edit.profiles.remove }}

@@ -6,6 +6,6 @@ export default defineEventHandler(async (event) => {
   const model = requireModel(getRouterParam(event, 'id'))
   const body = await readBody<{ profile?: unknown }>(event)
   const profile = requireProfile(model, body?.profile ?? model.activeProfile)
-  background(`retry ${model.id}:${profile}`, () => getContext().scheduler.retry({ modelId: model.id, profile }))
+  background(`retry ${model.id}:${profile}`, () => getContext().ops.retry({ modelId: model.id, profile }))
   return { ok: true }
 })

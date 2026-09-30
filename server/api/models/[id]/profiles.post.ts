@@ -11,17 +11,16 @@ import {
 } from '../../../core/models-admin'
 import { t } from '../../../core/i18n'
 import { getContext } from '../../../service/context'
-import { editError, requireModel, requireProfile, restartIfUp, upProfiles } from '../../../service/models-api'
+import { assertProfileFree, editError, requireModel, requireProfile, restartIfUp } from '../../../service/models-api'
 
 export default defineEventHandler(async (event) => {
   const model = requireModel(getRouterParam(event, 'id'))
   const body = await readBody<Record<string, unknown>>(event)
   const ctx = getContext()
   const op = body?.op
-  // A profile with a live instance cannot be renamed or removed: the instance is keyed by its name.
-  const busy = (name: string) => {
-    if (upProfiles(model.id).includes(name)) editError(new ProfileError('in-use'))
-  }
+  // A profile that is up, queued for loading or about to be restarted onto cannot be renamed or
+  // removed: instances and queued loads are keyed by its name.
+  const busy = (name: string) => assertProfileFree(model.id, name)
   try {
     switch (op) {
       case 'create':

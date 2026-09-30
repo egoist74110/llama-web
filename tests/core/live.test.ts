@@ -160,3 +160,55 @@ describe('handleStream', () => {
     expect(frames.some(f => f.startsWith(': keep-alive'))).toBe(true)
   })
 })
+
+describe('handleStream backpressure', () => {
+  const dataOf = <T>(f: string) => JSON.parse(f.split('data: ')[1]!) as T
+
+  test('a reader that falls behind gets every held activity in order and only the latest snapshot', async () => {
+    const { hub, sched, target } = setup()
+    const ac = new AbortController()
+    const res = handleStream(new Request('http://x/api/stream', { signal: ac.signal }), { hub, pollMs: 10_000, highWaterMark: 4 })
+    sched.models.push({ ...target, state: 'ready', port: 1, inflight: 0, lastUsedAt: null, error: null })
+    for (let i = 0; i < 20; i++) hub.onSchedulerEvent({ type: 'state', target, from: 'loading', to: 'ready' })
+    for (let n = 1; n <= 5; n++) {
+      sched.models[0]!.inflight = n
+      hub.notify()
+      await wait(5)
+    }
+    const frames = await readFrames(res, f => f.filter(x => x.startsWith('event: activity')).length >= 20
+      && f.filter(x => x.startsWith('event: snapshot')).length >= 2)
+    ac.abort()
+    const acts = frames.filter(x => x.startsWith('event: activity')).map(f => dataOf<ActivityEvent>(f).id)
+    expect(acts).toHaveLength(20)
+    expect(acts).toEqual([...acts].sort((a, b) => a - b))
+    const snaps = frames.filter(x => x.startsWith('event: snapshot'))
+    expect(snaps).toHaveLength(2) // the one on connect + the latest held one
+    expect(dataOf<StateDoc>(snaps[1]!).models[0]!.instances[0]!.inflight).toBe(5)
+  })
+
+  test('too many held activity events close the connection and unsubscribe', async () => {
+    const { hub, target } = setup()
+    const res = handleStream(new Request('http://x/api/stream'), { hub, pollMs: 10_000, highWaterMark: 4, maxPendingActivity: 50 })
+    for (let i = 0; i < 10_000; i++) hub.onSchedulerEvent({ type: 'state', target, from: 'loading', to: 'ready' })
+    expect(hub.subscriberCount).toBe(0)
+    // Only what fitted in the stream's queue is left to read, then the stream ends.
+    const reader = res.body!.getReader()
+    let chunks = 0
+    for (;;) {
+      const r = await reader.read()
+      if (r.done) break
+      chunks++
+    }
+    expect(chunks).toBeLessThanOrEqual(4)
+  })
+
+  test('many connections that stop reading stay bounded and clean up on cancel', async () => {
+    const { hub, target } = setup()
+    const conns = Array.from({ length: 5 }, () => handleStream(new Request('http://x/api/stream'), { hub, pollMs: 10_000, highWaterMark: 4 }))
+    expect(hub.subscriberCount).toBe(5)
+    for (let i = 0; i < 100; i++) hub.onSchedulerEvent({ type: 'state', target, from: 'loading', to: 'ready' })
+    expect(hub.subscriberCount).toBe(5) // 100 held events is under the default limit
+    await Promise.all(conns.map(r => r.body!.cancel()))
+    expect(hub.subscriberCount).toBe(0)
+  })
+})

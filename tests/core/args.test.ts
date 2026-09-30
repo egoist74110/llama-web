@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import {
-  buildLaunchArgs, canonicalFlag, DEFAULT_LAUNCH_DEFAULTS, formatCommand, groupArgs,
-  mergeParams, splitArgs, type BuildInput, type LaunchDefaults,
+  buildLaunchArgs, canonicalFlag, DEFAULT_LAUNCH_DEFAULTS, formatCmdCommand, formatCommand, groupArgs,
+  mergeParams, quoteCmdArg, splitArgs, type BuildInput, type LaunchDefaults,
 } from '../../server/core/args'
 
 const defaults = (over: Partial<LaunchDefaults> = {}): LaunchDefaults => ({ ...DEFAULT_LAUNCH_DEFAULTS, extraArgs: '', ...over })
@@ -146,6 +146,19 @@ test('formatCommand quotes only when needed and round-trips through splitArgs', 
   const cmd = formatCommand(exe, r.args)
   expect(cmd.startsWith('"C:\\Program Files\\llama\\llama-server.exe" --model "X:\\my models\\m 1.gguf"')).toBe(true)
   expect(splitArgs(cmd)).toEqual([exe, ...r.args])
+})
+
+test('quoteCmdArg: plain stays plain, spaces are quoted, cmd metacharacters get ^ (real cmd.exe check in tests/platform)', () => {
+  expect(quoteCmdArg('X:\\models\\m.gguf')).toBe('X:\\models\\m.gguf')
+  expect(quoteCmdArg('X:\\my models\\m 1.gguf')).toBe('"X:\\my models\\m 1.gguf"')
+  expect(quoteCmdArg('')).toBe('""')
+  expect(quoteCmdArg('X:\\models\\A&B.gguf')).toBe('X:\\models\\A^&B.gguf')
+  expect(quoteCmdArg('100%')).toBe('100^%')
+  expect(quoteCmdArg('X:\\a b\\A&B (1).gguf')).toBe('^"X:\\a b\\A^&B ^(1^).gguf^"')
+  expect(quoteCmdArg('{"a":1}')).toBe('^"{\\^"a\\^":1}^"')
+  expect(quoteCmdArg('trail space\\')).toBe('"trail space\\\\"')
+  expect(formatCmdCommand('C:\\Program Files\\llama\\llama-server.exe', ['--model', 'X:\\m.gguf']))
+    .toBe('"C:\\Program Files\\llama\\llama-server.exe" --model X:\\m.gguf')
 })
 
 test('default defaults match the plan and produce a sane command', () => {

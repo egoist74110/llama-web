@@ -22,7 +22,8 @@ watch(() => JSON.stringify(doc.value?.modelDirs), reset, { immediate: true })
 
 const dirty = computed(() => snapshot(rows.value) !== initial.value)
 const missing = (id?: string) => !!id && doc.value?.modelDirs.find(d => d.id === id)?.exists === false
-const badDepth = (r: Row) => !/^\d+$/.test(r.depth.trim()) || Number(r.depth) > 10
+// type="number" inputs hand back numbers; the row keeps text (converted on update, String() as a guard).
+const badDepth = (r: Row) => !/^\d+$/.test(String(r.depth).trim()) || Number(r.depth) > 10
 const invalid = computed(() => rows.value.some(r => !r.path.trim() || badDepth(r)))
 
 function add() {
@@ -47,7 +48,7 @@ async function submit() {
           <UInput v-model="r.path" class="min-w-64 flex-1 font-mono" :placeholder="s.pathPlaceholder" :aria-label="s.path" :color="r.path.trim() ? undefined : 'error'" />
           <label class="flex items-center gap-1.5 text-xs text-muted">
             {{ s.depth }}
-            <UInput v-model="r.depth" type="number" size="sm" class="w-20" :color="badDepth(r) ? 'error' : undefined" :aria-label="s.depth" />
+            <UInput :model-value="r.depth" type="number" size="sm" class="w-20" :color="badDepth(r) ? 'error' : undefined" :aria-label="s.depth" @update:model-value="(v: string | number | undefined) => { r.depth = v == null ? '' : String(v) }" />
           </label>
           <label class="flex items-center gap-1.5 text-xs text-muted">
             <USwitch v-model="r.enabled" size="sm" :aria-label="s.enabled" />

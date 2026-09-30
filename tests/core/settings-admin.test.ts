@@ -1,15 +1,19 @@
 import { describe, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve, sep } from 'node:path'
 import { defaultModels, defaultSettings, normalizeSettings, type ModelConfig, type ModelsDoc, type Settings } from '../../server/core/config'
 import {
   applyDefaults, applyImagePreprocess, applyModelDirs, applyServer, applySettingsPatch, dirStatus, isFirstRun, SettingsError,
 } from '../../server/core/settings-admin'
 
+// Absolute on the host (X:\… is not absolute on macOS / Linux); Windows-only semantics are tested separately.
+const ROOT = resolve('/X')
+const abs = (...p: string[]) => join(ROOT, ...p)
+
 const dir = (id: string, path: string, over: object = {}) => ({ id, path, enabled: true, maxDepth: 3, ...over })
 
-function settingsWith(dirs = [dir('main', 'X:\\models')]): Settings {
+function settingsWith(dirs = [dir('main', abs('models'))]): Settings {
   const s = defaultSettings()
   s.modelDirs = dirs
   return s
@@ -33,34 +37,38 @@ describe('applyModelDirs', () => {
   test('keeps ids of existing directories and assigns fresh ids to new ones', () => {
     const s = settingsWith()
     applyModelDirs(s, [
-      { id: 'main', path: 'Y:\\moved', enabled: false, maxDepth: 1 },
-      { path: 'X:\\more', enabled: true, maxDepth: 0 },
-      { id: 'made-up', path: 'X:\\other', enabled: true, maxDepth: 2 },
+      { id: 'main', path: abs('y-moved'), enabled: false, maxDepth: 1 },
+      { path: abs('more'), enabled: true, maxDepth: 0 },
+      { id: 'made-up', path: abs('other'), enabled: true, maxDepth: 2 },
     ], models())
     expect(s.modelDirs.map(d => d.id)).toEqual(['main', 'dir-1', 'dir-2'])
-    expect(s.modelDirs[0]).toEqual({ id: 'main', path: 'Y:\\moved', enabled: false, maxDepth: 1 })
+    expect(s.modelDirs[0]).toEqual({ id: 'main', path: abs('y-moved'), enabled: false, maxDepth: 1 })
   })
 
   test('strips quotes and whitespace; rejects relative, empty and non-string paths', () => {
     const s = settingsWith([])
-    applyModelDirs(s, [{ path: '  "X:\\models"  ', enabled: true, maxDepth: 1 }], models())
-    expect(s.modelDirs[0]!.path).toBe('X:\\models')
+    applyModelDirs(s, [{ path: `  "${abs('models')}"  `, enabled: true, maxDepth: 1 }], models())
+    expect(s.modelDirs[0]!.path).toBe(abs('models'))
     for (const bad of ['models', '', '   ', 42, null]) {
       expect(codeOf(() => applyModelDirs(settingsWith([]), [{ path: bad, enabled: true, maxDepth: 1 }], models()))).toBe('dir-path')
     }
   })
 
-  test('rejects duplicate paths (case and trailing slash insensitive on Windows)', () => {
+  test('rejects duplicate paths (trailing separator ignored)', () => {
+    const items = [{ path: abs('models'), enabled: true, maxDepth: 1 }, { path: abs('models') + sep, enabled: true, maxDepth: 1 }]
+    expect(codeOf(() => applyModelDirs(settingsWith([]), items, models()))).toBe('dir-duplicate')
+  })
+
+  test.if(process.platform === 'win32')('duplicate detection ignores case on Windows', () => {
     const items = [{ path: 'X:\\models', enabled: true, maxDepth: 1 }, { path: 'x:\\MODELS\\', enabled: true, maxDepth: 1 }]
-    const expected = process.platform === 'win32' ? 'dir-duplicate' : 'none'
-    expect(codeOf(() => applyModelDirs(settingsWith([]), items, models()))).toBe(expected)
+    expect(codeOf(() => applyModelDirs(settingsWith([]), items, models()))).toBe('dir-duplicate')
   })
 
   test('validates depth and the enabled flag', () => {
     for (const d of [-1, 11, 1.5, '2', null]) {
-      expect(codeOf(() => applyModelDirs(settingsWith([]), [{ path: 'X:\\m', enabled: true, maxDepth: d }], models()))).toBe('dir-depth')
+      expect(codeOf(() => applyModelDirs(settingsWith([]), [{ path: abs('m'), enabled: true, maxDepth: d }], models()))).toBe('dir-depth')
     }
-    expect(codeOf(() => applyModelDirs(settingsWith([]), [{ path: 'X:\\m', enabled: 'yes', maxDepth: 1 }], models()))).toBe('bad-request')
+    expect(codeOf(() => applyModelDirs(settingsWith([]), [{ path: abs('m'), enabled: 'yes', maxDepth: 1 }], models()))).toBe('bad-request')
     expect(codeOf(() => applyModelDirs(settingsWith([]), 'nope', models()))).toBe('bad-request')
   })
 
@@ -68,8 +76,8 @@ describe('applyModelDirs', () => {
     const used = models(model('main'))
     expect(codeOf(() => applyModelDirs(settingsWith(), [], used))).toBe('dir-in-use')
     const s = settingsWith()
-    applyModelDirs(s, [{ id: 'main', path: 'Z:\\new', enabled: false, maxDepth: 3 }], used)
-    expect(s.modelDirs[0]).toMatchObject({ id: 'main', path: 'Z:\\new', enabled: false })
+    applyModelDirs(s, [{ id: 'main', path: abs('z-new'), enabled: false, maxDepth: 3 }], used)
+    expect(s.modelDirs[0]).toMatchObject({ id: 'main', path: abs('z-new'), enabled: false })
     // mmproj / draft references count too.
     const viaMmproj = models(model('other', { mmproj: { dirId: 'main', rel: 'mm.gguf' } }))
     expect(codeOf(() => applyModelDirs(settingsWith(), [], viaMmproj))).toBe('dir-in-use')
@@ -82,8 +90,8 @@ describe('applyModelDirs', () => {
   test('does not reuse the same id twice when the client repeats one', () => {
     const s = settingsWith()
     applyModelDirs(s, [
-      { id: 'main', path: 'X:\\a', enabled: true, maxDepth: 1 },
-      { id: 'main', path: 'X:\\b', enabled: true, maxDepth: 1 },
+      { id: 'main', path: abs('a'), enabled: true, maxDepth: 1 },
+      { id: 'main', path: abs('b'), enabled: true, maxDepth: 1 },
     ], models())
     expect(new Set(s.modelDirs.map(d => d.id)).size).toBe(2)
   })
@@ -162,7 +170,7 @@ describe('applyServer', () => {
 describe('applySettingsPatch', () => {
   test('applies several sections together and needs at least one', () => {
     const s = settingsWith([])
-    applySettingsPatch(s, { modelDirs: [{ path: 'X:\\m', enabled: true, maxDepth: 2 }], image: { quality: 70 }, setupDone: true }, models())
+    applySettingsPatch(s, { modelDirs: [{ path: abs('m'), enabled: true, maxDepth: 2 }], image: { quality: 70 }, setupDone: true }, models())
     expect(s.modelDirs).toHaveLength(1)
     expect(s.preprocess.image.quality).toBe(70)
     expect(s.setup.done).toBe(true)
@@ -185,7 +193,7 @@ describe('first run and directory status', () => {
   test('first run only while nothing is configured and the wizard is not done', () => {
     const s = defaultSettings()
     expect(isFirstRun(s, models())).toBe(true)
-    expect(isFirstRun({ ...s, modelDirs: [dir('main', 'X:\\m')] }, models())).toBe(false)
+    expect(isFirstRun({ ...s, modelDirs: [dir('main', abs('m'))] }, models())).toBe(false)
     expect(isFirstRun(s, models(model('main')))).toBe(false)
     expect(isFirstRun({ ...s, setup: { done: true } }, models())).toBe(false)
   })

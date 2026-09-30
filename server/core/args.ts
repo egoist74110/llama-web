@@ -304,7 +304,27 @@ export function quoteArg(arg: string): string {
   return `"${arg.replace(/"/g, '\\"')}"`
 }
 
-/** Full command line for the UI preview; parses back to the same args with splitArgs. */
+/** Full command line in the project's own syntax; parses back to the same args with splitArgs. */
 export function formatCommand(exe: string, args: string[]): string {
   return [exe, ...args].map(quoteArg).join(' ')
+}
+
+/**
+ * Quote one argument for pasting into cmd.exe (Windows 命令提示符). First the quoting the
+ * program's C runtime undoes (CommandLineToArgvW rules: quotes around whitespace / quotes / empty,
+ * backslashes doubled only before a quote), then, if the argument holds a cmd metacharacter or a
+ * quote, every metacharacter (quotes included) is escaped with ^ so cmd passes it through as is.
+ */
+export function quoteCmdArg(arg: string): string {
+  let q = arg
+  if (arg === '' || /[\s"]/.test(arg)) {
+    q = `"${arg.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, '$1$1')}"`
+  }
+  if (/[&|<>^%!"]/.test(arg)) q = q.replace(/[()%!^"<>&|]/g, '^$&')
+  return q
+}
+
+/** Command line for the UI preview, ready to paste into cmd.exe. */
+export function formatCmdCommand(exe: string, args: string[]): string {
+  return [exe, ...args].map(quoteCmdArg).join(' ')
 }

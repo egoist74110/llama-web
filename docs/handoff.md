@@ -16,6 +16,19 @@
 
 ---
 
+## 2026-09-30 · 阶段 2 审查意见处理 · Opus 5.5
+- 完成：`docs/reviews/stage-2-codex.md` 6 条全部核实成立并修复，每条后已标注「处理」。CR-001/003：新增 `server/core/model-ops.ts`（`ctx.ops`），管理操作按模型递增代数，后发起的操作使等待 drain 的旧重启失效；draining 不再算「已在该方案运行」；改名 / 删除检查实例 + 调度队列 + 待重启目标（`GET /api/models/:id` 新增 `inUse`，抽屉按它禁用按钮）。CR-002：深度输入在 `update:model-value` 转字符串。CR-004：`handleStream` 每连接有界（最新快照合并、activity ≤200 超限断开、背压时跳过心跳、`pull()` 补发）。CR-005：Windows 预览改 `formatCmdCommand`（CMD 转义），界面注明粘贴到 CMD。CR-006：设置测试改用宿主绝对路径，大小写专项仅 Windows。
+- 验证：`bun test` 265 通过（新增 model-ops 9 条、live 背压 3 条、args 1 条、`tests/platform/cmd-preview.test.ts` 4 条，后者用真实 cmd.exe 回读参数数组）；`bun run typecheck`、`bun run build` 通过。构建产物 + 慢响应假 llama-server（临时数据目录、端口 5097，用完已停、已删）经真实接口复现 CR-001（A→B→A drain 中，最终默认 ready、没有启动 RP）和 CR-003（排队中的 RP 删除 409、改名中文提示）；内置浏览器测了设置页深度输入（键入、步进、超限、清空、保存落盘）。**没测**：macOS / Linux 上的全量测试；真实 llama-server / GPU；把预览命令粘贴到真实 llama-server 手动运行；编辑抽屉在排队时按钮禁用的界面效果（只测了接口）。
+- 剩余：审查外新发现的问题，已加入 plan 阶段 2 任务（未打勾）：值为 `''` 的下拉选项（设置页全局默认的「不传」、模型编辑的 mmproj/draft「无」、方案表单的「内置模板」）不渲染，控制台报 Reka `SelectItem` 空值错误——用户目前无法在下拉里选回「不传 / 无」。按规则没有顺手修。
+- 决定 / 坑：
+  - 路由里不要直接调 `scheduler.start/stop/retry`，一律走 `ctx.ops`，否则会绕过代数失效机制。
+  - 预览命令目标 shell 定为 CMD：PowerShell 5.1 向原生程序传参不转义内嵌双引号，无法与参数数组一致。非 Windows 仍用 `formatCommand`。
+  - Git Bash 里 curl 直接发中文 JSON 会乱码（服务端 404），实测时请求体用 node 写成 UTF-8 文件再 `-d @file`。Bash heredoc 依旧会吃反斜杠，含 `\` 的内容用 Write/Edit。
+  - 每连接 2 秒轮询没有移到 hub（`notify()` 已合并去重），审查里这条是可选建议。
+- 下一步：用户确认阶段 2（可再请 Codex 复审本次修复）→ 修上面的下拉空值问题（小修，Sonnet 5.5）→ 确认后开始 3-1。
+
+---
+
 ## 2026-09-30 · 工作包 2-4 · Sonnet 5.5
 - 完成：plan 阶段 2 第 9–11 项。设置页四张卡片（`SettingsDirs` / `SettingsDefaults` / `SettingsImage` / `SettingsServer`，各自保存）；首次启动向导 `/setup`（llama.cpp 状态、添加目录并扫描、旧配置导入，完成或跳过写 `settings.setup.done`）。后端校验在 `server/core/settings-admin.ts`（`applySettingsPatch` 等纯函数），接口 `GET/POST /api/settings`（补丁按段：modelDirs / defaults / image / server / setupDone，整个补丁校验通过才写）。快照新增 `firstRun`，布局在首次快照为 firstRun 时跳一次 `/setup`。
 - 验证：`bun test` 247 通过（新增 `tests/core/settings-admin.test.ts`、`live.test.ts` 1 条）；`bun run typecheck`、`bun run build` 通过。构建产物 + 编译的假 llama-server（临时数据目录，已删）在内置浏览器实测：向导重定向、相对路径被拒（中文）、添加目录并扫描、旧配置导入、设置页四段保存（settings.json 与备份落盘）、端口改后的重启提示、删除被引用目录 409、全局默认值进入命令预览、手机宽度 + 深色。**真机**（临时数据目录 + 端口 5094，复用 b11146 的拷贝，`autoUpdate=false`，模型目录只读扫描，测完进程已停、显存回到基线、临时目录已删）：向导添加真实目录扫出 3 个模型；UI 启用 Qwen3.8-27B；mmproj 选择、RP 方案复制、方案切换、全局 ctx 改 32768 用接口完成（对应界面 2-3 已用假进程测过）；`qwen3.8-27b:RP` 经 `/v1/chat/completions` 真实加载并流式 / 非流式回复；切换当前方案触发自动重启（RP → 默认）；**预览命令与 `Get-CimInstance` 读到的真实 llama-server 命令行逐字一致**（端口 7100 也一致）。

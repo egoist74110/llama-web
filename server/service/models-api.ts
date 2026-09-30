@@ -16,27 +16,25 @@ export function requireProfile(model: { profiles: Record<string, unknown> }, pro
   return profile
 }
 
-const UP = new Set(['loading', 'ready', 'draining', 'unloading'])
-
 /** Profiles of this model that have a live instance (loading / running / winding down). */
 export function upProfiles(modelId: string): string[] {
-  return getContext().scheduler.snapshot().models
-    .filter(s => s.modelId === modelId && UP.has(s.state))
-    .map(s => s.profile)
+  return getContext().ops.upProfiles(modelId)
+}
+
+/** Refuse to rename / delete a profile that is up, queued for loading or about to be restarted onto. */
+export function assertProfileFree(modelId: string, name: string): void {
+  if (getContext().ops.inUseProfiles(modelId).includes(name)) editError(new ProfileError('in-use'))
 }
 
 /**
- * Restart the model on the profile that is up, when `only` is unset or names that profile.
- * Used after edits that only apply on the next load. Returns whether a restart was scheduled.
+ * Restart the model on the profile it is serving (or about to start), when `only` is unset or
+ * names that profile. Used after edits that only apply on the next load. Returns whether a
+ * restart was scheduled.
  */
 export function restartIfUp(modelId: string, only?: string): boolean {
-  const ctx = getContext()
-  const profile = upProfiles(modelId).find(p => only === undefined || p === only)
-  if (!profile) return false
-  background(`restart ${modelId}:${profile}`, async () => {
-    await ctx.scheduler.stop(modelId)
-    await ctx.scheduler.start({ modelId, profile })
-  })
+  const work = getContext().ops.restartIfUp(modelId, only)
+  if (!work) return false
+  background(`restart ${modelId}`, () => work)
   return true
 }
 

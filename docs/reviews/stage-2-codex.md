@@ -1,7 +1,7 @@
 # 阶段 2 Codex 审查
 
 - 日期：2026-09-30。
-- 结论：**rework required（需要修正）**。共 6 条：高 1、中 4、低 1；CR-005 的 Windows shell 实测标为待确认。
+- 结论：**rework required（需要修正）**。（2026-09-30 处理结果：6 条均核实成立并已修复，见各条「处理」。）共 6 条：高 1、中 4、低 1；CR-005 的 Windows shell 实测标为待确认。
 - 范围：`7b5d363..9c41d4f`，依次为 `9c6f737`（2-1）、`7bde49a`（2-2）、`6a01c46`（2-3）、`9c41d4f`（2-4）。行号均对应 `9c41d4f`。
 - 已读取 AGENTS.md、计划的核心行为规则、阶段 2 任务和验收标准、开发指南、最新交接。关联读取阶段 1 调度器、参数构建器、来源检查和测试，以核实阶段 2 调用链。
 - 本次只新增此报告，没有修复代码、修改测试、计划或交接记录。开始时工作区干净；本地原停在 `7b5d363`，获取远端后快进到 `9c41d4f`。
@@ -24,6 +24,8 @@
 
 **建议修改：** 为每个模型统一管理操作的顺序和目标版本；stop 等待完成后，只有仍有效的启动意图才能继续。切换、保存并重启、手动停止应共享取消/序列化机制，不能只按旧快照判断。补充实际管理处理函数的 A→B→A draining 测试，以及重启等待期间手动停止测试；现有 scheduler 单测与纯 `switchProfile` 测试没有覆盖这一组合。
 
+- **处理（2026-09-30）：已修复。** 核实成立（代码路径与审查描述一致），并在真实接口上复现后修复。新增纯模块 `server/core/model-ops.ts`（`ModelOps`，挂在 `ctx.ops`）：每个模型一个「管理意图代数」，启动 / 停止 / 重试 / 重启 / 切换方案都先递增它；重启在 `stop()` 等待 drain 结束后，只有代数没变（期间没有更新的管理操作）才启动目标方案，旧闭包自动失效。切换方案时，draining / unloading 的实例不再算「已在这个方案上运行」，已有待执行的重启时一律重新发起重启到新方案。`start` / `stop` / `retry` / `profile` / 保存后重启 的接口全部改走 `ctx.ops`。「保存并重启」只针对 loading / ready 的实例或待执行重启的目标，不会重启到正在卸载的方案。新增 `tests/core/model-ops.test.ts`（真实 Scheduler + 假进程）：A→B→A draining 最终为 A 且没有启动 B；重启等待 drain 时手动停止 → 什么都不启动；已在该方案运行时不动作；`restartIfUp` 不重启到正在卸载的方案。另用构建产物 + 慢响应假 llama-server（临时数据目录）经真实接口复现审查场景：切到 RP → `restarted: true`，drain 中切回默认 → `restarted: true`，请求结束后最终 `默认 ready`、当前方案为默认，日志中该轮没有启动 RP。
+
 ## CR-002 · 中 · 修改扫描深度后，数字值调用 trim 导致设置卡片报错
 
 **位置：** `app/components/SettingsDirs.vue:25`、`:50`。
@@ -33,6 +35,8 @@
 **触发场景：** 在设置页添加或编辑目录，将深度从 3 改成 4，下一次渲染/计算 invalid 时抛异常。直接提取仓库中的 `badDepth` 表达式，以组件会收到的 `{ depth: 4 }` 执行，得到 `TypeError: r.depth.trim is not a function`。本次未做浏览器交互实测，但输入组件源码与表达式已核实。影响目录编辑、保存按钮和校验，属于阶段 2 的核心配置路径。
 
 **建议修改：** 和 `SettingsImage`、`SettingsServer` 一样，在 `update:model-value` 边界统一转换成字符串，再校验；覆盖键盘输入、步进按钮和清空值。增加 UI 控件值类型的回归验证，纯后端 `applyModelDirs` 测试无法捕获此问题。
+
+- **处理（2026-09-30）：已修复。** 核实成立（`v-model` 直接绑 `type="number"` 的 UInput，数字写回 `r.depth`）。改为和 SettingsImage / SettingsServer 一样在 `update:model-value` 处转成字符串（`null` / `undefined` → 空串），`badDepth` 另用 `String()` 兜底。全仓库已没有其他 `type="number"` + `v-model` 的用法。在内置浏览器（构建产物、临时数据目录）实测：键入 4、上箭头步进到 5、输入 11（标红且保存禁用）、清空（保存禁用）、再输入 4 保存，`settings.json` 写入 `maxDepth: 4`，控制台没有 `trim` 相关错误。没有加组件级自动化测试（项目没有前端组件测试设施）。
 
 ## CR-003 · 中 · 方案改名/删除保护忽略已有排队请求
 
@@ -44,6 +48,8 @@
 
 **建议修改：** 在管理提交点把 queue/current job 中被引用的方案也视为 in-use，返回 409；如果确实要允许操作，应明确取消并通知等待者，而不是让加载阶段失败。前端保护也应使用队列信息。补充“请求排队等待 drain 时删除/改名”的接口与 scheduler 集成测试。
 
+- **处理（2026-09-30）：已修复。** 核实成立。改名 / 删除的占用检查改为 `ModelOps.inUseProfiles()`：有实例（含 draining / unloading）、调度队列里（排队或正在执行）的加载任务、待执行重启的目标方案，都视为占用，返回 409 和中文提示（文案改为包含「排队」）。`GET /api/models/:id` 增加 `inUse`，编辑抽屉的改名 / 删除按钮按它禁用，并在该模型的队列变化时刷新。新增测试：请求排队等其他方案 drain 时，被排队的方案在 `inUseProfiles` 里；待执行重启的目标在拥有实例之前就在其中。真实接口实测：默认方案有在途请求、`fake:RP` 请求排队时，删除 RP 返回 409，改名 RP 返回上述中文提示，`inUse` 为 默认 + RP；两个请求随后都正常完成。
+
 ## CR-004 · 中 · SSE 不处理背压，慢连接的未读事件队列无限增长
 
 **位置：** `server/core/live.ts:203-213`、`:228-230`。
@@ -53,6 +59,8 @@
 **触发场景：** 客户端暂停读取但维持连接，模型状态持续变化或心跳持续产生。本次用 `handleStream()` 创建响应，不读取 body，然后同步产生 10,000 条状态事件：随后读到了 10,003 个已排队 chunk，共 1,419,070 字节，history 仍仅 50 条。取消 reader 后 subscriberCount 回到 0，说明普通取消清理有效，缺陷在连接存续期间的缓冲策略。该复现为 Web Stream 层验证，没有启动网络服务器测 RSS。
 
 **建议修改：** 设定每连接有界缓冲；背压期间只保留最新 snapshot，activity 使用有界队列，超限时关闭连接并让 EventSource 重连获取 history。共享状态轮询也可由 hub 持有，避免每连接一个 poll。补充慢 reader、多连接、超限及取消后的资源释放测试。
+
+- **处理（2026-09-30）：已修复。** 核实成立（原来无条件 `enqueue`）。`handleStream` 改为每连接有界：流用 `CountQueuingStrategy`（默认 16 个 chunk），队列满时不再入队——snapshot 只保留最新一份，activity 进有界队列（默认 200 条，超出即关闭连接，EventSource 重连后会拿到 history），心跳跳过；读者取走数据后由 `pull()` 按顺序补发（先 activity，后最新 snapshot）。每连接的 2 秒轮询没有移到 hub：`notify()` 本身已按 30 ms 合并、快照没变不推送，多连接只是多几次空调用，不是本条的缺陷，暂不改。新增测试：落后的读者按顺序收到全部 20 条 activity、只收到最新一份 snapshot；不读取时 10000 条事件 → 超限断开、订阅数归零、可读 chunk 不超过 4；5 个不读的连接在默认上限内保持订阅，取消后全部释放。
 
 ## CR-005 · 中 · 复制预览命令不满足 Windows shell 的转义规则（shell 实测待确认）
 
@@ -70,6 +78,8 @@ X:\app\llama-server.exe --model X:\models\A&B.gguf
 
 **建议修改：** 明确预览对应 CMD 或 PowerShell，使用该 shell 的可执行文件调用语法与参数转义；覆盖空格、`&`、`%`、引号和尾部反斜杠。用真正的目标 shell 执行 argv 回显夹具，比较回读数组，再执行预览命令验收；不要仅比较进程命令行字符串。
 
+- **处理（2026-09-30）：已修复（目标 shell 定为 CMD）。** 核实成立，并在 Windows 上实测：旧格式 `--model X:\models\A&B.gguf` 在 cmd.exe 里被拆成两条命令（参数只剩 `X:\models\A`，并报 `B.gguf` 不是命令）。新增 `quoteCmdArg` / `formatCmdCommand`（`server/core/args.ts`）：先按 CommandLineToArgvW 规则加引号（空白 / 引号 / 空串，引号前的反斜杠加倍），参数含 `& | < > ^ % !` 或引号时，再给全部元字符（含引号）加 `^`。Windows 下预览改用它；其他平台仍用原来的 `formatCommand`（`splitArgs` 往返不变）。预览说明文字写明「按 CMD 写法转义，请粘贴到 CMD 里运行，PowerShell 规则不同」。选 CMD 而不是 PowerShell 的原因：Windows PowerShell 5.1 向原生程序传参时不会转义参数里的双引号（例如 `{"enable_thinking":false}`），无法保证和参数数组一致。新增 `tests/platform/cmd-preview.test.ts`（仅 Windows）：用真实 `cmd /d /s /c` 执行预览命令、以 argv 回显夹具读回数组，覆盖空格、`&`、括号、`%`（含已定义的环境变量名，不会被展开）、JSON 引号、尾部反斜杠、`|<>^!`、空串、中文路径，全部与原数组一致；另有跨平台的 `quoteCmdArg` 单测。**没有测**：程序路径本身含 `&` 等元字符的情况（路径由 llama-web 管理，通常在 data/runtime 下）；批处理文件（.bat）里粘贴（`%` 规则不同，不在预览用途内）；真实 llama-server 手动执行（需要 GPU）。
+
 ## CR-006 · 低 · 新设置测试使用固定 Windows 路径，阻断 macOS 全量测试
 
 **位置：** `tests/core/settings-admin.test.ts:33-63`；同类路径位于 `:71-86`、`:165`。
@@ -79,6 +89,8 @@ X:\app\llama-server.exe --model X:\models\A&B.gguf
 **触发场景：** macOS 执行 `bun test`，稳定出现 7 条设置测试失败；针对 settings/live/scheduler 的重跑同样有 7 条设置失败。
 
 **建议修改：** 通用逻辑测试使用宿主绝对路径或临时目录；Windows 大小写和盘符语义通过注入 path/platform 或明确的 Windows 专项测试验证。恢复跨平台全量测试可用性，避免把其他真正的回归混入已知失败。
+
+- **处理（2026-09-30）：已修复（只在 Windows 上验证）。** 核实成立。`tests/core/settings-admin.test.ts` 中交给 `cleanPath` 的路径改为宿主平台上的绝对路径（`join(resolve('/X'), ...)`）；重复路径测试改为跨平台的「末尾分隔符不影响」，大小写不敏感改成仅 Windows 运行的专项测试（`test.if(win32)`）。产品代码未改。Windows 上 20 条全部通过；**没有在 macOS / Linux 上运行**，无法确认那边已全绿。审查首轮出现的 scheduler crash reason 和 live polling 两处偶发失败本轮在 Windows 上未出现，原因仍待确认（前者与阶段 1 第 4 轮记录的 Bun GC 现象相符）。
 
 ## 验证记录与边界
 

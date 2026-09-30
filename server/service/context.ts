@@ -9,6 +9,7 @@ import {
 import { LaunchConfigError, planLaunch } from '../core/launch'
 import { ensureRuntime, type RuntimeStatus } from '../core/llamacpp'
 import { describeModels, LiveHub } from '../core/live'
+import { ModelOps } from '../core/model-ops'
 import { createProxy, type Proxy, type ProxyEvent } from '../core/proxy'
 import { runStartupCleanup } from '../core/residue'
 import { PidRegistry, Runner } from '../core/runner'
@@ -31,6 +32,8 @@ export interface AppContext {
   getRuntimeStatus(): RuntimeStatus
   runner: Runner
   scheduler: Scheduler
+  /** Management actions (start / stop / restart / switch); use these instead of the scheduler directly. */
+  ops: ModelOps
   proxy: Proxy
   /** Live state for /api/stream and /api/state. */
   live: LiveHub
@@ -147,6 +150,7 @@ function createContext(): AppContext {
       return runner.start({ exe: plan.exe, args: plan.args, tag: plan.tag, loadTimeoutMs: plan.loadTimeoutMs })
     },
   })
+  const ops = new ModelOps(scheduler)
   const proxy = createProxy({ scheduler, getModels, getSettings, onEvent: logProxyEvent })
 
   // Background: adopt an installed llama.cpp or download the first one. Never blocks startup.
@@ -170,7 +174,7 @@ function createContext(): AppContext {
   return {
     dataDir, bootPort: getSettings().server.port, getSettings, getModels, updateSettings: settingsRef.update, updateModels: modelsRef.update,
     refresh: () => { settingsRef.refresh(); modelsRef.refresh() },
-    getRuntimeStatus: () => runtimeStatus, runner, scheduler, proxy, live, cleanupDone,
+    getRuntimeStatus: () => runtimeStatus, runner, scheduler, ops, proxy, live, cleanupDone,
     shutdown() {
       closing ??= (async () => {
         settingsStore.close()

@@ -7,6 +7,6 @@ export default defineEventHandler(async (event) => {
   const model = requireModel(getRouterParam(event, 'id'))
   const body = await readBody<{ profile?: unknown }>(event)
   const profile = requireProfile(model, body?.profile ?? model.activeProfile)
-  background(`start ${model.id}:${profile}`, () => getContext().scheduler.start({ modelId: model.id, profile }))
+  background(`start ${model.id}:${profile}`, () => getContext().ops.start({ modelId: model.id, profile }))
   return { ok: true }
 })

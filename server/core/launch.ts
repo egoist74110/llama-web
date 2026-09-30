@@ -3,7 +3,7 @@
 // scheduler records them as a load failure.
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { buildLaunchArgs, formatCommand, type ArgWarning, type BuildInput, type LaunchParams, type ParamOverrides } from './args'
+import { buildLaunchArgs, formatCmdCommand, formatCommand, type ArgWarning, type BuildInput, type LaunchParams, type ParamOverrides } from './args'
 import type { ModelConfig, ModelsDoc, Settings } from './config'
 import type { Target } from './scheduler'
 import { resolveFileRef } from './scanner'
@@ -54,7 +54,10 @@ export interface PreviewInput {
 }
 
 export interface LaunchPreview {
-  /** Full command line as the UI shows it; the same arguments planLaunch would pass. */
+  /**
+   * Full command line as the UI shows it; the same arguments planLaunch would pass. On Windows
+   * it is written for cmd.exe (quoting and ^ escapes), elsewhere in the project's own syntax.
+   */
   command: string
   ok: boolean
   warnings: ArgWarning[]
@@ -95,13 +98,16 @@ export function previewLaunch(input: PreviewInput): LaunchPreview {
     paths.chatTemplate = abs
   }
   const port = settings.scheduler.portRange[0]
+  const win = (input.platform ?? process.platform) === 'win32'
   const built = buildLaunchArgs({
     paths, defaults: settings.defaults,
     profile: { overrides: form.overrides, extraArgs: form.extraArgs },
     host: input.host, port,
   })
   return {
-    command: formatCommand(exe ?? ((input.platform ?? process.platform) === 'win32' ? 'llama-server.exe' : 'llama-server'), built.args),
+    command: win
+      ? formatCmdCommand(exe ?? 'llama-server.exe', built.args)
+      : formatCommand(exe ?? 'llama-server', built.args),
     ok: built.ok, warnings: built.warnings, effective: built.effective, missing, port,
   }
 }
