@@ -21,6 +21,8 @@ export interface AppContext {
   /** Save through the store (backup + atomic write) and make the change visible to getters. */
   updateSettings(fn: (draft: Settings) => Settings | void): Settings
   updateModels(fn: (draft: ModelsDoc) => ModelsDoc | void): ModelsDoc
+  /** Re-read both files now (hand edits the watcher has not reported yet). Throws StoreError if one is invalid. */
+  refresh(): void
   /** State of the initial llama.cpp download / version check. */
   getRuntimeStatus(): RuntimeStatus
   runner: Runner
@@ -49,6 +51,10 @@ function openStore<T extends VersionedDoc>(store: JsonStore<T>, fallback: () => 
   }, e => logError(`ignored invalid edit of ${store.file}:`, (e as Error).message))
   return {
     get: () => value,
+    refresh(): T {
+      value = store.refresh()
+      return value
+    },
     update(fn: (draft: T) => T | void): T {
       // Own writes are not reported by the file watcher, so refresh the cached value here.
       value = store.update(fn)
@@ -142,6 +148,7 @@ function createContext(): AppContext {
   let closing: Promise<void> | null = null
   return {
     dataDir, getSettings, getModels, updateSettings: settingsRef.update, updateModels: modelsRef.update,
+    refresh: () => { settingsRef.refresh(); modelsRef.refresh() },
     getRuntimeStatus: () => runtimeStatus, runner, scheduler, proxy, cleanupDone,
     shutdown() {
       closing ??= (async () => {

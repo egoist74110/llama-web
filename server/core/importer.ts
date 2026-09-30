@@ -10,7 +10,7 @@ import type { ModelConfig, ModelsDoc, Settings } from './config'
 import { scanModelDirs, type ScanEntry, type ScanResult } from './scanner'
 import type { FileRef, ModelDir } from './types'
 
-export type ImportErrorCode = 'unreadable' | 'invalid-json' | 'no-models-root'
+export type ImportErrorCode = 'unreadable' | 'invalid-json' | 'no-models-root' | 'config-invalid'
 
 export class ImportError extends Error {
   constructor(public code: ImportErrorCode, message: string) {
@@ -471,15 +471,23 @@ export interface ImportTarget {
   getModels(): ModelsDoc
   updateSettings(fn: () => Settings): unknown
   updateModels(fn: () => ModelsDoc): unknown
+  /** Re-read the documents from disk; throws when one is invalid. */
+  refresh?(): void
 }
 
 /**
  * Plan against the *latest* documents and save both, all synchronously, so no other config
  * change can land between planning and saving (a concurrent import, the llama.cpp download
- * setting `current`, a reloaded hand edit). If a save fails, whatever this import already
+ * setting `current`, a hand edit, which is re-read from disk first). If a save fails, whatever this import already
  * wrote is undone; ImportSaveError.rolledBack says whether that worked.
  */
 export function commitImport(src: ImportSource, target: ImportTarget): ImportResult {
+  // Hand edits already on disk but not yet reloaded by the watcher count as "latest" too.
+  try {
+    target.refresh?.()
+  } catch (e) {
+    throw new ImportError('config-invalid', (e as Error).message)
+  }
   const prevSettings = structuredClone(target.getSettings())
   const result = buildImport(src, { dataDir: target.dataDir, settings: target.getSettings(), models: target.getModels() })
   if (result.report.imported.length === 0) return result

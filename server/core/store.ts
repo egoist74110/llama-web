@@ -124,6 +124,22 @@ export class JsonStore<T extends VersionedDoc> {
     return this.current ?? this.load()
   }
 
+  /**
+   * Pick up an edit that is already on disk but not yet seen by the watcher (it debounces).
+   * Throws StoreError when the file is unreadable, so callers never overwrite a broken edit
+   * with the cached value. A deleted file keeps the cached value.
+   */
+  refresh(): T {
+    if (this.current === null || !existsSync(this.file)) return this.get()
+    const text = readFileSync(this.file, 'utf8')
+    if (text === this.lastWritten) return this.current
+    const { doc, migrated } = this.parse(text)
+    this.current = doc
+    if (migrated) this.save(doc)
+    else this.lastWritten = text
+    return doc
+  }
+
   /** Replace the document. The previous file is backed up first. */
   save(next: T): void {
     const doc = this.opts.validate ? this.opts.validate(next) : next
@@ -131,9 +147,9 @@ export class JsonStore<T extends VersionedDoc> {
     this.write(doc, true)
   }
 
-  /** Mutate a deep copy (return a new value or mutate in place) and save it. */
+  /** Mutate a deep copy of the on-disk document (see refresh) and save it. */
   update(fn: (draft: T) => T | void): T {
-    const draft = structuredClone(this.get())
+    const draft = structuredClone(this.refresh())
     const next = fn(draft) ?? draft
     this.save(next)
     return next

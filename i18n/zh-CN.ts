@@ -61,6 +61,7 @@ export default {
       unreadable: '无法读取该文件：{detail}',
       'invalid-json': '文件不是有效的 JSON：{detail}',
       'no-models-root': '文件里没有 models_root，不像是旧的 swap-config.json。',
+      'config-invalid': '当前的 data/settings.json 或 data/models.json 有错误，导入没有写入任何内容。请先修正：{detail}',
       saveFailed: '保存配置失败，已恢复到导入前的状态：{detail}',
       saveFailedPartial: '保存配置失败，而且没能完全恢复导入前的状态。请检查 data/settings.json、data/models.json 和 data/templates/（旧版本在 data/backups/）：{detail}',
     },

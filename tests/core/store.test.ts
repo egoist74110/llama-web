@@ -150,3 +150,25 @@ test('watch reloads hand edits, ignores own saves, keeps old value on bad edits'
     s.close()
   }
 })
+
+test('update starts from a hand edit already on disk, even before the watcher reports it', () => {
+  const s = make()
+  s.load()
+  s.watch(() => {})
+  try {
+    writeFileSync(s.file, JSON.stringify({ version: 1, items: ['hand'] }))
+    s.update(d => { d.items.push('mine') }) // immediately, inside the watcher's debounce
+    expect(JSON.parse(readFileSync(s.file, 'utf8')).items).toEqual(['hand', 'mine'])
+  } finally {
+    s.close()
+  }
+})
+
+test('refresh / update refuse to overwrite a broken hand edit', () => {
+  const s = make()
+  s.load()
+  writeFileSync(s.file, '{ half-typed')
+  expect(() => s.refresh()).toThrow(StoreError)
+  expect(() => s.update(d => { d.items.push('x') })).toThrow(StoreError)
+  expect(readFileSync(s.file, 'utf8')).toBe('{ half-typed')
+})

@@ -16,6 +16,17 @@
 
 ---
 
+## 2026-09-30 · 阶段 1 第二轮复审处理 · Opus 5.5
+- 完成：`docs/reviews/stage-1-codex-r2.md` 的 CR-001 剩余、CR-004 剩余、CR-012 全部修复，各条后写了「处理」。
+  - proxy：新增导出 `bounded(p, signal, ms?)`（每次等待一个 abort 监听，结束即移除）；冷加载转发循环所有等待以 `ac.signal` 为界（客户端断开 + 租约 abort）；模型中止后的最后错误事件最多等 `finalEventTimeoutMs`（默认 5 秒）。
+  - store：新增 `refresh()`，`update()` 从磁盘最新内容开始；磁盘文件损坏时抛 StoreError，不覆盖。context 新增 `refresh()`；`commitImport` 先 refresh，失败为 `ImportError('config-invalid')`。
+- 验证：`bun test` 186 通过；`bun run typecheck` 通过；proxy 测试连跑 3 次。新的强卸载 / 崩溃任务退出测试、store 手改测试在旧代码上确认失败。没有 build（用户 start.bat 在运行）。
+- 剩余：无（CR-003 余项按用户决定在阶段 2）。
+- 决定 / 坑：`JsonStore.update()` 现在会先读磁盘；手改文件写坏时，所有写入（包括下载完成写 `llamacpp.current`）都会失败并报错，而不是覆盖掉手改。Windows 上 setTimeout 精度约 15 ms，涉及大量小间隔分块的测试要留足超时。
+- 下一步：Codex 第三轮复审；通过且用户试用确认后开始 2-1。
+
+---
+
 ## 2026-09-30 · 阶段 1 审查意见 · 用户决定落地 · Opus 5.5
 - 完成：用户决定 CR-010 选 A、CR-011 选 B、CR-003 余项留到阶段 2。CR-010：计划关键决定 5 加导入例外；导入结果 `mmproj` 改为所选文件相对路径，状态页导入结果显示文件名并提示如何更换。CR-011：scheduler 去掉 `servedOk`，自动重载出来的进程再崩溃即 failed，手动 start/retry 后重新计；计划关键决定 22、状态机图、变更记录已同步。审查文件对应条目已更新。
 - 验证：`bun test` 178 通过；`bun run typecheck` 通过。没有 build（用户的 start.bat 仍在运行，见下一条）。

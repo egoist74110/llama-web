@@ -2,7 +2,8 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { defaultModels, defaultSettings, type ModelsDoc, type Settings } from '../../server/core/config'
+import { defaultModels, defaultSettings, normalizeModels, normalizeSettings, type ModelsDoc, type Settings } from '../../server/core/config'
+import { JsonStore } from '../../server/core/store'
 import { aliasOf, commitImport, ImportError, ImportSaveError, importSwapConfig, parseSwapConfig, readImportSource } from '../../server/core/importer'
 import { mmprojSpec, modelSpec, writeGguf } from '../fixtures/gguf-builder'
 
@@ -279,4 +280,54 @@ test('a template copy failing midway removes the templates already copied', asyn
   expect(e.rolledBack).toBe(true)
   expect(existsSync(join(data, 'templates', 'good.jinja'))).toBe(false)
   expect(target.getModels().models).toEqual([])
+})
+
+test('commitImport keeps hand edits of settings.json / models.json not yet seen by the watcher', async () => {
+  writeGguf(join(root, 'A-Q4_0.gguf'), modelSpec())
+  const sStore = new JsonStore<Settings>({ dataDir: data, name: 'settings.json', version: 1, defaults: defaultSettings, validate: normalizeSettings })
+  const mStore = new JsonStore<ModelsDoc>({ dataDir: data, name: 'models.json', version: 1, defaults: defaultModels, validate: normalizeModels })
+  sStore.load()
+  mStore.load()
+  const target = {
+    dataDir: data,
+    getSettings: () => sStore.get(),
+    getModels: () => mStore.get(),
+    updateSettings: (fn: () => Settings) => sStore.update(fn),
+    updateModels: (fn: () => ModelsDoc) => mStore.update(fn),
+    refresh: () => { sStore.refresh(); mStore.refresh() },
+  }
+  const src = await readImportSource({ configPath: writeConfig(), settings: target.getSettings() })
+  // Hand edits land on disk during the scan; nobody has reloaded them yet.
+  writeFileSync(sStore.file, JSON.stringify({ ...defaultSettings(), gpu: { sampleSec: 7 } }))
+  const manual = { id: 'manual', name: 'Manual', backend: 'llama-server', file: { dirId: 'x', rel: 'm.gguf' }, mmproj: null, draft: null, activeProfile: 'p', profiles: { p: { overrides: {}, extraArgs: '' } } }
+  writeFileSync(mStore.file, JSON.stringify({ version: 1, models: [manual] }))
+  commitImport(src, target)
+  const settings = JSON.parse(readFileSync(sStore.file, 'utf8'))
+  const models = JSON.parse(readFileSync(mStore.file, 'utf8'))
+  expect(settings.gpu.sampleSec).toBe(7)
+  expect(settings.modelDirs.map((d: { id: string }) => d.id)).toEqual(['main'])
+  expect(models.models.map((m: { name: string }) => m.name)).toEqual(['Manual', 'A'])
+})
+
+test('commitImport writes nothing when a config file on disk is invalid', async () => {
+  writeGguf(join(root, 'A-Q4_0.gguf'), modelSpec())
+  const sStore = new JsonStore<Settings>({ dataDir: data, name: 'settings.json', version: 1, defaults: defaultSettings, validate: normalizeSettings })
+  const mStore = new JsonStore<ModelsDoc>({ dataDir: data, name: 'models.json', version: 1, defaults: defaultModels, validate: normalizeModels })
+  sStore.load()
+  mStore.load()
+  const target = {
+    dataDir: data,
+    getSettings: () => sStore.get(),
+    getModels: () => mStore.get(),
+    updateSettings: (fn: () => Settings) => sStore.update(fn),
+    updateModels: (fn: () => ModelsDoc) => mStore.update(fn),
+    refresh: () => { sStore.refresh(); mStore.refresh() },
+  }
+  const src = await readImportSource({ configPath: writeConfig(), settings: target.getSettings() })
+  writeFileSync(sStore.file, '{ broken')
+  const e = (() => { try { commitImport(src, target) } catch (x) { return x } })() as ImportError
+  expect(e).toBeInstanceOf(ImportError)
+  expect(e.code).toBe('config-invalid')
+  expect(readFileSync(sStore.file, 'utf8')).toBe('{ broken')
+  expect(JSON.parse(readFileSync(mStore.file, 'utf8')).models).toEqual([])
 })

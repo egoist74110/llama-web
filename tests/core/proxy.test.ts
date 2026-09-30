@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import sharp from 'sharp'
 import { defaultSettings, type ModelsDoc, type Settings } from '../../server/core/config'
 import { LoadError } from '../../server/core/runner'
-import { createProxy, type ProxyEvent } from '../../server/core/proxy'
+import { bounded, createProxy, type ProxyEvent } from '../../server/core/proxy'
 import { Scheduler, type ModelProcess, type Target } from '../../server/core/scheduler'
 
 // ---------------------------------------------------------------------------------------
@@ -17,6 +17,8 @@ interface Upstream {
   aborted: boolean
   succeed(): void
   fail(e?: unknown): void
+  /** The process dies while ready. */
+  crash(): void
 }
 
 function makeUpstream(target: Target, opts: { chunks?: number, gapMs?: number }): Upstream {
@@ -32,6 +34,7 @@ function makeUpstream(target: Target, opts: { chunks?: number, gapMs?: number })
     aborted: false,
     succeed: () => res(),
     fail: (e = new LoadError('exited', 'boom')) => { rej(e); exit() },
+    crash: () => { up.server.stop(true); exit() },
     server: Bun.serve({
       port: 0,
       hostname: '127.0.0.1',
@@ -95,7 +98,7 @@ afterEach(async () => {
   for (const c of cleanups.splice(0)) await c()
 })
 
-function setup(opts: { autoReady?: boolean, chunks?: number, gapMs?: number, heartbeatMs?: number, maxBodyBytes?: number, drainTimeoutMs?: number } = {}) {
+function setup(opts: { autoReady?: boolean, chunks?: number, gapMs?: number, heartbeatMs?: number, maxBodyBytes?: number, drainTimeoutMs?: number, finalEventTimeoutMs?: number } = {}) {
   const ups: Upstream[] = []
   const events: ProxyEvent[] = []
   const settings: Settings = defaultSettings()
@@ -114,6 +117,7 @@ function setup(opts: { autoReady?: boolean, chunks?: number, gapMs?: number, hea
     getSettings: () => settings,
     heartbeatMs: opts.heartbeatMs ?? 30,
     maxBodyBytes: opts.maxBodyBytes,
+    finalEventTimeoutMs: opts.finalEventTimeoutMs,
     onEvent: e => events.push(e),
   })
   const front = Bun.serve({
@@ -364,23 +368,76 @@ describe('client disconnect', () => {
     await until(() => ups[0]!.aborted)
   })
 
-  test('drain timeout while the cold-load stream is backpressured: lease released, switch proceeds', async () => {
-    const { inflight, proxy, sched } = setup({ chunks: 100, gapMs: 5, drainTimeoutMs: 100 })
+  /** Cold-load stream whose client reads one heartbeat and then stops pulling. */
+  async function stalledColdStream(proxy: ReturnType<typeof setup>['proxy'], inflight: () => number) {
     const req = new Request('http://x/v1/chat/completions', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ model: 'Alpha', stream: true }),
     })
+    // The forwarding task removes its req.signal listener in its finally: count that.
+    let exited = 0
+    const sig = req.signal
+    const remove = sig.removeEventListener.bind(sig)
+    ;(sig as any).removeEventListener = (type: string, l: any, o?: any) => {
+      if (type === 'abort') exited++
+      return remove(type, l, o)
+    }
     const res = await proxy.handleV1(req)
     const reader = res.body!.getReader()
     await reader.read()
     await until(() => inflight() === 1)
-    await Bun.sleep(200)
+    await Bun.sleep(200) // upstream chunks pile up until the writer blocks
+    return { reader, exited: () => exited }
+  }
+
+  test('drain timeout while the cold-load stream is backpressured: lease released, task ends without the client', async () => {
+    const { inflight, proxy, sched } = setup({ chunks: 1000, gapMs: 5, drainTimeoutMs: 100, finalEventTimeoutMs: 100 })
+    const { reader, exited } = await stalledColdStream(proxy, inflight)
     const lease = await sched.acquire({ modelId: 'b', profile: 'main' })
     expect(sched.stateOf({ modelId: 'a', profile: 'default' })).toBe('stopped')
     expect(inflight()).toBe(1) // only the new lease on b
+    // The old forwarding task must finish on its own, before anyone cancels the body.
+    await until(() => exited() === 1, 1000)
     lease.release()
     await reader.cancel().catch(() => {})
   })
+
+  test('model crash while the cold-load stream is backpressured: lease released, task ends without the client', async () => {
+    const { inflight, proxy, sched, ups } = setup({ chunks: 1000, gapMs: 5, finalEventTimeoutMs: 100 })
+    const { reader, exited } = await stalledColdStream(proxy, inflight)
+    ups[0]!.crash()
+    await until(() => inflight() === 0, 1000)
+    expect(sched.stateOf({ modelId: 'a', profile: 'default' })).toBe('crashed')
+    await until(() => exited() === 1, 1000)
+    await reader.cancel().catch(() => {})
+  })
+
+  test('long cold-load stream read normally: abort waiters stay bounded and are all removed', async () => {
+    const proto = AbortSignal.prototype as any
+    const add = proto.addEventListener
+    const remove = proto.removeEventListener
+    let active = 0
+    let peak = 0
+    proto.addEventListener = function (this: AbortSignal, type: string, ...rest: any[]) {
+      if (type === 'abort') peak = Math.max(peak, ++active)
+      return add.call(this, type, ...rest)
+    }
+    proto.removeEventListener = function (this: AbortSignal, type: string, ...rest: any[]) {
+      if (type === 'abort') active--
+      return remove.call(this, type, ...rest)
+    }
+    try {
+      const { post } = setup({ chunks: 200, gapMs: 1 })
+      const res = await post('/v1/chat/completions', { model: 'Alpha', stream: true })
+      const text = await res.text()
+      expect(text).toContain('data: {"i":199}')
+      // Waiters are per chunk wait and removed right after; 400 waits must not pile up.
+      expect(peak).toBeLessThan(40)
+    } finally {
+      proto.addEventListener = add
+      proto.removeEventListener = remove
+    }
+  }, 20000)
 
   test('while waiting for a load (non-stream): no lease left behind', async () => {
     const { post, ups, sched, inflight } = setup({ autoReady: false })
@@ -470,5 +527,31 @@ describe('/upstream', () => {
     expect(r.status).toBe(500)
     await r.text()
     expect(inflight()).toBe(0)
+  })
+})
+
+describe('bounded()', () => {
+  test('resolves/rejects with the promise and leaves no abort listener behind', async () => {
+    const ac = new AbortController()
+    let added = 0
+    let removed = 0
+    const add = ac.signal.addEventListener.bind(ac.signal)
+    const remove = ac.signal.removeEventListener.bind(ac.signal)
+    ;(ac.signal as any).addEventListener = (t: string, l: any, o?: any) => { added++; return add(t, l, o) }
+    ;(ac.signal as any).removeEventListener = (t: string, l: any, o?: any) => { removed++; return remove(t, l, o) }
+    for (let i = 0; i < 1000; i++) expect(await bounded(Promise.resolve(i), ac.signal)).toBe(i)
+    expect(await bounded(Promise.reject(new Error('x')), ac.signal).catch(e => e.message)).toBe('x')
+    expect(added).toBe(1001)
+    expect(removed).toBe(1001)
+  })
+
+  test('rejects early on abort or timeout', async () => {
+    const ac = new AbortController()
+    const never = new Promise<void>(() => {})
+    const p = bounded(never, ac.signal).catch(e => e)
+    ac.abort(new Error('gone'))
+    expect((await p).message).toBe('gone')
+    expect((await bounded(never, new AbortController().signal, 20).catch(e => e)).message).toContain('timed out')
+    expect((await bounded(never, ac.signal).catch(e => e)).message).toBe('gone') // already aborted
   })
 })
