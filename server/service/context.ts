@@ -7,6 +7,7 @@ import {
   type ModelsDoc, type Settings,
 } from '../core/config'
 import { planLaunch } from '../core/launch'
+import { ensureRuntime, type RuntimeStatus } from '../core/llamacpp'
 import { createProxy, type Proxy, type ProxyEvent } from '../core/proxy'
 import { runStartupCleanup } from '../core/residue'
 import { PidRegistry, Runner } from '../core/runner'
@@ -17,6 +18,11 @@ export interface AppContext {
   dataDir: string
   getSettings(): Settings
   getModels(): ModelsDoc
+  /** Save through the store (backup + atomic write) and make the change visible to getters. */
+  updateSettings(fn: (draft: Settings) => Settings | void): Settings
+  updateModels(fn: (draft: ModelsDoc) => ModelsDoc | void): ModelsDoc
+  /** State of the initial llama.cpp download / version check. */
+  getRuntimeStatus(): RuntimeStatus
   runner: Runner
   scheduler: Scheduler
   proxy: Proxy
@@ -29,7 +35,7 @@ const log = (...a: unknown[]) => console.info('[llama-web]', ...a)
 const logError = (...a: unknown[]) => console.error('[llama-web]', ...a)
 
 /** A store whose last good value is kept when the file becomes unreadable. */
-function openStore<T extends VersionedDoc>(store: JsonStore<T>, fallback: () => T): () => T {
+function openStore<T extends VersionedDoc>(store: JsonStore<T>, fallback: () => T) {
   let value: T
   try {
     value = store.load()
@@ -41,7 +47,14 @@ function openStore<T extends VersionedDoc>(store: JsonStore<T>, fallback: () => 
     value = next
     log(`reloaded ${store.file}`)
   }, e => logError(`ignored invalid edit of ${store.file}:`, (e as Error).message))
-  return () => value
+  return {
+    get: () => value,
+    update(fn: (draft: T) => T | void): T {
+      // Own writes are not reported by the file watcher, so refresh the cached value here.
+      value = store.update(fn)
+      return value
+    },
+  }
 }
 
 function describeTarget(t: { modelId: string, profile: string }) {
@@ -79,8 +92,10 @@ function createContext(): AppContext {
   const modelsStore = new JsonStore<ModelsDoc>({
     dataDir, name: 'models.json', version: MODELS_VERSION, defaults: defaultModels, validate: normalizeModels,
   })
-  const getSettings = openStore(settingsStore, defaultSettings)
-  const getModels = openStore(modelsStore, defaultModels)
+  const settingsRef = openStore(settingsStore, defaultSettings)
+  const modelsRef = openStore(modelsStore, defaultModels)
+  const getSettings = settingsRef.get
+  const getModels = modelsRef.get
 
   const cleanupDone = runStartupCleanup(dataDir).then((r) => {
     if (r.killed.length || r.skipped.length) log(`residue cleanup: killed ${r.killed.length}, skipped ${r.skipped.length}`)
@@ -105,9 +120,27 @@ function createContext(): AppContext {
   })
   const proxy = createProxy({ scheduler, getModels, getSettings, onEvent: logProxyEvent })
 
+  // Background: adopt an installed llama.cpp or download the first one. Never blocks startup.
+  let runtimeStatus: RuntimeStatus = { state: 'idle' }
+  void ensureRuntime({
+    dataDir,
+    cudaRuntime: getSettings().llamacpp.cudaRuntime,
+    current: getSettings().llamacpp.current,
+    allowDownload: getSettings().llamacpp.autoUpdate,
+    setCurrent: tag => settingsRef.update((s) => { s.llamacpp.current = tag }),
+    onStatus: (s) => {
+      runtimeStatus = s
+      if (s.state === 'working') log(`llama.cpp: ${s.step} ${s.detail}`.trim())
+      else if (s.state === 'ready') log(`llama.cpp: using ${s.tag}`)
+      else if (s.state === 'error') logError(`llama.cpp download failed: ${s.code} ${s.detail}`)
+      else if (s.state === 'disabled') log('llama.cpp: none installed and downloads are off (llamacpp.autoUpdate)')
+    },
+  }).catch(e => logError('llama.cpp check failed', e))
+
   let closing: Promise<void> | null = null
   return {
-    dataDir, getSettings, getModels, runner, scheduler, proxy, cleanupDone,
+    dataDir, getSettings, getModels, updateSettings: settingsRef.update, updateModels: modelsRef.update,
+    getRuntimeStatus: () => runtimeStatus, runner, scheduler, proxy, cleanupDone,
     shutdown() {
       closing ??= (async () => {
         settingsStore.close()

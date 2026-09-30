@@ -16,6 +16,21 @@
 
 ---
 
+## 2026-09-30 · 工作包 1-5 · Sonnet 5.5
+- 完成：plan 阶段 1 第 13 项（旧配置导入）、第 15 项（最简状态页）。`server/core/importer.ts`（+ `POST /api/import`，`{ path, dryRun? }`）、`server/core/llamacpp.ts`（版本目录扫描 + 初始下载）、`GET /api/state`、`app/pages/index.vue`（状态 + 导入表单）、`start.bat`、`.gitattributes`（bat 强制 CRLF）。context 新增 `updateSettings / updateModels / getRuntimeStatus`（自己写盘不会触发文件监听，必须走这两个）。
+- 验证：`bun test` 155 通过；`bun run typecheck`、`bun run build` 通过。构建产物经 `start.bat` 启动（临时数据目录，端口 5099，用完已删）：`/api/state`、页面 200；对旧 swap-config.json 做预览和真实导入（写入临时目录）：3 个模型、mmproj 和 `-md` 草稿模型配对正确、聊天模板复制成功、key/域名未导入；错误路径返回中文 400。**没有**实际下载 llama.cpp（未经用户同意不下几百 MB），**没有**测关闭 start.bat 窗口，没用 GPU。
+- 剩余（所以这两项没打勾）：
+  - 「llama.cpp 初始获取」：下载 / 校验 / 解压逻辑只用假网络和假解压测过，真实的 GitHub 资产格式只核对了 API 返回（`nightly-tag.txt`、`digest` 字段存在）。1-6 真机时请用户同意后跑一次真实下载。
+  - 「start.bat」：能构建并启动；「关窗口即停止」留给 1-6 实测。
+- 决定 / 坑：
+  - **需要用户确认**：导入时 mmproj 按目录自动配对（沿用旧生成器：优先 BF16/F16/F32），与关键决定 5「mmproj 默认不选」不同。理由：否则旧配置导入后图片功能全部失效。手动启用模型仍按决定 5。
+  - 旧配置里全局没写的参数视为「不传」（旧生成器就是这样），所以导入后 `defaults.batchSize` 等可能为 null。全局默认只在**首次导入**（models.json 为空）时覆盖；再次导入保留现有默认值，各模型的覆盖项按当时生效的默认值重新计算。已存在的同名模型跳过。
+  - 旧 `-md "<路径>"` 在模型目录内且扫描到时转成 `draft` 字段并从额外参数移除；否则留在额外参数并警告。旧的 `chat_template`（名字）追加为 `--chat-template <名>`；`chat_template_file` 复制到 `data/templates/`，同名不同内容时改名 `<名>-imported`。`public` 段（域名、隧道、key）整体不导入。
+  - 初始下载只在 `data/runtime` 里没有任何可用版本、且 `llamacpp.autoUpdate` 为 true 时发生；有版本但 `llamacpp.current` 为空或失效时自动采用最新已装版本。后台执行，不阻塞启动；下载前请求会得到 `no-runtime`。状态见 `/api/state` 的 `llamacpp.runtime`。解压用系统 `tar.exe`（Windows 自带 bsdtar），没加依赖。下载先到 `.tmp-*` 目录，完整后整体改名，失败不留半个版本。摘要缺失一律拒绝安装。
+  - 这台机器上启动子进程很慢（约 2.5 秒），涉及 spawn 的测试要给足超时。`cmd /c start.bat` 要写成 `.\start.bat`。
+  - 状态页只轮询 `/api/state`（每 2 秒），SSE 在 2-1。
+- 下一步：工作包 1-6（Opus 5.5，阶段 1 验收）。真机测试前先告诉用户（占用 GPU、需先关旧 llama-swap、需同意下载 llama.cpp）。
+
 ## 2026-09-30 · 工作包 1-4 · Opus 5.5
 - 完成：plan 阶段 1 第 10–12 项 +「单元测试」项。`server/core/` 新增 config.ts（settings / models 结构、默认值、补全）、routing.ts、launch.ts、proxy.ts、i18n.ts、preprocess/（index + image）；`server/service/context.ts` 单例接线；自定义 Bun 入口 `server/entry.ts`；开发模式路由 `server/routes/{v1,upstream}/[...path].ts`；插件 `plugins/residue.ts` 换成 `plugins/app.ts`。错误文案在 i18n `api` / `loadError`。
 - 验证：`bun test` 133 通过（全量 2 次，proxy 3 次）；`typecheck`、`build` 通过。构建产物 + 编译成 exe 的假 llama-server（临时数据目录，用完已删）：/v1/models、加载中心跳后逐 chunk 输出、长流式结束后才切换、非流式静默等 15 秒不断开、断开后切换、图片 2000x1000 png → 896x448 jpeg、无 mmproj 中文 400、/upstream、手改 settings.json 热重载。`nuxt dev` 下同样测了流式 / 断开 / 切换 / upstream。**没用真实 llama-server 和 GPU**，留给 1-6。

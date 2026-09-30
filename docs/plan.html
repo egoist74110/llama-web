@@ -387,9 +387,9 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
     <li class="task" data-done="true"><span class="t"><code>/v1/*</code> 转发：按 <code>model</code> 与 <code>名字:方案</code> 路由；流式直通；加载期间 SSE 心跳；<code>/v1/models</code> 自己返回</span><span class="when">2026-09-30</span></li>
     <li class="task" data-done="true"><span class="t">预处理链 + 图片压缩步骤（按模型可覆盖）；无 mmproj 时收到图片返回中文 400；请求体上限</span><span class="when">2026-09-30</span></li>
     <li class="task" data-done="true"><span class="t"><code>/upstream/:model/*</code> 直通</span><span class="when">2026-09-30</span></li>
-    <li class="task" data-done="false"><span class="t">从旧 <code>swap-config.json</code> 导入：模型、参数、额外参数、聊天模板文件（复制到 data/templates），不导入 API key</span><span class="when"></span></li>
+    <li class="task" data-done="true"><span class="t">从旧 <code>swap-config.json</code> 导入：模型、参数、额外参数、聊天模板文件（复制到 data/templates），不导入 API key</span><span class="when">2026-09-30</span></li>
     <li class="task" data-done="false"><span class="t">llama.cpp 初始获取：<code>data/runtime</code> 为空时从官方 Release 下载（完整更新流程在阶段 4）</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">最简状态页：当前模型、状态、已启用模型列表</span><span class="when"></span></li>
+    <li class="task" data-done="true"><span class="t">最简状态页：当前模型、状态、已启用模型列表</span><span class="when">2026-09-30</span></li>
     <li class="task" data-done="false"><span class="t"><code>start.bat</code>：启动服务，关窗口即停止</span><span class="when"></span></li>
     <li class="task" data-done="true"><span class="t">单元测试：gguf、scanner、args、scheduler 状态机、路由解析</span><span class="when">2026-09-30</span></li>
     <li class="task" data-done="false"><span class="t">真机冒烟（见「验收方式」）并如实报告</span><span class="when"></span></li>
@@ -536,6 +536,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
     <tr><td>2026-09-30</td><td>开发改为按工作包分会话进行，新增 claude-guide.html 与 handoff.md；每个工作包结束即推送</td></tr>
     <tr><td>2026-09-30</td><td>工作包 1-1 技术验证：sharp 可用、流式不缓冲、Bun 子进程随父进程退出；新增关键决定 25（自定义 Bun 入口），更新「风险与待验证」</td></tr>
     <tr><td>2026-09-30</td><td>工作包 1-4：/v1 转发、预处理链（图片压缩）、/upstream 直通、自定义 Bun 入口落地；请求体上限定为 100 MB（代码常量，未进设置）；目录结构补充 <code>server/entry.ts</code>、<code>server/service/</code>；更新「风险与待验证」</td></tr>
+    <tr><td>2026-09-30</td><td>工作包 1-5：旧配置导入（<code>server/core/importer.ts</code>，<code>POST /api/import</code>，支持 dryRun）、llama.cpp 初始获取（<code>server/core/llamacpp.ts</code>，只在 data/runtime 没有可用版本且 <code>llamacpp.autoUpdate</code> 为真时下载）、最简状态页（<code>GET /api/state</code>）、<code>start.bat</code>。导入按旧生成器的行为还原：mmproj 按目录自动配对、<code>-md</code> 草稿模型转成 draft 字段、旧全局参数里没写的项视为「不传」；<code>public</code> 段整体不导入。「llama.cpp 初始获取」「start.bat」两项未打勾，原因见 handoff</td></tr>
   </table>
 </section>
 </main>
