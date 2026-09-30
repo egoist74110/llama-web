@@ -8,6 +8,7 @@ import {
 } from '../core/config'
 import { LaunchConfigError, planLaunch } from '../core/launch'
 import { ensureRuntime, type RuntimeStatus } from '../core/llamacpp'
+import { describeModels, LiveHub } from '../core/live'
 import { createProxy, type Proxy, type ProxyEvent } from '../core/proxy'
 import { runStartupCleanup } from '../core/residue'
 import { PidRegistry, Runner } from '../core/runner'
@@ -28,6 +29,8 @@ export interface AppContext {
   runner: Runner
   scheduler: Scheduler
   proxy: Proxy
+  /** Live state for /api/stream and /api/state. */
+  live: LiveHub
   /** Resolves once startup residue cleanup has finished. */
   cleanupDone: Promise<void>
   shutdown(): Promise<void>
@@ -37,7 +40,7 @@ const log = (...a: unknown[]) => console.info('[llama-web]', ...a)
 const logError = (...a: unknown[]) => console.error('[llama-web]', ...a)
 
 /** A store whose last good value is kept when the file becomes unreadable. Exported for tests. */
-export function openStore<T extends VersionedDoc>(store: JsonStore<T>, fallback: () => T) {
+export function openStore<T extends VersionedDoc>(store: JsonStore<T>, fallback: () => T, onChange?: () => void) {
   let value: T
   try {
     value = store.load()
@@ -48,16 +51,19 @@ export function openStore<T extends VersionedDoc>(store: JsonStore<T>, fallback:
   store.watch((next) => {
     value = next
     log(`reloaded ${store.file}`)
+    onChange?.()
   }, e => logError(`ignored invalid edit of ${store.file}:`, (e as Error).message))
   return {
     get: () => value,
     refresh(): T {
       value = store.refresh()
+      onChange?.()
       return value
     },
     update(fn: (draft: T) => T | void): T {
       // Own writes are not reported by the file watcher, so refresh the cached value here.
       value = store.update(fn)
+      onChange?.()
       return value
     },
   }
@@ -98,8 +104,10 @@ function createContext(): AppContext {
   const modelsStore = new JsonStore<ModelsDoc>({
     dataDir, name: 'models.json', version: MODELS_VERSION, defaults: defaultModels, validate: normalizeModels,
   })
-  const settingsRef = openStore(settingsStore, defaultSettings)
-  const modelsRef = openStore(modelsStore, defaultModels)
+  // `live` is created below; stores only call it after startup.
+  const changed = () => live.notify()
+  const settingsRef = openStore(settingsStore, defaultSettings, changed)
+  const modelsRef = openStore(modelsStore, defaultModels, changed)
   const getSettings = settingsRef.get
   const getModels = modelsRef.get
 
@@ -112,10 +120,19 @@ function createContext(): AppContext {
     get portRange() { return getSettings().scheduler.portRange },
     registry: new PidRegistry(join(dataDir, 'run', 'pids.json')),
   })
-  const scheduler = new Scheduler({
+  let runtimeStatus: RuntimeStatus = { state: 'idle' }
+  const live: LiveHub = new LiveHub({
+    snapshot: () => ({
+      scheduler: scheduler.snapshot(),
+      models: describeModels(getModels()),
+      queue: scheduler.snapshot().queue.map(q => ({ modelId: q.modelId, profile: q.profile, started: q.started, waiting: q.waiting })),
+      llamacpp: { current: getSettings().llamacpp.current, runtime: runtimeStatus },
+    }),
+  })
+  const scheduler: Scheduler = new Scheduler({
     maxLoaded: getSettings().scheduler.maxLoaded,
     get drainTimeoutMs() { return getSettings().scheduler.drainTimeoutSec * 1000 },
-    onEvent: logSchedulerEvent,
+    onEvent: (e) => { logSchedulerEvent(e); live.onSchedulerEvent(e) },
     // Initial llama.cpp download still running (or not installed yet): not a model failure.
     isPrecondition: e => e instanceof LaunchConfigError && e.code === 'no-runtime',
     launch: async (target) => {
@@ -129,7 +146,6 @@ function createContext(): AppContext {
   const proxy = createProxy({ scheduler, getModels, getSettings, onEvent: logProxyEvent })
 
   // Background: adopt an installed llama.cpp or download the first one. Never blocks startup.
-  let runtimeStatus: RuntimeStatus = { state: 'idle' }
   void ensureRuntime({
     dataDir,
     cudaRuntime: getSettings().llamacpp.cudaRuntime,
@@ -138,6 +154,7 @@ function createContext(): AppContext {
     setCurrent: tag => settingsRef.update((s) => { s.llamacpp.current = tag }),
     onStatus: (s) => {
       runtimeStatus = s
+      live.onRuntimeStatus(s)
       if (s.state === 'working') log(`llama.cpp: ${s.step} ${s.detail}`.trim())
       else if (s.state === 'ready') log(`llama.cpp: using ${s.tag}`)
       else if (s.state === 'error') logError(`llama.cpp download failed: ${s.code} ${s.detail}`)
@@ -149,7 +166,7 @@ function createContext(): AppContext {
   return {
     dataDir, getSettings, getModels, updateSettings: settingsRef.update, updateModels: modelsRef.update,
     refresh: () => { settingsRef.refresh(); modelsRef.refresh() },
-    getRuntimeStatus: () => runtimeStatus, runner, scheduler, proxy, cleanupDone,
+    getRuntimeStatus: () => runtimeStatus, runner, scheduler, proxy, live, cleanupDone,
     shutdown() {
       closing ??= (async () => {
         settingsStore.close()

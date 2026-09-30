@@ -16,6 +16,20 @@
 
 ---
 
+## 2026-09-30 · 工作包 2-1 · Sonnet 5.5
+- 完成：plan 阶段 2 第 1–3 项（Nuxt UI + 布局 + 深浅色 + i18n；`/api/stream` + `useLive` composable；总览页）。后端 `server/core/live.ts`（`LiveHub`：状态快照、最近 50 条事件、`handleStream` SSE）；context 新增 `live`，scheduler 事件 / llama.cpp 状态 / 配置文件变化都会触发推送；`/api/state` 与流里的 `snapshot` 是同一份文档。前端 `app/`：`layouts/default.vue`（顶栏 + 侧栏）、基础组件 `AppCard` / `PageHeader` / `StateDot` / `StateBadge`、`composables/useLive.ts` / `useFormat.ts`；页面 总览 + 模型 / 日志 / 设置（占位）。旧配置导入表单挪成 `ImportCard`，暂放设置页。
+- 验证：`bun test` 198 通过（新增 `tests/core/live.test.ts` 9 条）；`bun run typecheck`、`bun run build` 通过。构建产物 + 编译成 exe 的假 llama-server（临时数据目录，端口 5099，用完已停、已删）在内置浏览器实测：加载中（计时 + 进度条 + 排队）→ 失败（红点 + 中文原因 + 事件）、浅 / 深色、手机宽度、杀服务后出现「实时连接已断开」横幅。**没测**：服务重启后浏览器自动重连（EventSource 自带，没单独验证）；没用真实 llama-server / GPU；`nuxt dev` 下的 `/api/stream` 没跑。
+- 剩余：总览页的显存条、速度（prompt/生成 t/s）、真实加载百分比属于 3-2，没做；顶栏只显示模型名 + 状态 + llama.cpp 版本（没有速度，没有更新 / 告警提示）。
+- 决定 / 坑：
+  - `nuxt.config` 设了 `ssr: false`（纯 SPA；本地控制台不需要 SSR，也避免 hydration 问题）。图标用 `@iconify-json/lucide` 本地打包，不走在线 Iconify。
+  - `/api/stream` 在自定义入口里原生处理（和 /v1 一样用 `req.signal`），所以不再需要「内部请求 ID」；开发模式走 `server/api/stream.get.ts`。
+  - 在途请求数 / 排队的变化没有事件，`handleStream` 每 2 秒 `notify()` 一次，`LiveHub` 只在快照真的变了才推送。
+  - 配色：`app/assets/css/main.css` 用 `--ui-*` 变量覆盖 Nuxt UI 的背景 / 文字 / 边框（深色 #1b1d21 灰底），强调色 `blue`；状态色只用在 `StateDot` / `StateBadge` / 错误文字上。后面的页面复用 `AppCard`，不要另写卡片样式。
+  - 总览的「启动 / 停止 / 重试」按钮不在 2-1（模型页 2-2 做）；失败卡片的手动重试入口同理（CR-003 余项）。
+- 下一步：工作包 2-2（Sonnet 5.5，模型页：已启用列表 + 扫描发现）。
+
+---
+
 ## 2026-09-30 · 阶段 1 第三轮复审处理 · Opus 5.5
 - 完成：`docs/reviews/stage-1-codex-r3.md` 的 CR-001 剩余、CR-013 已修复，各条后写了「处理」。proxy 冷加载流所有结束路径改用有界的 `sendFinal()`（删 `sendError`）；`bounded()` 增加 `activeBoundedWaits()` 计数。store 的 `refresh()` 读到新内容时立即调用 watch 回调；context 的 `openStore` 导出供测试。
 - 验证：`bun test` 189 通过（全量 2 次）；`bun run typecheck` 通过；三条新测试在上一版代码上确认失败。Codex 首跑时 scheduler「crash -> crashed」的一次失败在 Windows 上连跑 30 次未复现；已去掉会替换全局 `AbortSignal.prototype` 的测试写法，原因仍未确认。没有 build（用户 start.bat 在运行）。

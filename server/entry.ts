@@ -2,12 +2,13 @@
 // whole body before handing it to Nitro, drops req.signal, and inherits Bun's 10 s idle
 // timeout. Here:
 // - every request gets `server.timeout(req, 0)` (no idle timeout; loads can take minutes);
-// - /v1/* and /upstream/* are handled natively (streaming pass-through, disconnect = abort);
+// - /v1/*, /upstream/* and GET /api/stream are handled natively (streaming, disconnect = abort);
 // - everything else goes to Nitro via localFetch.
 // Only used by the build (`bun run build` / `bun run preview` / start.bat); `nuxt dev`
 // serves /v1 and /upstream through server/routes/ instead.
 import '#nitro-internal-pollyfills'
 import { useNitroApp } from 'nitropack/runtime'
+import { handleStream } from './core/live'
 import { getContext } from './service/context'
 
 const nitroApp = useNitroApp()
@@ -22,6 +23,7 @@ const server = Bun.serve({
     const url = new URL(req.url)
     if (url.pathname.startsWith('/v1/')) return ctx.proxy.handleV1(req)
     if (url.pathname.startsWith('/upstream/')) return ctx.proxy.handleUpstream(req)
+    if (url.pathname === '/api/stream' && req.method === 'GET') return handleStream(req, { hub: ctx.live })
     const body = req.body ? await req.arrayBuffer() : undefined
     return nitroApp.localFetch(url.pathname + url.search, {
       host: url.hostname,

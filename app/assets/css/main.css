@@ -1,0 +1,33 @@
+@import "tailwindcss";
+@import "@nuxt/ui";
+
+/* One accent colour (blue). Status colours appear only on dots and badges. */
+@theme static {
+  --font-sans: system-ui, 'Segoe UI', 'Microsoft YaHei UI', 'PingFang SC', sans-serif;
+}
+
+:root {
+  --ui-radius: 0.625rem;
+  --ui-bg: #f6f7f9;
+  --ui-bg-elevated: #ffffff;
+  --ui-bg-muted: #eef0f3;
+  --ui-bg-accented: #e6e9ed;
+  --ui-border: #e3e6ea;
+  --ui-text: #1f2328;
+  --ui-text-muted: #5b6470;
+  --ui-text-dimmed: #8791a0;
+}
+
+/* Dark mode: grey background, soft text; never pure black / white. */
+.dark {
+  --ui-bg: #1b1d21;
+  --ui-bg-elevated: #23262b;
+  --ui-bg-muted: #2b2f35;
+  --ui-bg-accented: #33373e;
+  --ui-border: #33373e;
+  --ui-text: #d7dbe0;
+  --ui-text-muted: #8e96a1;
+  --ui-text-dimmed: #6d7580;
+}
+
+html, body { background: var(--ui-bg); color: var(--ui-text); }
