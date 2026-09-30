@@ -371,10 +371,10 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
   <ul class="tasks">
     <li class="task" data-done="true"><span class="t">初始化 Nuxt 4 + Bun + TypeScript 项目、<code>.gitignore</code>（含 <code>data/</code>）、GitHub 公开仓库 <code>llama-web</code></span><span class="when">2026-09-30</span></li>
     <li class="task" data-done="true"><span class="t">技术验证：Bun + Windows 下 sharp 可用；Nitro 在 bun preset 下 SSE 流式转发不缓冲；<code>Bun.spawn</code> 启动 llama-server 并能杀掉进程树（用替身进程验证，真实 llama-server 在 1-3 实测；结论见「风险与待验证」）</span><span class="when">2026-09-30</span></li>
-    <li class="task" data-done="false"><span class="t">store：<code>data/</code> 下 JSON 读写、原子写入（临时文件 + 改名）、备份、文件变化自动重载、版本号字段</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">gguf.ts：读取 GGUF 头部元数据（架构、参数量、量化、原生上下文、是否内嵌模板）</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">scanner.ts：多目录递归扫描、深度限制、分片合并、识别 mmproj / mtp 候选</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">args.ts：全局 → 模型 → 方案的参数合并；额外参数按 shell 规则拆分；重复参数检测；生成完整命令预览</span><span class="when"></span></li>
+    <li class="task" data-done="true"><span class="t">store：<code>data/</code> 下 JSON 读写、原子写入（临时文件 + 改名）、备份、文件变化自动重载、版本号字段</span><span class="when">2026-09-30</span></li>
+    <li class="task" data-done="true"><span class="t">gguf.ts：读取 GGUF 头部元数据（架构、参数量、量化、原生上下文、是否内嵌模板）</span><span class="when">2026-09-30</span></li>
+    <li class="task" data-done="true"><span class="t">scanner.ts：多目录递归扫描、深度限制、分片合并、识别 mmproj / mtp 候选</span><span class="when">2026-09-30</span></li>
+    <li class="task" data-done="true"><span class="t">args.ts：全局 → 模型 → 方案的参数合并；额外参数按 shell 规则拆分；重复参数检测；生成完整命令预览</span><span class="when">2026-09-30</span></li>
     <li class="task" data-done="false"><span class="t">runner.ts：分配端口、spawn（参数数组）、健康检查（<code>/health</code>）、加载超时、停止（杀进程树）、stdout/stderr 采集、pids.json 记录</span><span class="when"></span></li>
     <li class="task" data-done="false"><span class="t">启动时残留清理：按 pids.json 结束上次遗留、且可执行文件位于 <code>data/runtime</code> 下的 llama-server</span><span class="when"></span></li>
     <li class="task" data-done="false"><span class="t">scheduler.ts：状态机、切换队列、draining 超时、多个请求共享同一次加载、崩溃后最多自动重载一次、在线上限 X（固定 1，LRU）</span><span class="when"></span></li>

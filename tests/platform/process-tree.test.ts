@@ -59,7 +59,7 @@ describe.skipIf(!isWin)('process tree on windows', () => {
     const dead = await waitDead(childPid)
     if (!dead) process.kill(childPid)
     expect(dead).toBe(true)
-  })
+  }, 30000)
 
   test('taskkill /T /F kills the whole tree', async () => {
     const { parent, childPid } = await spawnTree()
@@ -68,7 +68,7 @@ describe.skipIf(!isWin)('process tree on windows', () => {
     expect(await tk.exited).toBe(0)
     await parent.exited
     expect(await waitDead(childPid)).toBe(true)
-  })
+  }, 30000)
 
   test('executable path of a pid can be read (for residue cleanup)', async () => {
     const p = Bun.spawn([process.execPath, '-e', 'setInterval(() => {}, 1000)'], { stdout: 'ignore' })
