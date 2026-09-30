@@ -32,21 +32,24 @@ llama-web：本地私有 LLM 控制台。一个 Nuxt + Bun 进程，负责：
 ## 常用命令
 
 ```bash
-bun install          # 安装依赖
-bun run dev          # 开发模式
-bun test             # 单元测试
-bun run build        # 构建
-start.bat            # 用户实际使用的启动方式
+bun install          # 安装依赖（postinstall 会执行 nuxt prepare）
+bun run dev          # 开发模式（Node 开发服务器，不走自定义 Bun 入口）
+bun test             # 单元测试（tests/，含 Windows 平台检查，约 10 秒）
+bun run typecheck    # 类型检查（nuxt typecheck / vue-tsc）
+bun run build        # 构建到 .output/
+bun run preview      # 用 bun 运行构建产物（默认端口 3000，PORT 环境变量可改）
+start.bat            # 用户实际使用的启动方式（1-5 实现）
 ```
 
-（项目初始化后，如命令有变化，请同步更新这里。）
+- `typescript` 固定在 5.x：vue-tsc 3.3 还不支持 TypeScript 7。
+- 提交前至少跑 `bun test` 和 `bun run typecheck`。
 
 ## 目录
 
 - `app/`：前端页面、组件、composables
 - `i18n/zh-CN.ts`：**所有界面文案**。组件里不要写死中文字符串
 - `server/api/`：管理接口
-- `server/routes/v1/`：OpenAI 兼容转发
+- `server/routes/v1/`：OpenAI 兼容转发（按关键决定 25，`/v1/*` 实际由自定义 Bun 入口原生处理，具体位置在 1-4 定）
 - `server/core/`：scheduler、runner、args、scanner、gguf、preprocess、errors、updater、gpu、store、backends
 - `server/plugins/`：启动时执行的逻辑
 - `tests/`：单元测试

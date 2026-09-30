@@ -237,6 +237,7 @@ li.task .when{color:var(--ok);font-size:12px;white-space:nowrap}
     <tr><td>22</td><td>加载失败 / 崩溃</td><td>不自动重试；中文原因 + 最后 30 行日志；崩溃后下一个请求最多自动重载一次，再失败需手动重试；加载超时默认 600 秒</td></tr>
     <tr><td>23</td><td>启动时加载</td><td>不自动加载，等第一个请求</td></tr>
     <tr><td>24</td><td>交付方式</td><td>4 个阶段，每阶段做完停下来让用户试用确认，再继续</td></tr>
+    <tr><td>25</td><td>HTTP 入口</td><td>不用 Nitro 自带的 bun 入口，改用自定义 Bun 入口：<code>/v1/*</code>、<code>/upstream/*</code> 由 Bun 原生处理；其余交给 Nitro，并把断开信号和客户端 IP 传给处理函数；关闭每个请求的空闲超时（原因见「风险与待验证」）</td></tr>
   </table>
 </section>
 
@@ -368,8 +369,8 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
   <div class="stage-head"><h2>阶段 1 · 核心</h2><div class="stage-meta"><span class="count"></span><div class="bar"><i></i></div></div></div>
   <div class="stage-goal">做完后：<b>完全替代 llama-swap + 图片代理</b>，酒馆连 <code>:5001</code> 直接可用。这一阶段只有一个最简单的状态页，配置可以先手改 JSON。</div>
   <ul class="tasks">
-    <li class="task" data-done="false"><span class="t">初始化 Nuxt 4 + Bun + TypeScript 项目、<code>.gitignore</code>（含 <code>data/</code>）、GitHub 公开仓库 <code>llama-web</code></span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">技术验证：Bun + Windows 下 sharp 可用；Nitro 在 bun preset 下 SSE 流式转发不缓冲；<code>Bun.spawn</code> 启动 llama-server 并能杀掉进程树</span><span class="when"></span></li>
+    <li class="task" data-done="true"><span class="t">初始化 Nuxt 4 + Bun + TypeScript 项目、<code>.gitignore</code>（含 <code>data/</code>）、GitHub 公开仓库 <code>llama-web</code></span><span class="when">2026-09-30</span></li>
+    <li class="task" data-done="true"><span class="t">技术验证：Bun + Windows 下 sharp 可用；Nitro 在 bun preset 下 SSE 流式转发不缓冲；<code>Bun.spawn</code> 启动 llama-server 并能杀掉进程树（用替身进程验证，真实 llama-server 在 1-3 实测；结论见「风险与待验证」）</span><span class="when">2026-09-30</span></li>
     <li class="task" data-done="false"><span class="t">store：<code>data/</code> 下 JSON 读写、原子写入（临时文件 + 改名）、备份、文件变化自动重载、版本号字段</span><span class="when"></span></li>
     <li class="task" data-done="false"><span class="t">gguf.ts：读取 GGUF 头部元数据（架构、参数量、量化、原生上下文、是否内嵌模板）</span><span class="when"></span></li>
     <li class="task" data-done="false"><span class="t">scanner.ts：多目录递归扫描、深度限制、分片合并、识别 mmproj / mtp 候选</span><span class="when"></span></li>
@@ -502,9 +503,9 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
   <h2>风险与待验证</h2>
   <table>
     <tr><th>风险</th><th>应对</th></tr>
-    <tr><td>关窗口时子进程是否一定退出</td><td>Windows 下同一控制台的子进程通常一起收到关闭事件；兜底是启动时按 pids.json 清理。阶段 1 实测，不可靠时考虑 Job Object。</td></tr>
-    <tr><td>sharp 在 Bun + Windows 下的兼容性</td><td>阶段 1 第二项先验证；不行则图片处理改为 Node 子进程或换库。</td></tr>
-    <tr><td>Nitro 在 bun 下流式响应被缓冲</td><td>阶段 1 验证逐 chunk 到达；必要时 <code>/v1</code> 转发改用 Bun 原生处理。</td></tr>
+    <tr><td>关窗口时子进程是否一定退出</td><td>Windows 下同一控制台的子进程通常一起收到关闭事件；兜底是启动时按 pids.json 清理。阶段 1 实测，不可靠时考虑 Job Object。<br><b>1-1 实测（Bun 1.3.14 / Win11）：</b>Bun 启动的子进程会随 Bun 进程一起退出，即使对 Bun 进程 <code>taskkill /F</code>（不带 <code>/T</code>）也是如此，表现同 kill-on-close Job Object；非 Bun 子进程（ping）同样。主动停止用 <code>taskkill /PID &lt;pid&gt; /T /F</code> 杀树，已验证。读取进程可执行文件路径可用 PowerShell <code>Get-CimInstance Win32_Process</code>（较慢，约数秒，只适合启动时清理）。关闭 start.bat 窗口的场景仍留到 1-6 实测。见 <code>tests/platform/process-tree.test.ts</code>。</td></tr>
+    <tr><td>sharp 在 Bun + Windows 下的兼容性</td><td>阶段 1 第二项先验证；不行则图片处理改为 Node 子进程或换库。<br><b>1-1 实测：可用。</b>sharp 0.35 在 bun test 和构建产物（<code>.output</code>，bun 运行）里都能缩放、编码 jpeg、读取 webp/gif。见 <code>tests/platform/sharp.test.ts</code>。</td></tr>
+    <tr><td>Nitro 在 bun 下流式响应被缓冲</td><td>阶段 1 验证逐 chunk 到达；必要时 <code>/v1</code> 转发改用 Bun 原生处理。<br><b>1-1 实测：不缓冲</b>（<code>createEventStream</code> 与直接返回上游 body 都按 400ms 间隔逐 chunk 到达）。<b>但 Nitro 自带的 bun 入口有三个问题：</b>① 只把路径、头和已读完的 body 交给 <code>localFetch</code>，处理函数拿不到 <code>req.signal</code>，客户端断开时上游不会被取消，<code>createEventStream</code> 的 <code>onClosed</code> 也不会触发；② 拿不到客户端 IP；③ <code>Bun.serve</code> 默认空闲超时 10 秒，长时间没有输出的请求（例如非流式请求等待模型加载）会被断开（实测失败）。<br><b>应对（已验证可行，见关键决定 25）：</b>用自定义 Bun 入口（<code>nitro.entry</code>，需用绝对路径）：每个请求 <code>server.timeout(req, 0)</code>；<code>/v1/*</code>、<code>/upstream/*</code> 由 Bun 原生处理（逐 chunk 直通、断开时上游被取消、IP 可得）；其余请求交给 <code>localFetch</code>，并通过入口覆盖写入的内部请求 ID 让处理函数取到 <code>signal</code> 和 IP（SSE 断开可感知、静默 30 秒不断）。<code>nuxt dev</code> 用的是 Node 开发服务器，不走该入口，1-4 需要考虑开发模式。</td></tr>
     <tr><td>llama.cpp 参数改名导致启动失败</td><td>更新后首次加载失败时提示回退；errors.ts 识别「未知参数」。</td></tr>
     <tr><td>Release 资产命名变化</td><td>更新失败只记事件，不影响现有版本使用。</td></tr>
     <tr><td>data/secrets.json 明文</td><td>用户已接受；只靠 .gitignore + pre-commit；需要时可以挪出项目目录。</td></tr>
@@ -527,6 +528,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
     <tr><th>日期</th><th>内容</th></tr>
     <tr><td>2026-09-30</td><td>初版：根据 24 轮需求问答整理</td></tr>
     <tr><td>2026-09-30</td><td>开发改为按工作包分会话进行，新增 claude-guide.html 与 handoff.md；每个工作包结束即推送</td></tr>
+    <tr><td>2026-09-30</td><td>工作包 1-1 技术验证：sharp 可用、流式不缓冲、Bun 子进程随父进程退出；新增关键决定 25（自定义 Bun 入口），更新「风险与待验证」</td></tr>
   </table>
 </section>
 </main>
