@@ -35,6 +35,8 @@ export function useModelActions() {
     stop: (id: string) => run(`stop:${id}`, 'stopFailed', () => post(path(id, 'stop'))),
     retry: (id: string, profile?: string) => run(`retry:${id}`, 'retryFailed', () => post(path(id, 'retry'), { profile })),
     setProfile: (id: string, profile: string) => run(`profile:${id}`, 'profileFailed', () => post(path(id, 'profile'), { profile })),
+    saveFiles: (id: string, body: object) => run(`files:${id}`, 'editFailed', () => post(path(id, 'files'), body)) as Promise<{ restarted: boolean } | null>,
+    profileOp: (id: string, body: object) => run(`profiles:${id}`, 'profileOpFailed', () => post(path(id, 'profiles'), body)) as Promise<{ name?: string, restarted?: boolean } | null>,
     enable: async (ref: { dirId: string, rel: string }) => {
       const r = await run(`enable:${ref.dirId}/${ref.rel}`, 'enableFailed', () => post('/api/models', ref)) as { model: { name: string } } | null
       if (r) toast.add({ title: fmt(t.models.toast.enabled, { name: r.model.name }), color: 'success', icon: 'i-lucide-check' })

@@ -16,6 +16,21 @@
 
 ---
 
+## 2026-09-30 · 工作包 2-3 · Sonnet 5.5
+- 完成：plan 阶段 2 第 6–8 项（模型编辑：文件区 + 聊天模板；参数表单 + 命令预览；配置方案增删改）。后端纯函数在 `server/core/models-admin.ts`（`applyFiles` / `saveProfile` / `createProfile` / `renameProfile` / `deleteProfile` / `sanitizeForm` / `listTemplates`），命令预览 `previewLaunch`（`server/core/launch.ts`，和 `planLaunch` 用同一个 `buildLaunchArgs`，缺文件 / 缺 runtime 不抛错而是报 `missing`）。接口：`GET /api/models/:id`（配置 + 全局默认 + 模板列表 + 在跑的方案）、`POST /api/models/:id/{files,preview,profiles}`。前端：`ModelEditor`（抽屉：文件区 + 方案管理）、`ProfileForm`（每个方案一份，常驻挂载，切换方案不丢未保存修改）、`useParamFields`。
+- 验证：`bun test` 227 通过（新增 `tests/core/models-edit.test.ts`、`launch.test.ts` 的 previewLaunch 5 条）；`bun run typecheck`、`bun run build` 通过。构建产物 + 编译成 exe 的假 llama-server（临时数据目录、端口 5098，用完已停、已删）在内置浏览器实测：选 mmproj 保存（models.json 写入）、新建方案、继承 / 自定义切换后预览实时变化、额外参数重复 / 保留参数警告、保存方案；**真实进程命令行与预览逐字一致**（仅端口由预览示例值 7100 对应实际分配）；运行中保存并重启、改名 / 删除被拒（中文提示）；手机宽度 + 深色。**没测**：真实 llama-server / GPU；`nuxt dev` 下的新接口；草稿模型下拉（只测了 mmproj）；聊天模板在界面上的选择（接口测了，`--chat-template-file` 进了命令）。
+- 剩余：无。聊天模板只能从 `data/templates/` 里已有的文件选（导入旧配置会复制进去），界面没有上传 / 新增模板入口（不在任务里）。
+- 决定 / 坑：
+  - 聊天模板是**方案级**字段（plan 配置结构如此），所以选择控件在方案表单里，不在文件区。
+  - 方案接口合成一个 `POST /api/models/:id/profiles`（`op`: create / duplicate / rename / delete / save），名字走 body，不放 URL（中文名 + 解码问题）。方案名不能含 `:`（路由按最后一个冒号拆 `名字:方案`）、≤ 40 字。
+  - 有实例在加载 / 运行的方案不能改名 / 删除（实例以方案名为键）；保存文件 / 方案只改配置，运行中的模型要点「保存并重启」才生效。
+  - 保存文件时，与当前不同的引用必须是服务端重新扫描出来的对应类型文件；没改的引用不再校验，所以文件丢失的模型仍可编辑。
+  - `UInput type="number"` 的 v-model 给的是数字，表单里统一转回字符串，否则 `.trim()` 抛错会让预览静默不刷新（实测踩到）。
+  - Bash 工具里带大量引号的 heredoc + `node -e` 容易整条解析失败；长内容用 Write 工具。
+- 下一步：工作包 2-4（Sonnet 5.5，设置页 + 首次启动向导 + 阶段 2 试用）。
+
+---
+
 ## 2026-09-30 · 工作包 2-2 · Sonnet 5.5
 - 完成：plan 阶段 2 第 4–5 项（模型页 已启用 + 扫描发现）。后端：`server/core/models-admin.ts`（`planEnable` / `missingFiles` / `switchProfile`，纯模块）；接口 `POST /api/scan`、`POST /api/models`（启用，服务端重新扫描，不信任前端元数据）、`POST /api/models/:id/{start,stop,retry,profile}`（都立即返回，进度走 `/api/stream`）。快照的 `models[]` 新增 `files`、`missing`（文件丢失）。前端：`ModelCard`（状态、启动 / 停止 / 重试、方案下拉、文件丢失标红且禁用启动、「排队中」）、`DiscoverPanel`（元数据、重新扫描、启用）、`useModelActions`（统一错误 toast）。
 - 验证：`bun test` 209 通过（新增 `models-admin.test.ts` 10 条、`live.test.ts` 1 条）；`bun run typecheck`、`bun run build` 通过。构建产物 + 编译成 exe 的假 llama-server + 假 GGUF（临时数据目录、端口 5099，用完已停、已删）在内置浏览器实测：启动 → 运行中；切方案自动重启；文件丢失标红且启动禁用；扫描（分片不完整、损坏文件、mmproj 候选提示）；一键启用；假进程立即退出 → 失败卡片 + 重试；另一模型运行时启动 → 「排队中」；手机宽度 / 深色。**没测**：真实 llama-server / GPU；`nuxt dev` 下的新接口；停止按钮的 `force`（接口支持，界面没放）。

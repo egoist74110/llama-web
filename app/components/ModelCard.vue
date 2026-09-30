@@ -16,6 +16,7 @@ const otherProfile = computed(() => (shown.value && shown.value.profile !== prop
 const missing = computed(() => props.model.missing)
 const failed = computed(() => state.value === 'failed' || state.value === 'crashed')
 const winding = computed(() => state.value === 'draining' || state.value === 'unloading')
+const editing = ref(false)
 const working = computed(() => !!(busy.value[`start:${props.model.id}`] || busy.value[`stop:${props.model.id}`] || busy.value[`retry:${props.model.id}`]))
 </script>
 
@@ -62,6 +63,9 @@ const working = computed(() => !!(busy.value[`start:${props.model.id}`] || busy.
             @update:model-value="(p: string) => setProfile(model.id, p)"
           />
         </div>
+        <UButton size="sm" color="neutral" variant="outline" icon="i-lucide-settings-2" @click="editing = true">
+          {{ t.models.edit.open }}
+        </UButton>
         <UButton
           v-if="state === 'stopped' && !queued"
           size="sm"
@@ -117,5 +121,6 @@ const working = computed(() => !!(busy.value[`start:${props.model.id}`] || busy.
         {{ t.models.card.missingHint }}
       </p>
     </div>
+    <ModelEditor v-model:open="editing" :model-id="model.id" />
   </section>
 </template>
