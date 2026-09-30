@@ -16,6 +16,25 @@
 
 ---
 
+## 2026-09-30 · 工作包 1-6 · Opus 5.5
+- 完成：plan 阶段 1 剩余三项（llama.cpp 初始获取、start.bat、真机冒烟）打勾，阶段 1 全部完成。修复：`llamacpp.ts` 新增 `pickCudaVersion`（官方已从 CUDA 13.3 换成 13.4，原来写死精确版本导致 `asset-missing`）；`start.bat` 的 `>/dev/null` 改 `>nul`、运行行加 `call`（bun 是 bun.cmd）、工作区改回 CRLF。新增测试 `tests/platform/start-bat.test.ts`、llamacpp 两条。
+- 验证：`bun test` 159 通过；`typecheck`、`build` 通过。真机（仓库 `data/`，RTX 5090，b11146）逐条验收，全部通过：
+  - 真实下载 bin 150 MB + cudart 423 MB，SHA-256 校验、解压、自动设为 current。网速约 300 KB/s，共约 25 分钟。
+  - 导入旧 swap-config：3 个模型，名字与旧别名一致。
+  - 冷加载流式：约 46–49 秒，每 15 秒一次 `: loading` 心跳，然后逐块输出。
+  - 切换：draining → unloading → stopped → loading → ready，只剩一个 llama-server。
+  - 排队：长回复在途时另一客户端要别的模型，旧模型 draining（inflight 1），长回复结束后 0.2 秒才开始卸载；非流式请求等了 130 秒没断。
+  - 图片：日志 `2000x1000 png 59KB -> 896x448 jpeg 11KB`，回答正确；没有 mmproj 的临时模型收到中文 400，且不触发加载（临时条目已删）。
+  - 关 start.bat 窗口 3.8 秒内全部退出、pids.json 清空。强杀 bun 时 llama-server 随之退出；手造真实残留后启动 → `killed 1`。
+  - **没测**：酒馆本身（用脚本模拟 OpenAI 流式请求，酒馆留给用户在关口试用）。
+- 剩余：无。
+- 决定 / 坑：
+  - `cudaRuntime` 语义改为「首选版本」：精确版本没有时，选同一主版本里最新的次版本（必须同时有 cudart），不会跨主版本。settings 里的值不会被改写。**需要用户知悉**（已写进变更记录）。
+  - Windows 下文件还开着时，目录列表显示的大小会一直是 0，不代表下载卡住。
+  - 这台机器 PowerShell 的 `bun` 是 `bun.ps1/bun.cmd`，`Start-Process` 要用真实的 bun.exe 路径。控制台窗口句柄要按标题 `llama-web` 找（conhost 的 MainWindowHandle 为 0）。
+  - 1-5 留下的两个待确认点（导入时 mmproj 自动配对、`--jinja` 不触发重复警告）仍待用户确认。
+- 下一步：阶段关口 1（用户试用 + Codex 审查），确认后才开始 2-1。
+
 ## 2026-09-30 · 工作包 1-5 · Sonnet 5.5
 - 完成：plan 阶段 1 第 13 项（旧配置导入）、第 15 项（最简状态页）。`server/core/importer.ts`（+ `POST /api/import`，`{ path, dryRun? }`）、`server/core/llamacpp.ts`（版本目录扫描 + 初始下载）、`GET /api/state`、`app/pages/index.vue`（状态 + 导入表单）、`start.bat`、`.gitattributes`（bat 强制 CRLF）。context 新增 `updateSettings / updateModels / getRuntimeStatus`（自己写盘不会触发文件监听，必须走这两个）。
 - 验证：`bun test` 155 通过；`bun run typecheck`、`bun run build` 通过。构建产物经 `start.bat` 启动（临时数据目录，端口 5099，用完已删）：`/api/state`、页面 200；对旧 swap-config.json 做预览和真实导入（写入临时目录）：3 个模型、mmproj 和 `-md` 草稿模型配对正确、聊天模板复制成功、key/域名未导入；错误路径返回中文 400。**没有**实际下载 llama.cpp（未经用户同意不下几百 MB），**没有**测关闭 start.bat 窗口，没用 GPU。

@@ -6,7 +6,7 @@ setlocal
 cd /d "%~dp0"
 title llama-web
 
-where bun >/dev/null 2>nul
+where bun >nul 2>nul
 if errorlevel 1 (
   echo [llama-web] bun was not found in PATH. Install it from https://bun.sh and try again.
   pause
@@ -29,7 +29,7 @@ if errorlevel 1 goto failed
 
 :run
 echo [llama-web] starting...
-bun ".output\server\index.mjs"
+call bun ".output\server\index.mjs"
 if errorlevel 1 goto failed
 exit /b 0
 

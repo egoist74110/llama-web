@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ensureRuntime, extractZip, installLatest, listInstalled, RuntimeError, versionsDir, type RuntimeStatus } from '../../server/core/llamacpp'
+import { ensureRuntime, extractZip, installLatest, listInstalled, pickCudaVersion, RuntimeError, versionsDir, type RuntimeStatus } from '../../server/core/llamacpp'
 
 let data: string
 beforeEach(() => { data = mkdtempSync(join(tmpdir(), 'lw-rt-')) })
@@ -165,3 +165,24 @@ test.skipIf(process.platform !== 'win32')('extractZip unpacks a real zip with th
   expect(await Bun.file(join(out, 'a.txt')).text()).toBe('hello')
   await expect(extractZip(join(data, 'missing.zip'), join(data, 'out2'))).rejects.toMatchObject({ code: 'extract-failed' })
 }, 30_000) // process start-up is slow on Windows
+
+test('pickCudaVersion: exact match, else newest minor of the same major with a cudart', () => {
+  const t = 'b9'
+  const names = (vs: string[], cudart = vs) => [
+    ...vs.map(v => `llama-${t}-bin-win-cuda-${v}-x64.zip`),
+    ...cudart.map(v => `cudart-llama-bin-win-cuda-${v}-x64.zip`),
+    `llama-${t}-bin-win-cuda-13.9-arm64.zip`,
+  ]
+  expect(pickCudaVersion(names(['12.4', '13.3', '13.4']), t, 'win', '13.3')).toBe('13.3')
+  expect(pickCudaVersion(names(['12.4', '13.4']), t, 'win', '13.3')).toBe('13.4')
+  expect(pickCudaVersion(names(['13.4', '13.10']), t, 'win', '13.3')).toBe('13.10')
+  expect(pickCudaVersion(names(['13.4', '13.5'], ['13.4']), t, 'win', '13.3')).toBe('13.4') // 13.5 has no cudart
+  expect(pickCudaVersion(names(['12.4']), t, 'win', '13.3')).toBeNull() // never switch major
+})
+
+test('installLatest falls back to the newer CUDA minor the release actually ships', async () => {
+  const f = fakeGithub()
+  const tag = await installLatest(opts(f, { cudaRuntime: '13.2' }))
+  expect(tag).toBe('b1234')
+  expect(f.calls).toContain(`https://dl.test/${f.binName}`)
+})

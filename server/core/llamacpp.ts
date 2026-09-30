@@ -80,13 +80,35 @@ export async function resolveLatest(fetchFn: FetchFn, cudaRuntime: string, platf
   if (!TAG_RE.test(tag)) throw new RuntimeError('bad-tag', 'Unexpected nightly tag', tag)
   const rel = await (await getOk(fetchFn, `https://api.github.com/repos/${REPO}/releases/tags/${tag}`)).json() as { assets?: ReleaseAsset[] }
   const os = platform === 'win32' ? 'win' : 'linux'
-  const binName = `llama-${tag}-bin-${os}-cuda-${cudaRuntime}-x64.zip`
-  const dllName = `cudart-llama-bin-${os}-cuda-${cudaRuntime}-x64.zip`
-  const bin = rel.assets?.find(a => a.name === binName)
-  const cudart = rel.assets?.find(a => a.name === dllName)
-  if (!bin) throw new RuntimeError('asset-missing', 'Release asset not found', binName)
-  if (!cudart) throw new RuntimeError('asset-missing', 'Release asset not found', dllName)
+  const assets = rel.assets ?? []
+  const pair = (cuda: string) => ({
+    bin: assets.find(a => a.name === `llama-${tag}-bin-${os}-cuda-${cuda}-x64.zip`),
+    cudart: assets.find(a => a.name === `cudart-llama-bin-${os}-cuda-${cuda}-x64.zip`),
+  })
+  const cuda = pickCudaVersion(assets.map(a => a.name), tag, os, cudaRuntime)
+  const { bin, cudart } = pair(cuda ?? cudaRuntime)
+  if (!bin) throw new RuntimeError('asset-missing', 'Release asset not found', `llama-${tag}-bin-${os}-cuda-${cudaRuntime}-x64.zip`)
+  if (!cudart) throw new RuntimeError('asset-missing', 'Release asset not found', `cudart-llama-bin-${os}-cuda-${cudaRuntime}-x64.zip`)
   return { tag, bin, cudart }
+}
+
+/**
+ * CUDA version to download: the configured one when the release has it, otherwise the newest
+ * minor of the same major (CUDA minor-version compatibility; releases move e.g. 13.3 → 13.4).
+ * Only versions that ship both the build and the matching cudart count. Null when none fits.
+ */
+export function pickCudaVersion(names: string[], tag: string, os: string, wanted: string): string | null {
+  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const binRe = new RegExp(`^llama-${esc(tag)}-bin-${os}-cuda-(\\d+)\\.(\\d+)-x64\\.zip$`)
+  const available = names
+    .map(n => binRe.exec(n))
+    .filter((m): m is RegExpExecArray => !!m)
+    .filter(m => names.includes(`cudart-llama-bin-${os}-cuda-${m[1]}.${m[2]}-x64.zip`))
+    .map(m => ({ v: `${m[1]}.${m[2]}`, major: Number(m[1]), minor: Number(m[2]) }))
+  if (available.some(a => a.v === wanted)) return wanted
+  const major = Number(wanted.split('.')[0])
+  const same = available.filter(a => a.major === major).sort((a, b) => b.minor - a.minor)
+  return same[0]?.v ?? null
 }
 
 async function sha256File(file: string): Promise<string> {
