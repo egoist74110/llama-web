@@ -49,8 +49,10 @@ start.bat            # 用户实际使用的启动方式（1-5 实现）
 - `app/`：前端页面、组件、composables
 - `i18n/zh-CN.ts`：**所有界面文案**。组件里不要写死中文字符串
 - `server/api/`：管理接口
-- `server/routes/v1/`：OpenAI 兼容转发（按关键决定 25，`/v1/*` 实际由自定义 Bun 入口原生处理，具体位置在 1-4 定）
-- `server/core/`：scheduler、runner、args、scanner、gguf、preprocess、errors、updater、gpu、store、backends
+- `server/entry.ts`：自定义 Bun 入口（关键决定 25，只在构建产物里生效）：`/v1/*`、`/upstream/*` 原生处理，其余交给 Nitro
+- `server/service/`：进程级接线（`context.ts`：配置、runner、scheduler、转发的单例）
+- `server/routes/v1/`、`server/routes/upstream/`：只在 `nuxt dev` 下起作用，调用和入口相同的 `core/proxy.ts`
+- `server/core/`：scheduler、runner、args、scanner、gguf、preprocess、proxy、routing、config、launch、errors、updater、gpu、store、backends
 - `server/plugins/`：启动时执行的逻辑
 - `tests/`：单元测试
 - `docs/plan.html`：开发计划与进度

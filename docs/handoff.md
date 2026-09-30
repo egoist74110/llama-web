@@ -16,6 +16,22 @@
 
 ---
 
+## 2026-09-30 · 工作包 1-4 · Opus 5.5
+- 完成：plan 阶段 1 第 10–12 项 +「单元测试」项。`server/core/` 新增 config.ts（settings / models 结构、默认值、补全）、routing.ts、launch.ts、proxy.ts、i18n.ts、preprocess/（index + image）；`server/service/context.ts` 单例接线；自定义 Bun 入口 `server/entry.ts`；开发模式路由 `server/routes/{v1,upstream}/[...path].ts`；插件 `plugins/residue.ts` 换成 `plugins/app.ts`。错误文案在 i18n `api` / `loadError`。
+- 验证：`bun test` 133 通过（全量 2 次，proxy 3 次）；`typecheck`、`build` 通过。构建产物 + 编译成 exe 的假 llama-server（临时数据目录，用完已删）：/v1/models、加载中心跳后逐 chunk 输出、长流式结束后才切换、非流式静默等 15 秒不断开、断开后切换、图片 2000x1000 png → 896x448 jpeg、无 mmproj 中文 400、/upstream、手改 settings.json 热重载。`nuxt dev` 下同样测了流式 / 断开 / 切换 / upstream。**没用真实 llama-server 和 GPU**，留给 1-6。
+- 剩余：无。未做：给 Nitro 处理函数传 signal / IP 的内部请求 ID（2-1 的 /api/stream 需要时再做）；入口里 SIGINT / SIGHUP 优雅退出的代码没测过（1-6 测 start.bat）。
+- 决定 / 坑：
+  - **Bun 1.3.14 会崩**：在响应流 `cancel` 里对上游 fetch body 调 `reader.cancel()` 会段错误。只用 fetch 的 AbortSignal 取消上游。以后写流式代码别用它。
+  - `nitro.entry` 放在 `$production` 下：开发模式下它也会替换 dev worker 入口（Node 里 `Bun is not defined`）。
+  - 流式请求、目标没 ready：立刻回 200 SSE，先发 `: loading`，之后每 heartbeatSec 一次；加载失败发 `data: {"error":…}` 再关流。目标已 ready：透传上游状态码和头。心跳百分比预留了 `progressOf`（3-2 接）。
+  - 租约释放：上游结束 / 出错 / 客户端断开（req.signal 或响应流 cancel）都会 release；中止上游就立刻释放，不等下一次 pull（dev 模式下没人 pull）。
+  - model 解析：整串能匹配就用整串（名字里可以有 `:`），否则按最后一个 `:` 拆；依次按 name、id、忽略大小写的 name 找。没有 model 字段：ready 的模型，其次 loading 的，否则 400。
+  - 转发时去掉 authorization、accept-encoding 和逐跳头。/upstream 不会触发加载，只转发 ready 的模型；`/upstream/x` 308 到 `/upstream/x/`。llama-server 自带网页用绝对路径的资源在前缀下能不能用还没验证。
+  - 请求体上限 100 MB（代码常量 `MAX_BODY_BYTES`，没加设置项）。图片只处理 base64 data URI，远程 URL 不动；小于 maxEdge 且格式相同的原样转发。按方案覆盖用 `profile.preprocess.image`（计划结构里只有方案级）。压缩前后尺寸目前只打到控制台。
+  - 手改设置：portRange / drainTimeoutSec / heartbeatSec / 启动参数下次使用时生效；maxLoaded、server.host/port 要重启。设置文件损坏时用默认值并打错误日志，不覆盖文件。
+  - `profile.chatTemplate` = `data/templates/` 下的文件名。`llamacpp.current` 为空 → 加载失败 `no-runtime`，1-5 初始获取后要写入它。
+- 下一步：工作包 1-5（Sonnet 5.5）。
+
 ## 2026-09-30 · 工作包 1-3 · Opus 5.5
 - 完成：plan 阶段 1 第 7–9 项。`server/core/runner.ts`（Runner / RunningProcess / PidRegistry / LoadError）、`residue.ts`（cleanupResidue、runStartupCleanup）、`scheduler.ts`；`server/plugins/residue.ts` 启动时跑清理。测试 `tests/core/{scheduler,runner,residue}.test.ts`，假 llama-server `tests/fixtures/fake-llama-server.ts`。
 - 验证：`bun test` 89 通过（连跑 3 次）；`bun run typecheck` 通过；`bun run build` 通过。真机：真实 llama-server b10809 + 27B Q4（`-c 4096`），scheduler → runner 加载 37 秒、/health 200、对话 200；停止 3.6 秒，进程树（含其子进程）全灭、端口释放、pids.json 清空；残留清理杀掉运行目录下的真实进程、放过目录外的。临时脚本在仓库外，已删除。

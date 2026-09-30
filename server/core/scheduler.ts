@@ -37,7 +37,7 @@ export type SchedulerErrorCode =
   | 'shutdown' // the scheduler is shutting down
 
 export class SchedulerError extends Error {
-  constructor(public code: SchedulerErrorCode, public target: Target, public cause?: unknown) {
+  constructor(public code: SchedulerErrorCode, public target: Target, public override cause?: unknown) {
     super(`${code}: ${target.modelId}:${target.profile}`)
     this.name = 'SchedulerError'
   }
