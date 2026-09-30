@@ -1,8 +1,10 @@
 // Live state for the UI: builds the state snapshot, keeps a short activity history and
 // pushes changes to /api/stream subscribers. Pure module (no Nitro), testable with bun test.
 import type { ModelsDoc } from './config'
+import { missingFiles, type ModelFile } from './models-admin'
 import type { RuntimeStatus } from './llamacpp'
 import type { ModelState, SchedulerEvent, SchedulerSnapshot } from './scheduler'
+import type { FileRef, ModelDir } from './types'
 
 export interface StateInstance {
   profile: string
@@ -23,6 +25,10 @@ export interface StateDoc {
     activeProfile: string
     profiles: string[]
     hasMmproj: boolean
+    /** Configured files as `dir/relative/path` (mmproj / draft are null when not set). */
+    files: { model: string, mmproj: string | null, draft: string | null }
+    /** Configured files that no longer exist on disk. */
+    missing: ModelFile[]
     instances: StateInstance[]
   }>
   queue: Array<{ modelId: string, profile: string, started: boolean, waiting: number }>
@@ -156,11 +162,22 @@ export class LiveHub {
   }
 }
 
-/** Convert the context's models doc into the `models` part of the snapshot. */
-export function describeModels(doc: ModelsDoc): StateDoc['models'] {
+const refText = (r: FileRef | null) => (r ? `${r.dirId}/${r.rel}` : null)
+
+/**
+ * Convert the context's models doc into the `models` part of the snapshot. With `dirs`, files
+ * missing on disk are reported (a directory that is no longer configured counts as missing).
+ */
+export function describeModels(
+  doc: ModelsDoc,
+  check?: { dirs: ModelDir[], exists?: (path: string) => boolean },
+): StateDoc['models'] {
   return doc.models.map(m => ({
     id: m.id, name: m.name, activeProfile: m.activeProfile,
-    profiles: Object.keys(m.profiles), hasMmproj: !!m.mmproj, instances: [],
+    profiles: Object.keys(m.profiles), hasMmproj: !!m.mmproj,
+    files: { model: refText(m.file)!, mmproj: refText(m.mmproj), draft: refText(m.draft) },
+    missing: check ? missingFiles(m, check.dirs, check.exists) : [],
+    instances: [],
   }))
 }
 
@@ -208,6 +225,7 @@ export function handleStream(req: Request, opts: StreamOptions): Response {
       frame('snapshot', hub.snapshot())
       unsub = hub.subscribe(m => m.type === 'snapshot' ? frame('snapshot', m.state) : frame('activity', m.event))
       hb = setInterval(() => send(': keep-alive\n\n'), opts.heartbeatMs ?? 15_000)
+      poll = setInterval(() => hub.notify(), opts.pollMs ?? 2000)
     },
     cancel() { cleanup() },
   })

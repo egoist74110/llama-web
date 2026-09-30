@@ -11,7 +11,7 @@ function setup() {
     historySize: 3,
     snapshot: () => ({
       scheduler: sched,
-      models: [{ id: 'm1', name: 'Model One', activeProfile: 'default', profiles: ['default'], hasMmproj: false, instances: [] }],
+      models: [{ id: 'm1', name: 'Model One', activeProfile: 'default', profiles: ['default'], hasMmproj: false, files: { model: 'main/m.gguf', mmproj: null, draft: null }, missing: [], instances: [] }],
       queue: sched.queue.map(q => ({ modelId: q.modelId, profile: q.profile, started: q.started, waiting: q.waiting })),
       llamacpp: { current: 'b1', runtime: { state: 'ready', tag: 'b1' } },
     }),
@@ -131,6 +131,17 @@ describe('handleStream', () => {
     expect(hub.subscriberCount).toBe(1)
     await res.body!.cancel()
     expect(hub.subscriberCount).toBe(0)
+  })
+
+  test('polling pushes changes that have no event (in-flight counts, missing files)', async () => {
+    const { hub, sched, target } = setup()
+    const ac = new AbortController()
+    const res = handleStream(new Request('http://x/api/stream', { signal: ac.signal }), { hub, pollMs: 15 })
+    sched.models.push({ ...target, state: 'ready', port: 1, inflight: 3, lastUsedAt: null, error: null })
+    const frames = await readFrames(res, f => f.filter(x => x.startsWith('event: snapshot')).length >= 2)
+    ac.abort()
+    const last = JSON.parse(frames.filter(x => x.startsWith('event: snapshot')).at(-1)!.split('data: ')[1]!) as StateDoc
+    expect(last.models[0]!.instances[0]?.inflight).toBe(3)
   })
 
   test('sends keep-alive comments', async () => {

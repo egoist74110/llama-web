@@ -124,7 +124,7 @@ function createContext(): AppContext {
   const live: LiveHub = new LiveHub({
     snapshot: () => ({
       scheduler: scheduler.snapshot(),
-      models: describeModels(getModels()),
+      models: describeModels(getModels(), { dirs: getSettings().modelDirs }),
       queue: scheduler.snapshot().queue.map(q => ({ modelId: q.modelId, profile: q.profile, started: q.started, waiting: q.waiting })),
       llamacpp: { current: getSettings().llamacpp.current, runtime: runtimeStatus },
     }),

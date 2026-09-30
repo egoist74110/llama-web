@@ -52,3 +52,22 @@ export function eventText(e: ActivityEvent, modelName: (id: string) => string): 
   const rt = t.events.runtime
   return fmt(rt[e.state], { tag: e.tag ?? '', code: e.code ?? '' })
 }
+
+export function formatBytes(n: number): string {
+  if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(n >= 10 * 1024 ** 3 ? 1 : 2)} GB`
+  if (n >= 1024 ** 2) return `${Math.round(n / 1024 ** 2)} MB`
+  return `${Math.max(1, Math.round(n / 1024))} KB`
+}
+
+/** 27_000_000_000 -> `27B`, 350_000_000 -> `350M`. */
+export function formatParams(n: number | null | undefined): string {
+  if (!n) return t.models.discover.unknown
+  if (n >= 1e9) return `${+(n / 1e9).toFixed(n >= 1e10 ? 0 : 1)}B`
+  return `${Math.round(n / 1e6)}M`
+}
+
+/** 262144 -> `256K`; other values are shown as-is. */
+export function formatContext(n: number | null | undefined): string {
+  if (!n) return t.models.discover.unknown
+  return n >= 1024 && n % 1024 === 0 ? `${n / 1024}K` : String(n)
+}

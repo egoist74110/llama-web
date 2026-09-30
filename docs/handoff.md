@@ -16,6 +16,19 @@
 
 ---
 
+## 2026-09-30 · 工作包 2-2 · Sonnet 5.5
+- 完成：plan 阶段 2 第 4–5 项（模型页 已启用 + 扫描发现）。后端：`server/core/models-admin.ts`（`planEnable` / `missingFiles` / `switchProfile`，纯模块）；接口 `POST /api/scan`、`POST /api/models`（启用，服务端重新扫描，不信任前端元数据）、`POST /api/models/:id/{start,stop,retry,profile}`（都立即返回，进度走 `/api/stream`）。快照的 `models[]` 新增 `files`、`missing`（文件丢失）。前端：`ModelCard`（状态、启动 / 停止 / 重试、方案下拉、文件丢失标红且禁用启动、「排队中」）、`DiscoverPanel`（元数据、重新扫描、启用）、`useModelActions`（统一错误 toast）。
+- 验证：`bun test` 209 通过（新增 `models-admin.test.ts` 10 条、`live.test.ts` 1 条）；`bun run typecheck`、`bun run build` 通过。构建产物 + 编译成 exe 的假 llama-server + 假 GGUF（临时数据目录、端口 5099，用完已停、已删）在内置浏览器实测：启动 → 运行中；切方案自动重启；文件丢失标红且启动禁用；扫描（分片不完整、损坏文件、mmproj 候选提示）；一键启用；假进程立即退出 → 失败卡片 + 重试；另一模型运行时启动 → 「排队中」；手机宽度 / 深色。**没测**：真实 llama-server / GPU；`nuxt dev` 下的新接口；停止按钮的 `force`（接口支持，界面没放）。
+- 剩余：无。编辑入口、mmproj / draft 下拉、聊天模板选择属于 2-3；模型的删除 / 停用没有入口（不在任务里）。
+- 决定 / 坑：
+  - 修了 2-1 的遗漏：`handleStream` 的 2 秒 `notify()` 轮询没有真正启动（`poll` 变量从未赋值），在途请求数 / 排队 / 文件丢失都不会推送。已补上并加测试。
+  - 切换方案：只要有别的方案在加载 / 运行就 stop 再 start（重启）；已经在跑同一方案则只改 `activeProfile`；只有 failed/crashed 标记时清标记，不自动启动。这与阶段 2 验收「切换后模型自动重启」一致，计划未改。
+  - 启用：名字取文件名去掉量化后缀（复用 `aliasOf`），名字 / id 冲突自动加 `-2`；默认方案「默认」，不选 mmproj / draft。
+  - `server/api/` 下不要放非路由的 `_xxx.ts` 辅助文件（共享代码放 `server/service/models-api.ts`）。
+- 下一步：工作包 2-3（Sonnet 5.5，模型编辑：文件区 / 参数表单 / 命令预览 / 配置方案）。
+
+---
+
 ## 2026-09-30 · 工作包 2-1 · Sonnet 5.5
 - 完成：plan 阶段 2 第 1–3 项（Nuxt UI + 布局 + 深浅色 + i18n；`/api/stream` + `useLive` composable；总览页）。后端 `server/core/live.ts`（`LiveHub`：状态快照、最近 50 条事件、`handleStream` SSE）；context 新增 `live`，scheduler 事件 / llama.cpp 状态 / 配置文件变化都会触发推送；`/api/state` 与流里的 `snapshot` 是同一份文档。前端 `app/`：`layouts/default.vue`（顶栏 + 侧栏）、基础组件 `AppCard` / `PageHeader` / `StateDot` / `StateBadge`、`composables/useLive.ts` / `useFormat.ts`；页面 总览 + 模型 / 日志 / 设置（占位）。旧配置导入表单挪成 `ImportCard`，暂放设置页。
 - 验证：`bun test` 198 通过（新增 `tests/core/live.test.ts` 9 条）；`bun run typecheck`、`bun run build` 通过。构建产物 + 编译成 exe 的假 llama-server（临时数据目录，端口 5099，用完已停、已删）在内置浏览器实测：加载中（计时 + 进度条 + 排队）→ 失败（红点 + 中文原因 + 事件）、浅 / 深色、手机宽度、杀服务后出现「实时连接已断开」横幅。**没测**：服务重启后浏览器自动重连（EventSource 自带，没单独验证）；没用真实 llama-server / GPU；`nuxt dev` 下的 `/api/stream` 没跑。
