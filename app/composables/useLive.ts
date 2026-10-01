@@ -1,7 +1,7 @@
 // One shared live connection to /api/stream for the whole app: the latest state snapshot,
 // the recent activity list and the connection status. Pages read from here and never
 // poll. EventSource reconnects by itself; a dropped connection is shown in the top bar.
-import type { ActivityEvent, LogLine, StateDoc } from '~~/server/core/live'
+import type { ActivityEvent, LogLine, MetricsDoc, StateDoc } from '~~/server/core/live'
 import type { RequestRecord } from '~~/server/core/request-log'
 
 const MAX_EVENTS = 50
@@ -12,6 +12,7 @@ const state = shallowRef<StateDoc | null>(null)
 const events = shallowRef<ActivityEvent[]>([]) // newest first
 const requests = shallowRef<RequestRecord[]>([]) // newest first
 const logLines = shallowRef<LogLine[]>([]) // oldest first
+const metrics = shallowRef<MetricsDoc | null>(null)
 const connected = ref(false)
 // Ticks every second so elapsed-time texts stay fresh without any server traffic.
 const now = ref(Date.now())
@@ -37,6 +38,10 @@ function connect() {
     state.value = s
     skew.value = s.now - Date.now()
     connected.value = true
+  })
+  source.addEventListener('metrics', (e) => {
+    const m = parse<MetricsDoc>(e as MessageEvent)
+    if (m) metrics.value = m
   })
   source.addEventListener('history', (e) => {
     const h = parse<ActivityEvent[]>(e as MessageEvent)
@@ -78,5 +83,5 @@ function disconnect() {
 export function useLive() {
   /** Server-time "now" in ms. */
   const serverNow = computed(() => now.value + skew.value)
-  return { state, events, requests, logLines, connected, serverNow, connect, disconnect }
+  return { state, events, requests, logLines, metrics, connected, serverNow, connect, disconnect }
 }

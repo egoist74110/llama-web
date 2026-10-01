@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import t from '~~/i18n/zh-CN'
 
-const { state, connected, connect, disconnect } = useLive()
+const { state, metrics, connected, connect, disconnect } = useLive()
 onMounted(connect)
 onBeforeUnmount(disconnect)
 
@@ -28,6 +28,11 @@ const headline = computed(() => {
   if (!s) return null
   const all = s.models.flatMap(m => m.instances.map(i => ({ m, i })))
   return all.find(x => x.i.state === 'ready') ?? all[0] ?? null
+})
+// Live speed of the model that is generating right now (top bar, visible on every page).
+const topSpeed = computed(() => {
+  const gen = metrics.value?.speed.active.find(a => a.phase === 'generating' && a.tokensPerSec !== null)
+  return gen ? fmt(t.layout.speed, { n: gen.tokensPerSec!.toFixed(1) }) : ''
 })
 const version = computed(() => state.value?.llamacpp.current || t.layout.llamacppNone)
 
@@ -58,6 +63,7 @@ const themeMenu = computed(() => [modes.map(m => ({
           <StateDot :state="headline.i.state" />
           <span class="truncate font-medium text-highlighted">{{ headline.m.name }}</span>
           <span class="hidden text-muted sm:inline">{{ stateLabel(headline.i.state) }}</span>
+          <span v-if="topSpeed" class="shrink-0 tabular-nums text-primary">{{ topSpeed }}</span>
         </template>
         <span v-else class="truncate text-muted">{{ t.layout.noModel }}</span>
       </div>

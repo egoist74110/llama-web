@@ -9,12 +9,15 @@ import {
 import { LaunchConfigError, planLaunch } from '../core/launch'
 import { LogStore } from '../core/logs'
 import { ensureRuntime, type RuntimeStatus } from '../core/llamacpp'
+import { GpuSampler } from '../core/gpu'
 import { describeModels, LiveHub } from '../core/live'
+import { LoadProgress } from '../core/load-progress'
 import { ModelOps } from '../core/model-ops'
 import { createProxy, type Proxy, type ProxyEvent } from '../core/proxy'
 import { runStartupCleanup } from '../core/residue'
 import { PidRegistry, Runner } from '../core/runner'
 import { Scheduler, type SchedulerEvent } from '../core/scheduler'
+import { SpeedMeter } from '../core/speed'
 import { isFirstRun } from '../core/settings-admin'
 import { JsonStore, resolveDataDir, type VersionedDoc } from '../core/store'
 
@@ -132,8 +135,13 @@ function createContext(): AppContext {
     registry: new PidRegistry(join(dataDir, 'run', 'pids.json')),
   })
   let runtimeStatus: RuntimeStatus = { state: 'idle' }
+  const speed = new SpeedMeter({ onChange: () => live.notifyMetrics() })
+  // Samples nvidia-smi every settings.gpu.sampleSec seconds (2 by default), but only while a browser is connected to /api/stream.
+  const gpu = new GpuSampler({ intervalMs: () => Math.max(500, getSettings().gpu.sampleSec * 1000), active: () => live.subscriberCount > 0, onChange: () => live.notifyMetrics() })
+  gpu.start()
   const live: LiveHub = new LiveHub({
     onActivity: e => logs.appendEvent(e),
+    metrics: () => ({ speed: speed.snapshot(), gpu: gpu.value }),
     snapshot: () => ({
       scheduler: scheduler.snapshot(),
       models: describeModels(getModels(), { dirs: getSettings().modelDirs }),
@@ -153,6 +161,8 @@ function createContext(): AppContext {
       const plan = planLaunch(target, { dataDir, settings: getSettings(), models: getModels(), host: runner.host })
       for (const w of plan.warnings) log(`args ${plan.tag}: ${w.code} ${w.flag ?? ''} ${w.layer ?? ''}`.trim())
       log(`starting ${plan.tag}: ${plan.exe}`)
+      const progress = new LoadProgress()
+      const report = (p: number | null) => { if (p !== null) live.onLoadProgress(target.modelId, target.profile, p) }
       // One output file per start; lines also go to the live feed of the log page.
       const run = logs.startRun(target.modelId)
       run.append(`# llama-web: starting ${plan.tag} at ${new Date().toISOString()}`)
@@ -162,7 +172,9 @@ function createContext(): AppContext {
           onLine: (stream, line) => {
             run.append(line)
             live.onLogLine(target.modelId, target.profile, stream, line)
+            report(progress.line(line))
           },
+          onPartial: (_stream, partial) => report(progress.partial(partial)),
         })
         void rp.exited.then((x) => {
           run.append(`# llama-web: exited code=${x.code ?? '-'} signal=${x.signal ?? '-'}${x.requested ? ' (stopped by llama-web)' : ''}`)
@@ -180,6 +192,8 @@ function createContext(): AppContext {
   const proxy = createProxy({
     scheduler, getModels, getSettings, onEvent: logProxyEvent,
     onRequest: (r) => { logs.appendRequest(r); live.onRequest(r) },
+    speed,
+    progressOf: t => live.progressOf(t.modelId, t.profile),
   })
 
   // Background: adopt an installed llama.cpp or download the first one. Never blocks startup.
@@ -208,6 +222,7 @@ function createContext(): AppContext {
       closing ??= (async () => {
         settingsStore.close()
         modelsStore.close()
+        gpu.stop()
         await scheduler.shutdown()
         await runner.stopAll()
         logs.closeAll()

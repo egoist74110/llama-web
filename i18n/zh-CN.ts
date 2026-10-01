@@ -22,6 +22,7 @@ export default {
     themeLight: '浅色',
     themeDark: '深色',
     themeSystem: '跟随系统',
+    speed: '{n} t/s',
   },
   // Shared by several pages: state labels, runtime (llama.cpp) text, time units.
   status: {
@@ -63,6 +64,22 @@ export default {
     queue: { title: '排队', hint: '等待切换的模型加载', empty: '没有排队的加载。', started: '加载中', waiting: '等待中', requests: '{count} 个请求在等' },
     events: { title: '最近事件', hint: '最近 50 条，服务重启后清空', empty: '还没有事件。' },
     llamacpp: { title: 'llama.cpp', hint: '推理引擎版本', current: '当前版本' },
+    progress: '加载进度约 {n}%',
+    speed: {
+      prompt: '正在处理提示……',
+      generating: '生成 {n} t/s',
+      generatingWarm: '生成中……',
+      last: '上次：提示处理 {prompt} t/s · 生成 {gen} t/s',
+      lastGen: '上次：生成 {gen} t/s',
+      lastPrompt: '上次：提示处理 {prompt} t/s',
+      estimated: '（估算）',
+    },
+    gpu: {
+      title: '显存',
+      hint: '每 2 秒读取一次 nvidia-smi',
+      used: '{used} / {total}',
+      util: '核心占用 {n}%',
+    },
   },
   events: {
     state: '{model}（{profile}）：{from} → {to}',

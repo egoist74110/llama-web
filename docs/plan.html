@@ -440,9 +440,9 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
     <li class="task" data-done="true"><span class="t">日志落盘：模型输出按次存文件、事件和请求按天存 jsonl、按保留策略清理</span><span class="when">2026-10-01</span></li>
     <li class="task" data-done="true"><span class="t">请求记录：时间、来源（本机 / 局域网 / 公网 key 名）、模型与方案、耗时、token 数、图片压缩前后、参数摘要（reasoning 等）；不记录对话内容</span><span class="when">2026-10-01</span></li>
     <li class="task" data-done="true"><span class="t">日志页：三个标签、实时滚动、暂停、搜索、按模型筛选、查看历史文件</span><span class="when">2026-10-01</span></li>
-    <li class="task" data-done="false"><span class="t">实时速度：流式时按 chunk 估算 t/s，结束后用 llama-server 返回的 <code>timings</code> 修正；显示 prompt 与生成速度</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">加载进度：解析 llama-server 输出估算进度</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">gpu.ts：每 2 秒采样 nvidia-smi，总览页显存条；没有 nvidia-smi 时隐藏</span><span class="when"></span></li>
+    <li class="task" data-done="true"><span class="t">实时速度：流式时按 chunk 估算 t/s，结束后用 llama-server 返回的 <code>timings</code> 修正；显示 prompt 与生成速度</span><span class="when">2026-10-01</span></li>
+    <li class="task" data-done="true"><span class="t">加载进度：解析 llama-server 输出估算进度</span><span class="when">2026-10-01</span></li>
+    <li class="task" data-done="true"><span class="t">gpu.ts：每 2 秒采样 nvidia-smi，总览页显存条；没有 nvidia-smi 时隐藏</span><span class="when">2026-10-01</span></li>
     <li class="task" data-done="false"><span class="t">errors.ts：常见报错识别（显存不足、文件找不到、未知参数、mmproj 不匹配…）→ 中文提示 + 建议</span><span class="when"></span></li>
     <li class="task" data-done="false"><span class="t">失败 / 崩溃卡片：原因 + 最后 30 行日志 + 跳转完整日志 + 手动重试</span><span class="when"></span></li>
     <li class="task" data-done="false"><span class="t">真机试用（包括故意把 ctx 设大制造显存不足）并如实报告</span><span class="when"></span></li>

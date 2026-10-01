@@ -20,6 +20,11 @@ export function formatClock(ms: number): string {
   return new Date(ms).toLocaleTimeString('zh-CN', { hour12: false })
 }
 
+/** Memory in MiB as MiB / GiB text. */
+export function formatMiB(mib: number): string {
+  return mib >= 1024 ? `${(mib / 1024).toFixed(1)} GiB` : `${Math.round(mib)} MiB`
+}
+
 export function stateLabel(s: string): string {
   return t.status.states[s as StateName] ?? s
 }

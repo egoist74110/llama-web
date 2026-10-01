@@ -146,6 +146,8 @@ export interface StartSpec {
   env?: Record<string, string | undefined>
   loadTimeoutMs: number
   onLine?: (stream: LogStream, line: string) => void
+  /** Called with the unfinished tail of the output after each read (no newline yet). */
+  onPartial?: (stream: LogStream, partial: string) => void
 }
 
 export interface RunnerOptions {
@@ -385,6 +387,8 @@ export class RunningProcess {
         emit(buf.slice(0, i).replace(/\r$/, ''))
         buf = buf.slice(i + 1)
       }
+      // The unfinished line (the weight loader prints its progress dots without a newline).
+      if (buf) try { this.spec.onPartial?.(name, buf) } catch { /* listener errors must not kill capture */ }
     })
     stream.on('end', () => {
       buf += decoder.decode()

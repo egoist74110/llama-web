@@ -3,6 +3,7 @@
 //   ok     ready after --fake-delay ms (default 100)
 //   exit   print an error and exit with code 3 before becoming ready
 //   hang   never becomes ready
+//   dots   like ok, and writes a dots-only unfinished line with a raw write (no newline, like the weight loader)
 //   child  like ok, but also spawns a long-lived grandchild and prints `child=<pid>`
 const argv = process.argv.slice(2)
 const opt = (name: string, def = '') => {
@@ -40,5 +41,9 @@ Bun.serve({
     return new Response('not found', { status: 404 })
   },
 })
-process.stdout.write('partial line without newline')
+if (mode === 'dots') {
+  require('node:fs').writeSync(2, '..........')
+} else {
+  process.stdout.write('partial line without newline')
+}
 setInterval(() => {}, 1000)

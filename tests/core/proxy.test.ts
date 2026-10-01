@@ -5,6 +5,7 @@ import { LoadError } from '../../server/core/runner'
 import { activeBoundedWaits, bounded, createProxy, type ProxyEvent } from '../../server/core/proxy'
 import type { RequestRecord } from '../../server/core/request-log'
 import { Scheduler, type ModelProcess, type Target } from '../../server/core/scheduler'
+import { SpeedMeter } from '../../server/core/speed'
 
 // ---------------------------------------------------------------------------------------
 // Fake llama-server: an in-process Bun server per launch. /v1/chat/completions streams
@@ -59,7 +60,7 @@ function makeUpstream(target: Target, opts: { chunks?: number, gapMs?: number, h
               return new Promise<void>((done) => {
                 timer = setTimeout(() => {
                   if (i < n) ctrl.enqueue(new TextEncoder().encode(`data: {"i":${i++}}\n\n`))
-                  else { ctrl.enqueue(new TextEncoder().encode('data: {"choices":[],"usage":{"prompt_tokens":11,"completion_tokens":4,"total_tokens":15}}\n\ndata: [DONE]\n\n')); ctrl.close() }
+                  else { ctrl.enqueue(new TextEncoder().encode('data: {"choices":[],"usage":{"prompt_tokens":11,"completion_tokens":4,"total_tokens":15},"timings":{"prompt_per_second":250.5,"predicted_per_second":31.25}}\n\ndata: [DONE]\n\n')); ctrl.close() }
                   done()
                 }, gap)
               })
@@ -68,7 +69,7 @@ function makeUpstream(target: Target, opts: { chunks?: number, gapMs?: number, h
           })
           return new Response(stream, { headers: { 'content-type': 'text/event-stream' } })
         }
-        return Response.json({ ok: true, model: target.modelId, profile: target.profile, echo: body, usage: { prompt_tokens: 7, completion_tokens: 3, total_tokens: 10 } })
+        return Response.json({ ok: true, model: target.modelId, profile: target.profile, echo: body, usage: { prompt_tokens: 7, completion_tokens: 3, total_tokens: 10 }, timings: { prompt_per_second: 90, predicted_per_second: 12.5 } })
       },
     }),
   }
@@ -101,7 +102,7 @@ afterEach(async () => {
   for (const c of cleanups.splice(0)) await c()
 })
 
-function setup(opts: { autoReady?: boolean, chunks?: number, gapMs?: number, heartbeatMs?: number, maxBodyBytes?: number, drainTimeoutMs?: number, finalEventTimeoutMs?: number, holdHeaders?: boolean } = {}) {
+function setup(opts: { autoReady?: boolean, chunks?: number, gapMs?: number, heartbeatMs?: number, maxBodyBytes?: number, drainTimeoutMs?: number, finalEventTimeoutMs?: number, holdHeaders?: boolean, speed?: SpeedMeter } = {}) {
   const ups: Upstream[] = []
   const events: ProxyEvent[] = []
   const records: RequestRecord[] = []
@@ -124,6 +125,7 @@ function setup(opts: { autoReady?: boolean, chunks?: number, gapMs?: number, hea
     finalEventTimeoutMs: opts.finalEventTimeoutMs,
     onEvent: e => events.push(e),
     onRequest: r => records.push(r),
+    speed: opts.speed,
   })
   const front = Bun.serve({
     port: 0,
@@ -509,6 +511,60 @@ describe('images', () => {
     expect([meta.width, meta.height]).toEqual([64, 32])
     const ev = events.find(e => e.type === 'preprocess') as Extract<ProxyEvent, { type: 'preprocess' }>
     expect(ev.result.reports.image![0]).toMatchObject({ action: 'compressed', before: { width: 300, height: 150 }, after: { width: 64, height: 32 } })
+  })
+})
+
+describe('live speed', () => {
+  test('streaming: tracked while it flows, llama-server timings replace the estimate at the end', async () => {
+    const speed = new SpeedMeter()
+    const { post } = setup({ chunks: 6, gapMs: 20, speed })
+    await (await post('/v1/chat/completions', { model: 'Alpha' })).json() // loads the model
+    const res = await post('/v1/chat/completions', { model: 'Alpha', stream: true })
+    const reader = res.body!.getReader()
+    let sawActive = false
+    for (;;) {
+      const { done } = await reader.read()
+      if (done) break
+      const a = speed.snapshot().active
+      if (a.length && a[0]!.tokens >= 3) {
+        sawActive = true
+        expect(a[0]).toMatchObject({ modelId: 'a', profile: 'default', phase: 'generating' })
+        expect(a[0]!.tokensPerSec).toBeGreaterThan(0)
+      }
+    }
+    expect(sawActive).toBe(true)
+    await until(() => speed.snapshot().active.length === 0)
+    expect(speed.snapshot().last).toMatchObject([{ modelId: 'a', profile: 'default', promptPerSec: 250.5, generationPerSec: 31.25, estimated: false }])
+  })
+
+  test('non-stream: nothing live, the timings of the response become the last speed', async () => {
+    const speed = new SpeedMeter()
+    const { post } = setup({ speed })
+    await (await post('/v1/chat/completions', { model: 'Alpha:RP' })).json()
+    expect(speed.snapshot().active).toEqual([])
+    expect(speed.snapshot().last).toMatchObject([{ modelId: 'a', profile: 'RP', promptPerSec: 90, generationPerSec: 12.5 }])
+  })
+
+  test('streaming while the model loads is tracked too, and a client abort leaves nothing active', async () => {
+    const speed = new SpeedMeter()
+    const { post, ups, inflight } = setup({ chunks: 50, gapMs: 20, heartbeatMs: 20, speed })
+    const res = await post('/v1/chat/completions', { model: 'Beta', stream: true })
+    const reader = res.body!.getReader()
+    for (;;) {
+      const { value } = await reader.read()
+      if (value && new TextDecoder().decode(value).includes('"i":')) break
+    }
+    expect(speed.snapshot().active).toHaveLength(1)
+    await reader.cancel()
+    await until(() => inflight() === 0 && speed.snapshot().active.length === 0)
+    expect(ups).toHaveLength(1)
+  })
+
+  test('requests that never reach a model are not tracked (no model, unknown model)', async () => {
+    const speed = new SpeedMeter()
+    const { post } = setup({ speed })
+    await post('/v1/chat/completions', { model: 'Nope', stream: true })
+    expect(speed.snapshot()).toEqual({ active: [], last: [] })
   })
 })
 

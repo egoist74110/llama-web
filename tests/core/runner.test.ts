@@ -24,13 +24,14 @@ afterEach(async () => {
   rmSync(dir, { recursive: true, force: true })
 })
 
-function start(mode: string, extra: { loadTimeoutMs?: number, delay?: number, onLine?: (s: LogStream, l: string) => void } = {}) {
+function start(mode: string, extra: { loadTimeoutMs?: number, delay?: number, onLine?: (s: LogStream, l: string) => void, onPartial?: (s: LogStream, t: string) => void } = {}) {
   return runner.start({
     exe: process.execPath,
     args: port => [fixture, '--fake-mode', mode, '--fake-delay', String(extra.delay ?? 100), '--host', '127.0.0.1', '--port', String(port)],
     tag: `test:${mode}`,
     loadTimeoutMs: extra.loadTimeoutMs ?? 15000,
     onLine: extra.onLine,
+    onPartial: extra.onPartial,
   })
 }
 
@@ -90,6 +91,19 @@ describe('runner', () => {
     expect(lines).toContainEqual(['stdout', `fake llama-server mode=ok port=${p.port}`])
     expect(lines).toContainEqual(['stderr', 'stderr: 加载模型中'])
     expect(p.tail(100)).toContain('partial line without newline')
+  }, 30000)
+
+  test('the unfinished output line is reported while it grows (load progress dots have no newline)', async () => {
+    const partials: string[] = []
+    const lines: string[] = []
+    const p = await start('dots', { onLine: (_s, l) => lines.push(l), onPartial: (_s, t) => partials.push(t) })
+    await p.ready
+    const end = Date.now() + 5000
+    while (Date.now() < end && !partials.some(t => t.startsWith('.....'))) await Bun.sleep(25)
+    // Partial text is reported while unfinished; onLine only gets it once the line ends.
+    expect(partials.some(t => /^\.+$/.test(t))).toBe(true)
+    expect(lines.some(l => /^\.+$/.test(l))).toBe(false)
+    await p.stop()
   }, 30000)
 
   test('exit before ready -> LoadError(exited) with exit code and last lines', async () => {

@@ -1,11 +1,13 @@
 // Live state for the UI: builds the state snapshot, keeps a short activity history and
 // pushes changes to /api/stream subscribers. Pure module (no Nitro), testable with bun test.
 import type { ModelsDoc } from './config'
+import type { GpuDoc } from './gpu'
 import { missingFiles, type ModelFile } from './models-admin'
 import type { RuntimeStatus } from './llamacpp'
 import type { RequestRecord } from './request-log'
 import type { LogStream } from './runner'
 import type { ModelState, SchedulerEvent, SchedulerSnapshot } from './scheduler'
+import type { SpeedDoc } from './speed'
 import type { FileRef, ModelDir } from './types'
 
 export interface StateInstance {
@@ -16,6 +18,8 @@ export interface StateInstance {
   error: string | null
   /** Epoch ms when the instance entered its current state. */
   since: number | null
+  /** Estimated load progress 0..99 while loading; null otherwise or when nothing was recognised yet. */
+  progress: number | null
 }
 
 export interface StateDoc {
@@ -67,8 +71,15 @@ export interface LogLine {
   text: string
 }
 
+/** Fast-changing numbers, pushed apart from the snapshot: generation speed and GPU memory. */
+export interface MetricsDoc {
+  speed: SpeedDoc
+  gpu: GpuDoc
+}
+
 export type LiveMessage =
   | { type: 'snapshot', state: StateDoc }
+  | { type: 'metrics', metrics: MetricsDoc }
   | { type: 'activity', event: ActivityEvent }
   | { type: 'request', record: RequestRecord }
   | { type: 'log', lines: LogLine[] }
@@ -87,6 +98,10 @@ export interface LiveHubOptions {
   logHistorySize?: number
   /** Output lines of a burst are pushed together within this window. */
   logBatchMs?: number
+  /** Current speed / GPU numbers. Without it no `metrics` messages are sent. */
+  metrics?(): MetricsDoc
+  /** Metrics pushes are merged within this window. */
+  metricsMs?: number
 }
 
 export class LiveHub {
@@ -97,6 +112,9 @@ export class LiveHub {
   private readonly logs: LogLine[] = []
   private logBatch: LogLine[] = []
   private logTimer: ReturnType<typeof setTimeout> | null = null
+  private readonly progress = new Map<string, number>()
+  private metricsTimer: ReturnType<typeof setTimeout> | null = null
+  private lastMetrics = ''
   private seq = 0
   private logSeq = 0
   private lastKey = ''
@@ -111,11 +129,42 @@ export class LiveHub {
   onSchedulerEvent(e: SchedulerEvent): void {
     const { modelId, profile } = e.target
     if (e.type === 'state') {
+      // Progress belongs to one load; it starts over with every new load and ends with it.
+      this.progress.delete(instKey(modelId, profile))
       this.since.set(instKey(modelId, profile), this.now())
       this.record({ kind: 'state', modelId, profile, from: e.from, to: e.to, error: errorText(e.error) })
     } else {
       this.record({ kind: 'drain-timeout', modelId, profile, inflight: e.inflight })
     }
+  }
+
+  /** Estimated load progress of an instance (only kept while it is loading). */
+  onLoadProgress(modelId: string, profile: string, percent: number): void {
+    this.progress.set(instKey(modelId, profile), percent)
+    this.notify()
+  }
+
+  progressOf(modelId: string, profile: string): number | null {
+    return this.progress.get(instKey(modelId, profile)) ?? null
+  }
+
+  /** Speed or GPU numbers changed. Pushes are merged and identical documents are skipped. */
+  notifyMetrics(): void {
+    if (this.metricsTimer || !this.subs.size || !this.opts.metrics) return
+    this.metricsTimer = setTimeout(() => {
+      this.metricsTimer = null
+      const metrics = this.metricsNow()
+      if (!metrics) return
+      const key = JSON.stringify(metrics)
+      if (key === this.lastMetrics) return
+      this.lastMetrics = key
+      this.push({ type: 'metrics', metrics })
+    }, this.opts.metricsMs ?? 250)
+    this.metricsTimer.unref?.()
+  }
+
+  metricsNow(): MetricsDoc | null {
+    return this.opts.metrics?.() ?? null
   }
 
   onRuntimeStatus(s: RuntimeStatus): void {
@@ -181,6 +230,7 @@ export class LiveHub {
           .map(s => ({
             profile: s.profile, state: s.state, inflight: s.inflight, error: errorText(s.error),
             since: this.since.get(instKey(m.id, s.profile)) ?? null,
+            progress: s.state === 'loading' ? (this.progress.get(instKey(m.id, s.profile)) ?? null) : null,
           })),
       })),
       queue, llamacpp, firstRun: firstRun === true,
@@ -263,7 +313,8 @@ export interface StreamOptions {
  * every change, `activity` for each new event, and `history` once on connect. Closing the
  * connection (req.signal) unsubscribes.
  *
- * Also `request` (finished /v1 request records) and `log` (batches of model output lines), with
+ * Also `metrics` (generation speed + GPU memory; only the latest is held for a slow reader),
+ * `request` (finished /v1 request records) and `log` (batches of model output lines), with
  * `request-history` / `log-history` on connect.
  *
  * Bounded per connection: once the reader falls behind (the stream's queue is full), only the
@@ -285,6 +336,7 @@ export function handleStream(req: Request, opts: StreamOptions): Response {
       let hb: ReturnType<typeof setInterval> | undefined
       let poll: ReturnType<typeof setInterval> | undefined
       let heldSnapshot: string | null = null
+      let heldMetrics: string | null = null
       const heldActivity: string[] = []
       const heldLogs: string[] = []
       const write = (chunk: string) => {
@@ -292,7 +344,7 @@ export function handleStream(req: Request, opts: StreamOptions): Response {
         try { controller.enqueue(enc.encode(chunk)) } catch { cleanup() }
       }
       const room = () => (controller.desiredSize ?? 0) > 0
-      const backedUp = () => !room() || heldSnapshot !== null || heldActivity.length > 0 || heldLogs.length > 0
+      const backedUp = () => !room() || heldSnapshot !== null || heldMetrics !== null || heldActivity.length > 0 || heldLogs.length > 0
       const frame = (event: string, data: unknown) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
       // Called when the reader takes a chunk: held activity first (in order), then output lines,
       // then the latest snapshot.
@@ -304,12 +356,21 @@ export function handleStream(req: Request, opts: StreamOptions): Response {
           heldSnapshot = null
           write(chunk)
         }
+        if (!closed && room() && !heldActivity.length && !heldLogs.length && heldSnapshot === null && heldMetrics !== null) {
+          const chunk = heldMetrics
+          heldMetrics = null
+          write(chunk)
+        }
       }
       const onMessage = (m: LiveMessage) => {
         if (closed) return
         if (m.type === 'snapshot') {
           const chunk = frame('snapshot', m.state)
           if (backedUp()) heldSnapshot = chunk // only the latest state matters
+          else write(chunk)
+        } else if (m.type === 'metrics') {
+          const chunk = frame('metrics', m.metrics)
+          if (backedUp()) heldMetrics = chunk // only the latest numbers matter
           else write(chunk)
         } else if (m.type === 'log') {
           const chunk = frame('log', m.lines)
@@ -330,6 +391,7 @@ export function handleStream(req: Request, opts: StreamOptions): Response {
         clearInterval(hb)
         clearInterval(poll)
         heldSnapshot = null
+        heldMetrics = null
         heldActivity.length = 0
         heldLogs.length = 0
         req.signal.removeEventListener('abort', cleanup)
@@ -344,9 +406,11 @@ export function handleStream(req: Request, opts: StreamOptions): Response {
       const recentLogs = hub.recentLogs()
       if (recentLogs.length) write(frame('log-history', recentLogs))
       write(frame('snapshot', hub.snapshot()))
+      const metrics = hub.metricsNow()
+      if (metrics) write(frame('metrics', metrics))
       unsub = hub.subscribe(onMessage)
       hb = setInterval(() => { if (!backedUp()) write(': keep-alive\n\n') }, opts.heartbeatMs ?? 15_000)
-      poll = setInterval(() => hub.notify(), opts.pollMs ?? 2000)
+      poll = setInterval(() => { hub.notify(); hub.notifyMetrics() }, opts.pollMs ?? 2000)
     },
     pull() { flush() },
     cancel() { cleanup() },

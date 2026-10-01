@@ -16,6 +16,19 @@
 
 ---
 
+## 2026-10-01 · 工作包 3-2 · Sonnet 5.5
+- 完成：plan 阶段 3 第 4–6 项。`server/core/speed.ts`（`SpeedMeter`）：流式时数 SSE 的 `data:` 事件（行首匹配，一次原生字节搜索，不解码）按 3 秒窗口估 t/s，结束后用响应末尾 `timings`（`UsageTap.result()` 新增 `promptPerSecond` / `predictedPerSecond`）替换；没有 timings 时用整段平均并标「估算」；非流式只取 timings。`load-progress.ts`（`LoadProgress`）：按日志里程碑（不依赖 `函数名:` 前缀）+ 权重加载的点号行（无换行，所以 `runner` 新增 `onPartial`）估算 0..99%，只增不减；进度进快照 `instances[].progress`（仅 loading），也接到流式等待加载的 `: loading N%` 心跳（`progressOf`）。`gpu.ts`（`GpuSampler`）：按 `settings.gpu.sampleSec`（≥0.5 秒）采样 `nvidia-smi`，**只在有浏览器连着 `/api/stream` 时采样**，没有 nvidia-smi 就 `available:false`（总览不显示显存卡），每 60 秒重试一次。`LiveHub` 新增 `metrics` 消息（速度 + 显存，250ms 合并、相同不推、慢读者只保留最新），连接时先发一帧。界面：总览加载进度条+百分比、运行中模型的实时 / 上次速度、显存卡；顶栏显示正在生成的 t/s。
+- 验证：`bun test` 349 通过（新增 speed 10、load-progress 4、gpu 6，live +3、proxy +4、runner +1、request-log +1，并改了 live 一条断言；fake-llama-server 加了 `dots` 模式）；`bun run typecheck`、`bun run build` 通过。构建产物 + 编译的假 llama-server（会输出里程碑、无换行点号行、流式带 timings；临时数据目录、端口 5097，已停已删）在内置浏览器实测：加载中进度 20→51→86→93 并显示「加载进度约 78%」、生成中 21 t/s（顶栏同步）、结束后显示「上次：提示处理 812.3 t/s · 生成 24.9 t/s」；显存卡读到本机真实 nvidia-smi。**没测**：真实 llama-server 的日志（只用 `llama.dll` 里的字符串确认了 `loading model tensors` / `offloaded %d/%d layers` / `loaded meta data with` / `constructing llama_context` / `llama_kv_cache` / `compute buffer size` 存在；`main: model loaded`、`initializing slots` 以及点号行是否真的会出现没确认）；真实生成速度与 llama-server 自身统计对比；多 GPU；没有 nvidia-smi 的机器上的界面。
+- 剩余：无。
+- 决定 / 坑：
+  - `metrics` 不放进 snapshot（速度每秒变化，会让快照 diff 失效）；前端从 `useLive().metrics` 读。
+  - 速度只按「有 modelId 的 /v1 请求」统计；`/upstream` 不统计；streaming 请求在上游返回响应头后才算开始（`prompt` 阶段只在头已到、首 token 未到时出现）。
+  - 若真实 llama-server 不打点号行，进度会在 10% → 91% 之间不动（只剩里程碑）；3-3 真机时留意，必要时改成按模型文件大小 / 显存增长估算。
+  - Bash 的 heredoc 遇到中文 / 引号 / 反斜杠常整条失败：写文件用 Write 工具，改文件用 Python 脚本文件（别在 heredoc 里写 `\b` 之类转义，会被吃成控制字符）。
+- 下一步：工作包 3-3（Sonnet 5.5，含阶段 3 验收，真机测试前先告诉用户）。
+
+---
+
 ## 2026-10-01 · 工作包 3-1 · Sonnet 5.5
 - 完成：plan 阶段 3 前三项。`server/core/logs.ts`（`LogStore`）：模型输出每次启动一个 `data/logs/models/<模型>/时间.log`（缓冲 200ms 写盘，退出时写一行 `# llama-web: exited …`），事件 / 请求按天 `events|requests/日期.jsonl`；按 `settings.logs` 清理（每模型保留最近 N 个，不删仍打开的；jsonl 保留 keepDays 天），启动、每次新启动、跨天时清理；读取只认固定文件名格式（防路径穿越）。`server/core/request-log.ts` + `proxy.ts`：每个 `/v1` 请求结束时产出一条记录（时间、来源、模型/方案、状态、结果 ok/error/aborted、耗时、token、图片压缩前后、参数摘要）；`GET /v1/models` 和 `/upstream` 不记。`live.ts`：新增 `request` / `log` 消息及 `request-history` / `log-history`，`onActivity` 用于事件落盘。接口 `GET /api/logs`、`GET /api/logs/file`。日志页三个标签、实时 / 历史文件切换、模型筛选、搜索、暂停、自动跟随滚动。
 - 验证：`bun test` 320 通过（新增 logs 11、request-log 9、proxy 记录 7、live 5 条，并修了 `readFrames` 测试辅助函数会丢块的问题）；`bun run typecheck` 通过；`bun run build` 通过。构建产物 + 编译成的假 llama-server（临时数据目录、端口 5097，已停已删）实测：非流式 / 流式 / 404 三种请求各一条记录、token 正确；对话内容与 Authorization 全文搜索日志目录为 0 命中；重启后内置浏览器在日志页能看到上次的请求记录和模型输出。**没测**：真实 llama-server / GPU；公网来源（key 名字段已预留，4-1 接入）；局域网来源在真机上的判定（只有单元测试）；事件标签的界面（只看了模型输出和请求两个标签）。

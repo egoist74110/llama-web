@@ -74,25 +74,32 @@ describe('UsageTap', () => {
     const body = JSON.stringify({ choices: [{ message: { content: 'x'.repeat(50_000) } }], usage: { prompt_tokens: 12, completion_tokens: 34, total_tokens: 46 } })
     const tap = new UsageTap()
     for (let i = 0; i < body.length; i += 777) tap.push(enc.encode(body.slice(i, i + 777)))
-    expect(tap.result()).toEqual({ promptTokens: 12, completionTokens: 34 })
+    expect(tap.result()).toMatchObject({ promptTokens: 12, completionTokens: 34, promptPerSecond: null, predictedPerSecond: null })
 
     const sse = new UsageTap()
     sse.push(enc.encode('data: {"choices":[{"delta":{"content":"hi"}}]}\n\n'))
     sse.push(enc.encode('data: {"usage":{"prompt_tokens":5,"comple'))
     sse.push(enc.encode('tion_tokens":6}}\n\ndata: [DONE]\n\n'))
-    expect(sse.result()).toEqual({ promptTokens: 5, completionTokens: 6 })
+    expect(sse.result()).toMatchObject({ promptTokens: 5, completionTokens: 6 })
   })
 
   test('embeddings have no completion tokens; nothing at all gives nulls; only a tail is kept', () => {
     const e = new UsageTap()
     e.push(enc.encode('{"data":[],"usage":{"prompt_tokens":9,"total_tokens":9}}'))
-    expect(e.result()).toEqual({ promptTokens: 9, completionTokens: null })
-    expect(new UsageTap().result()).toEqual({ promptTokens: null, completionTokens: null })
+    expect(e.result()).toMatchObject({ promptTokens: 9, completionTokens: null })
+    expect(new UsageTap().result()).toEqual({ promptTokens: null, completionTokens: null, promptPerSecond: null, predictedPerSecond: null })
 
     const big = new UsageTap(1024)
     big.push(enc.encode('{"usage":{"prompt_tokens":1,"completion_tokens":1}}'))
     for (let i = 0; i < 200; i++) big.push(enc.encode('x'.repeat(100)))
-    expect(big.result()).toEqual({ promptTokens: null, completionTokens: null }) // far from the end: not found, not an error
+    expect(big.result()).toMatchObject({ promptTokens: null, completionTokens: null }) // far from the end: not found, not an error
+  })
+
+  test('reads llama-server timings (decimal speeds) from the final chunk', () => {
+    const t = new UsageTap()
+    t.push(enc.encode('data: {"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":6},'))
+    t.push(enc.encode('"timings":{"prompt_n":5,"prompt_per_second":1234.56,"predicted_n":6,"predicted_per_second":42}}\n\ndata: [DONE]\n\n'))
+    expect(t.result()).toMatchObject({ promptPerSecond: 1234.56, predictedPerSecond: 42, promptTokens: 5, completionTokens: 6 })
   })
 
   test('text that merely mentions the field is not mistaken for usage', () => {

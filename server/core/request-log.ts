@@ -167,18 +167,29 @@ export class UsageTap {
     }
   }
 
-  result(): { promptTokens: number | null, completionTokens: number | null } {
-    if (!this.chunks.length) return { promptTokens: null, completionTokens: null }
+  result(): {
+    promptTokens: number | null
+    completionTokens: number | null
+    /** llama-server's own speeds (`timings` object), when the response has them. */
+    promptPerSecond: number | null
+    predictedPerSecond: number | null
+  } {
+    if (!this.chunks.length) return { promptTokens: null, completionTokens: null, promptPerSecond: null, predictedPerSecond: null }
     const all = new Uint8Array(this.held)
     let off = 0
     for (const c of this.chunks) { all.set(c, off); off += c.byteLength }
     const text = new TextDecoder().decode(all.subarray(Math.max(0, all.byteLength - this.keep)))
-    return { promptTokens: lastNumber(text, 'prompt_tokens'), completionTokens: lastNumber(text, 'completion_tokens') }
+    return {
+      promptTokens: lastNumber(text, 'prompt_tokens'),
+      completionTokens: lastNumber(text, 'completion_tokens'),
+      promptPerSecond: lastNumber(text, 'prompt_per_second'),
+      predictedPerSecond: lastNumber(text, 'predicted_per_second'),
+    }
   }
 }
 
 function lastNumber(text: string, key: string): number | null {
-  const re = new RegExp(`"${key}"\\s*:\\s*(\\d+)`, 'g')
+  const re = new RegExp(`"${key}"\\s*:\\s*(\\d+(?:\\.\\d+)?)`, 'g')
   let last: number | null = null
   for (let m = re.exec(text); m; m = re.exec(text)) last = Number(m[1])
   return last

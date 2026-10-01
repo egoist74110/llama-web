@@ -15,6 +15,7 @@ import { resolvePreprocessOptions, runPreprocess, type PreprocessResult } from '
 import { sourceOf, summarizeImages, summarizeParams, UsageTap, type RequestMeta, type RequestRecord } from './request-log'
 import { findModel, hasImages, listModelNames, resolveTarget, type RouteResult } from './routing'
 import { LoadError } from './runner'
+import type { SpeedMeter } from './speed'
 import { ModelCrashError, SchedulerError, type Lease, type Scheduler, type Target } from './scheduler'
 
 /** Request body limit for /v1 and /upstream (bytes). */
@@ -73,6 +74,8 @@ export interface ProxyDeps {
   onEvent?(e: ProxyEvent): void
   /** Called once per finished /v1 request (not for GET /v1/models). Must not throw. */
   onRequest?(r: RequestRecord): void
+  /** Live speed tracking for streaming responses (estimate per chunk, exact timings at the end). */
+  speed?: SpeedMeter
 }
 
 // ---------------------------------------------------------------------------------------
@@ -105,20 +108,42 @@ class RequestTrace {
   /** Set when a streaming path owns the end of the exchange and will call finish() itself. */
   deferred = false
   private done = false
+  private flowing = false
 
   constructor(
     private readonly req: Request,
     private readonly meta: RequestMeta | undefined,
     private readonly emit: ((r: RequestRecord) => void) | null,
     private readonly id: number,
+    private readonly speed: SpeedMeter | null = null,
   ) {}
+
+  /** The upstream answered: start live speed tracking (streaming requests only). */
+  startFlow(): void {
+    if (this.speed && this.stream && this.modelId && this.profile) {
+      this.speed.begin(this.id, this.modelId, this.profile)
+      this.flowing = true
+    }
+  }
+
+  /** A response chunk: feeds the usage tail and the speed estimate. */
+  chunk(value: Uint8Array): void {
+    this.tap.push(value)
+    if (this.flowing) this.speed!.chunk(this.id, value)
+  }
 
   finish(status: number, outcome: RequestRecord['outcome'], error: string | null = null): void {
     if (this.done) return
     this.done = true
+    const usage = this.tap.result()
+    if (this.speed && this.modelId && this.profile) {
+      const timings = { promptPerSecond: usage.promptPerSecond, predictedPerSecond: usage.predictedPerSecond }
+      if (this.flowing) this.speed.end(this.id, timings)
+      else this.speed.record(this.modelId, this.profile, timings)
+    }
     if (!this.emit) return
     const { source, keyName } = sourceOf(this.meta)
-    const { promptTokens, completionTokens } = this.tap.result()
+    const { promptTokens, completionTokens } = usage
     try {
       this.emit({
         id: this.id, at: this.at, source, keyName, method: this.req.method, path: new URL(this.req.url).pathname,
@@ -279,6 +304,7 @@ export function createProxy(deps: ProxyDeps) {
       return failure
     }
     const { res, ac, cleanup } = up
+    trace?.startFlow()
     let finished = false
     const finish = (ok: boolean) => {
       if (finished) return
@@ -304,7 +330,7 @@ export function createProxy(deps: ProxyDeps) {
             finish(true)
             ctrl.close()
           } else {
-            trace?.tap.push(value)
+            trace?.chunk(value)
             ctrl.enqueue(value)
           }
         } catch (e) {
@@ -393,6 +419,7 @@ export function createProxy(deps: ProxyDeps) {
         return
       }
       const { res, ac, cleanup } = up
+      trace.startFlow()
       let ok = false
       let released = false
       let upstreamStatus = 200
@@ -412,14 +439,14 @@ export function createProxy(deps: ProxyDeps) {
           const text = await res.text()
           await bounded(send(`data: ${text || JSON.stringify({ error: { message: res.statusText, code: res.status } })}\n\n`), ac.signal)
           upstreamStatus = res.status
-          trace.tap.push(enc.encode(text))
+          trace.chunk(enc.encode(text))
           ok = res.status < 500
         } else {
           const reader = res.body.getReader()
           for (;;) {
             const { done, value } = await reader.read()
             if (done) break
-            trace.tap.push(value)
+            trace.chunk(value)
             // Parked here when the client stopped reading; neither abort wakes these waits
             // by itself, so each one is bounded by `ac`.
             await bounded(writer.ready, ac.signal)
@@ -454,7 +481,7 @@ export function createProxy(deps: ProxyDeps) {
   async function handleV1(req: Request, meta?: RequestMeta): Promise<Response> {
     const url = new URL(req.url)
     const quiet = req.method === 'GET' && url.pathname.startsWith('/v1/models')
-    const trace = new RequestTrace(req, meta, quiet ? null : deps.onRequest ?? null, ++requestSeq)
+    const trace = new RequestTrace(req, meta, quiet ? null : deps.onRequest ?? null, ++requestSeq, quiet ? null : deps.speed ?? null)
     let res: Response
     try {
       res = await handleV1Inner(req, trace)

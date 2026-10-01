@@ -39,7 +39,7 @@ describe('LiveHub', () => {
     tick(500)
     const snap = hub.snapshot()
     expect(snap.now).toBe(1500)
-    expect(snap.models[0]!.instances).toEqual([{ profile: 'default', state: 'loading', inflight: 2, error: null, since: 1000 }])
+    expect(snap.models[0]!.instances).toEqual([{ profile: 'default', state: 'loading', inflight: 2, error: null, since: 1000, progress: null }])
     sched.models[0]!.state = 'stopped'
     expect(hub.snapshot().models[0]!.instances).toEqual([])
   })
@@ -107,6 +107,57 @@ async function readFrames(res: Response, until: (frames: string[]) => boolean, t
   reader.releaseLock()
   return frames
 }
+
+describe('load progress and metrics', () => {
+  test('progress shows only while loading and restarts with every load', () => {
+    const { hub, sched, target } = setup()
+    hub.onSchedulerEvent({ type: 'state', target, from: 'stopped', to: 'loading' })
+    sched.models.push({ ...target, state: 'loading', port: 1, inflight: 0, lastUsedAt: null, error: null })
+    expect(hub.snapshot().models[0]!.instances[0]!.progress).toBeNull()
+    hub.onLoadProgress('m1', 'default', 42)
+    expect(hub.snapshot().models[0]!.instances[0]!.progress).toBe(42)
+    expect(hub.progressOf('m1', 'default')).toBe(42)
+    sched.models[0]!.state = 'ready'
+    hub.onSchedulerEvent({ type: 'state', target, from: 'loading', to: 'ready' })
+    expect(hub.snapshot().models[0]!.instances[0]!.progress).toBeNull()
+    expect(hub.progressOf('m1', 'default')).toBeNull()
+  })
+
+  test('metrics are pushed merged, identical documents are skipped', async () => {
+    let n = 0
+    const { hub } = setup({
+      metricsMs: 1,
+      metrics: () => ({ speed: { active: [], last: [] }, gpu: { available: true, gpus: [{ index: 0, name: 'G', usedMiB: n, totalMiB: 100, utilization: null }] } }),
+    })
+    const got: number[] = []
+    hub.subscribe((m) => { if (m.type === 'metrics') got.push(m.metrics.gpu.gpus[0]!.usedMiB) })
+    n = 1
+    hub.notifyMetrics()
+    hub.notifyMetrics()
+    await wait(15)
+    hub.notifyMetrics() // unchanged
+    await wait(15)
+    n = 2
+    hub.notifyMetrics()
+    await wait(15)
+    expect(got).toEqual([1, 2])
+  })
+
+  test('a connection gets the metrics on connect and again when they change', async () => {
+    let n = 0
+    const { hub } = setup({
+      metricsMs: 1,
+      metrics: () => ({ speed: { active: [], last: [] }, gpu: { available: false, gpus: [] }, tag: n }) as any,
+    })
+    const ac = new AbortController()
+    const res = handleStream(new Request('http://x/api/stream', { signal: ac.signal }), { hub, pollMs: 10_000 })
+    n = 7
+    hub.notifyMetrics()
+    const frames = await readFrames(res, f => f.filter(x => x.startsWith('event: metrics')).length >= 2)
+    expect(frames.filter(x => x.startsWith('event: metrics')).map(x => JSON.parse(x.split('data: ')[1]!).tag)).toEqual([0, 7])
+    ac.abort()
+  })
+})
 
 describe('handleStream', () => {
   test('sends history and snapshot on connect, then live changes; abort unsubscribes', async () => {
