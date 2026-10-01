@@ -363,6 +363,20 @@ ol.steps li{margin:4px 0}
 真机测试前先告诉我。做完按指南的「会话收尾流程」结束。</pre></div>
   </div>
 
+  <div class="pkg" id="p4-5">
+    <div class="pkg-head"><b>4-5 一键建隧道（Cloudflare API）</b><span class="m opus">Opus 5.5</span></div>
+    <ul class="scope">
+      <li>plan 阶段 4「一键建隧道」一项。设置页输入 Cloudflare 操作 token（所需权限：Account · Cloudflare Tunnel · Edit；Zone · DNS · Edit；Zone · Zone · Read），保存到 <code>data/secrets.json</code>（新增字段，secrets 升版本并写迁移），打码显示，不进日志、事件、请求记录和错误输出；<code>server/core/</code> 下新模块封装 Cloudflare API（可注入 fetch，便于用假服务测试）。</li>
+      <li>流程：校验 token（权限不足时指出缺哪项）→ 列出 zone → 用户选域名 + 填子域名 → 预览将要做的事（新建隧道、入口规则指向 <code>http://127.0.0.1:公网端口</code>、DNS CNAME 指向 <code>&lt;隧道ID&gt;.cfargotunnel.com</code> 且代理开启）→ 用户确认后执行 → 取回隧道 token 存入 secrets 并打开托管开关。</li>
+      <li>已存在同名隧道、同名 DNS 记录（尤其指向别的隧道的）要展示现状，让用户选择复用 / 改指 / 取消，不能静默覆盖或删除；失败的步骤可以从中断处重试，不留半成品（创建了隧道但后面失败要提示或清理）。</li>
+      <li>域名必须是该 Cloudflare 账号下已添加（NS 已指向 Cloudflare）的 zone，Cloudflare 靠这一点验证域名归属；界面里说明这一点，并只列出可用的 zone。</li>
+      <li>补测试（假 Cloudflare 服务：成功、权限不足、已存在冲突、中途失败）；README 隧道一节加入新流程；真机验收用用户自己的账号，前先告诉用户要创建 / 修改哪些东西。</li>
+    </ul>
+    <div class="prompt"><button type="button">复制</button><pre>执行工作包 4-5（含阶段 4 验收）。
+按 AGENTS.md 的规则开始：先读 docs/claude-guide.html 里「工作包 4-5」的卡片和「会话规则」，再读 docs/handoff.md 最新交接和 docs/plan.html 阶段 4 的任务、验收标准与变更记录里 4-4、4-5 的那两条。
+会改动用户的 Cloudflare 账号（隧道、DNS），真机测试前先告诉我要创建 / 修改什么。做完按指南的「会话收尾流程」结束。</pre></div>
+  </div>
+
   <div class="gatebox"><span class="m gate">阶段关口 4</span> 你试用（经隧道带 key / 不带 key）→ Codex 审查（阶段号 4）→ Claude 处理意见 → 完成。之后自行吊销旧 key、归档旧目录。</div>
 </section>
 
