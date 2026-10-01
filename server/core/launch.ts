@@ -24,6 +24,8 @@ export interface LaunchPlan {
   tag: string
   loadTimeoutMs: number
   warnings: ArgWarning[]
+  /** Absolute paths of the weight files (model, mmproj, draft) the load reads. */
+  weightFiles: string[]
 }
 
 export interface PlanInput {
@@ -160,5 +162,6 @@ export function planLaunch(target: Target, input: PlanInput): LaunchPlan {
     tag: `${model.id}:${target.profile}`,
     loadTimeoutMs: settings.scheduler.loadTimeoutSec * 1000,
     warnings: probe.warnings,
+    weightFiles: [paths.model, paths.mmproj, paths.draft].filter((p): p is string => !!p),
   }
 }

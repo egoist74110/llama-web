@@ -16,6 +16,14 @@
 
 ---
 
+## 2026-10-01 · 3-3 补丁：加载进度 · Sonnet 5.5
+- 完成：修真机加载进度不动。原因：当前 llama.cpp（b11146）加载时几乎不输出（只有 `loading model` → `llama threadpool init` → `creating MTP draft context` → `load_model: initializing` → `llama_server: model loaded`），没有点号行，旧里程碑也匹配不上。现在：新增这几条里程碑；加载期间每秒按 GPU 显存增长 ÷ 权重文件大小（model + mmproj + draft，`LaunchPlan.weightFiles`）推进 12→90%，没有 nvidia-smi 时用时间曲线（τ=15s）；`LoadProgress.estimate()`，`trackWeightLoad`（context.ts）；只增不减，里程碑更靠前时以里程碑为准。
+- 验证：`bun test`、`bun run typecheck`、`bun run build` 通过（load-progress 新增 3 条）。真机（Qwen3.8-27B，临时数据目录，已停已删）：热缓存加载 8 秒，进度 12 → 14 → 85 → 94 → ready。**没测**：冷缓存长加载（预期更平滑）；无 nvidia-smi 的机器；多 GPU（按总显存增长算）；有别的程序同时占显存时进度可能被带偏（只会提前，不会倒退，就绪后归零）。
+- 剩余：无。部分卸载（-ngl 小于全部层）时显存增长小于文件大小，进度会停在中段直到里程碑。
+- 下一步：阶段 3 关口，用户确认后 4-1。
+
+---
+
 ## 2026-10-01 · 工作包 3-3（含阶段 3 验收） · Sonnet 5.5
 - 完成：plan 阶段 3 第 7–9 项。`server/core/errors.ts`：按进程最后输出 + 退出码识别 oom / cuda-error / dll-missing / file-missing / unknown-arg / mmproj-mismatch / unsupported-arch / bad-model / port-in-use，认不出保留 `exited` / `timeout` / `crashed` 等原因码（顺序敏感，显存不足优先于笼统的 failed to load model）。`ModelCrashError` 现在带最后 30 行和退出码（`ModelProcess.tail?`）。快照 `instances[].failure`（kind、exitCode、tail）；`errorText` 和 `/v1` 503 报错用识别后的 kind（事件里只有 kind，不含输出）。界面 `FailureCard`（总览 + 模型卡片）：中文原因 + 建议 + 「不会自动重试」+ 最后 30 行 + 「查看完整日志」（`/logs?model=<id>` 预选模型）+ 重试。
 - 验证：`bun test` 373 通过（新增 errors 22、live 1、scheduler 1）；`bun run typecheck`、`bun run build` 通过。**阶段 3 真机验收**（RTX 5090、临时数据目录、端口 5094、b11146 拷贝、Qwen3.8-27B，用完已停已删，显存回到基线约 3 GB）：

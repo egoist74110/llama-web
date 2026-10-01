@@ -1,7 +1,9 @@
 // Estimates model load progress (0..99) from llama-server output. llama-server prints no
-// percentage, so progress is a mix of milestones (known log messages, matched without the
-// `function:` prefix) and the dot line the tensor loader prints while it reads the weights
-// (one dot per percent, no newline until done).
+// percentage, and current builds print almost nothing while the weights load, so progress is a
+// mix of: milestones (known log messages, matched without the `function:` prefix), the dot
+// line older builds print while reading the weights, and -- the part that actually moves the
+// bar on recent builds -- GPU memory growth against the size of the weight files (or, with no
+// GPU numbers, a time curve).  Milestones always win when they are further along.
 // Pure module, testable with bun test. Unknown output never moves progress backwards.
 
 /** Milestone patterns in the order llama-server usually prints them: [pattern, percent]. */
@@ -11,14 +13,19 @@ const MILESTONES: Array<[RegExp, number]> = [
   [/loading model tensors/i, 8],
   [/offloading .* layers|offloaded \d+\/\d+ layers/i, 10],
   [/constructing llama_context|n_ctx\s*=/i, 91],
+  [/llama threadpool init/i, 92], // recent builds: weights are in, the context is being built
   [/llama_kv_cache|kv_cache: /i, 93],
   [/compute buffer size/i, 95],
-  [/initializing slots|warming up/i, 97],
-  [/main: model loaded/i, 99],
+  [/creating \w+ draft context/i, 94],
+  [/initializing slots|warming up|load_model: initializing/i, 97],
+  [/(?:main|llama_server): model loaded/i, 99],
 ]
 
 /** Share of the bar covered by the weight-reading dots: [from, to]. */
 const DOT_RANGE: [number, number] = [12, 90]
+
+/** Time-curve fallback: about 63% of the weight range after this long. */
+const TIME_CONSTANT_MS = 15_000
 
 export class LoadProgress {
   private pct = 0
@@ -42,6 +49,19 @@ export class LoadProgress {
     if (!/^\.{3,}$/.test(t)) return null
     const [from, to] = DOT_RANGE
     return this.raise(from + Math.min(100, t.length) / 100 * (to - from))
+  }
+
+  /**
+   * Weight loading by GPU memory: `growthMiB` is how much GPU memory went up since the load
+   * started, `expectedMiB` the size of the weight files. Without GPU numbers (`growthMiB` null)
+   * a time curve is used instead. Stays below the context milestones (max 90).
+   */
+  estimate(elapsedMs: number, growthMiB: number | null, expectedMiB: number): number | null {
+    const [from, to] = DOT_RANGE
+    const frac = growthMiB !== null && expectedMiB > 0
+      ? Math.min(1, Math.max(0, growthMiB) / expectedMiB)
+      : 1 - Math.exp(-Math.max(0, elapsedMs) / TIME_CONSTANT_MS)
+    return this.raise(from + frac * (to - from))
   }
 
   private raise(p: number): number | null {
