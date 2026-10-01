@@ -15,7 +15,7 @@ function setup(extra: Partial<LiveHubOptions> = {}) {
       scheduler: sched,
       models: [{ id: 'm1', name: 'Model One', activeProfile: 'default', profiles: ['default'], hasMmproj: false, files: { model: 'main/m.gguf', mmproj: null, draft: null }, missing: [], instances: [] }],
       queue: sched.queue.map(q => ({ modelId: q.modelId, profile: q.profile, started: q.started, waiting: q.waiting })),
-      llamacpp: { current: 'b1', runtime: { state: 'ready', tag: 'b1' } },
+      llamacpp: { current: 'b1', runtime: { state: 'ready', tag: 'b1' }, versions: [], rollback: null },
     }),
   })
   const target = { modelId: 'm1', profile: 'default' }
@@ -28,7 +28,7 @@ describe('LiveHub', () => {
   test('carries the first-run flag (false unless the snapshot source says so)', () => {
     const { hub } = setup()
     expect(hub.snapshot().firstRun).toBe(false)
-    const first = new LiveHub({ snapshot: () => ({ scheduler: { models: [], queue: [] }, models: [], queue: [], llamacpp: { current: '', runtime: { state: 'idle' } }, firstRun: true }) })
+    const first = new LiveHub({ snapshot: () => ({ scheduler: { models: [], queue: [] }, models: [], queue: [], llamacpp: { current: '', runtime: { state: 'idle' }, versions: [], rollback: null }, firstRun: true }) })
     expect(first.snapshot().firstRun).toBe(true)
   })
 
@@ -97,6 +97,18 @@ describe('LiveHub', () => {
     hub.onRuntimeStatus({ state: 'working', step: 'download', detail: 'a' })
     hub.onRuntimeStatus({ state: 'ready', tag: 'b2' })
     expect(hub.recent().map(e => e.kind === 'runtime' && e.state)).toEqual(['working', 'ready'])
+  })
+
+  test('update / rollback / failed check events carry the versions involved', () => {
+    const { hub } = setup()
+    hub.onRuntimeStatus({ state: 'ready', tag: 'b3', note: 'updated', from: 'b2', latest: 'b3' })
+    hub.onRuntimeStatus({ state: 'ready', tag: 'b2', note: 'switched', from: 'b3' })
+    hub.onRuntimeStatus({ state: 'error', code: 'network', detail: 'offline', using: 'b2' })
+    expect(hub.recent().map(({ id: _i, at: _a, ...e }) => e)).toEqual([
+      { kind: 'runtime', state: 'ready', tag: 'b3', code: null, note: 'updated', from: 'b2' },
+      { kind: 'runtime', state: 'ready', tag: 'b2', code: null, note: 'switched', from: 'b3' },
+      { kind: 'runtime', state: 'error', tag: 'b2', code: 'network', note: null, from: null },
+    ])
   })
 })
 
@@ -295,7 +307,7 @@ describe('requests and model output', () => {
     let boom = false
     const hub = new LiveHub({
       onActivity: (e) => { seen.push(e); if (boom) throw new Error('disk full') },
-      snapshot: () => ({ scheduler: { models: [], queue: [] }, models: [], queue: [], llamacpp: { current: '', runtime: { state: 'idle' } } }),
+      snapshot: () => ({ scheduler: { models: [], queue: [] }, models: [], queue: [], llamacpp: { current: '', runtime: { state: 'idle' }, versions: [], rollback: null } }),
     })
     const got: string[] = []
     hub.subscribe(m => got.push(m.type))
@@ -308,7 +320,7 @@ describe('requests and model output', () => {
   })
 
   test('request records are pushed and the last ones kept for new connections', () => {
-    const hub = new LiveHub({ requestHistorySize: 3, snapshot: () => ({ scheduler: { models: [], queue: [] }, models: [], queue: [], llamacpp: { current: '', runtime: { state: 'idle' } } }) })
+    const hub = new LiveHub({ requestHistorySize: 3, snapshot: () => ({ scheduler: { models: [], queue: [] }, models: [], queue: [], llamacpp: { current: '', runtime: { state: 'idle' }, versions: [], rollback: null } }) })
     const got: number[] = []
     hub.subscribe(m => { if (m.type === 'request') got.push(m.record.id) })
     for (let i = 1; i <= 5; i++) hub.onRequest(record(i))
@@ -326,7 +338,7 @@ describe('requests and model output', () => {
     await wait(150)
     expect(batches).toEqual([[2, 3, 4, 5, 6]])
     off()
-    const small = new LiveHub({ logHistorySize: 3, snapshot: () => ({ scheduler: { models: [], queue: [] }, models: [], queue: [], llamacpp: { current: '', runtime: { state: 'idle' } } }) })
+    const small = new LiveHub({ logHistorySize: 3, snapshot: () => ({ scheduler: { models: [], queue: [] }, models: [], queue: [], llamacpp: { current: '', runtime: { state: 'idle' }, versions: [], rollback: null } }) })
     for (let i = 0; i < 10; i++) small.onLogLine('m1', 'default', 'stdout', `l${i}`)
     expect(small.recentLogs().map(l => l.text)).toEqual(['l7', 'l8', 'l9'])
   })

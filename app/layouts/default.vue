@@ -97,5 +97,6 @@ const themeMenu = computed(() => [modes.map(m => ({
         <slot />
       </main>
     </div>
+    <LlamacppSwitchModal />
   </div>
 </template>

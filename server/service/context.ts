@@ -9,7 +9,7 @@ import {
 import { authenticate, defaultSecrets, normalizeSecrets, SECRETS_VERSION, type SecretsDoc } from '../core/keys'
 import { LaunchConfigError, planLaunch } from '../core/launch'
 import { LogStore } from '../core/logs'
-import { ensureRuntime, type RuntimeStatus } from '../core/llamacpp'
+import type { RuntimeStatus } from '../core/llamacpp'
 import { GpuSampler, parseNvidiaSmi, runNvidiaSmi } from '../core/gpu'
 import { describeModels, LiveHub } from '../core/live'
 import { LoadProgress, trackWeightLoad } from '../core/load-progress'
@@ -22,6 +22,7 @@ import { Scheduler, type SchedulerEvent } from '../core/scheduler'
 import { SpeedMeter } from '../core/speed'
 import { isFirstRun } from '../core/settings-admin'
 import { JsonStore, resolveDataDir, type VersionedDoc } from '../core/store'
+import { Updater } from '../core/updater'
 
 export interface AppContext {
   dataDir: string
@@ -37,8 +38,10 @@ export interface AppContext {
   updateSecrets(fn: (draft: SecretsDoc) => SecretsDoc | void): SecretsDoc
   /** Re-read both files now (hand edits the watcher has not reported yet). Throws StoreError if one is invalid. */
   refresh(): void
-  /** State of the initial llama.cpp download / version check. */
+  /** State of the llama.cpp startup check / download. */
   getRuntimeStatus(): RuntimeStatus
+  /** llama.cpp versions: list, switch (rollback), pruning. */
+  updater: Updater
   runner: Runner
   scheduler: Scheduler
   /** Management actions (start / stop / restart / switch); use these instead of the scheduler directly. */
@@ -156,7 +159,27 @@ function createContext(): AppContext {
     get portRange() { return getSettings().scheduler.portRange },
     registry: new PidRegistry(join(dataDir, 'run', 'pids.json')),
   })
-  let runtimeStatus: RuntimeStatus = { state: 'idle' }
+  // Executables between planLaunch and runner.start: their version directory must not be pruned yet.
+  const launching = new Map<number, string>()
+  let launchSeq = 0
+  const updater = new Updater({
+    dataDir,
+    llamacpp: () => getSettings().llamacpp,
+    setCurrent: tag => settingsRef.update((s) => { s.llamacpp.current = tag }),
+    usedExes: () => [...runner.list().map(p => p.spec.exe), ...launching.values()],
+    onStatus: (s) => {
+      live.onRuntimeStatus(s)
+      if (s.state === 'working') log(`llama.cpp: ${s.step} ${s.detail}`.trim())
+      else if (s.state === 'ready') log(`llama.cpp: using ${s.tag}${s.note === 'updated' ? ` (updated from ${s.from ?? 'none'})` : ''}${s.note === 'pinned' ? ` (latest ${s.latest} installed, kept the chosen version)` : ''}`)
+      else if (s.state === 'error') logError(`llama.cpp update failed: ${s.code} ${s.detail}${s.using ? ` (still using ${s.using})` : ''}`)
+      else if (s.state === 'disabled') log('llama.cpp: none installed and downloads are off (llamacpp.autoUpdate)')
+    },
+    onPrune: (r) => {
+      if (r.removed.length) log(`llama.cpp: removed old versions ${r.removed.join(', ')}`)
+      for (const f of r.failed) logError(`llama.cpp: could not remove ${f.tag}: ${f.detail}`)
+      live.notify()
+    },
+  })
   const speed = new SpeedMeter({ onChange: () => live.notifyMetrics() })
   // Samples nvidia-smi every settings.gpu.sampleSec seconds (2 by default), but only while a browser is connected to /api/stream.
   const gpu = new GpuSampler({ intervalMs: () => Math.max(500, getSettings().gpu.sampleSec * 1000), active: () => live.subscriberCount > 0, onChange: () => live.notifyMetrics() })
@@ -168,7 +191,7 @@ function createContext(): AppContext {
       scheduler: scheduler.snapshot(),
       models: describeModels(getModels(), { dirs: getSettings().modelDirs }),
       queue: scheduler.snapshot().queue.map(q => ({ modelId: q.modelId, profile: q.profile, started: q.started, waiting: q.waiting })),
-      llamacpp: { current: getSettings().llamacpp.current, runtime: runtimeStatus },
+      llamacpp: { current: getSettings().llamacpp.current, runtime: updater.getStatus(), versions: updater.versions(), rollback: updater.rollbackTarget() },
       firstRun: isFirstRun(getSettings(), getModels()),
     }),
   })
@@ -183,6 +206,8 @@ function createContext(): AppContext {
       const plan = planLaunch(target, { dataDir, settings: getSettings(), models: getModels(), host: runner.host })
       for (const w of plan.warnings) log(`args ${plan.tag}: ${w.code} ${w.flag ?? ''} ${w.layer ?? ''}`.trim())
       log(`starting ${plan.tag}: ${plan.exe}`)
+      const launchId = ++launchSeq
+      launching.set(launchId, plan.exe)
       const progress = new LoadProgress()
       const report = (p: number | null) => { if (p !== null) live.onLoadProgress(target.modelId, target.profile, p) }
       const stopTracking = trackWeightLoad({ files: plan.weightFiles, progress, report, usedMiB: totalUsedMiB })
@@ -199,6 +224,7 @@ function createContext(): AppContext {
           },
           onPartial: (_stream, partial) => report(progress.partial(partial)),
         })
+        launching.delete(launchId) // runner.list() covers it from here on
         void rp.ready.then(stopTracking, stopTracking)
         void rp.exited.then((x) => {
           stopTracking()
@@ -207,6 +233,7 @@ function createContext(): AppContext {
         })
         return rp
       } catch (e) {
+        launching.delete(launchId)
         stopTracking()
         run.append(`# llama-web: could not start: ${(e as Error).message}`)
         run.close()
@@ -235,29 +262,17 @@ function createContext(): AppContext {
     else if (st.state === 'off') log('public entry off')
   }
 
-  // Background: adopt an installed llama.cpp or download the first one. Never blocks startup.
-  void ensureRuntime({
-    dataDir,
-    cudaRuntime: getSettings().llamacpp.cudaRuntime,
-    current: getSettings().llamacpp.current,
-    allowDownload: getSettings().llamacpp.autoUpdate,
-    setCurrent: tag => settingsRef.update((s) => { s.llamacpp.current = tag }),
-    onStatus: (s) => {
-      runtimeStatus = s
-      live.onRuntimeStatus(s)
-      if (s.state === 'working') log(`llama.cpp: ${s.step} ${s.detail}`.trim())
-      else if (s.state === 'ready') log(`llama.cpp: using ${s.tag}`)
-      else if (s.state === 'error') logError(`llama.cpp download failed: ${s.code} ${s.detail}`)
-      else if (s.state === 'disabled') log('llama.cpp: none installed and downloads are off (llamacpp.autoUpdate)')
-    },
-  }).catch(e => logError('llama.cpp check failed', e))
+  // Background, once per start (plan 关键决定 15): adopt an installed llama.cpp, download a newer
+  // release and make it current, prune old versions. Loads meanwhile use the current version.
+  // After residue cleanup, so leftovers of the last run do not hold a version directory.
+  void cleanupDone.then(() => updater.run())
 
   let closing: Promise<void> | null = null
   return {
     dataDir, bootPort: getSettings().server.port, getSettings, getModels, updateSettings: settingsRef.update, updateModels: modelsRef.update,
     getSecrets: secretsRef.get, updateSecrets: secretsRef.update,
     refresh: () => { settingsRef.refresh(); modelsRef.refresh() },
-    getRuntimeStatus: () => runtimeStatus, runner, scheduler, ops, proxy, publicEntry, applyPublic, live, logs, cleanupDone,
+    getRuntimeStatus: () => updater.getStatus(), updater, runner, scheduler, ops, proxy, publicEntry, applyPublic, live, logs, cleanupDone,
     shutdown() {
       closing ??= (async () => {
         publicEntry.close()

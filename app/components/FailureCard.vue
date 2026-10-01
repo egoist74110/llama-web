@@ -22,6 +22,16 @@ const toEnd = () => nextTick(() => { if (tailEl.value) tailEl.value.scrollTop = 
 onMounted(toEnd)
 watch(() => props.failure.tail.length, toEnd)
 const working = computed(() => !!busy.value[`retry:${props.modelId}`])
+
+// Just updated llama.cpp and a load fails: suggest the previous version, unless the cause is
+// clearly not the engine (memory, files, ports, configuration, or a model needing a newer build).
+const NOT_VERSION = new Set(['oom', 'file-missing', 'port-in-use', 'no-runtime', 'bad-args', 'unsupported-arch'])
+const { state: live } = useLive()
+const llamacpp = useLlamacpp()
+const rollback = computed(() => {
+  const l = live.value?.llamacpp
+  return l?.rollback && !NOT_VERSION.has(props.failure.kind) ? { tag: l.rollback, current: l.current } : null
+})
 </script>
 
 <template>
@@ -34,6 +44,14 @@ const working = computed(() => !!busy.value[`retry:${props.modelId}`])
     <p class="text-default">
       {{ advice }}
     </p>
+    <div v-if="rollback" class="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+      <p class="min-w-0 flex-1 basis-60 text-default">
+        {{ fmt(f.rollback, rollback) }}
+      </p>
+      <UButton size="sm" color="neutral" variant="outline" icon="i-lucide-history" @click="llamacpp.ask(rollback.tag)">
+        {{ fmt(f.rollbackButton, rollback) }}
+      </UButton>
+    </div>
     <p v-if="state === 'failed'" class="text-xs text-muted">
       {{ f.noRetry }}
     </p>

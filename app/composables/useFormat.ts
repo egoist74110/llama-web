@@ -40,8 +40,12 @@ export function runtimeText(r: StateDoc['llamacpp']['runtime'] | undefined): str
   const rt = t.status.runtime
   switch (r.state) {
     case 'working': return fmt(rt.working[r.step], { detail: r.detail })
-    case 'ready': return fmt(rt.ready, { tag: r.tag })
-    case 'error': return fmt(rt.error, { code: r.code, detail: r.detail })
+    case 'ready': {
+      const vars = { tag: r.tag, from: r.from ?? '', latest: r.latest ?? '' }
+      if (r.note === 'updated') return fmt(r.from ? rt.notes.updated : rt.notes.updatedFirst, vars)
+      return r.note ? fmt(rt.notes[r.note], vars) : fmt(rt.ready, vars)
+    }
+    case 'error': return fmt(r.using ? rt.errorUsing : rt.error, { code: r.code, detail: r.detail, using: r.using ?? '' })
     case 'disabled': return rt.disabled
     default: return rt.idle
   }
@@ -56,7 +60,11 @@ export function eventText(e: ActivityEvent, modelName: (id: string) => string): 
     return fmt(t.events.drainTimeout, { model: modelName(e.modelId), profile: e.profile, count: e.inflight })
   }
   const rt = t.events.runtime
-  return fmt(rt[e.state], { tag: e.tag ?? '', code: e.code ?? '' })
+  const vars = { tag: e.tag ?? '', code: e.code ?? '', from: e.from ?? '' }
+  if (e.state === 'ready' && e.note === 'updated') return fmt(e.from ? rt.updated : rt.updatedFirst, vars)
+  if (e.state === 'ready' && e.note === 'switched') return fmt(rt.switched, vars)
+  if (e.state === 'error' && e.tag) return fmt(rt.errorUsing, vars)
+  return fmt(rt[e.state], vars)
 }
 
 export function formatBytes(n: number): string {

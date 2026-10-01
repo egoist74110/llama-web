@@ -5,6 +5,7 @@ import { diagnose, type FailureDoc } from './errors'
 import type { GpuDoc } from './gpu'
 import { missingFiles, type ModelFile } from './models-admin'
 import type { RuntimeStatus } from './llamacpp'
+import type { VersionView } from './updater'
 import type { RequestRecord } from './request-log'
 import type { LogStream } from './runner'
 import type { ModelState, SchedulerEvent, SchedulerSnapshot } from './scheduler'
@@ -41,7 +42,14 @@ export interface StateDoc {
     instances: StateInstance[]
   }>
   queue: Array<{ modelId: string, profile: string, started: boolean, waiting: number }>
-  llamacpp: { current: string, runtime: RuntimeStatus }
+  llamacpp: {
+    current: string
+    runtime: RuntimeStatus
+    /** Installed versions, newest first. */
+    versions: VersionView[]
+    /** Older version to suggest when a model fails to load (current is the newest installed); null when none. */
+    rollback: string | null
+  }
   /** Nothing configured yet and the setup wizard has not been dismissed. */
   firstRun: boolean
 }
@@ -49,13 +57,13 @@ export interface StateDoc {
 export type ActivityEvent =
   | { id: number, at: number, kind: 'state', modelId: string, profile: string, from: ModelState, to: ModelState, error: string | null }
   | { id: number, at: number, kind: 'drain-timeout', modelId: string, profile: string, inflight: number }
-  | { id: number, at: number, kind: 'runtime', state: RuntimeStatus['state'], tag: string | null, code: string | null }
+  | { id: number, at: number, kind: 'runtime', state: RuntimeStatus['state'], tag: string | null, code: string | null, note?: string | null, from?: string | null }
 
 /** Activity event without the id / time the hub assigns. */
 export type ActivityInput =
   | { kind: 'state', modelId: string, profile: string, from: ModelState, to: ModelState, error: string | null }
   | { kind: 'drain-timeout', modelId: string, profile: string, inflight: number }
-  | { kind: 'runtime', state: RuntimeStatus['state'], tag: string | null, code: string | null }
+  | { kind: 'runtime', state: RuntimeStatus['state'], tag: string | null, code: string | null, note?: string | null, from?: string | null }
 
 /** Short reason key (the diagnosed kind when the output was recognised) or message; null when none. */
 export function errorText(e: unknown): string | null {
@@ -179,8 +187,10 @@ export class LiveHub {
     if (s.state === 'working' && last?.kind === 'runtime' && last.state === 'working') return this.notify()
     this.record({
       kind: 'runtime', state: s.state,
-      tag: 'tag' in s ? (s.tag ?? null) : null,
+      tag: 'tag' in s ? (s.tag ?? null) : s.state === 'error' ? (s.using ?? null) : null,
       code: s.state === 'error' ? s.code : null,
+      note: s.state === 'ready' ? (s.note ?? null) : null,
+      from: s.state === 'ready' ? (s.from ?? null) : null,
     })
   }
 

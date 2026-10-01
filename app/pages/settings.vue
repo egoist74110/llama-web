@@ -20,6 +20,7 @@ onMounted(load)
     </div>
     <template v-else>
       <SettingsDirs />
+      <SettingsLlamacpp />
       <SettingsDefaults />
       <SettingsImage />
       <SettingsServer />

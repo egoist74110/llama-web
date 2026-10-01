@@ -163,28 +163,38 @@ function findRoot(dir: string, exe: string): string | null {
   return subs.length === 1 && existsSync(join(dir, subs[0]!, exe)) ? join(dir, subs[0]!) : null
 }
 
-/** Download and install the latest build; returns its tag. Already installed => no download. */
-export async function installLatest(opts: InstallOptions): Promise<string> {
+/** Leftovers of an interrupted install (`.tmp-`) or removal (`.del-`) never count as a version; clear them. */
+export function clearLeftovers(dataDir: string): void {
+  const base = versionsDir(dataDir)
+  let names: string[]
+  try { names = readdirSync(base) } catch { return }
+  for (const n of names) {
+    if (n.startsWith('.tmp-') || n.startsWith('.del-')) {
+      try { rmSync(join(base, n), { recursive: true, force: true }) } catch { /* still locked: next start */ }
+    }
+  }
+}
+
+/**
+ * Download, verify and install one resolved build; returns its tag. Already installed => no download.
+ * Everything happens in a `.tmp-` work directory; the version directory only appears by the final
+ * rename, so an interrupted download / extract never leaves a usable-looking half version.
+ */
+export async function installBuild(build: LatestBuild, opts: InstallOptions): Promise<string> {
   const platform = opts.platform ?? process.platform
   const fetchFn = opts.fetch ?? fetch
   const extract = opts.extract ?? extractZip
   const exe = serverExeName(platform)
   const base = versionsDir(opts.dataDir)
   mkdirSync(base, { recursive: true })
+  const dest = join(base, build.tag)
+  if (existsSync(join(dest, exe))) return build.tag
 
-  // Leftovers of an interrupted install never count as a version; clear them.
-  for (const n of readdirSync(base)) if (n.startsWith('.tmp-')) rmSync(join(base, n), { recursive: true, force: true })
-
-  opts.onStep?.('resolve', '')
-  const latest = await resolveLatest(fetchFn, opts.cudaRuntime, platform)
-  const dest = join(base, latest.tag)
-  if (existsSync(join(dest, exe))) return latest.tag
-
-  const work = join(base, `.tmp-${latest.tag}-${process.pid}`)
+  const work = join(base, `.tmp-${build.tag}-${process.pid}`)
   try {
     mkdirSync(join(work, 'dl'), { recursive: true })
     const extracted = join(work, 'out')
-    for (const asset of [latest.bin, latest.cudart]) {
+    for (const asset of [build.bin, build.cudart]) {
       const zip = join(work, 'dl', asset.name)
       opts.onStep?.('download', asset.name)
       await download(fetchFn, asset, zip)
@@ -195,48 +205,30 @@ export async function installLatest(opts: InstallOptions): Promise<string> {
     if (!root) throw new RuntimeError('no-server-exe', `${exe} not found in the downloaded archive`)
     rmSync(dest, { recursive: true, force: true }) // an incomplete directory without the exe
     renameSync(root, dest)
-    return latest.tag
+    return build.tag
   } finally {
     rmSync(work, { recursive: true, force: true })
   }
 }
 
-export type RuntimeStatus =
-  | { state: 'idle' }
-  | { state: 'disabled' }
-  | { state: 'working', step: 'resolve' | 'download' | 'extract', detail: string }
-  | { state: 'ready', tag: string }
-  | { state: 'error', code: string, detail: string }
-
-export interface EnsureOptions extends Omit<InstallOptions, 'onStep'> {
-  /** Current `llamacpp.current` from settings. */
-  current: string
-  /** Initial download is allowed (settings.llamacpp.autoUpdate). */
-  allowDownload: boolean
-  setCurrent: (tag: string) => void
-  onStatus?: (s: RuntimeStatus) => void
+/** Resolve the latest build and install it; returns its tag. */
+export async function installLatest(opts: InstallOptions): Promise<string> {
+  clearLeftovers(opts.dataDir)
+  opts.onStep?.('resolve', '')
+  const latest = await resolveLatest(opts.fetch ?? fetch, opts.cudaRuntime, opts.platform ?? process.platform)
+  return installBuild(latest, opts)
 }
 
 /**
- * Make sure `llamacpp.current` points at an installed version. Keeps a valid setting, adopts
- * an installed version when the setting is empty or stale, and downloads only when none exists.
+ * llama.cpp status shown on the page. `ready.note`: `latest` = the current version is the newest
+ * release; `updated` = it was just downloaded (from the previous `from`); `pinned` = a version picked
+ * by hand stays current although `latest` is installed; `auto-off` = no check (autoUpdate off);
+ * `switched` = picked on the settings page just now (rollback).
+ * `error.using` is the installed version that keeps being used after a failed check / download.
  */
-export async function ensureRuntime(opts: EnsureOptions): Promise<RuntimeStatus> {
-  const platform = opts.platform ?? process.platform
-  const set = (s: RuntimeStatus) => { opts.onStatus?.(s); return s }
-  const installed = listInstalled(opts.dataDir, platform)
-  if (opts.current && installed.includes(opts.current)) return set({ state: 'ready', tag: opts.current })
-  if (installed.length > 0) {
-    opts.setCurrent(installed[0]!)
-    return set({ state: 'ready', tag: installed[0]! })
-  }
-  if (!opts.allowDownload) return set({ state: 'disabled' })
-  try {
-    const tag = await installLatest({ ...opts, onStep: (step, detail) => set({ state: 'working', step, detail }) })
-    opts.setCurrent(tag)
-    return set({ state: 'ready', tag })
-  } catch (e) {
-    if (e instanceof RuntimeError) return set({ state: 'error', code: e.code, detail: e.detail ?? e.message })
-    return set({ state: 'error', code: 'unknown', detail: (e as Error).message })
-  }
-}
+export type RuntimeStatus =
+  | { state: 'idle' }
+  | { state: 'disabled' }
+  | { state: 'working', step: 'resolve' | 'download' | 'extract', detail: string, tag?: string }
+  | { state: 'ready', tag: string, note?: 'latest' | 'updated' | 'pinned' | 'auto-off' | 'switched', from?: string | null, latest?: string }
+  | { state: 'error', code: string, detail: string, using?: string | null }

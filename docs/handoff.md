@@ -16,6 +16,20 @@
 
 ---
 
+## 2026-10-01 · 工作包 4-2 · Opus 5.5
+- 完成：plan 阶段 4 第 4–6 项。`server/core/updater.ts`（`Updater`）：启动后台（等残留清理完）检查一次：采用已装版本 → 查官方最新（nightly-tag）→ 没装就下载 CUDA 构建 + cudart、SHA-256 校验、在 `.tmp-` 里解压、改名成版本目录 → 设为当前 → 清理旧版本。`llamacpp.ts` 拆出 `installBuild` / `clearLeftovers`，删掉 `ensureRuntime`。状态 `RuntimeStatus.ready.note`（latest / updated / pinned / auto-off / switched）、`error.using`（失败后继续用的版本）；事件带 `note` / `from`。接口 `GET /api/llamacpp`、`POST /api/llamacpp/current {tag}`。快照 `llamacpp.versions`（current / inUse）、`rollback`。界面：设置页「llama.cpp 版本」卡片（状态、版本列表、切换 / 回退）；全局确认框 `LlamacppSwitchModal`；失败卡片在「当前是最新安装的版本且有旧版本」时提示回退（oom / 文件 / 端口 / 参数 / 需更新版本这几类不提示）。
+- 验证：`bun test` 449 通过（新增 updater 18 条，含 Windows 上目录被别的进程占用时整体保留；live 1 条；fake GitHub 移到 `tests/fixtures/fake-github.ts`）；`bun run typecheck`、`bun run build` 通过。构建产物 + 临时数据目录（端口 5096，已停已删）：真实 GitHub 查询到最新 b11146（已放假目录，未下载）→ 手动选的 b11000 保持当前（pinned）、第 3 个旧版本被清理、`.tmp-` 残留被清除；切换接口成功 / 未安装 404 / 非法 400 / 跨站 403；内置浏览器里假模型（空 exe → spawn-failed）失败卡片出现「回退到 b11000」，确认框 → 切换成功，顶栏和总览更新，提示消失；设置页卡片正常，控制台无错误。**没测**：真实下载一个新版本并替换（当前没有更新的官方版本，下载路径只有单测 + 1-6 的首次下载）；真实 llama-server 运行时其版本目录不被删（单测覆盖）；网络失败时的界面文字（单测覆盖状态）；深色模式下的新卡片。
+- 剩余：无。
+- 决定 / 坑：
+  - 只有「下载了新版本」才设为当前；回退后的选择在下次打开时保持，直到官方发布更新的版本（plan 变更记录已写）。下载期间手动切换的版本也不会被覆盖。
+  - 保留：最新 `keepVersions` 个（至少 2）∪ 当前 ∪ 正在运行 / 启动中的进程所在目录，所以可能临时多于 2 个。删除前先改名为 `.del-…`，改名失败（被占用）就整体保留。
+  - 切换版本不重启正在运行的模型；卸载后再加载才用新版本（确认框里有说明）。
+  - `autoUpdate` / `keepVersions` / `cudaRuntime` 仍只能手改 settings.json（界面只读显示）。
+  - 新建的 models.json 不会被文件监听发现（watcher 只盯启动时已存在的文件），需要重启；不是本工作包改的。Bash 后台任务被 TaskStop 后 bun 子进程可能还活着，按端口查 PID 结束。
+- 下一步：工作包 4-3（Sonnet 5.5，含阶段 4 验收，真机测试前先告诉用户）。
+
+---
+
 ## 2026-10-01 · 工作包 4-1 · Opus 5.5
 - 完成：plan 阶段 4 第 1–3 项。`server/core/public-entry.ts`：`handlePublic`（先查路径：只有 `/v1/*`，且不含 `%2e` `%2f` `%5c` `\`，其余 404 且不看 key；再查 `Authorization: Bearer`，失败统一 401 + `WWW-Authenticate`；通过后在进程内调 `proxy.handleV1(req, { ip, keyName })`；内部异常给通用 500）；`PublicListener`（只绑 127.0.0.1，`enabled` / `port` 变化才重启监听，绑定失败显示原因并在下次保存时重试；没挂监听实现时为 unavailable）。`server/core/keys.ts`：`sk-` + 32 字节随机、sha256 + timingSafeEqual 遍历全部 key、吊销保留在列表、名称在未吊销 key 中唯一、打码 `sk-AbCd…wxYz`。`data/secrets.json`（version 1，JsonStore 原子写 + 备份，读坏了按「没有 key」处理）。接口 `/api/keys`（GET 打码列表、POST 新建返回一次明文、`POST /:id/reveal`、`POST /:id/revoke`）。设置：`public` 段（开关、端口、域名、隧道名），`SettingsDoc.public` 带监听状态、`dnsCommand`、可用 key 数。界面：设置页「公网入口」「API key」两张卡片（吊销用确认框）。
 - 验证：`bun test` 432 通过（新增 keys 20、public-entry 22（含真实 socket 端到端）、settings-admin 6）；`bun run typecheck`、`bun run build` 通过。构建产物实测（临时数据目录、主端口 5098、公网 18089、关闭自动下载、不加载模型，已停已删）：无 key / 错 key → 401，有效 key `/v1/models` 200；`/`、`/settings`、`/api/state|stream|keys|settings`、`/upstream/x/props`、`/_nuxt/`、`/favicon.ico`、`/v1`、`/v1/%2e%2e/...`、`--path-as-is /v1/../api/state` 带 key GET/POST 全部 404；本机局域网地址连 18089 被拒（只监听 127.0.0.1）；吊销后立即 401；请求记录 `source: public` + key 名，key 明文未出现在请求 / 事件日志和控制台；关闭开关后端口释放；跨站 POST 吊销 403。浏览器里新建 / 查看 / 吊销确认框可用。**没测**：真实 Cloudflare 隧道（4-3 验收）；经公网入口触发真实模型加载与流式（只用了假上游的单测）；开发模式。
