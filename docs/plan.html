@@ -270,7 +270,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
   <h3>参数合并</h3>
   <p>最终参数 = 全局默认 ← 模型设置 ← 当前方案的覆盖 ← 方案的「额外参数」。表单项每一项都有「继承 / 自定义」两种状态。额外参数里出现了表单已经管理的参数（例如 <code>-c</code>、<code>--jinja</code>）时给出警告，以额外参数为准。<code>--host</code> / <code>--port</code> 由 llama-web 分配，不允许用户覆盖。</p>
   <h3>来源识别</h3>
-  <p><code>:5001</code> 来的请求 = 本机或局域网，免 key。<code>:8080</code> 来的请求 = 公网：只允许 <code>/v1/*</code>，校验 <code>Authorization: Bearer &lt;key&gt;</code>，转交主服务时附带一个每次启动随机生成的内部头来标记来源，外部无法伪造。其他路径一律 404。</p>
+  <p><code>:5001</code> 来的请求 = 本机或局域网，免 key。<code>:8080</code> 来的请求 = 公网：只允许 <code>/v1/*</code>，校验 <code>Authorization: Bearer &lt;key&gt;</code>（吊销的 key 与无效 key 同样返回 401），通过后在进程内直接交给 <code>/v1</code> 转发逻辑，来源（公网 + key 名）作为参数传入，不经过网络、不使用任何请求头，外部无法伪造。其他路径（页面、<code>/api/*</code>、<code>/upstream/*</code>、静态资源）一律 404，不看 key。<code>Authorization</code> 头不会转给 llama-server。</p>
 </section>
 
 <section id="data">
@@ -460,9 +460,9 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
   <div class="stage-head"><h2>阶段 4 · 公网与更新</h2><div class="stage-meta"><span class="count"></span><div class="bar"><i></i></div></div></div>
   <div class="stage-goal">做完后：<b>功能完整</b>，可以换掉旧的公网方案。</div>
   <ul class="tasks">
-    <li class="task" data-done="false"><span class="t"><code>:8080</code> 公网入口：仅绑定 127.0.0.1、只允许 <code>/v1/*</code>、Bearer key 校验、内部来源标记、其余 404</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">API key 管理：新建（随机生成）、命名、打码列表、查看 / 复制、吊销（二次确认）</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">公网设置：启用开关、域名、隧道名；显示需要手动执行的 <code>cloudflared tunnel route dns</code> 命令</span><span class="when"></span></li>
+    <li class="task" data-done="true"><span class="t"><code>:8080</code> 公网入口：仅绑定 127.0.0.1、只允许 <code>/v1/*</code>、Bearer key 校验、内部来源标记、其余 404</span><span class="when">2026-10-01</span></li>
+    <li class="task" data-done="true"><span class="t">API key 管理：新建（随机生成）、命名、打码列表、查看 / 复制、吊销（二次确认）</span><span class="when">2026-10-01</span></li>
+    <li class="task" data-done="true"><span class="t">公网设置：启用开关、域名、隧道名；显示需要手动执行的 <code>cloudflared tunnel route dns</code> 命令</span><span class="when">2026-10-01</span></li>
     <li class="task" data-done="false"><span class="t">updater.ts：启动时后台检查官方最新 Release（nightly-tag 解析）、下载 CUDA 构建与 cudart、SHA-256 校验、解压到版本目录、设为当前</span><span class="when"></span></li>
     <li class="task" data-done="false"><span class="t">更新不阻塞启动；网络失败只记事件；下载未完成时本次加载用旧版本</span><span class="when"></span></li>
     <li class="task" data-done="false"><span class="t">版本管理：保留最近 2 个、界面一键回退（二次确认）、新版本加载失败时提示回退</span><span class="when"></span></li>
@@ -547,6 +547,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
       <tr><td>2026-09-30</td><td>阶段 2 第二轮复审处理：切换方案会撤回该模型还在排队的手动启动 / 重试并改为启动新方案；已排队的客户端请求保持它请求时的方案；命令预览的程序路径遇到空白或 CMD 特殊字符时一律加双引号</td></tr>
       <tr><td>2026-10-01</td><td>阶段 2 第三轮复审处理：切换方案 / 保存后重启不再拒绝该模型已排队的客户端请求（它们先按原方案处理，新方案排在其后）；只有显式停止会拒绝排队请求。命令预览的程序路径不含空白时用 ^ 转义特殊字符（含 %），含空白且有成对 % 时给出警告</td></tr>
       <tr><td>2026-10-01</td><td>阶段 2 第四轮复审处理：管理操作的目标（切换方案、保存后重启）总是排在已排队的客户端请求之后，不与更早的同方案加载合并；保存后重启会在旧请求结束后按新配置重新启动该方案</td></tr>
+      <tr><td>2026-10-01</td><td>工作包 4-1（用户确认）：「来源识别」改为进程内传递来源，不再使用每次启动随机的内部头（两个入口在同一进程，进程内传参没有可伪造的东西）。公网入口在 <code>server/core/public-entry.ts</code>，由自定义 Bun 入口挂上监听；启用开关和端口保存后立即生效（关闭时中断进行中的公网请求），开发模式下没有公网入口。API key 在 <code>server/core/keys.ts</code>，<code>data/secrets.json</code>（version 1）原子写入并备份；名称在未吊销的 key 中唯一，吊销后保留在列表里。管理接口 <code>/api/keys</code>（查看明文用 POST）</td></tr>
   </table>
 </section>
 </main>

@@ -23,6 +23,8 @@ onMounted(load)
       <SettingsDefaults />
       <SettingsImage />
       <SettingsServer />
+      <SettingsPublic />
+      <SettingsKeys />
     </template>
 
     <ImportCard @imported="load" />

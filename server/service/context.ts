@@ -6,6 +6,7 @@ import {
   defaultModels, defaultSettings, MODELS_VERSION, normalizeModels, normalizeSettings, SETTINGS_VERSION,
   type ModelsDoc, type Settings,
 } from '../core/config'
+import { authenticate, defaultSecrets, normalizeSecrets, SECRETS_VERSION, type SecretsDoc } from '../core/keys'
 import { LaunchConfigError, planLaunch } from '../core/launch'
 import { LogStore } from '../core/logs'
 import { ensureRuntime, type RuntimeStatus } from '../core/llamacpp'
@@ -14,6 +15,7 @@ import { describeModels, LiveHub } from '../core/live'
 import { LoadProgress, trackWeightLoad } from '../core/load-progress'
 import { ModelOps } from '../core/model-ops'
 import { createProxy, type Proxy, type ProxyEvent } from '../core/proxy'
+import { handlePublic, PublicListener } from '../core/public-entry'
 import { runStartupCleanup } from '../core/residue'
 import { PidRegistry, Runner } from '../core/runner'
 import { Scheduler, type SchedulerEvent } from '../core/scheduler'
@@ -30,6 +32,9 @@ export interface AppContext {
   /** Save through the store (backup + atomic write) and make the change visible to getters. */
   updateSettings(fn: (draft: Settings) => Settings | void): Settings
   updateModels(fn: (draft: ModelsDoc) => ModelsDoc | void): ModelsDoc
+  /** data/secrets.json (API keys). Never send `key` values anywhere except the reveal / create responses. */
+  getSecrets(): SecretsDoc
+  updateSecrets(fn: (draft: SecretsDoc) => SecretsDoc | void): SecretsDoc
   /** Re-read both files now (hand edits the watcher has not reported yet). Throws StoreError if one is invalid. */
   refresh(): void
   /** State of the initial llama.cpp download / version check. */
@@ -39,6 +44,10 @@ export interface AppContext {
   /** Management actions (start / stop / restart / switch); use these instead of the scheduler directly. */
   ops: ModelOps
   proxy: Proxy
+  /** Public entry on 127.0.0.1 (settings.public); the custom Bun entry attaches the listener. */
+  publicEntry: PublicListener
+  /** Apply settings.public to the listener now (after attaching it, and on every settings change). */
+  applyPublic(): void
   /** Live state for /api/stream and /api/state. */
   live: LiveHub
   /** Log files under data/logs (model output, events, request records). */
@@ -124,9 +133,15 @@ function createContext(): AppContext {
     dataDir, name: 'models.json', version: MODELS_VERSION, defaults: defaultModels, validate: normalizeModels,
   })
   // `live` is created below; stores only call it after startup.
+  const secretsStore = new JsonStore<SecretsDoc>({
+    dataDir, name: 'secrets.json', version: SECRETS_VERSION, defaults: defaultSecrets, validate: normalizeSecrets,
+  })
   const changed = () => live.notify()
-  const settingsRef = openStore(settingsStore, defaultSettings, changed)
+  // Settings edits (page or by hand) also start / stop / move the public listener.
+  const settingsRef = openStore(settingsStore, defaultSettings, () => { changed(); applyPublic() })
   const modelsRef = openStore(modelsStore, defaultModels, changed)
+  // An unreadable secrets.json falls back to "no keys": every public request is refused.
+  const secretsRef = openStore(secretsStore, defaultSecrets)
   const getSettings = settingsRef.get
   const getModels = modelsRef.get
   const logs = new LogStore({ dir: join(dataDir, 'logs'), retention: () => getSettings().logs })
@@ -206,6 +221,19 @@ function createContext(): AppContext {
     speed,
     progressOf: t => live.progressOf(t.modelId, t.profile),
   })
+  const publicEntry: PublicListener = new PublicListener((req, ip) => handlePublic(req, {
+    authenticate: header => authenticate(secretsRef.get(), header),
+    handleV1: (r, meta) => proxy.handleV1(r, meta),
+  }, ip))
+  /** Bring the public listener in line with settings.public and log what changed. */
+  function applyPublic() {
+    const before = JSON.stringify(publicEntry.status())
+    const st = publicEntry.apply(getSettings().public)
+    if (JSON.stringify(st) === before) return
+    if (st.state === 'listening') log(`public entry on http://${st.host}:${st.port} (/v1/* with API key only)`)
+    else if (st.state === 'error') logError(`public entry could not listen on ${st.port}: ${st.detail}`)
+    else if (st.state === 'off') log('public entry off')
+  }
 
   // Background: adopt an installed llama.cpp or download the first one. Never blocks startup.
   void ensureRuntime({
@@ -227,12 +255,15 @@ function createContext(): AppContext {
   let closing: Promise<void> | null = null
   return {
     dataDir, bootPort: getSettings().server.port, getSettings, getModels, updateSettings: settingsRef.update, updateModels: modelsRef.update,
+    getSecrets: secretsRef.get, updateSecrets: secretsRef.update,
     refresh: () => { settingsRef.refresh(); modelsRef.refresh() },
-    getRuntimeStatus: () => runtimeStatus, runner, scheduler, ops, proxy, live, logs, cleanupDone,
+    getRuntimeStatus: () => runtimeStatus, runner, scheduler, ops, proxy, publicEntry, applyPublic, live, logs, cleanupDone,
     shutdown() {
       closing ??= (async () => {
+        publicEntry.close()
         settingsStore.close()
         modelsStore.close()
+        secretsStore.close()
         gpu.stop()
         await scheduler.shutdown()
         await runner.stopAll()

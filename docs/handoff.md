@@ -16,6 +16,19 @@
 
 ---
 
+## 2026-10-01 · 工作包 4-1 · Opus 5.5
+- 完成：plan 阶段 4 第 1–3 项。`server/core/public-entry.ts`：`handlePublic`（先查路径：只有 `/v1/*`，且不含 `%2e` `%2f` `%5c` `\`，其余 404 且不看 key；再查 `Authorization: Bearer`，失败统一 401 + `WWW-Authenticate`；通过后在进程内调 `proxy.handleV1(req, { ip, keyName })`；内部异常给通用 500）；`PublicListener`（只绑 127.0.0.1，`enabled` / `port` 变化才重启监听，绑定失败显示原因并在下次保存时重试；没挂监听实现时为 unavailable）。`server/core/keys.ts`：`sk-` + 32 字节随机、sha256 + timingSafeEqual 遍历全部 key、吊销保留在列表、名称在未吊销 key 中唯一、打码 `sk-AbCd…wxYz`。`data/secrets.json`（version 1，JsonStore 原子写 + 备份，读坏了按「没有 key」处理）。接口 `/api/keys`（GET 打码列表、POST 新建返回一次明文、`POST /:id/reveal`、`POST /:id/revoke`）。设置：`public` 段（开关、端口、域名、隧道名），`SettingsDoc.public` 带监听状态、`dnsCommand`、可用 key 数。界面：设置页「公网入口」「API key」两张卡片（吊销用确认框）。
+- 验证：`bun test` 432 通过（新增 keys 20、public-entry 22（含真实 socket 端到端）、settings-admin 6）；`bun run typecheck`、`bun run build` 通过。构建产物实测（临时数据目录、主端口 5098、公网 18089、关闭自动下载、不加载模型，已停已删）：无 key / 错 key → 401，有效 key `/v1/models` 200；`/`、`/settings`、`/api/state|stream|keys|settings`、`/upstream/x/props`、`/_nuxt/`、`/favicon.ico`、`/v1`、`/v1/%2e%2e/...`、`--path-as-is /v1/../api/state` 带 key GET/POST 全部 404；本机局域网地址连 18089 被拒（只监听 127.0.0.1）；吊销后立即 401；请求记录 `source: public` + key 名，key 明文未出现在请求 / 事件日志和控制台；关闭开关后端口释放；跨站 POST 吊销 403。浏览器里新建 / 查看 / 吊销确认框可用。**没测**：真实 Cloudflare 隧道（4-3 验收）；经公网入口触发真实模型加载与流式（只用了假上游的单测）；开发模式。
+- 剩余：无。
+- 决定 / 坑：
+  - **来源识别改为进程内传参**（用户确认，plan 已改「来源识别」并加变更记录），没有内部头。
+  - 公网开关 / 端口**保存后立即生效**，关闭时 `stop(true)` 中断进行中的公网请求；`nuxt dev` 下没有公网入口（界面会说明）。
+  - 401 不记请求记录（只有通过鉴权的请求进入 `/v1` 处理）。`allowSwitch` 仍是坑位，只存不用。
+  - 从 Git Bash 用 curl 发中文 JSON 会变乱码（不是程序问题）；测试时用英文名或界面。
+- 下一步：工作包 4-2（Opus 5.5）。
+
+---
+
 ## 2026-10-01 · 阶段 3 审查意见处理 · Sonnet 5.5
 - 完成：`docs/reviews/stage-3-codex.md` 6 条：CR-001/002/003/004/005 核实成立并修复，CR-006 不成立（理由见文件）。CR-001：失败卡片的输出末尾对绝对路径脱敏（`redactPaths`，在 `diagnose()` 出口）。CR-002：日志读取用 `lstat` 拒绝符号链接。CR-003：`UsageTap` 单个超大块只留末尾 keep 字节。CR-004：加载进度采样移到 `trackWeightLoad`（`load-progress.ts`），单飞、stop 后丢弃在途结果。CR-005：OOM / bad-model 规则收紧，Info / Debug 行不参与分类。
 - 验证：`bun test` 387 通过（新增 errors 5、request-log 2、logs 1、load-progress 3）；`bun run typecheck` 通过。**没运行**：build、真机（本轮没有改变真机行为之外的东西，但 `trackWeightLoad` 搬了位置、错误规则收紧后没有再用真实 llama-server 复测）。

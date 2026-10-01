@@ -4,6 +4,8 @@
 // - every request gets `server.timeout(req, 0)` (no idle timeout; loads can take minutes);
 // - /v1/*, /upstream/* and GET /api/stream are handled natively (streaming, disconnect = abort);
 // - everything else goes to Nitro via localFetch.
+// The public entry (settings.public, 127.0.0.1 only) is a second Bun.serve whose handler only
+// knows /v1/* behind an API key (core/public-entry.ts); it never reaches Nitro.
 // Only used by the build (`bun run build` / `bun run preview` / start.bat); `nuxt dev`
 // serves /v1 and /upstream through server/routes/ instead.
 import '#nitro-internal-pollyfills'
@@ -36,6 +38,22 @@ const server = Bun.serve({
   },
 })
 console.log(`[llama-web] listening on ${server.url}`)
+
+ctx.publicEntry.attach((opts) => {
+  const s = Bun.serve({
+    hostname: opts.hostname,
+    port: opts.port,
+    fetch(req, srv) {
+      srv.timeout(req, 0)
+      return opts.fetch(req, srv.requestIP(req)?.address ?? null)
+    },
+    // Plain 500 instead of Bun's error page (which can show stacks and paths).
+    error: () => new Response('Internal Server Error', { status: 500 }),
+  })
+  // Turning the entry off (or moving it) also ends requests still running on it.
+  return { stop: () => void s.stop(true) }
+})
+ctx.applyPublic()
 
 let stopping = false
 async function stop(signal: string) {

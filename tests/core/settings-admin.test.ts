@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 import { defaultModels, defaultSettings, normalizeSettings, type ModelConfig, type ModelsDoc, type Settings } from '../../server/core/config'
 import {
-  applyDefaults, applyImagePreprocess, applyModelDirs, applyServer, applySettingsPatch, dirStatus, isFirstRun, SettingsError,
+  applyDefaults, applyImagePreprocess, applyModelDirs, applyPublic, applyServer, applySettingsPatch, dirStatus, isFirstRun, SettingsError,
 } from '../../server/core/settings-admin'
 
 // Absolute on the host (X:\… is not absolute on macOS / Linux); Windows-only semantics are tested separately.
@@ -211,5 +211,48 @@ describe('first run and directory status', () => {
     } finally {
       rmSync(tmp, { recursive: true, force: true })
     }
+  })
+})
+
+describe('applyPublic', () => {
+  test('saves on/off, port, lower-cased domain and tunnel name', () => {
+    const s = settingsWith()
+    applyPublic(s, { enabled: true, port: 8081, domain: '  LLM.Example.com ', tunnelName: ' my-tunnel ' })
+    expect(s.public).toEqual({ enabled: true, port: 8081, domain: 'llm.example.com', tunnelName: 'my-tunnel' })
+  })
+
+  test('missing keys are kept; empty domain / tunnel are allowed', () => {
+    const s = settingsWith()
+    applyPublic(s, { domain: 'a.example.com', tunnelName: 't' })
+    applyPublic(s, { enabled: true })
+    expect(s.public).toEqual({ enabled: true, port: 8080, domain: 'a.example.com', tunnelName: 't' })
+    applyPublic(s, { domain: '', tunnelName: '' })
+    expect(s.public.domain).toBe('')
+    expect(s.public.tunnelName).toBe('')
+  })
+
+  test('port must be free of the main port and the llama-server range', () => {
+    for (const port of [5001, 7100, 7150, 7199, 80, 70000, 8080.5, '8080', null]) {
+      expect(codeOf(() => applyPublic(settingsWith(), { port }))).toBe('bad-public-port')
+    }
+  })
+
+  test('domain is a bare host name: no scheme, path, port, spaces or shell characters', () => {
+    for (const domain of ['https://llm.example.com', 'llm.example.com/v1', 'llm.example.com:443', 'llm example.com', 'localhost', 'a.example.com;rm', '-a.example.com', 42]) {
+      expect(codeOf(() => applyPublic(settingsWith(), { domain }))).toBe('bad-domain')
+    }
+  })
+
+  test('tunnel name is a plain word (safe in the shown command)', () => {
+    for (const tunnelName of ['my tunnel', 'a&b', 'a;b', '"t"', 'x'.repeat(65), 1]) {
+      expect(codeOf(() => applyPublic(settingsWith(), { tunnelName }))).toBe('bad-tunnel')
+    }
+  })
+
+  test('enabled must be a boolean; the section goes through applySettingsPatch', () => {
+    expect(codeOf(() => applyPublic(settingsWith(), { enabled: 'yes' }))).toBe('bad-request')
+    const s = settingsWith()
+    applySettingsPatch(s, { public: { enabled: true } }, models())
+    expect(s.public.enabled).toBe(true)
   })
 })

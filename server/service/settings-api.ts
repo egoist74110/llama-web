@@ -1,6 +1,7 @@
 // Shared by the settings routes: the document the settings page works with.
 import { DEFAULT_LAUNCH_DEFAULTS } from '../core/args'
 import { fmt, t } from '../core/i18n'
+import { routeDnsCommand } from '../core/public-entry'
 import { dirStatus, SettingsError, type SettingsDoc } from '../core/settings-admin'
 import { getContext } from './context'
 
@@ -18,6 +19,12 @@ export function describeSettings(): SettingsDoc {
       loadTimeoutSec: s.scheduler.loadTimeoutSec,
       drainTimeoutSec: s.scheduler.drainTimeoutSec,
       maxLoaded: s.scheduler.maxLoaded,
+    },
+    public: {
+      ...s.public,
+      status: ctx.publicEntry.status(),
+      dnsCommand: routeDnsCommand(s.public.tunnelName, s.public.domain),
+      activeKeys: ctx.getSecrets().apiKeys.filter(k => !k.revoked).length,
     },
     setupDone: s.setup.done,
     restartRequired: s.server.port !== ctx.bootPort,

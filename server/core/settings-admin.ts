@@ -5,11 +5,13 @@ import { existsSync, statSync } from 'node:fs'
 import { isAbsolute, resolve } from 'node:path'
 import { ArgsSyntaxError, PARAM_DEFS, splitArgs, type LaunchDefaults, type ParamValue } from './args'
 import type { ModelsDoc, Settings } from './config'
+import type { PublicStatus } from './public-entry'
 import type { ModelDir } from './types'
 
 export type SettingsErrorCode =
   | 'bad-request' | 'dir-path' | 'dir-duplicate' | 'dir-depth' | 'dir-in-use' | 'dir-limit'
   | 'bad-param' | 'bad-extra-args' | 'bad-image' | 'bad-port' | 'bad-port-range' | 'bad-timeout'
+  | 'bad-public-port' | 'bad-domain' | 'bad-tunnel'
 
 export class SettingsError extends Error {
   constructor(public code: SettingsErrorCode, public detail = '') {
@@ -169,16 +171,50 @@ export function applyServer(draft: Settings, raw: unknown): void {
   draft.scheduler.drainTimeoutSec = drain
 }
 
+// A bare host name such as `llm.example.com` (no scheme, port or path).
+const DOMAIN = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/
+// Cloudflare tunnel names: letters, digits, dot, dash, underscore (also safe to show in a command line).
+const TUNNEL = /^[A-Za-z0-9._-]{1,64}$/
+
+/**
+ * Public entry (plan 关键决定 3): on/off, its port (loopback only, never the main port or inside
+ * the llama-server range), and the tunnel name / domain used for the DNS command hint.
+ */
+export function applyPublic(draft: Settings, raw: unknown): void {
+  if (!isObj(raw)) throw new SettingsError('bad-request')
+  const cur = draft.public
+  const enabled = raw.enabled === undefined ? cur.enabled : raw.enabled
+  if (typeof enabled !== 'boolean') throw new SettingsError('bad-request')
+  const port = raw.port === undefined ? cur.port : int(raw.port, 1024, 65535)
+  if (port === null || port === draft.server.port) throw new SettingsError('bad-public-port')
+  const [from, to] = draft.scheduler.portRange
+  if (port >= from && port <= to) throw new SettingsError('bad-public-port')
+  let domain = cur.domain
+  if (raw.domain !== undefined) {
+    if (typeof raw.domain !== 'string') throw new SettingsError('bad-domain')
+    domain = raw.domain.trim().toLowerCase()
+    if (domain && !DOMAIN.test(domain)) throw new SettingsError('bad-domain', raw.domain.trim().slice(0, 100))
+  }
+  let tunnelName = cur.tunnelName
+  if (raw.tunnelName !== undefined) {
+    if (typeof raw.tunnelName !== 'string') throw new SettingsError('bad-tunnel')
+    tunnelName = raw.tunnelName.trim()
+    if (tunnelName && !TUNNEL.test(tunnelName)) throw new SettingsError('bad-tunnel', tunnelName.slice(0, 100))
+  }
+  draft.public = { enabled, port, domain, tunnelName }
+}
+
 export interface SettingsPatch {
   modelDirs?: unknown
   defaults?: unknown
   image?: unknown
   server?: unknown
+  public?: unknown
   /** Marks the first-run wizard as finished (or skipped). */
   setupDone?: unknown
 }
 
-const SECTIONS = ['modelDirs', 'defaults', 'image', 'server', 'setupDone']
+const SECTIONS = ['modelDirs', 'defaults', 'image', 'server', 'public', 'setupDone']
 
 /** Apply every section present in the patch; validation of any section failing aborts the whole patch. */
 export function applySettingsPatch(draft: Settings, patch: unknown, models: ModelsDoc): void {
@@ -188,6 +224,7 @@ export function applySettingsPatch(draft: Settings, patch: unknown, models: Mode
   if (p.defaults !== undefined) applyDefaults(draft, p.defaults)
   if (p.image !== undefined) applyImagePreprocess(draft, p.image)
   if (p.server !== undefined) applyServer(draft, p.server)
+  if (p.public !== undefined) applyPublic(draft, p.public)
   if (p.setupDone !== undefined) {
     if (typeof p.setupDone !== 'boolean') throw new SettingsError('bad-request')
     draft.setup.done = p.setupDone
@@ -201,6 +238,14 @@ export interface SettingsDoc {
   builtinDefaults: LaunchDefaults
   image: Settings['preprocess']['image']
   server: { port: number, portRange: [number, number], loadTimeoutSec: number, drainTimeoutSec: number, maxLoaded: number }
+  public: Settings['public'] & {
+    /** State of the public listener right now. */
+    status: PublicStatus
+    /** DNS command for the tunnel, once tunnel name and domain are set. */
+    dnsCommand: string | null
+    /** Keys that would be accepted (not revoked). */
+    activeKeys: number
+  }
   setupDone: boolean
   /** The saved port differs from the one this process is listening on. */
   restartRequired: boolean
