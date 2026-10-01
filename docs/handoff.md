@@ -16,6 +16,15 @@
 
 ---
 
+## 2026-10-01 · 阶段 2 第四轮复审处理 · Opus 5.5
+- 完成：`docs/reviews/stage-2-codex-r4.md` 的 CR-009、CR-010 已修复并标注。`Scheduler.start(target, { last, reload })`：`last` 在队尾新建任务、不并入更早的同目标任务；`reload` 让在此之前创建的同方案实例（等它的请求结束后）被卸载并重新启动。实例新增 `born` 序号。`ModelOps`：切换方案 / 撤回手动启动后的新目标用 `last`；保存后重启用 `last + reload`；已在目标方案上但有其他方案请求排队时，在队尾补一个回到它的任务。
+- 验证：`bun test` 281 通过（model-ops 新增 6 条，修复前其中 3 条失败）；`bun run typecheck`、`bun run build` 通过。构建产物 + 3 秒才就绪且记录启动参数的假 llama-server（临时数据目录、端口 5097，已停已删）真实接口：CR-009 两次启动依次 `ctx=262144`、`ctx=8192`，客户端 200；CR-010 B、C 客户端 200，最终 `B ready`。**没测**：GPU；macOS / Linux；浏览器界面。
+- 剩余：plan 阶段 2「下拉空值选项不显示」仍未做。
+- 决定 / 坑：管理操作永远排在已排队的客户端请求之后（FIFO），代价是切换 / 保存后可能先加载一次旧请求要的方案再换回来。被显式停止或更晚的管理操作取代的重启会静默结束（不报错）。
+- 下一步：用户决定是否让 Codex 做第五轮复审（`stage-2-codex-r5.md`）→ 修下拉空值问题 → 阶段 2 确认后开始 3-1。
+
+---
+
 ## 2026-10-01 · 阶段 2 第三轮复审处理 · Opus 5.5
 - 完成：`docs/reviews/stage-2-codex-r3.md` 的 CR-008 已修复、CR-005 余项已修复（一种组合改为警告），已标注。CR-008：`Scheduler.stop(modelId, { keepRequests: true })` 只撤回手动调用方，保留排队客户端请求及其正在进行的加载；`ModelOps.restart`（切换方案 / 保存后重启）改用它，显式停止不变。CR-005：`quoteCmdProgram` 改为无空白时给 `( ) % ! ^ & | < > ; , =` 加 `^`、有空白时加双引号；「空白 + 成对 %」在预览里给警告 `preview-program-percent`。
 - 验证：`bun test` 276 通过（新增 model-ops 3 条、scheduler 1 条、launch 1 条，真实 cmd 程序路径用例 +3）；`bun run typecheck`、`bun run build` 通过。构建产物 + 慢响应假 llama-server（临时数据目录、端口 5097，已停已删）真实接口复现 CR-008：客户端 `mmm:A` 200，最终 `B ready`。真实 cmd 探测了程序路径 `%` 的三种写法（见审查文件）。**没测**：`cmd /v:on`；交互式 CMD 窗口粘贴；macOS / Linux；GPU。

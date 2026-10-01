@@ -39,6 +39,12 @@ export class ModelOps {
     return this.sched.retry(target)
   }
 
+  /** A management start that queues after everything already waiting (see Scheduler.start `last`). */
+  private startLast(target: Target): Promise<void> {
+    this.bump(target.modelId)
+    return this.sched.start(target, { last: true })
+  }
+
   stop(modelId: string, opts: { force?: boolean } = {}): Promise<void> {
     this.bump(modelId)
     return this.sched.stop(modelId, opts)
@@ -48,15 +54,18 @@ export class ModelOps {
    * Unload the model's running profile(s), then start `profile`, unless a later action supersedes
    * it. Queued client requests are kept (they load the profile they asked for, first in line);
    * only older manual starts are withdrawn. An explicit stop() is what rejects requests.
+   * The new target is queued after those requests, never merged into an earlier load of the
+   * same profile; with `reload` (the configuration changed) a process of that profile started
+   * before this call is replaced too.
    */
-  async restart(modelId: string, profile: string): Promise<void> {
+  async restart(modelId: string, profile: string, reload = false): Promise<void> {
     const gen = this.bump(modelId)
     this.pending.set(modelId, { gen, profile })
     try {
       await this.sched.stop(modelId, { keepRequests: true })
       if (this.gens.get(modelId) !== gen) return
       this.pending.delete(modelId)
-      await this.sched.start({ modelId, profile })
+      await this.sched.start({ modelId, profile }, { last: true, reload })
     } finally {
       if (this.pending.get(modelId)?.gen === gen) this.pending.delete(modelId)
     }
@@ -94,9 +103,12 @@ export class ModelOps {
     const up = mine.filter(s => UP.has(s.state))
     const pending = this.pending.get(modelId)
     const settled = !pending && up.length > 0 && up.every(s => LIVE.has(s.state) && s.profile === profile)
-    if (settled) return { restarted: false, work: null }
+    const queuedOther = this.sched.snapshot().queue.some(q => q.modelId === modelId && q.profile !== profile)
+    if (settled && !queuedOther) return { restarted: false, work: null }
+    // Already on it, but requests for another profile are queued: come back to it after them.
+    if (settled) return { restarted: false, work: this.startLast({ modelId, profile }) }
     if (up.length || pending) return { restarted: true, work: this.restart(modelId, profile) }
-    if (withdrawn) return { restarted: true, work: this.start({ modelId, profile }) }
+    if (withdrawn) return { restarted: true, work: this.startLast({ modelId, profile }) }
     return { restarted: false, work: mine.length ? this.stop(modelId) : null }
   }
 
@@ -108,6 +120,6 @@ export class ModelOps {
     const pending = this.pending.get(modelId)?.profile
     const live = this.instances(modelId).filter(s => LIVE.has(s.state)).map(s => s.profile)
     const profile = [...(pending ? [pending] : []), ...live].find(p => only === undefined || p === only)
-    return profile === undefined ? null : this.restart(modelId, profile)
+    return profile === undefined ? null : this.restart(modelId, profile, true)
   }
 }

@@ -119,6 +119,8 @@ interface Instance {
   proc: ModelProcess | null
   inflight: Set<LeaseImpl>
   useSeq: number
+  /** Sequence number when created (compared with Job.reloadAfter). */
+  born: number
   lastUsedAt: number | null
   error: unknown
   /** Launched by the automatic post-crash reload. */
@@ -145,6 +147,8 @@ interface Job {
   started: boolean
   fromCrash: boolean
   cancelled: boolean
+  /** Reload: an instance created at or before this sequence number is replaced. */
+  reloadAfter?: number
 }
 
 class LeaseImpl implements Lease {
@@ -220,13 +224,22 @@ export class Scheduler {
     })
   }
 
-  /** Manual start, also used as「重试」for failed/crashed targets. Resolves when ready. */
-  start(target: Target): Promise<void> {
+  /**
+   * Manual start, also used as「重试」for failed/crashed targets. Resolves when ready.
+   *
+   * `last`: a management target (profile switch / restart) that must come after everything
+   * already queued, so it gets its own job at the end instead of joining an earlier one.
+   * `reload`: the configuration changed; a process started before this call is unloaded
+   * (after its requests) and the target is launched again.
+   */
+  start(target: Target, opts: { last?: boolean, reload?: boolean } = {}): Promise<void> {
     if (this.shuttingDown) return Promise.reject(new SchedulerError('shutdown', target))
     const inst = this.instances.get(keyOf(target))
-    if (inst?.state === 'ready') return Promise.resolve()
+    if (inst?.state === 'ready' && !opts.last && !opts.reload) return Promise.resolve()
     return new Promise<void>((resolve, reject) => {
-      this.jobFor(target, true).waiters.push({ manual: true, resolve: () => resolve(), reject })
+      const job = opts.last || opts.reload ? this.newJob(target, true) : this.jobFor(target, true)
+      if (opts.reload) job.reloadAfter = this.seq
+      job.waiters.push({ manual: true, resolve: () => resolve(), reject })
     })
   }
 
@@ -377,6 +390,12 @@ export class Scheduler {
     const key = keyOf(target)
     const existing = [this.current, ...this.queue].find(j => j && j.key === key && !j.cancelled)
     if (existing) return existing
+    return this.newJob(target, manual)
+  }
+
+  /** A new load job at the end of the queue. */
+  private newJob(target: Target, manual: boolean): Job {
+    const key = keyOf(target)
     const inst = this.instances.get(key)
     const job: Job = {
       key, target, waiters: [], started: false, cancelled: false,
@@ -411,6 +430,12 @@ export class Scheduler {
   private async runLoad(job: Job): Promise<void> {
     const { key, target } = job
     let inst = this.instances.get(key)
+    // A reload replaces a process started before the configuration changed (after its requests).
+    if (job.reloadAfter !== undefined && inst && inst.born <= job.reloadAfter && (inst.state === 'ready' || inst.state === 'draining')) {
+      await this.evict(inst, false)
+      if (job.cancelled) return this.rejectAll(job, this.shuttingDown ? 'shutdown' : 'stopped')
+      inst = this.instances.get(key)
+    }
     if (inst?.state === 'ready') return this.resolveAll(job, inst)
     const manual = job.waiters.some(w => w.manual)
     if (inst?.state === 'failed' && !manual) return this.failAll(job, inst.error)
@@ -461,7 +486,7 @@ export class Scheduler {
   private newInstance(target: Target, autoReloaded: boolean, prev: ModelState = 'stopped'): Instance {
     const inst: Instance = {
       key: keyOf(target), target, state: prev, proc: null, inflight: new Set(),
-      useSeq: ++this.seq, lastUsedAt: null, error: null, autoReloaded,
+      useSeq: ++this.seq, born: this.seq, lastUsedAt: null, error: null, autoReloaded,
       stopRequested: false, evicting: null, forceNow: null, drainWaiters: [], loadWaiters: [],
     }
     this.instances.set(inst.key, inst)

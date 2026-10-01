@@ -9,8 +9,8 @@ class FakeProc implements ModelProcess {
   private exit!: (why: string) => void
   private alive = true
 
-  constructor(readonly target: Target, readonly port: number) {
-    this.ready = Promise.resolve()
+  constructor(readonly target: Target, readonly port: number, ready: Promise<void> = Promise.resolve()) {
+    this.ready = ready
     this.exited = new Promise(r => { this.exit = r })
   }
 
@@ -18,19 +18,34 @@ class FakeProc implements ModelProcess {
     if (this.alive) { this.alive = false; this.exit('stopped') }
     return this.exited
   }
+
+  get stopped() { return !this.alive }
 }
 
-function setup() {
+/** `gate`: launches stay loading until `open()`. `config` is read at launch, like the real launcher. */
+function setup(opts: { gate?: boolean } = {}) {
   const launched: string[] = []
+  const procs: FakeProc[] = []
+  const config = { ctx: 4096 }
+  const launchedWith: number[] = []
+  let gate: (() => void) | null = null
   let port = 7100
   const sched = new Scheduler({
     maxLoaded: 1,
     drainTimeoutMs: 5000,
-    launch: async (t) => { launched.push(t.profile); return new FakeProc(t, port++) },
+    launch: async (t) => {
+      launched.push(t.profile)
+      launchedWith.push(config.ctx)
+      const ready = opts.gate ? new Promise<void>((r) => { gate = r }) : undefined
+      const p = new FakeProc(t, port++, ready)
+      procs.push(p)
+      return p
+    },
   })
   const ops = new ModelOps(sched)
   const states = () => sched.snapshot().models.filter(s => s.modelId === 'm').map(s => `${s.profile}:${s.state}`)
-  return { sched, ops, launched, states }
+  const open = () => { gate?.(); gate = null }
+  return { sched, ops, launched, states, procs, config, launchedWith, open }
 }
 
 const at = (profile: string): Target => ({ modelId: 'm', profile })
@@ -275,6 +290,107 @@ describe('ModelOps.restartIfUp', () => {
     const err = await queued.then(() => null, e => e)
     expect(err).toBeInstanceOf(SchedulerError)
     expect((err as SchedulerError).code).toBe('stopped')
+    await sched.shutdown()
+  })
+})
+
+describe('management targets go after kept requests and are not merged into them', () => {
+  test('save + restart while a client load is in progress: the client is served, then the profile reloads with the new config', async () => {
+    const { sched, ops, launchedWith, procs, config, states, open } = setup({ gate: true })
+    const client = sched.acquire(at('A'))
+    await until(() => procs.length === 1) // launched with ctx 4096, still loading
+    config.ctx = 8192 // the save
+    const work = ops.restartIfUp('m', 'A')
+    expect(work).not.toBeNull()
+    open()
+    const lease = await client
+    expect(lease.port).toBe(procs[0]!.port) // the request got the load it was waiting for
+    lease.release()
+    await until(() => procs.length === 2)
+    open()
+    await work
+    expect(launchedWith).toEqual([4096, 8192])
+    expect(procs[0]!.stopped).toBe(true)
+    expect(states()).toEqual(['A:ready'])
+    await sched.shutdown()
+  })
+
+  test('save + restart of a ready profile reloads even when nobody is queued', async () => {
+    const { sched, ops, launchedWith, config, states } = setup()
+    await sched.start(at('A'))
+    config.ctx = 8192
+    await ops.restartIfUp('m', 'A')
+    expect(launchedWith).toEqual([4096, 8192])
+    expect(states()).toEqual(['A:ready'])
+    await sched.shutdown()
+  })
+
+  test('switching to a profile an earlier request also wants ends on it, after the requests behind', async () => {
+    const { sched, ops, launched, states } = setup()
+    await sched.start(at('H'))
+    const leaseH = await sched.acquire(at('H'))
+    const clientB = sched.acquire(at('B'))
+    const clientC = sched.acquire(at('C'))
+    await tick()
+    expect(sched.snapshot().queue.map(q => q.profile)).toEqual(['B', 'C'])
+    const { restarted, work } = ops.switchTo('m', 'B')
+    expect(restarted).toBe(true)
+    leaseH.release()
+    ;(await clientB).release()
+    ;(await clientC).release()
+    await work
+    expect(launched).toEqual(['H', 'B', 'C', 'B'])
+    expect(states()).toEqual(['B:ready'])
+    await sched.shutdown()
+  })
+
+  test('already on the profile with requests for another queued: comes back to it after them', async () => {
+    const { sched, ops, launched, states } = setup()
+    await sched.start(at('B'))
+    const other: Target = { modelId: 'other', profile: 'X' }
+    const leaseB = await sched.acquire(at('B'))
+    const clientX = sched.acquire(other) // waits for m:B to drain
+    const clientC = sched.acquire(at('C')) // queued behind it
+    await tick()
+    const r = ops.switchTo('m', 'C') // makes C current: m:B is draining, so this restarts
+    expect(r.restarted).toBe(true)
+    const back = ops.switchTo('m', 'B')
+    leaseB.release()
+    ;(await clientX).release()
+    ;(await clientC).release()
+    await Promise.all([r.work, back.work])
+    expect(launched).toEqual(['B', 'X', 'C', 'B'])
+    expect(states()).toEqual(['B:ready'])
+    await sched.shutdown()
+  })
+
+  test('a later switch or an explicit stop drops the queued management target', async () => {
+    const { sched, ops, launched, states } = setup()
+    await sched.start(at('H'))
+    const leaseH = await sched.acquire(at('H'))
+    const clientC = sched.acquire(at('C'))
+    await tick()
+    const toB = ops.switchTo('m', 'B')
+    await tick()
+    const toD = ops.switchTo('m', 'D')
+    leaseH.release()
+    ;(await clientC).release()
+    await Promise.all([toB.work, toD.work])
+    expect(launched).toEqual(['H', 'C', 'D'])
+    expect(states()).toEqual(['D:ready'])
+
+    const leaseD = await sched.acquire(at('D'))
+    const clientE = sched.acquire(at('E')).catch(e => e)
+    await tick()
+    const toF = ops.switchTo('m', 'F')
+    await tick()
+    const stopped = ops.stop('m')
+    leaseD.release()
+    await stopped
+    await toF.work // superseded by the stop: ends without starting F
+    expect((await clientE as SchedulerError).code).toBe('stopped')
+    expect(launched).toEqual(['H', 'C', 'D'])
+    expect(states()).toEqual([])
     await sched.shutdown()
   })
 })
