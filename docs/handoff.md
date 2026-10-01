@@ -16,6 +16,15 @@
 
 ---
 
+## 2026-10-01 · 工作包 4-3 · Sonnet 5.5
+- 完成：plan 阶段 4 第 7–8 项。`scripts/pre-commit`（POSIX sh）：拒绝 `data/`、`secrets.json`、`.env*`，扫描新增行的 `sk-…`、32 位以上十六进制串、Bearer token（报错不打印值）；行内标记 `pre-commit:allow` 放行假值；`docs/reviews/` 不查十六进制串（引用提交哈希）。`.gitattributes` 固定该脚本为 LF（`core.autocrlf=true` 下 CRLF 会让 sh 失败）。启用：`git config core.hooksPath scripts`（每个克隆一次）。`README.md`（中文）。
+- 验证：`bun test` 457 通过（新增 `tests/platform/pre-commit.test.ts` 8 条，在临时 git 仓库里真实运行脚本）；`bun run typecheck` 通过；真实仓库里 `git add -f data/settings.json` 后运行脚本被拒绝。**没运行**：`bun run build`；阶段 4 真机试用（见下）。
+- 剩余：阶段 4 第 9 项「真机试用」未做。**用户要求改隧道方案**（变更记录已写）：改为设置页填隧道 token，llama-web 自动检测 / 下载 cloudflared 并 `--token` 托管，带 Cloudflare 后台分步图文指引；用户本机已装 cloudflared。该部分拆成工作包 4-4（plan 新增任务、claude-guide 新增卡片）。
+- 决定 / 坑：README 的隧道一节描述的是旧流程（手动 DNS 命令 + config.yml），4-4 要改写。设置页现有「需要手动执行的命令」「ingress 提示」在 4-4 一并替换；`dnsCommand` 相关代码和测试到时再处理。
+- 下一步：工作包 4-4（Opus 5.5，含阶段 4 验收，真机测试前先告诉用户）。
+
+---
+
 ## 2026-10-01 · 工作包 4-2 · Opus 5.5
 - 完成：plan 阶段 4 第 4–6 项。`server/core/updater.ts`（`Updater`）：启动后台（等残留清理完）检查一次：采用已装版本 → 查官方最新（nightly-tag）→ 没装就下载 CUDA 构建 + cudart、SHA-256 校验、在 `.tmp-` 里解压、改名成版本目录 → 设为当前 → 清理旧版本。`llamacpp.ts` 拆出 `installBuild` / `clearLeftovers`，删掉 `ensureRuntime`。状态 `RuntimeStatus.ready.note`（latest / updated / pinned / auto-off / switched）、`error.using`（失败后继续用的版本）；事件带 `note` / `from`。接口 `GET /api/llamacpp`、`POST /api/llamacpp/current {tag}`。快照 `llamacpp.versions`（current / inUse）、`rollback`。界面：设置页「llama.cpp 版本」卡片（状态、版本列表、切换 / 回退）；全局确认框 `LlamacppSwitchModal`；失败卡片在「当前是最新安装的版本且有旧版本」时提示回退（oom / 文件 / 端口 / 参数 / 需更新版本这几类不提示）。
 - 验证：`bun test` 449 通过（新增 updater 18 条，含 Windows 上目录被别的进程占用时整体保留；live 1 条；fake GitHub 移到 `tests/fixtures/fake-github.ts`）；`bun run typecheck`、`bun run build` 通过。构建产物 + 临时数据目录（端口 5096，已停已删）：真实 GitHub 查询到最新 b11146（已放假目录，未下载）→ 手动选的 b11000 保持当前（pinned）、第 3 个旧版本被清理、`.tmp-` 残留被清除；切换接口成功 / 未安装 404 / 非法 400 / 跨站 403；内置浏览器里假模型（空 exe → spawn-failed）失败卡片出现「回退到 b11000」，确认框 → 切换成功，顶栏和总览更新，提示消失；设置页卡片正常，控制台无错误。**没测**：真实下载一个新版本并替换（当前没有更新的官方版本，下载路径只有单测 + 1-6 的首次下载）；真实 llama-server 运行时其版本目录不被删（单测覆盖）；网络失败时的界面文字（单测覆盖状态）；深色模式下的新卡片。

@@ -346,10 +346,20 @@ ol.steps li{margin:4px 0}
   </div>
 
   <div class="pkg" id="p4-3">
-    <div class="pkg-head"><b>4-3 pre-commit + README + 阶段 4 试用</b><span class="m sonnet">Sonnet 5.5</span></div>
-    <ul class="scope"><li>plan 阶段 4 第 7–9 项；最后按阶段 4 验收标准逐条验证，给出结果表。</li></ul>
-    <div class="prompt"><button type="button">复制</button><pre>执行工作包 4-3（含阶段 4 验收）。
-按 AGENTS.md 的规则开始：先读 docs/claude-guide.html 里「工作包 4-3」的卡片和「会话规则」，再读 docs/handoff.md 最新交接和 docs/plan.html 阶段 4 的任务与验收标准。
+    <div class="pkg-head"><b>4-3 pre-commit + README</b><span class="m sonnet">Sonnet 5.5</span></div>
+    <ul class="scope"><li>plan 阶段 4 第 7–8 项（已完成）。阶段 4 真机试用因隧道方案变更推迟到 4-4。</li></ul>
+  </div>
+
+  <div class="pkg" id="p4-4">
+    <div class="pkg-head"><b>4-4 隧道托管 + 阶段 4 试用</b><span class="m opus">Opus 5.5</span></div>
+    <ul class="scope">
+      <li>plan 阶段 4「隧道托管」一项与「真机试用」。设置页填隧道 token + 开关；自动检测本机已装的 <code>cloudflared</code>（PATH、常见安装位置、<code>data/runtime/</code>），没有则从官方 Release 下载并校验 SHA-256；用 <code>cloudflared tunnel run --token</code> 启停并监控（参数数组、记录 PID、停止时杀进程树、残留清理只杀 <code>data/runtime/</code> 下的）。</li>
+      <li>隧道 token 存 <code>data/secrets.json</code>，打码显示，不进日志、事件、请求记录和错误输出（cloudflared 输出里的 token 要脱敏）；改动鉴权相关代码要补测试。</li>
+      <li>设置页内置分步图文指引：在 Cloudflare 后台新建隧道（Zero Trust → Networks → Tunnels → Create → Cloudflared）、复制 token、添加公共主机名并把服务填成 <code>http://127.0.0.1:8080</code>；用界面截图风格的步骤图（SVG 示意即可，不放真实账号信息）。界面显示 cloudflared 状态（未找到 / 下载中 / 启动中 / 已连通 / 失败原因）。</li>
+      <li>README 隧道一节改写成新流程；最后按阶段 4 验收标准逐条验证，给出结果表。真机测试前先告诉用户（用户本机已装 cloudflared，隧道由用户自己在后台建）。</li>
+    </ul>
+    <div class="prompt"><button type="button">复制</button><pre>执行工作包 4-4（含阶段 4 验收）。
+按 AGENTS.md 的规则开始：先读 docs/claude-guide.html 里「工作包 4-4」的卡片和「会话规则」，再读 docs/handoff.md 最新交接和 docs/plan.html 阶段 4 的任务、验收标准与变更记录里 4-3 的那条。
 真机测试前先告诉我。做完按指南的「会话收尾流程」结束。</pre></div>
   </div>
 

@@ -1,0 +1,52 @@
+#!/bin/sh
+# llama-web pre-commit: refuse data/ files and suspected secrets.
+# Enable once per clone:  git config core.hooksPath scripts
+# A line that is a deliberate fake (test fixture) can carry the marker "pre-commit:allow".
+# Last resort: git commit --no-verify (do not use it for real keys).
+
+fail=0
+
+# 1. data/ must never be committed (runtime data, secrets.json, logs, binaries).
+bad_paths=$(git -c core.quotepath=off diff --cached --name-only --diff-filter=ACMR |
+  grep -E '(^|/)(data/|secrets\.json$|\.env($|\.))')
+if [ -n "$bad_paths" ]; then
+  echo "pre-commit: refusing to commit runtime data / secret files:" >&2
+  echo "$bad_paths" | sed 's/^/  /' >&2
+  fail=1
+fi
+
+# 2. Scan added lines for key-like strings: sk-..., long hex runs, Bearer tokens.
+file=""
+hits=$(git -c core.quotepath=off diff --cached -U0 --no-color --diff-filter=ACMR |
+  while IFS= read -r line; do
+    case "$line" in
+      '+++ b/'*) file=${line#'+++ b/'}; continue ;;
+      '+++'*|'---'*) continue ;;
+      '+'*) ;;
+      *) continue ;;
+    esac
+    body=${line#+}
+    case "$body" in *pre-commit:allow*) continue ;; esac
+    # review reports quote commit hashes (40 hex); only hex runs are skipped there.
+    hexcheck=1
+    case "$file" in docs/reviews/*) hexcheck=0 ;; esac
+    reason=""
+    if printf '%s\n' "$body" | grep -Eq '(^|[^A-Za-z0-9])sk-[A-Za-z0-9_-]{20,}'; then
+      reason="sk- style key"
+    elif printf '%s\n' "$body" | grep -Eiq 'bearer[[:space:]]+[A-Za-z0-9._~+/=-]{20,}'; then
+      reason="Bearer token"
+    elif [ "$hexcheck" = 1 ] && printf '%s\n' "$body" | grep -Eq '(^|[^A-Za-z0-9])[0-9a-fA-F]{32,}($|[^A-Za-z0-9])'; then
+      reason="long hex string"
+    fi
+    if [ -n "$reason" ]; then
+      echo "  $file: $reason"
+    fi
+  done)
+if [ -n "$hits" ]; then
+  echo "pre-commit: suspected secrets in staged changes (values not shown):" >&2
+  echo "$hits" >&2
+  echo "If this is a deliberate fake, add the marker pre-commit:allow to that line." >&2
+  fail=1
+fi
+
+exit $fail

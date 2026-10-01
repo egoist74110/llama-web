@@ -466,9 +466,10 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
     <li class="task" data-done="true"><span class="t">updater.ts：启动时后台检查官方最新 Release（nightly-tag 解析）、下载 CUDA 构建与 cudart、SHA-256 校验、解压到版本目录、设为当前</span><span class="when">2026-10-01</span></li>
     <li class="task" data-done="true"><span class="t">更新不阻塞启动；网络失败只记事件；下载未完成时本次加载用旧版本</span><span class="when">2026-10-01</span></li>
     <li class="task" data-done="true"><span class="t">版本管理：保留最近 2 个、界面一键回退（二次确认）、新版本加载失败时提示回退</span><span class="when">2026-10-01</span></li>
-    <li class="task" data-done="false"><span class="t"><code>scripts/pre-commit</code>：拒绝提交 <code>data/</code> 下的文件和疑似密钥（长十六进制串等）</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">README（中文）：安装、启动、配置说明、隧道设置步骤</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">真机试用：经隧道带 key / 不带 key / 访问管理路径；更新与回退，并如实报告</span><span class="when"></span></li>
+    <li class="task" data-done="true"><span class="t"><code>scripts/pre-commit</code>：拒绝提交 <code>data/</code> 下的文件和疑似密钥（长十六进制串等）</span><span class="when">2026-10-01</span></li>
+    <li class="task" data-done="true"><span class="t">README（中文）：安装、启动、配置说明、隧道设置步骤（隧道一节在 4-4 随隧道托管改写）</span><span class="when">2026-10-01</span></li>
+    <li class="task" data-done="false"><span class="t">隧道托管（4-4）：设置页填隧道 token + 开关；自动检测本机已装的 <code>cloudflared</code>（没有则从官方下载并校验）；llama-web 用 <code>--token</code> 启停并监控 cloudflared 进程；界面显示连通状态；设置页内置「在 Cloudflare 后台建隧道」的分步图文指引（含公共主机名填 <code>http://127.0.0.1:8080</code>）</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">真机试用：经隧道带 key / 不带 key / 访问管理路径；更新与回退，并如实报告（4-4 完成后进行）</span><span class="when"></span></li>
   </ul>
   <div class="accept"><h3>验收标准</h3>
     <ul>
@@ -500,7 +501,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
     <tr><td><span class="tag slot">调度</span></td><td>常驻模型、空闲自动卸载：<code>reserved.pinned</code> / <code>reserved.idleUnloadMin</code></td></tr>
     <tr><td><span class="tag slot">调度</span></td><td>按显存判断能否共存：<code>gpu.ts</code> 采样数据已有</td></tr>
     <tr><td><span class="tag slot">公网</span></td><td>按 key 禁止触发切换：<code>apiKeys[].allowSwitch</code></td></tr>
-    <tr><td><span class="tag slot">公网</span></td><td>界面一键配置隧道 DNS</td></tr>
+    <tr><td><span class="tag slot">公网</span></td><td>用 Cloudflare API token 全自动建隧道 / DNS（方案 B；2026-10-01 决定先做隧道 token 托管，见变更记录）</td></tr>
     <tr><td><span class="tag slot">界面</span></td><td>英文界面：新增 <code>i18n/en.ts</code></td></tr>
     <tr><td><span class="tag slot">运行</span></td><td>开机自启服务：加一个注册脚本即可，架构不变</td></tr>
     <tr><td><span class="tag slot">安全</span></td><td>数据目录挪到项目外：<code>LLAMA_WEB_DATA</code> 环境变量已支持</td></tr>
@@ -549,6 +550,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
       <tr><td>2026-10-01</td><td>阶段 2 第四轮复审处理：管理操作的目标（切换方案、保存后重启）总是排在已排队的客户端请求之后，不与更早的同方案加载合并；保存后重启会在旧请求结束后按新配置重新启动该方案</td></tr>
       <tr><td>2026-10-01</td><td>工作包 4-1（用户确认）：「来源识别」改为进程内传递来源，不再使用每次启动随机的内部头（两个入口在同一进程，进程内传参没有可伪造的东西）。公网入口在 <code>server/core/public-entry.ts</code>，由自定义 Bun 入口挂上监听；启用开关和端口保存后立即生效（关闭时中断进行中的公网请求），开发模式下没有公网入口。API key 在 <code>server/core/keys.ts</code>，<code>data/secrets.json</code>（version 1）原子写入并备份；名称在未吊销的 key 中唯一，吊销后保留在列表里。管理接口 <code>/api/keys</code>（查看明文用 POST）</td></tr>
       <tr><td>2026-10-01</td><td>工作包 4-2：更新器 <code>server/core/updater.ts</code>。关键决定 15 的细化：只有下载了新版本才「设为当前」；手动回退选中的版本在下次打开时保持不变，直到官方发布更新的版本；下载期间手动切换的版本也不会被覆盖。保留规则：按版本号保留最新的 <code>keepVersions</code> 个（至少 2 个），当前版本和正在运行 / 启动中的 llama-server 所在目录一律不删，删除前先改名（目录被占用时整体保留，下次启动再试）。切换版本不重启正在运行的模型，卸载后再加载才用新版本。新版本加载失败（显存、文件、端口、参数类问题除外）时失败卡片提示回退到上一个版本</td></tr>
+      <tr><td>2026-10-01</td><td>工作包 4-3（用户确认）：公网连通改为「隧道 token 托管」——用户在 Cloudflare 后台建一次隧道并复制隧道 token，llama-web 自动检测 / 下载 <code>cloudflared</code> 并以 <code>--token</code> 启停和监控，设置页带分步图文指引；替换原来的「手动执行 DNS 命令 + config.yml」流程和坑位「界面一键配置隧道 DNS」。用 API token 全自动建隧道留作坑位。隧道 token 存 <code>data/secrets.json</code>，不进日志和事件。该部分拆为工作包 4-4；4-3 只完成 pre-commit 和 README，阶段 4 真机试用推迟到 4-4 之后。</td></tr>
   </table>
 </section>
 </main>
