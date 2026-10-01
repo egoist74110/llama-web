@@ -32,15 +32,19 @@ export interface FailureDoc {
 
 /** Output pattern -> kind. Order matters: the first matching rule wins. */
 const OUTPUT_RULES: Array<[FailureKind, RegExp]> = [
-  ['oom', /out of memory|cudaMalloc failed|failed to allocate (?:CUDA|Vulkan|\S+ )?(?:buffer|memory)|unable to allocate .*buffer|ggml_backend_\w*alloc_buffer: allocating .* failed|failed to allocate .*compute buffer|CUDA_ERROR_OUT_OF_MEMORY|ErrorOutOfDeviceMemory|std::bad_alloc|not enough memory/i],
+  // "out of memory" alone also appears in harmless text: it needs a GPU / allocator word on the same line.
+  ['oom', /(?:cuda|cublas|vulkan|hip|metal|ggml|alloc|device)\w*[^\n]*out of memory|out of memory[^\n]*(?:cuda|vulkan|device)|cudaMalloc failed|failed to allocate (?:CUDA|Vulkan|\S+ )?(?:buffer|memory)|unable to allocate .*buffer|ggml_backend_\w*alloc_buffer: allocating .* failed|failed to allocate .*compute buffer|CUDA_ERROR_OUT_OF_MEMORY|ErrorOutOfDeviceMemory|std::bad_alloc|not enough memory/i],
   ['port-in-use', /couldn't bind HTTP server socket|address already in use|only one usage of each socket address/i],
   ['unknown-arg', /error: invalid argument|invalid argument:|unknown argument|error while handling argument|unrecognized (?:option|argument)/i],
   ['mmproj-mismatch', /mmproj.*(?:mismatch|incompatible|not compatible|does not match|failed)|(?:failed to load|unable to load) (?:mmproj|multimodal|vision)|clip_init: failed|clip_model_load: .*(?:failed|error)|unknown projector type|mtmd_init_from_file: error/i],
   ['unsupported-arch', /unknown model architecture|unsupported (?:model )?architecture/i],
   ['file-missing', /failed to open GGUF file|failed to open .*\.gguf|no such file or directory|cannot open (?:file|model)|system cannot find the (?:file|path)|file not found/i],
   ['cuda-error', /CUDA error|no CUDA-capable device|CUDA driver version is insufficient|cudaGetDeviceCount failed|ggml_cuda_init: failed/i],
-  ['bad-model', /invalid magic|failed to load model|error loading model|model is corrupted|tensor .* data is not within the file bounds/i],
+  // Only llama.cpp's own failure lines; a bare "failed to load model" elsewhere proves nothing.
+  ['bad-model', /invalid magic|(?:llama_model_load|common_init_from_params|load_model): (?:error loading model|failed to load model)|model is corrupted|tensor .* data is not within the file bounds/i],
 ]
+
+const INFO_LINE = /^\d+\.\d+\.\d+\.\d+ [ID] /
 
 // STATUS_DLL_NOT_FOUND / STATUS_ENTRYPOINT_NOT_FOUND: Windows could not start the program.
 const DLL_EXIT_CODES = new Set([0xC0000135, 0xC0000139, -1073741515, -1073741511])
@@ -56,7 +60,8 @@ function causeOf(cause: unknown): { code: string, exitCode: number | null, tail:
 export function classify(code: string, exitCode: number | null, tail: readonly string[]): FailureKind {
   // The reasons below mean the process never ran, so its output says nothing.
   if (code !== 'no-port' && code !== 'spawn-failed' && code !== 'register-failed' && code !== 'aborted') {
-    const text = tail.join('\n')
+    // Lines llama-server tags Info / Debug are progress chatter, not the cause.
+    const text = tail.filter(l => !INFO_LINE.test(l)).join('\n')
     for (const [kind, re] of OUTPUT_RULES) if (re.test(text)) return kind
     if (exitCode !== null && DLL_EXIT_CODES.has(exitCode)) return 'dll-missing'
   }
@@ -69,9 +74,18 @@ const CODE_KINDS: Record<string, true> = {
   'file-missing': true, 'no-runtime': true, 'bad-args': true, 'unknown': true,
 }
 
+/** Absolute paths in an output line -> `<dir>/file`: the card is readable from the LAN, local folders should not be. */
+export function redactPaths(line: string): string {
+  return line
+    // Quoted paths may contain spaces.
+    .replace(/(['"])(?:[A-Za-z]:[\\/]|\/)[^'"]*?([^\\/'"]+)\1/g, '$1<dir>/$2$1')
+    .replace(/[A-Za-z]:[\\/](?:[^\\/\s'"]+[\\/])*([^\\/\s'"]+)/g, '<dir>/$1')
+    .replace(/(?<![\w.:/])\/(?:[^/\s'"]+\/)+([^/\s'"]+)/g, '<dir>/$1')
+}
+
 /** Diagnose the `error` of a failed / crashed instance (or a rejected load). Null when there is none. */
 export function diagnose(cause: unknown): FailureDoc | null {
   if (!cause) return null
   const c = causeOf(cause)
-  return { kind: classify(c.code, c.exitCode, c.tail), code: c.code, exitCode: c.exitCode, tail: c.tail.slice(-30) }
+  return { kind: classify(c.code, c.exitCode, c.tail), code: c.code, exitCode: c.exitCode, tail: c.tail.slice(-30).map(redactPaths) }
 }

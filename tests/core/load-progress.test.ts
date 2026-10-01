@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { LoadProgress } from '../../server/core/load-progress'
+import { LoadProgress, trackWeightLoad } from '../../server/core/load-progress'
 
 describe('LoadProgress', () => {
   test('milestones move forward and never back', () => {
@@ -70,5 +70,56 @@ describe('LoadProgress with a recent llama-server (almost silent while loading)'
     expect(b).toBeLessThanOrEqual(90)
     expect(p.estimate(5000, null, 0)).toBeNull() // time never runs backwards either
     expect(p.line('llama threadpool init')).toBe(92)
+  })
+})
+
+describe('trackWeightLoad lifecycle (review CR-004)', () => {
+  const wait = (ms: number) => new Promise(r => setTimeout(r, ms))
+  const setup = (usedMiB: () => Promise<number | null>) => {
+    const reports: Array<number | null> = []
+    const stop = trackWeightLoad({
+      files: ['a'], sizeOf: () => 1000 * 1048576, progress: new LoadProgress(), intervalMs: 5, usedMiB,
+      report: p => reports.push(p),
+    })
+    return { stop, reports }
+  }
+
+  test('a slow sample never overlaps the next one', async () => {
+    let calls = 0
+    let inFlight = 0
+    let maxInFlight = 0
+    const { stop } = setup(async () => {
+      calls++
+      inFlight++
+      maxInFlight = Math.max(maxInFlight, inFlight)
+      await wait(40)
+      inFlight--
+      return 100 + calls * 10
+    })
+    await wait(150)
+    stop()
+    expect(maxInFlight).toBe(1)
+    expect(calls).toBeGreaterThan(1)
+  })
+
+  test('after stop nothing is reported, not even by a sample that was still running', async () => {
+    let n = 0
+    const { stop, reports } = setup(async () => { await wait(30); return 100 + 50 * n++ })
+    await wait(80)
+    stop()
+    const seen = reports.length
+    await wait(120)
+    expect(reports.length).toBe(seen)
+  })
+
+  test('no GPU numbers: the time curve reports; a throwing sampler is survived', async () => {
+    const a = setup(async () => null)
+    await wait(40)
+    a.stop()
+    expect(a.reports.some(p => typeof p === 'number')).toBe(true)
+    const b = setup(async () => { throw new Error('smi gone') })
+    await wait(40)
+    b.stop()
+    expect(b.reports.length).toBeGreaterThan(0)
   })
 })

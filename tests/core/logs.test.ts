@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { LogError, LogStore, modelDirName, modelIdFromDir } from '../../server/core/logs'
@@ -164,5 +164,16 @@ describe('listing and reading', () => {
     const t = new Date(2026, 0, 2, 3, 4, 5)
     utimesSync(run.file, t, t)
     expect(logs.list().models[0]!.files[0]!.mtime).toBe(t.getTime())
+  })
+})
+
+describe('symlinks (review CR-002)', () => {
+  test('a link with a valid log name is not followed', () => {
+    const logs = mk()
+    mkdirSync(join(dir, 'requests'), { recursive: true })
+    const outside = join(dir, 'outside.txt')
+    writeFileSync(outside, 'secret\n')
+    try { symlinkSync(outside, join(dir, 'requests', '2026-09-30.jsonl')) } catch { return } // no symlink right on this machine
+    expect(() => logs.read('requests', '2026-09-30.jsonl')).toThrow(LogError)
   })
 })

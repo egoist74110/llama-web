@@ -108,3 +108,19 @@ describe('UsageTap', () => {
     expect(t.result().promptTokens).toBeNull()
   })
 })
+
+describe('UsageTap memory bound (review CR-003)', () => {
+  test('one huge chunk keeps only its tail and still yields the usage at the end', () => {
+    const tap = new UsageTap(1024)
+    const huge = enc.encode('x'.repeat(5_000_000) + '{"usage":{"prompt_tokens":7,"completion_tokens":8}}')
+    tap.push(huge)
+    const held = (tap as unknown as { held: number }).held
+    expect(held).toBeLessThanOrEqual(1024)
+    expect(tap.result()).toMatchObject({ promptTokens: 7, completionTokens: 8 })
+  })
+  test('several chunks never hold more than keep + one chunk', () => {
+    const tap = new UsageTap(1024)
+    for (let i = 0; i < 50; i++) tap.push(enc.encode('y'.repeat(900)))
+    expect((tap as unknown as { held: number }).held).toBeLessThanOrEqual(1024 + 900)
+  })
+})

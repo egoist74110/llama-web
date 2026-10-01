@@ -159,6 +159,8 @@ export class UsageTap {
   constructor(private readonly keep = 16 * 1024) {}
 
   push(chunk: Uint8Array): void {
+    // A single oversized chunk is cut to its tail right away (copied, so the big buffer is not kept alive).
+    if (chunk.byteLength > this.keep) chunk = chunk.slice(chunk.byteLength - this.keep)
     this.chunks.push(chunk)
     this.held += chunk.byteLength
     // Drop whole chunks that are no longer needed to cover `keep` bytes.

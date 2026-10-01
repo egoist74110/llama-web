@@ -16,6 +16,14 @@
 
 ---
 
+## 2026-10-01 · 阶段 3 审查意见处理 · Sonnet 5.5
+- 完成：`docs/reviews/stage-3-codex.md` 6 条：CR-001/002/003/004/005 核实成立并修复，CR-006 不成立（理由见文件）。CR-001：失败卡片的输出末尾对绝对路径脱敏（`redactPaths`，在 `diagnose()` 出口）。CR-002：日志读取用 `lstat` 拒绝符号链接。CR-003：`UsageTap` 单个超大块只留末尾 keep 字节。CR-004：加载进度采样移到 `trackWeightLoad`（`load-progress.ts`），单飞、stop 后丢弃在途结果。CR-005：OOM / bad-model 规则收紧，Info / Debug 行不参与分类。
+- 验证：`bun test` 387 通过（新增 errors 5、request-log 2、logs 1、load-progress 3）；`bun run typecheck` 通过。**没运行**：build、真机（本轮没有改变真机行为之外的东西，但 `trackWeightLoad` 搬了位置、错误规则收紧后没有再用真实 llama-server 复测）。
+- 剩余：无。局限：错误规则对「无等级标记的普通行里同时含这些词」仍可能误判；符号链接测试在无权限的机器上会被跳过；在途 nvidia-smi 不取消（最多 3 秒）。
+- 下一步：阶段 3 关口——用户确认后开始 4-1（Opus 5.5）。
+
+---
+
 ## 2026-10-01 · 3-3 补丁：加载进度 · Sonnet 5.5
 - 完成：修真机加载进度不动。原因：当前 llama.cpp（b11146）加载时几乎不输出（只有 `loading model` → `llama threadpool init` → `creating MTP draft context` → `load_model: initializing` → `llama_server: model loaded`），没有点号行，旧里程碑也匹配不上。现在：新增这几条里程碑；加载期间每秒按 GPU 显存增长 ÷ 权重文件大小（model + mmproj + draft，`LaunchPlan.weightFiles`）推进 12→90%，没有 nvidia-smi 时用时间曲线（τ=15s）；`LoadProgress.estimate()`，`trackWeightLoad`（context.ts）；只增不减，里程碑更靠前时以里程碑为准。
 - 验证：`bun test`、`bun run typecheck`、`bun run build` 通过（load-progress 新增 3 条）。真机（Qwen3.8-27B，临时数据目录，已停已删）：热缓存加载 8 秒，进度 12 → 14 → 85 → 94 → ready。**没测**：冷缓存长加载（预期更平滑）；无 nvidia-smi 的机器；多 GPU（按总显存增长算）；有别的程序同时占显存时进度可能被带偏（只会提前，不会倒退，就绪后归零）。

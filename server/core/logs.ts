@@ -5,7 +5,7 @@
 // Pure module (node:fs only). Retention follows settings.logs; the files of a run that is
 // still open are never pruned. Reads are confined to the log root.
 import {
-  appendFileSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readSync, rmSync, statSync,
+  appendFileSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readSync, rmSync, lstatSync, statSync,
 } from 'node:fs'
 import { join } from 'node:path'
 
@@ -233,7 +233,8 @@ export class LogStore {
     const file = join(dir, name)
     let size: number
     try {
-      const st = statSync(file)
+      // lstat: a link with a valid name must not lead outside the log directory.
+      const st = lstatSync(file)
       if (!st.isFile()) throw new Error('not a file')
       size = st.size
     } catch {

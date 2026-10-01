@@ -1,7 +1,6 @@
 // Process-wide wiring: config stores, runner, scheduler and the /v1 proxy. Created once
 // (kept on globalThis so dev-server reloads do not orphan running llama-server processes)
 // and shared by the custom Bun entry, the Nitro plugin and the dev-mode routes.
-import { statSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   defaultModels, defaultSettings, MODELS_VERSION, normalizeModels, normalizeSettings, SETTINGS_VERSION,
@@ -12,7 +11,7 @@ import { LogStore } from '../core/logs'
 import { ensureRuntime, type RuntimeStatus } from '../core/llamacpp'
 import { GpuSampler, parseNvidiaSmi, runNvidiaSmi } from '../core/gpu'
 import { describeModels, LiveHub } from '../core/live'
-import { LoadProgress } from '../core/load-progress'
+import { LoadProgress, trackWeightLoad } from '../core/load-progress'
 import { ModelOps } from '../core/model-ops'
 import { createProxy, type Proxy, type ProxyEvent } from '../core/proxy'
 import { runStartupCleanup } from '../core/residue'
@@ -116,30 +115,6 @@ const totalUsedMiB = async (): Promise<number | null> => {
   } catch { return null }
 }
 
-/**
- * While a model loads, move its progress by GPU memory growth against the weight files' size
- * (time curve when nvidia-smi is missing). Returns the function that stops it.
- */
-function trackWeightLoad(files: string[], progress: LoadProgress, report: (p: number | null) => void): () => void {
-  let expectedMiB = 0
-  for (const f of files) { try { expectedMiB += statSync(f).size / 1048576 } catch { /* gone: time curve */ } }
-  const startedAt = Date.now()
-  let stopped = false
-  let baseline: Promise<number | null> | null = totalUsedMiB()
-  let base: number | null | undefined
-  const tick = async () => {
-    if (stopped) return
-    if (base === undefined) base = await baseline
-    baseline = null
-    const used = base === null ? null : await totalUsedMiB()
-    if (stopped) return
-    report(progress.estimate(Date.now() - startedAt, used === null || base === null ? null : used - base, expectedMiB))
-  }
-  const timer = setInterval(() => void tick(), 1000)
-  timer.unref?.()
-  return () => { stopped = true; clearInterval(timer) }
-}
-
 function createContext(): AppContext {
   const dataDir = resolveDataDir()
   const settingsStore = new JsonStore<Settings>({
@@ -195,7 +170,7 @@ function createContext(): AppContext {
       log(`starting ${plan.tag}: ${plan.exe}`)
       const progress = new LoadProgress()
       const report = (p: number | null) => { if (p !== null) live.onLoadProgress(target.modelId, target.profile, p) }
-      const stopTracking = trackWeightLoad(plan.weightFiles, progress, report)
+      const stopTracking = trackWeightLoad({ files: plan.weightFiles, progress, report, usedMiB: totalUsedMiB })
       // One output file per start; lines also go to the live feed of the log page.
       const run = logs.startRun(target.modelId)
       run.append(`# llama-web: starting ${plan.tag} at ${new Date().toISOString()}`)

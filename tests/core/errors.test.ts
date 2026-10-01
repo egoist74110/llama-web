@@ -84,3 +84,36 @@ describe('diagnose', () => {
     expect(diagnose(new Error('boom'))!.kind).toBe('unknown')
   })
 })
+
+describe('classify: harmless text is not a cause (review CR-005)', () => {
+  test('"out of memory" in an ordinary line, or on an Info line, is not OOM', () => {
+    expect(classify('timeout', null, ['warning: cache policy says out of memory is acceptable'])).toBe('timeout')
+    expect(classify('timeout', null, ['0.01.000.001 I srv  note: handles out of memory (cuda) gracefully'])).toBe('timeout')
+  })
+  test('a bare "failed to load model" outside llama.cpp\'s own failure lines is not bad-model', () => {
+    expect(classify('timeout', null, ['failed to load model list cache; using fallback'])).toBe('timeout')
+    expect(classify('exited', 1, ['0.02.000.001 E common_init_from_params: failed to load model \'a.gguf\''])).toBe('bad-model')
+  })
+  test('real errors on E / W lines still match', () => {
+    expect(classify('exited', 1, ['0.36.1.1 E ggml_backend_cuda_buffer_type_alloc_buffer: cudaMalloc failed: out of memory'])).toBe('oom')
+  })
+})
+
+describe('redactPaths (review CR-001)', () => {
+  test('failure tails keep the file name, not the folders', () => {
+    const d = diagnose(new LoadError('exited', 'x', 1, [
+      String.raw`load_model: loading model 'D:\Some Dir\models\a.gguf'`,
+      'open C:/Users/someone/models/b.gguf failed',
+      'see /home/someone/models/c.gguf and http://127.0.0.1:7100/health',
+    ]))!
+    const text = d.tail.join('\n')
+    expect(text).toContain('<dir>/a.gguf')
+    expect(text).toContain('<dir>/b.gguf')
+    expect(text).toContain('<dir>/c.gguf')
+    expect(text).toContain('http://127.0.0.1:7100/health')
+    expect(text).not.toMatch(/someone|Users|Some Dir|home/)
+  })
+  test('classification still uses the raw lines', () => {
+    expect(diagnose(new LoadError('exited', 'x', 1, ["failed to open GGUF file 'X:\m\a.gguf'"]))!.kind).toBe('file-missing')
+  })
+})
