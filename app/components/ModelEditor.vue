@@ -109,7 +109,7 @@ function fileItems(kind: 'file' | 'mmproj' | 'draft') {
   if (current && !items.some(i => i.value === refKey(current))) {
     items.unshift({ label: `${current.dirId}/${current.rel}${edit.files.missing}`, value: refKey(current) })
   }
-  return kind === 'file' ? items : [{ label: edit.files.none, value: '' }, ...items]
+  return kind === 'file' ? items : withEmptyOption(edit.files.none, items)
 }
 const fileRows = [
   { kind: 'file' as const, label: edit.files.model },
@@ -219,7 +219,13 @@ const pendingTitle = computed(() => {
           <div class="space-y-3">
             <div v-for="row in fileRows" :key="row.kind" class="space-y-1">
               <label class="text-sm text-default">{{ row.label }}</label>
-              <USelect v-model="picked[row.kind]" :items="itemsFor[row.kind]" class="w-full" :aria-label="row.label" />
+              <USelect
+                :model-value="toSelectValue(picked[row.kind])"
+                :items="itemsFor[row.kind]"
+                class="w-full"
+                :aria-label="row.label"
+                @update:model-value="(v: unknown) => { picked[row.kind] = fromSelectValue(v) }"
+              />
             </div>
           </div>
           <div class="mt-4 flex flex-wrap items-center gap-2">

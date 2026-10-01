@@ -99,7 +99,7 @@ function toForm() {
 }
 
 const templateItems = computed(() => {
-  const items = [{ label: t.models.edit.form.templateBuiltin, value: '' }, ...props.templates.map(n => ({ label: n, value: n }))]
+  const items = withEmptyOption(t.models.edit.form.templateBuiltin, props.templates.map(n => ({ label: n, value: n })))
   if (state.chatTemplate && !props.templates.includes(state.chatTemplate)) {
     items.push({ label: `${state.chatTemplate}${t.models.edit.preview.missing.chatTemplate}`, value: state.chatTemplate })
   }
@@ -165,7 +165,13 @@ const globalExtra = computed(() => props.defaults.extraArgs?.trim())
       <h4 class="text-sm font-medium text-highlighted">
         {{ edit.form.template }}
       </h4>
-      <USelect v-model="state.chatTemplate" :items="templateItems" class="w-full sm:w-80" :aria-label="edit.form.template" />
+      <USelect
+        :model-value="toSelectValue(state.chatTemplate)"
+        :items="templateItems"
+        class="w-full sm:w-80"
+        :aria-label="edit.form.template"
+        @update:model-value="(v: unknown) => { state.chatTemplate = fromSelectValue(v) }"
+      />
       <p class="text-xs text-muted">
         {{ edit.form.templateHint }}
       </p>

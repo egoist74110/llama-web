@@ -28,7 +28,7 @@ const dirty = computed(() => JSON.stringify(state) !== initial.value)
 const invalidKeys = computed(() => PARAM_FIELDS.filter(f => f.kind === 'number' && state.values[f.key]!.trim() !== '' && !Number.isFinite(Number(state.values[f.key]))).map(f => f.key))
 
 function selectItems(f: ParamField, current: string) {
-  const items = [{ label: s.empty, value: '' }, ...(f.options ?? []).map(o => ({ label: o, value: o }))]
+  const items = withEmptyOption(s.empty, (f.options ?? []).map(o => ({ label: o, value: o })))
   if (current && !(f.options ?? []).includes(current)) items.push({ label: current, value: current })
   return items
 }
@@ -60,7 +60,7 @@ async function submit() {
             {{ params[f.key].hint }}
           </p>
         </div>
-        <USelect v-if="f.kind === 'select'" v-model="state.values[f.key]" :items="selectItems(f, state.values[f.key]!)" size="sm" class="w-40" :aria-label="params[f.key].label" />
+        <USelect v-if="f.kind === 'select'" :model-value="toSelectValue(state.values[f.key])" :items="selectItems(f, state.values[f.key]!)" size="sm" class="w-40" :aria-label="params[f.key].label" @update:model-value="(v: unknown) => { state.values[f.key] = fromSelectValue(v) }" />
         <UInput
           v-else
           :model-value="state.values[f.key]"
