@@ -2,4 +2,4 @@
 import { getContext } from '../../service/context'
 import { toAbortableRequest } from '../../service/h3'
 
-export default defineEventHandler(event => getContext().proxy.handleV1(toAbortableRequest(event)))
+export default defineEventHandler(event => getContext().proxy.handleV1(toAbortableRequest(event), { ip: event.node.req.socket.remoteAddress }))

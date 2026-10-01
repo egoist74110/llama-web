@@ -370,8 +370,48 @@ export default {
     done: '已完成配置，不再显示这个向导',
     finish: '完成，去看看模型',
   },
-  placeholder: {
-    logs: { title: '日志', subtitle: '模型输出、事件、请求', body: '日志页将在阶段 3 提供。' },
+  logs: {
+    title: '日志',
+    subtitle: '模型输出、事件和请求。页面里只保留最近的内容，完整记录保存在 data/logs，重启后仍可查看。',
+    tabs: { model: '模型输出', events: '事件', requests: '请求' },
+    filters: {
+      model: '模型',
+      allModels: '全部模型',
+      range: '范围',
+      live: '实时（最近内容）',
+      search: '搜索',
+      searchPlaceholder: '在当前内容里搜索',
+      pause: '暂停',
+      resume: '继续',
+      pausedHint: '已暂停，新内容不会显示（仍在记录）。',
+      refresh: '刷新文件列表',
+      historyNeedsModel: '选择一个模型后才能查看它的历史输出文件。',
+    },
+    file: {
+      truncated: '文件较大，只显示结尾的部分内容。',
+      loading: '正在读取……',
+      loadFailed: '读取日志文件失败',
+      listFailed: '读取日志文件列表失败',
+    },
+    empty: {
+      model: '还没有模型输出。模型加载后，llama-server 的输出会显示在这里。',
+      events: '还没有事件。',
+      requests: '还没有请求记录。',
+      noMatch: '没有符合搜索条件的内容。',
+    },
+    requests: {
+      columns: { time: '时间', source: '来源', model: '模型', result: '结果', duration: '耗时', tokens: 'token（输入 → 输出）', images: '图片', params: '参数' },
+      source: { local: '本机', lan: '局域网', public: '公网' },
+      outcome: { ok: '成功', error: '失败', aborted: '中断' },
+      stream: '流式',
+      images: '{count} 张，{before} → {after}，最长边 {edgeBefore} → {edgeAfter}px',
+      imagesKept: '{count} 张，未改动（{before}，最长边 {edgeBefore}px）',
+      noContentNote: '请求记录不包含对话内容，也不包含 Authorization。',
+    },
+    errors: {
+      badRequest: '日志文件名或类型不正确。',
+      notFound: '找不到这个日志文件，可能已按保留策略清理。',
+    },
   },
   // Import of the old swap-config.json.
   import: {

@@ -1,6 +1,7 @@
 // Text helpers for the UI. All wording comes from i18n/zh-CN.ts.
 import t from '~~/i18n/zh-CN'
 import type { ActivityEvent, StateDoc } from '~~/server/core/live'
+import type { RequestRecord } from '~~/server/core/request-log'
 
 export function fmt(template: string, vars: Record<string, string | number> = {}): string {
   return template.replace(/\{(\w+)\}/g, (m, k: string) => (k in vars ? String(vars[k]) : m))
@@ -70,4 +71,29 @@ export function formatParams(n: number | null | undefined): string {
 export function formatContext(n: number | null | undefined): string {
   if (!n) return t.models.discover.unknown
   return n >= 1024 && n % 1024 === 0 ? `${n / 1024}K` : String(n)
+}
+
+export function requestSourceText(r: Pick<RequestRecord, 'source' | 'keyName'>): string {
+  const label = t.logs.requests.source[r.source]
+  return r.keyName ? `${label} · ${r.keyName}` : label
+}
+
+/** `{count} images, 2.1 MB -> 180 KB, longest edge 3000 -> 896px`. */
+export function requestImagesText(i: RequestRecord['images']): string {
+  if (!i) return ''
+  const vars = { count: i.count, before: formatBytes(i.beforeBytes), after: formatBytes(i.afterBytes), edgeBefore: i.maxEdgeBefore, edgeAfter: i.maxEdgeAfter }
+  return fmt(i.compressed ? t.logs.requests.images : t.logs.requests.imagesKept, vars)
+}
+
+export function requestParamsText(p: RequestRecord['params']): string {
+  return Object.entries(p).map(([k, v]) => `${k}=${v}`).join(' ')
+}
+
+export function requestTokensText(r: Pick<RequestRecord, 'promptTokens' | 'completionTokens'>): string {
+  if (r.promptTokens === null && r.completionTokens === null) return ''
+  return `${r.promptTokens ?? '-'} → ${r.completionTokens ?? '-'}`
+}
+
+export function formatMs(ms: number): string {
+  return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)} s`
 }

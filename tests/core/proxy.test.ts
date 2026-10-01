@@ -3,6 +3,7 @@ import sharp from 'sharp'
 import { defaultSettings, type ModelsDoc, type Settings } from '../../server/core/config'
 import { LoadError } from '../../server/core/runner'
 import { activeBoundedWaits, bounded, createProxy, type ProxyEvent } from '../../server/core/proxy'
+import type { RequestRecord } from '../../server/core/request-log'
 import { Scheduler, type ModelProcess, type Target } from '../../server/core/scheduler'
 
 // ---------------------------------------------------------------------------------------
@@ -58,7 +59,7 @@ function makeUpstream(target: Target, opts: { chunks?: number, gapMs?: number, h
               return new Promise<void>((done) => {
                 timer = setTimeout(() => {
                   if (i < n) ctrl.enqueue(new TextEncoder().encode(`data: {"i":${i++}}\n\n`))
-                  else { ctrl.enqueue(new TextEncoder().encode('data: [DONE]\n\n')); ctrl.close() }
+                  else { ctrl.enqueue(new TextEncoder().encode('data: {"choices":[],"usage":{"prompt_tokens":11,"completion_tokens":4,"total_tokens":15}}\n\ndata: [DONE]\n\n')); ctrl.close() }
                   done()
                 }, gap)
               })
@@ -67,7 +68,7 @@ function makeUpstream(target: Target, opts: { chunks?: number, gapMs?: number, h
           })
           return new Response(stream, { headers: { 'content-type': 'text/event-stream' } })
         }
-        return Response.json({ ok: true, model: target.modelId, profile: target.profile, echo: body })
+        return Response.json({ ok: true, model: target.modelId, profile: target.profile, echo: body, usage: { prompt_tokens: 7, completion_tokens: 3, total_tokens: 10 } })
       },
     }),
   }
@@ -103,6 +104,7 @@ afterEach(async () => {
 function setup(opts: { autoReady?: boolean, chunks?: number, gapMs?: number, heartbeatMs?: number, maxBodyBytes?: number, drainTimeoutMs?: number, finalEventTimeoutMs?: number, holdHeaders?: boolean } = {}) {
   const ups: Upstream[] = []
   const events: ProxyEvent[] = []
+  const records: RequestRecord[] = []
   const settings: Settings = defaultSettings()
   const sched = new Scheduler({
     drainTimeoutMs: opts.drainTimeoutMs ?? 5000,
@@ -121,6 +123,7 @@ function setup(opts: { autoReady?: boolean, chunks?: number, gapMs?: number, hea
     maxBodyBytes: opts.maxBodyBytes,
     finalEventTimeoutMs: opts.finalEventTimeoutMs,
     onEvent: e => events.push(e),
+    onRequest: r => records.push(r),
   })
   const front = Bun.serve({
     port: 0,
@@ -141,7 +144,7 @@ function setup(opts: { autoReady?: boolean, chunks?: number, gapMs?: number, hea
     method: 'POST', headers: { 'content-type': 'application/json', ...(init.headers as any) }, body: JSON.stringify(body), ...init,
   })
   const inflight = () => sched.snapshot().models.reduce((n, m) => n + m.inflight, 0)
-  return { sched, ups, events, base, post, inflight, settings, proxy }
+  return { sched, ups, events, records, base, post, inflight, settings, proxy }
 }
 
 async function readAll(res: Response): Promise<{ text: string, times: number[] }> {
@@ -506,6 +509,103 @@ describe('images', () => {
     expect([meta.width, meta.height]).toEqual([64, 32])
     const ev = events.find(e => e.type === 'preprocess') as Extract<ProxyEvent, { type: 'preprocess' }>
     expect(ev.result.reports.image![0]).toMatchObject({ action: 'compressed', before: { width: 300, height: 150 }, after: { width: 64, height: 32 } })
+  })
+})
+
+describe('request records', () => {
+  const png = async (w: number, h: number) => (await sharp({ create: { width: w, height: h, channels: 3, background: '#3366aa' } }).png().toBuffer()).toString('base64')
+
+  test('non-stream: model, profile, tokens, parameters, no conversation content or Authorization', async () => {
+    const { post, records } = setup()
+    const res = await post('/v1/chat/completions', {
+      model: 'Alpha:RP', temperature: 0.7, reasoning_effort: 'high', max_tokens: 64, chat_template_kwargs: { enable_thinking: false },
+      messages: [{ role: 'user', content: 'my secret question' }],
+    }, { headers: { authorization: 'Bearer sk-very-secret' } })
+    expect(res.status).toBe(200)
+    await res.text()
+    await until(() => records.length === 1)
+    const r = records[0]!
+    expect(r).toMatchObject({
+      source: 'local', keyName: null, method: 'POST', path: '/v1/chat/completions', modelId: 'a', modelName: 'Alpha', profile: 'RP',
+      stream: false, status: 200, outcome: 'ok', error: null, promptTokens: 7, completionTokens: 3, images: null,
+      params: { temperature: 0.7, reasoning_effort: 'high', max_tokens: 64, 'chat_template_kwargs.enable_thinking': false, messages: 1 },
+    })
+    expect(r.durationMs).toBeGreaterThanOrEqual(0)
+    const text = JSON.stringify(r)
+    expect(text).not.toContain('secret')
+    expect(text).not.toContain('Bearer')
+  })
+
+  test('streaming on a ready model: tokens come from the final chunk, one record', async () => {
+    const { post, records } = setup({ chunks: 2, gapMs: 10 })
+    await (await post('/v1/chat/completions', { model: 'Alpha' })).json()
+    const res = await post('/v1/chat/completions', { model: 'Alpha', stream: true })
+    await readAll(res)
+    await until(() => records.length === 2)
+    expect(records[1]).toMatchObject({ stream: true, status: 200, outcome: 'ok', promptTokens: 11, completionTokens: 4 })
+  })
+
+  test('streaming while the model loads: tokens and status are recorded too', async () => {
+    const { post, records } = setup({ chunks: 2, gapMs: 10, heartbeatMs: 20 })
+    const res = await post('/v1/chat/completions', { model: 'Alpha', stream: true })
+    await readAll(res)
+    await until(() => records.length === 1)
+    expect(records[0]).toMatchObject({ stream: true, status: 200, outcome: 'ok', promptTokens: 11, completionTokens: 4, modelName: 'Alpha' })
+  })
+
+  test('errors are recorded with their code; GET /v1/models is not recorded', async () => {
+    const { post, base, records, ups } = setup({ autoReady: false })
+    await fetch(`${base}/v1/models`)
+    const unknown = await post('/v1/chat/completions', { model: 'Nope' })
+    expect(unknown.status).toBe(404)
+    await until(() => records.length === 1)
+    expect(records[0]).toMatchObject({ status: 404, outcome: 'error', error: 'model_not_found', modelId: null, modelName: null })
+
+    const p = post('/v1/chat/completions', { model: 'Alpha' })
+    await until(() => ups.length === 1)
+    ups[0]!.fail()
+    expect((await p).status).toBe(503)
+    await until(() => records.length === 2)
+    expect(records[1]).toMatchObject({ status: 503, outcome: 'error', error: 'model_load_failed', modelName: 'Alpha' })
+    expect(records).toHaveLength(2)
+  })
+
+  test('client leaving mid-stream is recorded as aborted', async () => {
+    const { post, records, inflight } = setup({ chunks: 100, gapMs: 30 })
+    await (await post('/v1/chat/completions', { model: 'Alpha' })).json()
+    const ac = new AbortController()
+    const res = await post('/v1/chat/completions', { model: 'Alpha', stream: true }, { signal: ac.signal })
+    await res.body!.getReader().read()
+    ac.abort()
+    await until(() => inflight() === 0)
+    await until(() => records.length === 2)
+    expect(records[1]).toMatchObject({ stream: true, outcome: 'aborted' })
+  })
+
+  test('image step: sizes before / after, never the image data', async () => {
+    const { post, records } = setup()
+    const data = await png(300, 150)
+    await post('/v1/chat/completions', {
+      model: 'Alpha:RP',
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }, { type: 'image_url', image_url: { url: `data:image/png;base64,${data}` } }] }],
+    })
+    await until(() => records.length === 1)
+    const img = records[0]!.images!
+    expect(img).toMatchObject({ count: 1, compressed: 1, maxEdgeBefore: 300, maxEdgeAfter: 64 })
+    expect(img.beforeBytes).toBeGreaterThan(0)
+    expect(img.afterBytes).toBeGreaterThan(0)
+    expect(JSON.stringify(records[0])).not.toContain(data.slice(0, 40))
+  })
+
+  test('source follows the client address and the key name', async () => {
+    const { proxy, records } = setup()
+    const call = (meta?: Parameters<typeof proxy.handleV1>[1]) => proxy.handleV1(
+      new Request('http://x/v1/chat/completions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: 'Nope' }) }), meta)
+    await call()
+    await call({ ip: '::1' })
+    await call({ ip: '192.0.2.5' })
+    await call({ ip: '198.51.100.9', keyName: 'phone' })
+    expect(records.map(r => [r.source, r.keyName])).toEqual([['local', null], ['local', null], ['lan', null], ['public', 'phone']])
   })
 })
 

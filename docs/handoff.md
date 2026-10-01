@@ -16,6 +16,21 @@
 
 ---
 
+## 2026-10-01 · 工作包 3-1 · Sonnet 5.5
+- 完成：plan 阶段 3 前三项。`server/core/logs.ts`（`LogStore`）：模型输出每次启动一个 `data/logs/models/<模型>/时间.log`（缓冲 200ms 写盘，退出时写一行 `# llama-web: exited …`），事件 / 请求按天 `events|requests/日期.jsonl`；按 `settings.logs` 清理（每模型保留最近 N 个，不删仍打开的；jsonl 保留 keepDays 天），启动、每次新启动、跨天时清理；读取只认固定文件名格式（防路径穿越）。`server/core/request-log.ts` + `proxy.ts`：每个 `/v1` 请求结束时产出一条记录（时间、来源、模型/方案、状态、结果 ok/error/aborted、耗时、token、图片压缩前后、参数摘要）；`GET /v1/models` 和 `/upstream` 不记。`live.ts`：新增 `request` / `log` 消息及 `request-history` / `log-history`，`onActivity` 用于事件落盘。接口 `GET /api/logs`、`GET /api/logs/file`。日志页三个标签、实时 / 历史文件切换、模型筛选、搜索、暂停、自动跟随滚动。
+- 验证：`bun test` 320 通过（新增 logs 11、request-log 9、proxy 记录 7、live 5 条，并修了 `readFrames` 测试辅助函数会丢块的问题）；`bun run typecheck` 通过；`bun run build` 通过。构建产物 + 编译成的假 llama-server（临时数据目录、端口 5097，已停已删）实测：非流式 / 流式 / 404 三种请求各一条记录、token 正确；对话内容与 Authorization 全文搜索日志目录为 0 命中；重启后内置浏览器在日志页能看到上次的请求记录和模型输出。**没测**：真实 llama-server / GPU；公网来源（key 名字段已预留，4-1 接入）；局域网来源在真机上的判定（只有单元测试）；事件标签的界面（只看了模型输出和请求两个标签）。
+- 剩余：无。
+- 决定 / 坑：
+  - 请求记录的参数只取白名单标量（采样、max_tokens、reasoning / thinking 开关等）和 messages / tools 的**个数**；`stop`、`user`、`response_format` 等一律不记。
+  - 来源：`handleV1(req, { ip, keyName })`。回环地址和本机自己的网卡地址 = 本机，其他 = 局域网，有 `keyName` = 公网。4-1 的公网入口调用时传 `keyName`。
+  - 实时输出行经 `/api/stream`（`log` 批量消息）；读者跟不上时丢弃最旧的输出批次（文件里有全量），活动 / 请求事件仍按旧规则（超限断开）。
+  - token 数从响应末尾 16KB 里正则取 `prompt_tokens` / `completion_tokens`，不逐块解码，不影响流式转发；超大非流式响应若 usage 不在末尾则记为空。
+  - 顺手修了布局：`main` 加 `min-w-0`，宽表格不再撑出整页横向滚动。删除了不再使用的 `PagePlaceholder` 组件。
+  - Bash 工具的 heredoc 遇到引号 / 反斜杠组合会整条命令解析失败；改用 Write 工具写文件。
+- 下一步：工作包 3-2（Sonnet 5.5）。
+
+---
+
 ## 2026-10-01 · 阶段 2 关口 · Opus 5.5
 - 完成：在界面里验证了下拉空值修复并给 plan 对应任务打勾。构建产物 + 临时数据目录（端口 5097，已停已删）在内置浏览器实测：设置页 K 缓存类型出现「不传」，选中保存后 `cacheTypeK: null`，刷新仍显示「不传」；模型编辑 mmproj 选文件保存 → 选回「不使用」保存 → `mmproj: null`；聊天模板选 `chat.jinja` 保存 → 选回内置保存 → 字段为空；控制台无错误。
 - 阶段 2 状态：plan 阶段 2 任务全部打勾；Codex 审查 5 轮，CR-001～CR-010 已复审关闭，CR-011 已修复未复审。用户确认进入阶段 3，**未亲自试用**。以下验收项至今**没有人实际做过**：酒馆实际连接；往目录放新 gguf → 扫描 → 启用 → 酒馆使用；`名字:RP` 在酒馆里调用；预览命令粘贴到 CMD 手动跑真实 llama-server；长时间深色模式观感。后续出问题时优先怀疑这些。

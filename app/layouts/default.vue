@@ -87,7 +87,7 @@ const themeMenu = computed(() => [modes.map(m => ({
           {{ n.label }}
         </NuxtLink>
       </nav>
-      <main class="mx-auto w-full max-w-5xl flex-1 px-4 py-6 md:px-8">
+      <main class="mx-auto w-full min-w-0 max-w-5xl flex-1 px-4 py-6 md:px-8">
         <slot />
       </main>
     </div>

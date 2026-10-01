@@ -1,14 +1,15 @@
 import { describe, expect, test } from 'bun:test'
-import { handleStream, LiveHub, type ActivityEvent, type StateDoc } from '../../server/core/live'
+import { handleStream, LiveHub, type ActivityEvent, type LiveHubOptions, type StateDoc } from '../../server/core/live'
 import type { SchedulerSnapshot } from '../../server/core/scheduler'
 
-function setup() {
+function setup(extra: Partial<LiveHubOptions> = {}) {
   let clock = 1000
   const sched: SchedulerSnapshot = { models: [], queue: [] }
   const hub = new LiveHub({
     now: () => clock,
     coalesceMs: 1,
     historySize: 3,
+    ...extra,
     snapshot: () => ({
       scheduler: sched,
       models: [{ id: 'm1', name: 'Model One', activeProfile: 'default', profiles: ['default'], hasMmproj: false, files: { model: 'main/m.gguf', mmproj: null, draft: null }, missing: [], instances: [] }],
@@ -91,9 +92,13 @@ async function readFrames(res: Response, until: (frames: string[]) => boolean, t
   let buf = ''
   const frames: string[] = []
   const deadline = Date.now() + timeoutMs
+  // One read stays outstanding across the 50 ms polls; abandoning a pending read would swallow its chunk.
+  let pending: ReturnType<typeof reader.read> | null = null
   while (!until(frames) && Date.now() < deadline) {
-    const r = await Promise.race([reader.read(), wait(50).then(() => null)])
+    pending ??= reader.read()
+    const r = await Promise.race([pending, wait(50).then(() => null)])
     if (r === null) continue
+    pending = null
     if (r.done) break
     buf += dec.decode(r.value)
     let i: number
@@ -210,5 +215,90 @@ describe('handleStream backpressure', () => {
     expect(hub.subscriberCount).toBe(5) // 100 held events is under the default limit
     await Promise.all(conns.map(r => r.body!.cancel()))
     expect(hub.subscriberCount).toBe(0)
+  })
+})
+
+describe('requests and model output', () => {
+  const dataOf = <T>(f: string) => JSON.parse(f.split('data: ')[1]!) as T
+  const record = (id: number) => ({
+    id, at: 1000 + id, source: 'local', keyName: null, method: 'POST', path: '/v1/chat/completions', modelId: 'm1', modelName: 'Model One',
+    profile: 'default', stream: false, status: 200, outcome: 'ok', error: null, durationMs: 5, promptTokens: 1, completionTokens: 2, images: null, params: {},
+  }) as const
+
+  test('every activity event is also handed to onActivity (persistence); a failing sink does not break the feed', () => {
+    const seen: ActivityEvent[] = []
+    let boom = false
+    const hub = new LiveHub({
+      onActivity: (e) => { seen.push(e); if (boom) throw new Error('disk full') },
+      snapshot: () => ({ scheduler: { models: [], queue: [] }, models: [], queue: [], llamacpp: { current: '', runtime: { state: 'idle' } } }),
+    })
+    const got: string[] = []
+    hub.subscribe(m => got.push(m.type))
+    const target = { modelId: 'm1', profile: 'default' }
+    hub.onSchedulerEvent({ type: 'state', target, from: 'stopped', to: 'loading' })
+    boom = true
+    hub.onSchedulerEvent({ type: 'state', target, from: 'loading', to: 'ready' })
+    expect(seen.map(e => e.id)).toEqual([1, 2])
+    expect(got.filter(x => x === 'activity')).toHaveLength(2)
+  })
+
+  test('request records are pushed and the last ones kept for new connections', () => {
+    const hub = new LiveHub({ requestHistorySize: 3, snapshot: () => ({ scheduler: { models: [], queue: [] }, models: [], queue: [], llamacpp: { current: '', runtime: { state: 'idle' } } }) })
+    const got: number[] = []
+    hub.subscribe(m => { if (m.type === 'request') got.push(m.record.id) })
+    for (let i = 1; i <= 5; i++) hub.onRequest(record(i))
+    expect(got).toEqual([1, 2, 3, 4, 5])
+    expect(hub.recentRequests().map(r => r.id)).toEqual([3, 4, 5])
+  })
+
+  test('output lines of a burst arrive as one batch, history is bounded, nobody listening costs no batches', async () => {
+    const { hub } = setup()
+    const batches: number[][] = []
+    hub.onLogLine('m1', 'default', 'stderr', 'before anyone listens')
+    const off = hub.subscribe((m) => { if (m.type === 'log') batches.push(m.lines.map(l => l.id)) })
+    for (let i = 0; i < 5; i++) hub.onLogLine('m1', 'default', 'stdout', `line ${i}`)
+    expect(batches).toEqual([])
+    await wait(150)
+    expect(batches).toEqual([[2, 3, 4, 5, 6]])
+    off()
+    const small = new LiveHub({ logHistorySize: 3, snapshot: () => ({ scheduler: { models: [], queue: [] }, models: [], queue: [], llamacpp: { current: '', runtime: { state: 'idle' } } }) })
+    for (let i = 0; i < 10; i++) small.onLogLine('m1', 'default', 'stdout', `l${i}`)
+    expect(small.recentLogs().map(l => l.text)).toEqual(['l7', 'l8', 'l9'])
+  })
+
+  test('a connection gets request / output history first, then live records and lines', async () => {
+    const { hub } = setup()
+    hub.onRequest(record(1))
+    hub.onLogLine('m1', 'default', 'stdout', 'old line')
+    const ac = new AbortController()
+    const res = handleStream(new Request('http://x/api/stream', { signal: ac.signal }), { hub, pollMs: 10_000 })
+    hub.onRequest(record(2))
+    hub.onLogLine('m1', 'default', 'stdout', 'new line')
+    const frames = await readFrames(res, f => f.some(x => x.startsWith('event: log\n')) && f.some(x => x.startsWith('event: request\n')))
+    ac.abort()
+    const names = frames.filter(f => f.startsWith('event:')).map(f => f.split('\n')[0]!.slice(7))
+    expect(names.slice(0, 4)).toEqual(['history', 'request-history', 'log-history', 'snapshot'])
+    expect(dataOf<Array<{ id: number }>>(frames.find(f => f.startsWith('event: request-history'))!).map(r => r.id)).toEqual([1])
+    expect(dataOf<Array<{ text: string }>>(frames.find(f => f.startsWith('event: log-history'))!).map(l => l.text)).toEqual(['old line'])
+    expect(dataOf<{ id: number }>(frames.find(f => f.startsWith('event: request\n'))!).id).toBe(2)
+    expect(dataOf<Array<{ text: string }>>(frames.find(f => f.startsWith('event: log\n'))!).map(l => l.text)).toEqual(['new line'])
+  })
+
+  test('a reader that falls behind loses the oldest output batches but keeps the connection and the activity', async () => {
+    const { hub, target } = setup({ logBatchMs: 1 })
+    const ac = new AbortController()
+    const res = handleStream(new Request('http://x/api/stream', { signal: ac.signal }), { hub, pollMs: 10_000, highWaterMark: 4, maxPendingLogs: 5, maxPendingActivity: 50 })
+    hub.onSchedulerEvent({ type: 'state', target, from: 'loading', to: 'ready' })
+    for (let i = 0; i < 40; i++) {
+      hub.onLogLine('m1', 'default', 'stdout', `l${i}`)
+      await wait(3) // one batch per line
+    }
+    expect(hub.subscriberCount).toBe(1)
+    const frames = await readFrames(res, f => f.some(x => x.startsWith('event: activity')) && f.some(x => x.includes('"l39"')))
+    ac.abort()
+    expect(frames.some(x => x.startsWith('event: activity'))).toBe(true)
+    const lines = frames.filter(x => x.startsWith('event: log\n')).flatMap(x => dataOf<Array<{ text: string }>>(x).map(l => l.text))
+    expect(lines.length).toBeLessThan(40)
+    expect(lines.at(-1)).toBe('l39')
   })
 })

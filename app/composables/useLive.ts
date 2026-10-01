@@ -1,12 +1,17 @@
 // One shared live connection to /api/stream for the whole app: the latest state snapshot,
 // the recent activity list and the connection status. Pages read from here and never
 // poll. EventSource reconnects by itself; a dropped connection is shown in the top bar.
-import type { ActivityEvent, StateDoc } from '~~/server/core/live'
+import type { ActivityEvent, LogLine, StateDoc } from '~~/server/core/live'
+import type { RequestRecord } from '~~/server/core/request-log'
 
 const MAX_EVENTS = 50
+const MAX_REQUESTS = 200
+const MAX_LOG_LINES = 3000
 
 const state = shallowRef<StateDoc | null>(null)
 const events = shallowRef<ActivityEvent[]>([]) // newest first
+const requests = shallowRef<RequestRecord[]>([]) // newest first
+const logLines = shallowRef<LogLine[]>([]) // oldest first
 const connected = ref(false)
 // Ticks every second so elapsed-time texts stay fresh without any server traffic.
 const now = ref(Date.now())
@@ -41,6 +46,26 @@ function connect() {
     const a = parse<ActivityEvent>(e as MessageEvent)
     if (a) events.value = [a, ...events.value.filter(x => x.id !== a.id)].slice(0, MAX_EVENTS)
   })
+  source.addEventListener('request-history', (e) => {
+    const h = parse<RequestRecord[]>(e as MessageEvent)
+    if (h) requests.value = [...h].reverse().slice(0, MAX_REQUESTS)
+  })
+  source.addEventListener('request', (e) => {
+    const r = parse<RequestRecord>(e as MessageEvent)
+    if (r) requests.value = [r, ...requests.value.filter(x => x.id !== r.id)].slice(0, MAX_REQUESTS)
+  })
+  // Reconnects resend the history; ids keep increasing, so merge by id instead of appending twice.
+  source.addEventListener('log-history', (e) => {
+    const h = parse<LogLine[]>(e as MessageEvent)
+    if (h) logLines.value = h.slice(-MAX_LOG_LINES)
+  })
+  source.addEventListener('log', (e) => {
+    const lines = parse<LogLine[]>(e as MessageEvent)
+    if (!lines?.length) return
+    const last = logLines.value.at(-1)?.id ?? 0
+    const fresh = lines.filter(l => l.id > last)
+    if (fresh.length) logLines.value = [...logLines.value, ...fresh].slice(-MAX_LOG_LINES)
+  })
 }
 
 function disconnect() {
@@ -53,5 +78,5 @@ function disconnect() {
 export function useLive() {
   /** Server-time "now" in ms. */
   const serverNow = computed(() => now.value + skew.value)
-  return { state, events, connected, serverNow, connect, disconnect }
+  return { state, events, requests, logLines, connected, serverNow, connect, disconnect }
 }

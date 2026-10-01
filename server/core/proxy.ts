@@ -12,6 +12,7 @@ import type { ModelsDoc, Settings } from './config'
 import { fmt, t } from './i18n'
 import { LaunchConfigError } from './launch'
 import { resolvePreprocessOptions, runPreprocess, type PreprocessResult } from './preprocess'
+import { sourceOf, summarizeImages, summarizeParams, UsageTap, type RequestMeta, type RequestRecord } from './request-log'
 import { findModel, hasImages, listModelNames, resolveTarget, type RouteResult } from './routing'
 import { LoadError } from './runner'
 import { ModelCrashError, SchedulerError, type Lease, type Scheduler, type Target } from './scheduler'
@@ -70,6 +71,8 @@ export interface ProxyDeps {
   /** Host llama-server listens on. */
   upstreamHost?: string
   onEvent?(e: ProxyEvent): void
+  /** Called once per finished /v1 request (not for GET /v1/models). Must not throw. */
+  onRequest?(r: RequestRecord): void
 }
 
 // ---------------------------------------------------------------------------------------
@@ -77,9 +80,54 @@ export interface ProxyDeps {
 
 type ErrorType = 'invalid_request_error' | 'not_found_error' | 'server_error'
 
+const errorCodes = new WeakMap<Response, string>()
+
 export function errorResponse(status: number, code: string, message: string): Response {
   const type: ErrorType = status === 404 ? 'not_found_error' : status < 500 ? 'invalid_request_error' : 'server_error'
-  return Response.json({ error: { message, type, code } }, { status })
+  const res = Response.json({ error: { message, type, code } }, { status })
+  errorCodes.set(res, code)
+  return res
+}
+
+/** Error code of a response made by errorResponse(), for the request record. */
+const codeOf = (res: Response): string | null => errorCodes.get(res) ?? null
+
+/** Collects what the request record needs while a request is handled; `finish` emits it once. */
+class RequestTrace {
+  readonly at = Date.now()
+  readonly tap = new UsageTap()
+  modelId: string | null = null
+  modelName: string | null = null
+  profile: string | null = null
+  stream = false
+  params: RequestRecord['params'] = {}
+  images: RequestRecord['images'] = null
+  /** Set when a streaming path owns the end of the exchange and will call finish() itself. */
+  deferred = false
+  private done = false
+
+  constructor(
+    private readonly req: Request,
+    private readonly meta: RequestMeta | undefined,
+    private readonly emit: ((r: RequestRecord) => void) | null,
+    private readonly id: number,
+  ) {}
+
+  finish(status: number, outcome: RequestRecord['outcome'], error: string | null = null): void {
+    if (this.done) return
+    this.done = true
+    if (!this.emit) return
+    const { source, keyName } = sourceOf(this.meta)
+    const { promptTokens, completionTokens } = this.tap.result()
+    try {
+      this.emit({
+        id: this.id, at: this.at, source, keyName, method: this.req.method, path: new URL(this.req.url).pathname,
+        modelId: this.modelId, modelName: this.modelName, profile: this.profile, stream: this.stream,
+        status, outcome, error, durationMs: Date.now() - this.at,
+        promptTokens, completionTokens, images: this.images, params: this.params,
+      })
+    } catch { /* a broken listener must not affect the request */ }
+  }
 }
 
 function routeErrorResponse(r: Extract<RouteResult, { ok: false }>): Response {
@@ -179,6 +227,7 @@ export function createProxy(deps: ProxyDeps) {
   const limit = deps.maxBodyBytes ?? MAX_BODY_BYTES
   const host = deps.upstreamHost ?? '127.0.0.1'
   const enc = new TextEncoder()
+  let requestSeq = 0
 
   /**
    * Start the upstream request. The returned controller aborts it; `cleanup` detaches the
@@ -218,13 +267,16 @@ export function createProxy(deps: ProxyDeps) {
   }
 
   /** Forward to the leased model and pass the response through; releases the lease. */
-  async function forward(call: UpstreamCall, modelName: string): Promise<Response> {
+  async function forward(call: UpstreamCall, modelName: string, trace?: RequestTrace): Promise<Response> {
+    if (trace) trace.deferred = true
     let up: Awaited<ReturnType<typeof callUpstream>>
     try {
       up = await callUpstream(call)
     } catch (e) {
       call.lease.release()
-      return upstreamFailure(e, call.lease, modelName)
+      const failure = upstreamFailure(e, call.lease, modelName)
+      trace?.finish(failure.status, call.lease.signal.aborted || call.req.signal.aborted ? 'aborted' : 'error', codeOf(failure))
+      return failure
     }
     const { res, ac, cleanup } = up
     let finished = false
@@ -233,6 +285,7 @@ export function createProxy(deps: ProxyDeps) {
       finished = true
       cleanup()
       call.lease.release(ok && res.status < 500 ? 'ok' : undefined)
+      trace?.finish(res.status, !ok ? 'aborted' : res.status >= 400 ? 'error' : 'ok')
     }
     // Client gone or model unloaded: release now, not at the next pull (which may never come
     // when nobody reads the body any more, e.g. under nuxt dev).
@@ -251,6 +304,7 @@ export function createProxy(deps: ProxyDeps) {
             finish(true)
             ctrl.close()
           } else {
+            trace?.tap.push(value)
             ctrl.enqueue(value)
           }
         } catch (e) {
@@ -270,7 +324,8 @@ export function createProxy(deps: ProxyDeps) {
   }
 
   /** Streaming request whose model is not ready: answer at once, heartbeat, then stream. */
-  function streamWhileLoading(req: Request, target: Target, path: string, body: Uint8Array<ArrayBuffer> | null, modelName: string): Response {
+  function streamWhileLoading(req: Request, target: Target, path: string, body: Uint8Array<ArrayBuffer> | null, modelName: string, trace: RequestTrace): Response {
+    trace.deferred = true
     const ts = new TransformStream<Uint8Array, Uint8Array>()
     const writer = ts.writable.getWriter()
     const gone = new AbortController()
@@ -305,8 +360,14 @@ export function createProxy(deps: ProxyDeps) {
         lease = await deps.scheduler.acquire(target, { signal: gone.signal })
       } catch (e) {
         clearInterval(timer)
-        if (gone.signal.aborted) writer.abort().catch(() => {})
-        else await sendFinal(schedulerErrorResponse(e, modelName))
+        if (gone.signal.aborted) {
+          trace.finish(200, 'aborted')
+          writer.abort().catch(() => {})
+        } else {
+          const failure = schedulerErrorResponse(e, modelName)
+          trace.finish(200, 'error', codeOf(failure))
+          await sendFinal(failure)
+        }
         req.signal.removeEventListener('abort', onClient)
         return
       }
@@ -320,19 +381,27 @@ export function createProxy(deps: ProxyDeps) {
         up = await callUpstream({ lease, req: fakeReq, path, body, headers: forwardRequestHeaders(req.headers) })
       } catch (e) {
         lease.release()
-        if (gone.signal.aborted) writer.abort().catch(() => {})
-        else await sendFinal(upstreamFailure(e, lease, modelName))
+        if (gone.signal.aborted) {
+          trace.finish(200, 'aborted')
+          writer.abort().catch(() => {})
+        } else {
+          const failure = upstreamFailure(e, lease, modelName)
+          trace.finish(200, lease.signal.aborted ? 'aborted' : 'error', codeOf(failure))
+          await sendFinal(failure)
+        }
         req.signal.removeEventListener('abort', onClient)
         return
       }
       const { res, ac, cleanup } = up
       let ok = false
       let released = false
+      let upstreamStatus = 200
       const finish = () => {
         if (released) return
         released = true
         cleanup()
         lease.release(ok ? 'ok' : undefined)
+        trace.finish(upstreamStatus, !ok ? 'aborted' : upstreamStatus >= 400 ? 'error' : 'ok')
       }
       // `ac` aborts when the client goes away (fakeReq carries gone.signal) or the model is
       // unloaded / crashes (lease.signal): release the lease at once, like forward().
@@ -342,12 +411,15 @@ export function createProxy(deps: ProxyDeps) {
           // Headers are already sent as SSE; report the upstream error as an event.
           const text = await res.text()
           await bounded(send(`data: ${text || JSON.stringify({ error: { message: res.statusText, code: res.status } })}\n\n`), ac.signal)
+          upstreamStatus = res.status
+          trace.tap.push(enc.encode(text))
           ok = res.status < 500
         } else {
           const reader = res.body.getReader()
           for (;;) {
             const { done, value } = await reader.read()
             if (done) break
+            trace.tap.push(value)
             // Parked here when the client stopped reading; neither abort wakes these waits
             // by itself, so each one is bounded by `ac`.
             await bounded(writer.ready, ac.signal)
@@ -379,7 +451,22 @@ export function createProxy(deps: ProxyDeps) {
     return Response.json({ object: 'list', data })
   }
 
-  async function handleV1(req: Request): Promise<Response> {
+  async function handleV1(req: Request, meta?: RequestMeta): Promise<Response> {
+    const url = new URL(req.url)
+    const quiet = req.method === 'GET' && url.pathname.startsWith('/v1/models')
+    const trace = new RequestTrace(req, meta, quiet ? null : deps.onRequest ?? null, ++requestSeq)
+    let res: Response
+    try {
+      res = await handleV1Inner(req, trace)
+    } catch (e) {
+      trace.finish(500, 'error', 'internal_error')
+      throw e
+    }
+    if (!trace.deferred) trace.finish(res.status, res.status >= 400 ? 'error' : 'ok', codeOf(res))
+    return res
+  }
+
+  async function handleV1Inner(req: Request, trace: RequestTrace): Promise<Response> {
     const url = new URL(req.url)
     const path = url.pathname
     if (req.method === 'GET' && (path === '/v1/models' || path === '/v1/models/')) return modelsList()
@@ -408,10 +495,15 @@ export function createProxy(deps: ProxyDeps) {
       }
     }
 
+    trace.stream = !!json && typeof json === 'object' && json.stream === true
+    trace.params = summarizeParams(json)
     const models = deps.getModels()
     const route = resolveTarget(models, json && typeof json === 'object' ? json.model : undefined, deps.scheduler.snapshot().models)
     if (!route.ok) return routeErrorResponse(route)
     const { target, model, profile } = route
+    trace.modelId = model.id
+    trace.modelName = model.name
+    trace.profile = target.profile
 
     let body = raw
     if (json && typeof json === 'object') {
@@ -421,6 +513,7 @@ export function createProxy(deps: ProxyDeps) {
       try {
         const result = await runPreprocess(json, { options: resolvePreprocessOptions(deps.getSettings().preprocess, profile) })
         if (Object.keys(result.reports).length) deps.onEvent?.({ type: 'preprocess', target, result })
+        trace.images = summarizeImages(result.reports.image)
         if (result.changed) body = new TextEncoder().encode(JSON.stringify(json))
       } catch (e) {
         return errorResponse(500, 'preprocess_failed', fmt(t.api.preprocessFailed, { detail: String((e as Error)?.message ?? e) }))
@@ -430,7 +523,7 @@ export function createProxy(deps: ProxyDeps) {
     const upstreamPath = path + url.search
     const streaming = !!json && json.stream === true
     if (streaming && deps.scheduler.stateOf(target) !== 'ready') {
-      return streamWhileLoading(req, target, upstreamPath, body, model.name)
+      return streamWhileLoading(req, target, upstreamPath, body, model.name, trace)
     }
     let lease: Lease
     try {
@@ -438,7 +531,7 @@ export function createProxy(deps: ProxyDeps) {
     } catch (e) {
       return schedulerErrorResponse(e, model.name)
     }
-    return forward({ lease, req, path: upstreamPath, body }, model.name)
+    return forward({ lease, req, path: upstreamPath, body }, model.name, trace)
   }
 
   async function handleUpstream(req: Request): Promise<Response> {

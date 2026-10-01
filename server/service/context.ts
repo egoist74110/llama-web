@@ -7,6 +7,7 @@ import {
   type ModelsDoc, type Settings,
 } from '../core/config'
 import { LaunchConfigError, planLaunch } from '../core/launch'
+import { LogStore } from '../core/logs'
 import { ensureRuntime, type RuntimeStatus } from '../core/llamacpp'
 import { describeModels, LiveHub } from '../core/live'
 import { ModelOps } from '../core/model-ops'
@@ -37,6 +38,8 @@ export interface AppContext {
   proxy: Proxy
   /** Live state for /api/stream and /api/state. */
   live: LiveHub
+  /** Log files under data/logs (model output, events, request records). */
+  logs: LogStore
   /** Resolves once startup residue cleanup has finished. */
   cleanupDone: Promise<void>
   shutdown(): Promise<void>
@@ -116,6 +119,8 @@ function createContext(): AppContext {
   const modelsRef = openStore(modelsStore, defaultModels, changed)
   const getSettings = settingsRef.get
   const getModels = modelsRef.get
+  const logs = new LogStore({ dir: join(dataDir, 'logs'), retention: () => getSettings().logs })
+  try { logs.prune() } catch (e) { logError('log retention failed', e) }
 
   const cleanupDone = runStartupCleanup(dataDir).then((r) => {
     if (r.killed.length || r.skipped.length) log(`residue cleanup: killed ${r.killed.length}, skipped ${r.skipped.length}`)
@@ -128,6 +133,7 @@ function createContext(): AppContext {
   })
   let runtimeStatus: RuntimeStatus = { state: 'idle' }
   const live: LiveHub = new LiveHub({
+    onActivity: e => logs.appendEvent(e),
     snapshot: () => ({
       scheduler: scheduler.snapshot(),
       models: describeModels(getModels(), { dirs: getSettings().modelDirs }),
@@ -147,11 +153,34 @@ function createContext(): AppContext {
       const plan = planLaunch(target, { dataDir, settings: getSettings(), models: getModels(), host: runner.host })
       for (const w of plan.warnings) log(`args ${plan.tag}: ${w.code} ${w.flag ?? ''} ${w.layer ?? ''}`.trim())
       log(`starting ${plan.tag}: ${plan.exe}`)
-      return runner.start({ exe: plan.exe, args: plan.args, tag: plan.tag, loadTimeoutMs: plan.loadTimeoutMs })
+      // One output file per start; lines also go to the live feed of the log page.
+      const run = logs.startRun(target.modelId)
+      run.append(`# llama-web: starting ${plan.tag} at ${new Date().toISOString()}`)
+      try {
+        const rp = await runner.start({
+          exe: plan.exe, args: plan.args, tag: plan.tag, loadTimeoutMs: plan.loadTimeoutMs,
+          onLine: (stream, line) => {
+            run.append(line)
+            live.onLogLine(target.modelId, target.profile, stream, line)
+          },
+        })
+        void rp.exited.then((x) => {
+          run.append(`# llama-web: exited code=${x.code ?? '-'} signal=${x.signal ?? '-'}${x.requested ? ' (stopped by llama-web)' : ''}`)
+          run.close()
+        })
+        return rp
+      } catch (e) {
+        run.append(`# llama-web: could not start: ${(e as Error).message}`)
+        run.close()
+        throw e
+      }
     },
   })
   const ops = new ModelOps(scheduler)
-  const proxy = createProxy({ scheduler, getModels, getSettings, onEvent: logProxyEvent })
+  const proxy = createProxy({
+    scheduler, getModels, getSettings, onEvent: logProxyEvent,
+    onRequest: (r) => { logs.appendRequest(r); live.onRequest(r) },
+  })
 
   // Background: adopt an installed llama.cpp or download the first one. Never blocks startup.
   void ensureRuntime({
@@ -174,13 +203,14 @@ function createContext(): AppContext {
   return {
     dataDir, bootPort: getSettings().server.port, getSettings, getModels, updateSettings: settingsRef.update, updateModels: modelsRef.update,
     refresh: () => { settingsRef.refresh(); modelsRef.refresh() },
-    getRuntimeStatus: () => runtimeStatus, runner, scheduler, ops, proxy, live, cleanupDone,
+    getRuntimeStatus: () => runtimeStatus, runner, scheduler, ops, proxy, live, logs, cleanupDone,
     shutdown() {
       closing ??= (async () => {
         settingsStore.close()
         modelsStore.close()
         await scheduler.shutdown()
         await runner.stopAll()
+        logs.closeAll()
       })()
       return closing
     },

@@ -21,7 +21,7 @@ const server = Bun.serve({
   async fetch(req, srv) {
     srv.timeout(req, 0)
     const url = new URL(req.url)
-    if (url.pathname.startsWith('/v1/')) return ctx.proxy.handleV1(req)
+    if (url.pathname.startsWith('/v1/')) return ctx.proxy.handleV1(req, { ip: srv.requestIP(req)?.address })
     if (url.pathname.startsWith('/upstream/')) return ctx.proxy.handleUpstream(req)
     if (url.pathname === '/api/stream' && req.method === 'GET') return handleStream(req, { hub: ctx.live })
     const body = req.body ? await req.arrayBuffer() : undefined

@@ -3,6 +3,8 @@
 import type { ModelsDoc } from './config'
 import { missingFiles, type ModelFile } from './models-admin'
 import type { RuntimeStatus } from './llamacpp'
+import type { RequestRecord } from './request-log'
+import type { LogStream } from './runner'
 import type { ModelState, SchedulerEvent, SchedulerSnapshot } from './scheduler'
 import type { FileRef, ModelDir } from './types'
 
@@ -55,9 +57,21 @@ export function errorText(e: unknown): string | null {
 
 const instKey = (modelId: string, profile: string) => JSON.stringify([modelId, profile])
 
+/** One line of llama-server output, as shown live on the log page. */
+export interface LogLine {
+  id: number
+  at: number
+  modelId: string
+  profile: string
+  stream: LogStream
+  text: string
+}
+
 export type LiveMessage =
   | { type: 'snapshot', state: StateDoc }
   | { type: 'activity', event: ActivityEvent }
+  | { type: 'request', record: RequestRecord }
+  | { type: 'log', lines: LogLine[] }
 
 export interface LiveHubOptions {
   snapshot(): Omit<StateDoc, 'now' | 'firstRun'> & { scheduler: SchedulerSnapshot, firstRun?: boolean }
@@ -66,13 +80,25 @@ export interface LiveHubOptions {
   now?: () => number
   /** Snapshot pushes caused by bursts of changes are merged within this window. */
   coalesceMs?: number
+  /** Called for every new activity event (persistence). Must not throw. */
+  onActivity?(e: ActivityEvent): void
+  /** Recent request records / model output lines kept for new connections. */
+  requestHistorySize?: number
+  logHistorySize?: number
+  /** Output lines of a burst are pushed together within this window. */
+  logBatchMs?: number
 }
 
 export class LiveHub {
   private readonly subs = new Set<(m: LiveMessage) => void>()
   private readonly since = new Map<string, number>()
   private readonly history: ActivityEvent[] = []
+  private readonly requests: RequestRecord[] = []
+  private readonly logs: LogLine[] = []
+  private logBatch: LogLine[] = []
+  private logTimer: ReturnType<typeof setTimeout> | null = null
   private seq = 0
+  private logSeq = 0
   private lastKey = ''
   private timer: ReturnType<typeof setTimeout> | null = null
   private readonly now: () => number
@@ -101,6 +127,32 @@ export class LiveHub {
       tag: 'tag' in s ? (s.tag ?? null) : null,
       code: s.state === 'error' ? s.code : null,
     })
+  }
+
+  /** A finished /v1 request (already stripped of conversation content). */
+  onRequest(record: RequestRecord): void {
+    this.requests.push(record)
+    const max = this.opts.requestHistorySize ?? 100
+    if (this.requests.length > max) this.requests.splice(0, this.requests.length - max)
+    this.push({ type: 'request', record })
+  }
+
+  /** One line of model output. Lines of a burst are pushed as one message. */
+  onLogLine(modelId: string, profile: string, stream: LogStream, text: string): void {
+    const line: LogLine = { id: ++this.logSeq, at: this.now(), modelId, profile, stream, text }
+    this.logs.push(line)
+    const max = this.opts.logHistorySize ?? 500
+    if (this.logs.length > max) this.logs.splice(0, this.logs.length - max)
+    if (!this.subs.size) return
+    this.logBatch.push(line)
+    if (this.logTimer) return
+    this.logTimer = setTimeout(() => {
+      this.logTimer = null
+      const lines = this.logBatch
+      this.logBatch = []
+      if (lines.length) this.push({ type: 'log', lines })
+    }, this.opts.logBatchMs ?? 100)
+    this.logTimer.unref?.()
   }
 
   /** Something visible in the snapshot changed (config edit, queue, ...). */
@@ -139,6 +191,14 @@ export class LiveHub {
     return [...this.history]
   }
 
+  recentRequests(): RequestRecord[] {
+    return [...this.requests]
+  }
+
+  recentLogs(): LogLine[] {
+    return [...this.logs]
+  }
+
   subscribe(fn: (m: LiveMessage) => void): () => void {
     this.subs.add(fn)
     return () => { this.subs.delete(fn) }
@@ -153,6 +213,7 @@ export class LiveHub {
     this.history.push(event)
     const max = this.opts.historySize ?? 50
     if (this.history.length > max) this.history.splice(0, this.history.length - max)
+    try { this.opts.onActivity?.(event) } catch { /* persistence must not break the live feed */ }
     this.push({ type: 'activity', event })
     this.notify()
   }
@@ -191,8 +252,10 @@ export interface StreamOptions {
   pollMs?: number
   /** Chunks the stream buffers for a reader before holding events back. */
   highWaterMark?: number
-  /** Held-back activity events per connection; more and the connection is closed. */
+  /** Held-back activity / request events per connection; more and the connection is closed. */
   maxPendingActivity?: number
+  /** Held-back output line batches per connection; beyond that the oldest are dropped (the log file has them). */
+  maxPendingLogs?: number
 }
 
 /**
@@ -200,14 +263,19 @@ export interface StreamOptions {
  * every change, `activity` for each new event, and `history` once on connect. Closing the
  * connection (req.signal) unsubscribes.
  *
+ * Also `request` (finished /v1 request records) and `log` (batches of model output lines), with
+ * `request-history` / `log-history` on connect.
+ *
  * Bounded per connection: once the reader falls behind (the stream's queue is full), only the
- * latest snapshot is held back, activity events queue up to `maxPendingActivity` (beyond that
- * the connection is closed; EventSource reconnects and gets `history`), and heartbeats are skipped.
+ * latest snapshot is held back, activity / request events queue up to `maxPendingActivity` (beyond
+ * that the connection is closed; EventSource reconnects and gets `history`), output line batches
+ * queue up to `maxPendingLogs` (older ones are dropped), and heartbeats are skipped.
  */
 export function handleStream(req: Request, opts: StreamOptions): Response {
   const enc = new TextEncoder()
   const { hub } = opts
   const maxPending = opts.maxPendingActivity ?? 200
+  const maxPendingLogs = opts.maxPendingLogs ?? 200
   let cleanup = () => {}
   let flush = () => {}
   const body = new ReadableStream<Uint8Array>({
@@ -218,17 +286,20 @@ export function handleStream(req: Request, opts: StreamOptions): Response {
       let poll: ReturnType<typeof setInterval> | undefined
       let heldSnapshot: string | null = null
       const heldActivity: string[] = []
+      const heldLogs: string[] = []
       const write = (chunk: string) => {
         if (closed) return
         try { controller.enqueue(enc.encode(chunk)) } catch { cleanup() }
       }
       const room = () => (controller.desiredSize ?? 0) > 0
-      const backedUp = () => !room() || heldSnapshot !== null || heldActivity.length > 0
+      const backedUp = () => !room() || heldSnapshot !== null || heldActivity.length > 0 || heldLogs.length > 0
       const frame = (event: string, data: unknown) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
-      // Called when the reader takes a chunk: held activity first (in order), then the latest snapshot.
+      // Called when the reader takes a chunk: held activity first (in order), then output lines,
+      // then the latest snapshot.
       flush = () => {
         while (!closed && room() && heldActivity.length) write(heldActivity.shift()!)
-        if (!closed && room() && !heldActivity.length && heldSnapshot !== null) {
+        while (!closed && room() && !heldActivity.length && heldLogs.length) write(heldLogs.shift()!)
+        if (!closed && room() && !heldActivity.length && !heldLogs.length && heldSnapshot !== null) {
           const chunk = heldSnapshot
           heldSnapshot = null
           write(chunk)
@@ -240,8 +311,13 @@ export function handleStream(req: Request, opts: StreamOptions): Response {
           const chunk = frame('snapshot', m.state)
           if (backedUp()) heldSnapshot = chunk // only the latest state matters
           else write(chunk)
+        } else if (m.type === 'log') {
+          const chunk = frame('log', m.lines)
+          if (!backedUp()) return write(chunk)
+          heldLogs.push(chunk)
+          if (heldLogs.length > maxPendingLogs) heldLogs.splice(0, heldLogs.length - maxPendingLogs)
         } else {
-          const chunk = frame('activity', m.event)
+          const chunk = m.type === 'request' ? frame('request', m.record) : frame('activity', m.event)
           if (!backedUp()) return write(chunk)
           heldActivity.push(chunk)
           if (heldActivity.length > maxPending) cleanup()
@@ -255,6 +331,7 @@ export function handleStream(req: Request, opts: StreamOptions): Response {
         clearInterval(poll)
         heldSnapshot = null
         heldActivity.length = 0
+        heldLogs.length = 0
         req.signal.removeEventListener('abort', cleanup)
         try { controller.close() } catch { /* already closed */ }
       }
@@ -262,6 +339,10 @@ export function handleStream(req: Request, opts: StreamOptions): Response {
       req.signal.addEventListener('abort', cleanup, { once: true })
       write('retry: 2000\n\n')
       write(frame('history', hub.recent()))
+      const recentRequests = hub.recentRequests()
+      if (recentRequests.length) write(frame('request-history', recentRequests))
+      const recentLogs = hub.recentLogs()
+      if (recentLogs.length) write(frame('log-history', recentLogs))
       write(frame('snapshot', hub.snapshot()))
       unsub = hub.subscribe(onMessage)
       hb = setInterval(() => { if (!backedUp()) write(': keep-alive\n\n') }, opts.heartbeatMs ?? 15_000)
