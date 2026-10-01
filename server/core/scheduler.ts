@@ -27,6 +27,8 @@ export interface ModelProcess {
   readonly exited: Promise<unknown>
   /** Kill the process (tree) and wait for exit. Idempotent. */
   stop(): Promise<unknown>
+  /** Last `n` output lines (for the crash card). */
+  tail?(n?: number): string[]
 }
 
 export type Launcher = (target: Target) => Promise<ModelProcess>
@@ -46,8 +48,11 @@ export class SchedulerError extends Error {
 
 /** Stored as the `error` of a target whose process exited unexpectedly. */
 export class ModelCrashError extends Error {
-  constructor(public exit: unknown) {
+  readonly exitCode: number | null
+  constructor(public exit: unknown, /** Last output lines of the process. */ public tail: string[] = []) {
     super('Model process exited unexpectedly')
+    const code = (exit as { code?: unknown } | null)?.code
+    this.exitCode = typeof code === 'number' ? code : null
     this.name = 'ModelCrashError'
   }
 }
@@ -496,9 +501,10 @@ export class Scheduler {
   private onExit(inst: Instance, exit: unknown) {
     if (this.instances.get(inst.key) !== inst) return
     if (inst.state !== 'ready') return // loading: handled by runLoad; draining/unloading: by evict
-    for (const l of inst.inflight) l.controller.abort(new ModelCrashError(exit))
+    const crash = new ModelCrashError(exit, inst.proc?.tail?.(30) ?? [])
+    for (const l of inst.inflight) l.controller.abort(crash)
     inst.proc = null
-    inst.error = new ModelCrashError(exit)
+    inst.error = crash
     // The automatic reload is used up: any later crash of this process needs a manual retry.
     const next: ModelState = inst.autoReloaded ? 'failed' : 'crashed'
     this.setState(inst, next, inst.error)

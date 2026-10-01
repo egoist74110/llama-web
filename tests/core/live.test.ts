@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { handleStream, LiveHub, type ActivityEvent, type LiveHubOptions, type StateDoc } from '../../server/core/live'
+import { LoadError } from '../../server/core/runner'
 import type { SchedulerSnapshot } from '../../server/core/scheduler'
 
 function setup(extra: Partial<LiveHubOptions> = {}) {
@@ -31,6 +32,19 @@ describe('LiveHub', () => {
     expect(first.snapshot().firstRun).toBe(true)
   })
 
+  test('a failed instance carries the diagnosis (kind, exit code, output tail); the event only the kind', () => {
+    const { hub, sched, target } = setup()
+    const err = new LoadError('exited', 'Exited with code 1', 1, ['llama_model_load: error', 'cudaMalloc failed: out of memory'])
+    hub.onSchedulerEvent({ type: 'state', target, from: 'loading', to: 'failed', error: err })
+    sched.models.push({ ...target, state: 'failed', port: null, inflight: 0, lastUsedAt: null, error: err })
+    const inst = hub.snapshot().models[0]!.instances[0]!
+    expect(inst.error).toBe('oom')
+    expect(inst.failure).toEqual({ kind: 'oom', code: 'exited', exitCode: 1, tail: ['llama_model_load: error', 'cudaMalloc failed: out of memory'] })
+    const ev = hub.recent().at(-1)!
+    expect(ev).toMatchObject({ kind: 'state', to: 'failed', error: 'oom' })
+    expect(JSON.stringify(ev)).not.toContain('llama_model_load')
+  })
+
   test('tracks when an instance entered its state and lists only running instances', () => {
     const { hub, sched, target, tick } = setup()
     expect(hub.snapshot().models[0]!.instances).toEqual([])
@@ -39,7 +53,7 @@ describe('LiveHub', () => {
     tick(500)
     const snap = hub.snapshot()
     expect(snap.now).toBe(1500)
-    expect(snap.models[0]!.instances).toEqual([{ profile: 'default', state: 'loading', inflight: 2, error: null, since: 1000, progress: null }])
+    expect(snap.models[0]!.instances).toEqual([{ profile: 'default', state: 'loading', inflight: 2, error: null, failure: null, since: 1000, progress: null }])
     sched.models[0]!.state = 'stopped'
     expect(hub.snapshot().models[0]!.instances).toEqual([])
   })

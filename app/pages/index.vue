@@ -77,7 +77,15 @@ const hints: Record<string, string> = {
             <p v-if="hints[r.inst.state]" class="text-xs text-muted">
               {{ hints[r.inst.state] }}
             </p>
-            <p v-if="r.inst.error" class="text-sm text-error">
+            <FailureCard
+              v-if="r.inst.failure && (r.inst.state === 'failed' || r.inst.state === 'crashed')"
+              :model-id="r.model.id"
+              :profile="r.inst.profile"
+              :state="r.inst.state"
+              :failure="r.inst.failure"
+              retry-button
+            />
+            <p v-else-if="r.inst.error" class="text-sm text-error">
               {{ reasonText(r.inst.error) }}
             </p>
           </li>

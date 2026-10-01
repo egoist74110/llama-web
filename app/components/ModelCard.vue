@@ -105,7 +105,15 @@ const working = computed(() => !!(busy.value[`start:${props.model.id}`] || busy.
     <p v-if="otherProfile" class="mt-2 text-xs text-muted">
       {{ fmt(t.models.card.runningProfile, { profile: otherProfile }) }}
     </p>
-    <p v-if="shown?.error" class="mt-2 text-sm text-error">
+    <FailureCard
+      v-if="shown?.failure && failed"
+      class="mt-3"
+      :model-id="model.id"
+      :profile="shown.profile"
+      :state="shown.state"
+      :failure="shown.failure"
+    />
+    <p v-else-if="shown?.error" class="mt-2 text-sm text-error">
       {{ reasonText(shown.error) }}
     </p>
     <div v-if="missing.length" class="mt-3 rounded-lg bg-error/10 px-3 py-2 text-sm text-error">

@@ -18,7 +18,8 @@ const tabs: Array<{ value: Tab, label: string }> = [
   { value: 'events', label: t.logs.tabs.events },
   { value: 'requests', label: t.logs.tabs.requests },
 ]
-const model = ref(EMPTY_SELECT_VALUE) // sentinel = all models
+// Sentinel = all models; /logs?model=<id> (the failure card's link) preselects one.
+const model = ref(toSelectValue(typeof useRoute().query.model === 'string' ? useRoute().query.model as string : ''))
 const range = ref(LIVE)
 const search = ref('')
 const paused = ref(false)

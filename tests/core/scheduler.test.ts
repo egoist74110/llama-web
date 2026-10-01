@@ -21,6 +21,8 @@ class FakeProc implements ModelProcess {
     this.exited = new Promise(r => { this.exit = r })
   }
 
+  tail(): string[] { return ['cudaMalloc failed: out of memory'] }
+
   succeed() { this.res() }
   fail(e: unknown = new Error('load failed')) { this.rej(e); this.die('failed') }
   crash() { this.die('crash') }
@@ -281,6 +283,16 @@ describe('failures', () => {
     const r = await settled(sched.acquire(A))
     expect(r.ok).toBe(false)
     expect(sched.stateOf(A)).toBe('failed')
+  })
+
+  test('a crash carries the last output lines of the process', async () => {
+    const { sched, procs } = setup({ autoReady: true })
+    const l = await sched.acquire(A)
+    procs[0]!.crash()
+    await until(() => sched.stateOf(A) === 'crashed')
+    expect((l.signal.reason as ModelCrashError).tail).toEqual(['cudaMalloc failed: out of memory'])
+    expect((sched.snapshot().models[0]!.error as ModelCrashError).tail).toHaveLength(1)
+    l.release()
   })
 
   test('crash -> crashed; next request auto-reloads once', async () => {

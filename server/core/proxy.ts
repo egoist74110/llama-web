@@ -10,13 +10,12 @@
 //   connection alive every heartbeat interval.
 import type { ModelsDoc, Settings } from './config'
 import { fmt, t } from './i18n'
-import { LaunchConfigError } from './launch'
 import { resolvePreprocessOptions, runPreprocess, type PreprocessResult } from './preprocess'
 import { sourceOf, summarizeImages, summarizeParams, UsageTap, type RequestMeta, type RequestRecord } from './request-log'
 import { findModel, hasImages, listModelNames, resolveTarget, type RouteResult } from './routing'
-import { LoadError } from './runner'
+import { diagnose } from './errors'
 import type { SpeedMeter } from './speed'
-import { ModelCrashError, SchedulerError, type Lease, type Scheduler, type Target } from './scheduler'
+import { SchedulerError, type Lease, type Scheduler, type Target } from './scheduler'
 
 /** Request body limit for /v1 and /upstream (bytes). */
 export const MAX_BODY_BYTES = 100 * 1024 * 1024
@@ -165,9 +164,7 @@ function routeErrorResponse(r: Extract<RouteResult, { ok: false }>): Response {
 
 /** Short reason key (see i18n loadError) for a load failure cause. */
 export function loadFailureReason(cause: unknown): keyof typeof t.loadError {
-  if (cause instanceof LoadError || cause instanceof LaunchConfigError) return cause.code
-  if (cause instanceof ModelCrashError) return 'crashed'
-  return 'unknown'
+  return diagnose(cause)?.kind ?? 'unknown'
 }
 
 function schedulerErrorResponse(e: unknown, modelName: string): Response {

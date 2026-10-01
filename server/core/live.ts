@@ -1,6 +1,7 @@
 // Live state for the UI: builds the state snapshot, keeps a short activity history and
 // pushes changes to /api/stream subscribers. Pure module (no Nitro), testable with bun test.
 import type { ModelsDoc } from './config'
+import { diagnose, type FailureDoc } from './errors'
 import type { GpuDoc } from './gpu'
 import { missingFiles, type ModelFile } from './models-admin'
 import type { RuntimeStatus } from './llamacpp'
@@ -16,6 +17,8 @@ export interface StateInstance {
   inflight: number
   /** Error code or message; null when there is none. */
   error: string | null
+  /** Diagnosis of a failed / crashed instance (kind, exit code, last output lines). */
+  failure: FailureDoc | null
   /** Epoch ms when the instance entered its current state. */
   since: number | null
   /** Estimated load progress 0..99 while loading; null otherwise or when nothing was recognised yet. */
@@ -54,8 +57,11 @@ export type ActivityInput =
   | { kind: 'drain-timeout', modelId: string, profile: string, inflight: number }
   | { kind: 'runtime', state: RuntimeStatus['state'], tag: string | null, code: string | null }
 
+/** Short reason key (the diagnosed kind when the output was recognised) or message; null when none. */
 export function errorText(e: unknown): string | null {
   if (!e) return null
+  const d = diagnose(e)
+  if (d && d.kind !== 'unknown') return d.kind
   return String((e as { code?: string }).code ?? (e as Error).message ?? e)
 }
 
@@ -228,7 +234,7 @@ export class LiveHub {
         instances: scheduler.models
           .filter(s => s.modelId === m.id && s.state !== 'stopped')
           .map(s => ({
-            profile: s.profile, state: s.state, inflight: s.inflight, error: errorText(s.error),
+            profile: s.profile, state: s.state, inflight: s.inflight, error: errorText(s.error), failure: diagnose(s.error),
             since: this.since.get(instKey(m.id, s.profile)) ?? null,
             progress: s.state === 'loading' ? (this.progress.get(instKey(m.id, s.profile)) ?? null) : null,
           })),

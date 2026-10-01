@@ -16,6 +16,21 @@
 
 ---
 
+## 2026-10-01 · 工作包 3-3（含阶段 3 验收） · Sonnet 5.5
+- 完成：plan 阶段 3 第 7–9 项。`server/core/errors.ts`：按进程最后输出 + 退出码识别 oom / cuda-error / dll-missing / file-missing / unknown-arg / mmproj-mismatch / unsupported-arch / bad-model / port-in-use，认不出保留 `exited` / `timeout` / `crashed` 等原因码（顺序敏感，显存不足优先于笼统的 failed to load model）。`ModelCrashError` 现在带最后 30 行和退出码（`ModelProcess.tail?`）。快照 `instances[].failure`（kind、exitCode、tail）；`errorText` 和 `/v1` 503 报错用识别后的 kind（事件里只有 kind，不含输出）。界面 `FailureCard`（总览 + 模型卡片）：中文原因 + 建议 + 「不会自动重试」+ 最后 30 行 + 「查看完整日志」（`/logs?model=<id>` 预选模型）+ 重试。
+- 验证：`bun test` 373 通过（新增 errors 22、live 1、scheduler 1）；`bun run typecheck`、`bun run build` 通过。**阶段 3 真机验收**（RTX 5090、临时数据目录、端口 5094、b11146 拷贝、Qwen3.8-27B，用完已停已删，显存回到基线约 3 GB）：
+  - ctx=4000000 + f16 KV：36 秒后失败，界面「显存不足」+ 建议 + 最后 29 行（末行 `failed to allocate buffer for kv cache`），第二次请求 0.2 秒内直接 503，没有重试 → 通过。
+  - 流式生成：顶栏 / 总览实时 89.0 t/s；结束后「上次：提示处理 51.6 · 生成 89.5」，llama-server 自己的 timings 为 51.55 / 89.46（另一次 676.9 / 91.8 也一致）→ 通过。
+  - 外部杀掉 llama-server → `crashed` 卡片（退出码 255、30 行）；硬杀 llama-web 重启后 `/api/logs` 仍列出两次运行的模型日志，最后一行 `# llama-web: exited code=255` → 通过。
+- 剩余：无。**没测**：真实环境下的未知参数 / mmproj 不匹配 / 文件缺失 / 缺 DLL（只用合成输出单测，OOM 用了真实输出）；浏览器里点「查看完整日志」后的跳转（只测了接口和链接构造）；多 GPU；手机宽度下的卡片。
+- 决定 / 坑：
+  - **加载进度在真实 llama-server 上基本不动**：27B 加载 ~35 秒，进度停在 3% 直到就绪（3-2 预告的风险成真，点号行没有被识别 / 没出现）。plan 里该项已勾，但真机上体验差，建议下一步按模型文件大小或显存增长估算。
+  - 失败卡片的输出末尾含模型路径（只在界面，不落盘到事件）；提交内容无个人路径。
+  - `pkill` 在此环境不存在；`bun run build` 会因 `.output` 被运行中的服务占用而失败，先停服务。
+- 下一步：阶段 3 关口——请用户试用并确认后再开始 4-1（Opus 5.5）。
+
+---
+
 ## 2026-10-01 · 工作包 3-2 · Sonnet 5.5
 - 完成：plan 阶段 3 第 4–6 项。`server/core/speed.ts`（`SpeedMeter`）：流式时数 SSE 的 `data:` 事件（行首匹配，一次原生字节搜索，不解码）按 3 秒窗口估 t/s，结束后用响应末尾 `timings`（`UsageTap.result()` 新增 `promptPerSecond` / `predictedPerSecond`）替换；没有 timings 时用整段平均并标「估算」；非流式只取 timings。`load-progress.ts`（`LoadProgress`）：按日志里程碑（不依赖 `函数名:` 前缀）+ 权重加载的点号行（无换行，所以 `runner` 新增 `onPartial`）估算 0..99%，只增不减；进度进快照 `instances[].progress`（仅 loading），也接到流式等待加载的 `: loading N%` 心跳（`progressOf`）。`gpu.ts`（`GpuSampler`）：按 `settings.gpu.sampleSec`（≥0.5 秒）采样 `nvidia-smi`，**只在有浏览器连着 `/api/stream` 时采样**，没有 nvidia-smi 就 `available:false`（总览不显示显存卡），每 60 秒重试一次。`LiveHub` 新增 `metrics` 消息（速度 + 显存，250ms 合并、相同不推、慢读者只保留最新），连接时先发一帧。界面：总览加载进度条+百分比、运行中模型的实时 / 上次速度、显存卡；顶栏显示正在生成的 t/s。
 - 验证：`bun test` 349 通过（新增 speed 10、load-progress 4、gpu 6，live +3、proxy +4、runner +1、request-log +1，并改了 live 一条断言；fake-llama-server 加了 `dots` 模式）；`bun run typecheck`、`bun run build` 通过。构建产物 + 编译的假 llama-server（会输出里程碑、无换行点号行、流式带 timings；临时数据目录、端口 5097，已停已删）在内置浏览器实测：加载中进度 20→51→86→93 并显示「加载进度约 78%」、生成中 21 t/s（顶栏同步）、结束后显示「上次：提示处理 812.3 t/s · 生成 24.9 t/s」；显存卡读到本机真实 nvidia-smi。**没测**：真实 llama-server 的日志（只用 `llama.dll` 里的字符串确认了 `loading model tensors` / `offloaded %d/%d layers` / `loaded meta data with` / `constructing llama_context` / `llama_kv_cache` / `compute buffer size` 存在；`main: model loaded`、`initializing slots` 以及点号行是否真的会出现没确认）；真实生成速度与 llama-server 自身统计对比；多 GPU；没有 nvidia-smi 的机器上的界面。
