@@ -242,6 +242,7 @@ export default {
           'extra-overrides-form': '额外参数里的 {flag} 覆盖了表单里的设置。',
           'duplicate-in-layer': '额外参数里 {flag} 出现了多次，以最后一个为准（{layer}）。',
           'reserved-flag-removed': '{flag} 由 llama-web 分配，额外参数里的已被忽略（{layer}）。',
+          'preview-program-percent': '程序路径同时含空格和成对的 %，CMD 可能把它当成环境变量展开，复制的命令可能找不到程序。llama-web 自己启动不受影响。',
         },
         layers: { global: '全局', model: '模型', profile: '方案' },
       },

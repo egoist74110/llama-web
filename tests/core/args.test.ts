@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import {
-  buildLaunchArgs, canonicalFlag, DEFAULT_LAUNCH_DEFAULTS, formatCmdCommand, formatCommand, groupArgs,
+  buildLaunchArgs, canonicalFlag, cmdProgramMayExpand, DEFAULT_LAUNCH_DEFAULTS, formatCmdCommand, formatCommand, groupArgs,
   mergeParams, quoteCmdArg, splitArgs, type BuildInput, type LaunchDefaults,
 } from '../../server/core/args'
 
@@ -164,8 +164,14 @@ test('quoteCmdArg: plain stays plain, spaces are quoted, cmd metacharacters get 
     .toBe('"C:\\Program Files\\llama\\llama-server.exe" --model X:\\m.gguf')
   // The program path is always plain-quoted when unusual (^-escaped quotes do not group it for cmd).
   expect(formatCmdCommand('X:\\a b&c (x)\\llama-server.exe', [])).toBe('"X:\\a b&c (x)\\llama-server.exe"')
-  expect(formatCmdCommand('X:\\semi;co\\llama-server.exe', [])).toBe('"X:\\semi;co\\llama-server.exe"')
+  // Without whitespace every special (% included) gets a ^ instead.
+  expect(formatCmdCommand('X:\\semi;co\\llama-server.exe', [])).toBe('X:\\semi^;co\\llama-server.exe')
+  expect(formatCmdCommand('X:\\p%V%x\\llama-server.exe', [])).toBe('X:\\p^%V^%x\\llama-server.exe')
   expect(formatCmdCommand('X:\\plain\\llama-server.exe', [])).toBe('X:\\plain\\llama-server.exe')
+  // Whitespace plus a %NAME% pair cannot be written safely for cmd: flagged for the preview.
+  expect(cmdProgramMayExpand('X:\\a b %V%\\llama-server.exe')).toBe(true)
+  expect(cmdProgramMayExpand('X:\\a b 100%\\llama-server.exe')).toBe(false)
+  expect(cmdProgramMayExpand('X:\\p%V%x\\llama-server.exe')).toBe(false)
 })
 
 test('default defaults match the plan and produce a sane command', () => {

@@ -177,6 +177,7 @@ export type ArgWarningCode =
   | 'extra-overrides-form' // an extra arg replaces a form-managed flag
   | 'duplicate-in-layer' // same flag twice inside one extra-args text; the last one wins
   | 'reserved-flag-removed' // --host / --port in extra args were dropped
+  | 'preview-program-percent' // preview only: program path cmd.exe may expand (%NAME% with spaces)
 
 export interface ArgWarning {
   code: ArgWarningCode
@@ -328,12 +329,19 @@ export function quoteCmdArg(arg: string): string {
 
 /**
  * The program path for cmd.exe. cmd finds the program name by its own rules: ^-escaped quotes do
- * not group it and ; , = split it, so it is always put in plain quotes when it holds anything
- * unusual (a Windows path cannot contain a quote). Limitation: a %NAME% pair naming a defined
- * variable would still be expanded.
+ * not group it and ; , = split it. Without whitespace every special character (% included) gets
+ * a ^; with whitespace the path goes in plain quotes (a Windows path cannot contain a quote),
+ * where % cannot be escaped: see cmdProgramMayExpand.
  */
 export function quoteCmdProgram(exe: string): string {
-  return /[\s()&|<>^%!;,=]/.test(exe) || exe === '' ? `"${exe}"` : exe
+  if (exe === '') return '""'
+  if (!/\s/.test(exe)) return exe.replace(/[()%!^&|<>;,=]/g, '^$&')
+  return `"${exe}"`
+}
+
+/** True when cmd.exe could expand part of the quoted program path as a %variable%. */
+export function cmdProgramMayExpand(exe: string): boolean {
+  return /\s/.test(exe) && /%[^%]+%/.test(exe)
 }
 
 /** Command line for the UI preview, ready to paste into cmd.exe. */

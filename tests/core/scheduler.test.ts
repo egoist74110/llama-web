@@ -393,6 +393,29 @@ describe('cancellation and manual control', () => {
     expect(sched.cancelManual('b')).toBe(0)
   })
 
+  test('stop with keepRequests leaves a load clients wait for running; a plain stop aborts it', async () => {
+    const { sched, procs } = setup()
+    const req = sched.acquire(A)
+    const manual = settled(sched.start(A))
+    await until(() => procs.length === 1)
+    const kept = sched.stop('a', { keepRequests: true })
+    const rm = await manual
+    expect(rm.ok || rm.error.code).toBe('stopped')
+    procs[0]!.succeed()
+    await kept
+    const lease = await req
+    expect(procs[0]!.stopped).toBe(false)
+    lease.release()
+
+    const req2 = settled(sched.acquire(B))
+    await until(() => procs.length === 2) // b loads after a is evicted
+    await sched.stop('b')
+    const r2 = await req2
+    expect(r2.ok || r2.error.code).toBe('stopped')
+    expect(procs[1]!.stopped).toBe(true)
+    await sched.shutdown()
+  })
+
   test('aborted waiter is removed; a queued switch nobody waits for is dropped', async () => {
     const { sched, procs } = setup({ autoReady: true })
     const la = await sched.acquire(A)

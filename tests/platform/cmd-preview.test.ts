@@ -51,7 +51,9 @@ describe.if(isWin)('command preview through cmd.exe', () => {
   test('program paths with spaces and cmd metacharacters', () => {
     const base = mkdtempSync(join(tmpdir(), 'llw-cmd-'))
     try {
-      for (const name of ['a b', 'a&b', 'a b&c (x)', 'p100%', 'semi;co,ma=eq']) {
+      // LLW_PREVIEW_VAR is defined in throughCmd: a %pair% without spaces must stay literal.
+      const names = ['a b', 'a&b', 'a b&c (x)', 'p100%', 'semi;co,ma=eq', 'p%LLW_PREVIEW_VAR%x', 'q&(x)%LLW_PREVIEW_VAR%!y;=', 'a b 100%']
+      for (const name of names) {
         const dir = join(base, name)
         mkdirSync(dir)
         const exe = join(dir, 'bun.exe')

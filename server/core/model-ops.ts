@@ -44,12 +44,16 @@ export class ModelOps {
     return this.sched.stop(modelId, opts)
   }
 
-  /** Stop every profile of the model, then start `profile`, unless a later action supersedes it. */
+  /**
+   * Unload the model's running profile(s), then start `profile`, unless a later action supersedes
+   * it. Queued client requests are kept (they load the profile they asked for, first in line);
+   * only older manual starts are withdrawn. An explicit stop() is what rejects requests.
+   */
   async restart(modelId: string, profile: string): Promise<void> {
     const gen = this.bump(modelId)
     this.pending.set(modelId, { gen, profile })
     try {
-      await this.sched.stop(modelId)
+      await this.sched.stop(modelId, { keepRequests: true })
       if (this.gens.get(modelId) !== gen) return
       this.pending.delete(modelId)
       await this.sched.start({ modelId, profile })

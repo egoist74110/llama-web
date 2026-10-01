@@ -238,22 +238,32 @@ export class Scheduler {
    * Manual stop of every profile of a model: queued requests for it are rejected with
    * `stopped`, a load in progress is aborted, a ready process is drained (or killed at once
    * with `force`) and unloaded, and failed/crashed marks are cleared.
+   *
+   * With `keepRequests` (a restart onto another profile, not a stop): only manual start()/retry()
+   * callers are withdrawn; queued client requests keep their place and their target, and a load
+   * already running for them goes on. Everything else of the model is unloaded as above.
    */
-  async stop(modelId: string, opts: { force?: boolean } = {}): Promise<void> {
+  async stop(modelId: string, opts: { force?: boolean, keepRequests?: boolean } = {}): Promise<void> {
     const mine = (t: Target) => t.modelId === modelId
-    for (const job of [...this.queue]) {
-      if (!mine(job.target)) continue
-      this.queue.splice(this.queue.indexOf(job), 1)
-      this.rejectAll(job, 'stopped')
+    if (opts.keepRequests) {
+      this.cancelManual(modelId)
+    } else {
+      for (const job of [...this.queue]) {
+        if (!mine(job.target)) continue
+        this.queue.splice(this.queue.indexOf(job), 1)
+        this.rejectAll(job, 'stopped')
+      }
+      if (this.current && mine(this.current.target)) this.current.cancelled = true
     }
-    if (this.current && mine(this.current.target)) this.current.cancelled = true
+    // A load still wanted by queued requests (keepRequests only).
+    const kept = this.current && mine(this.current.target) && !this.current.cancelled ? this.current.key : null
 
     const pending: Promise<void>[] = []
     for (const inst of [...this.instances.values()]) {
       if (!mine(inst.target)) continue
       switch (inst.state) {
         case 'loading':
-          pending.push(this.abortLoad(inst))
+          if (inst.key !== kept) pending.push(this.abortLoad(inst))
           break
         case 'ready':
         case 'draining':

@@ -36,6 +36,14 @@ function setup() {
 const at = (profile: string): Target => ({ modelId: 'm', profile })
 const tick = (ms = 0) => new Promise(r => setTimeout(r, ms))
 
+async function until(cond: () => boolean, ms = 2000) {
+  const end = Date.now() + ms
+  while (!cond()) {
+    if (Date.now() > end) throw new Error('timed out waiting for condition')
+    await tick(2)
+  }
+}
+
 describe('ModelOps.switchTo', () => {
   test('A -> B -> A while A drains ends on A; the superseded restart does not start B', async () => {
     const { sched, ops, launched, states } = setup()
@@ -115,6 +123,60 @@ describe('ModelOps.switchTo', () => {
     lease.release()
     ;(await request).release()
     expect(states()).toEqual(['A:ready'])
+    await sched.shutdown()
+  })
+
+  test('switching while the same model drains keeps a queued client request (manual start withdrawn)', async () => {
+    const { sched, ops, launched, states } = setup()
+    await sched.start(at('H'))
+    const leaseH = await sched.acquire(at('H'))
+    const manualA = ops.start(at('A')).catch(e => e)
+    const clientA = sched.acquire(at('A'))
+    await tick()
+    expect(states()).toEqual(['H:draining'])
+
+    const { restarted, work } = ops.switchTo('m', 'B')
+    expect(restarted).toBe(true)
+    leaseH.release()
+    const leaseA = await clientA // the request still gets the profile it asked for
+    expect(leaseA.target.profile).toBe('A')
+    expect((await manualA as SchedulerError).code).toBe('stopped')
+    leaseA.release()
+    await work
+    await until(() => states().join() === 'B:ready')
+    expect(launched).toEqual(['H', 'A', 'B'])
+    await sched.shutdown()
+  })
+
+  test('a newer switch during a pending restart keeps queued client requests too', async () => {
+    const { sched, ops, states } = setup()
+    await sched.start(at('H'))
+    const leaseH = await sched.acquire(at('H'))
+    const first = ops.switchTo('m', 'B') // restart waits for H to drain
+    await tick()
+    const clientC = sched.acquire(at('C'))
+    await tick()
+    const second = ops.switchTo('m', 'D')
+    expect(second.restarted).toBe(true)
+    leaseH.release()
+    const leaseC = await clientC
+    expect(leaseC.target.profile).toBe('C')
+    leaseC.release()
+    await Promise.all([first.work, second.work])
+    await until(() => states().join() === 'D:ready')
+    await sched.shutdown()
+  })
+
+  test('an explicit stop still rejects queued client requests', async () => {
+    const { sched, ops } = setup()
+    await sched.start(at('H'))
+    const leaseH = await sched.acquire(at('H'))
+    const clientA = sched.acquire(at('A')).catch(e => e)
+    await tick()
+    const stopped = ops.stop('m')
+    leaseH.release()
+    await stopped
+    expect((await clientA as SchedulerError).code).toBe('stopped')
     await sched.shutdown()
   })
 

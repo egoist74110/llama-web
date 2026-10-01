@@ -137,6 +137,14 @@ describe('previewLaunch', () => {
     expect(p.missing).toContain('runtime')
   })
 
+  test('warns when cmd.exe could expand the program path (spaces plus a %NAME% pair)', () => {
+    const odd = previewLaunch({ ...base(), dataDir: join(root, 'a b %LLW_X%', 'data'), model: models().models[0]!, form: form() })
+    expect(odd.warnings.map(w => w.code)).toContain('preview-program-percent')
+    expect(odd.ok).toBe(true)
+    const plain = previewLaunch({ ...base(), model: models().models[0]!, form: form() })
+    expect(plain.warnings.map(w => w.code)).not.toContain('preview-program-percent')
+  })
+
   test('argument problems are reported, not thrown', () => {
     const p = previewLaunch({ ...base(), model: models().models[0]!, form: form({ extraArgs: '"oops' }) })
     expect(p.ok).toBe(false)

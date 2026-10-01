@@ -3,7 +3,7 @@
 // scheduler records them as a load failure.
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { buildLaunchArgs, formatCmdCommand, formatCommand, type ArgWarning, type BuildInput, type LaunchParams, type ParamOverrides } from './args'
+import { buildLaunchArgs, cmdProgramMayExpand, formatCmdCommand, formatCommand, type ArgWarning, type BuildInput, type LaunchParams, type ParamOverrides } from './args'
 import type { ModelConfig, ModelsDoc, Settings } from './config'
 import type { Target } from './scheduler'
 import { resolveFileRef } from './scanner'
@@ -104,11 +104,12 @@ export function previewLaunch(input: PreviewInput): LaunchPreview {
     profile: { overrides: form.overrides, extraArgs: form.extraArgs },
     host: input.host, port,
   })
+  const program = exe ?? (win ? 'llama-server.exe' : 'llama-server')
+  const warnings = [...built.warnings]
+  if (win && cmdProgramMayExpand(program)) warnings.push({ code: 'preview-program-percent', severity: 'warning' })
   return {
-    command: win
-      ? formatCmdCommand(exe ?? 'llama-server.exe', built.args)
-      : formatCommand(exe ?? 'llama-server', built.args),
-    ok: built.ok, warnings: built.warnings, effective: built.effective, missing, port,
+    command: win ? formatCmdCommand(program, built.args) : formatCommand(program, built.args),
+    ok: built.ok, warnings, effective: built.effective, missing, port,
   }
 }
 

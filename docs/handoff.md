@@ -16,6 +16,15 @@
 
 ---
 
+## 2026-10-01 · 阶段 2 第三轮复审处理 · Opus 5.5
+- 完成：`docs/reviews/stage-2-codex-r3.md` 的 CR-008 已修复、CR-005 余项已修复（一种组合改为警告），已标注。CR-008：`Scheduler.stop(modelId, { keepRequests: true })` 只撤回手动调用方，保留排队客户端请求及其正在进行的加载；`ModelOps.restart`（切换方案 / 保存后重启）改用它，显式停止不变。CR-005：`quoteCmdProgram` 改为无空白时给 `( ) % ! ^ & | < > ; , =` 加 `^`、有空白时加双引号；「空白 + 成对 %」在预览里给警告 `preview-program-percent`。
+- 验证：`bun test` 276 通过（新增 model-ops 3 条、scheduler 1 条、launch 1 条，真实 cmd 程序路径用例 +3）；`bun run typecheck`、`bun run build` 通过。构建产物 + 慢响应假 llama-server（临时数据目录、端口 5097，已停已删）真实接口复现 CR-008：客户端 `mmm:A` 200，最终 `B ready`。真实 cmd 探测了程序路径 `%` 的三种写法（见审查文件）。**没测**：`cmd /v:on`；交互式 CMD 窗口粘贴；macOS / Linux；GPU。
+- 剩余：plan 阶段 2「下拉空值选项不显示」仍未做。
+- 决定 / 坑：「已排队的客户端请求保持请求时的方案」现在在所有切换分支都成立（含同一模型在 drain、待重启）；只有显式停止会拒绝排队请求。新方案排在保留的请求之后（FIFO），所以切换后会先加载一次旧请求要的方案。
+- 下一步：用户决定是否让 Codex 做第四轮复审（`stage-2-codex-r4.md`）→ 修下拉空值问题 → 阶段 2 确认后开始 3-1。
+
+---
+
 ## 2026-09-30 · 阶段 2 第二轮复审处理 · Opus 5.5
 - 完成：`docs/reviews/stage-2-codex-r2.md` 的 CR-001 / CR-005 余项已修复，CR-007 已核实（Windows 实测不构成错误）并加固，CR-004 的边界说明已认可，各条已标注。CR-001：`Scheduler.cancelManual()` 只撤回手动 start/retry 调用方；`ModelOps.switchTo` 撤回其他方案的排队手动启动并按新方案启动；`snapshot().queue` 不列已取消的任务；后台日志不再把 `stopped` 记成错误。CR-005：新增 `quoteCmdProgram`，程序路径含空白或 `( ) & | < > ^ % ! ; , =` 时用普通双引号。CR-007：参数里的括号也加 `^`。
 - 验证：`bun test` 271 通过（新增 model-ops 3 条、scheduler 1 条、真实 cmd.exe 测试 2 条：只含括号的参数 / `; , =`，以及程序路径含空格与元字符）；`bun run typecheck`、`bun run build` 通过。构建产物 + 慢响应假 llama-server（临时数据目录、端口 5097，已停已删）经真实接口复现审查场景：其他模型 drain 中手动启动 mmm、再切 RP → 队列 `[mmm:RP]`、`inUse` 只有 RP、最终 `mmm:RP ready`，从未启动 `mmm:默认`，日志无错误。**没测**：`cmd /v:on`；交互式 CMD 窗口里手动粘贴；macOS / Linux 上的全量测试；GPU。
