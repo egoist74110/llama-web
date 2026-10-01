@@ -4,7 +4,7 @@
 import { existsSync, statSync } from 'node:fs'
 import { isAbsolute, resolve } from 'node:path'
 import { ArgsSyntaxError, PARAM_DEFS, splitArgs, type LaunchDefaults, type ParamValue } from './args'
-import type { ModelsDoc, Settings } from './config'
+import { cleanWizard, type ModelsDoc, type Settings } from './config'
 import type { PublicStatus } from './public-entry'
 import type { ModelDir } from './types'
 
@@ -176,7 +176,8 @@ const DOMAIN = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2
 
 /**
  * Public entry (plan 关键决定 3): on/off, its port (loopback only, never the main port or inside
- * the llama-server range), the public domain (display only) and whether llama-web hosts the tunnel.
+ * the llama-server range), the public domain (display only), whether llama-web hosts the tunnel
+ * and the progress of the public access guide.
  * The tunnel token is not part of this patch: it has its own endpoint and is never echoed back.
  */
 export function applyPublic(draft: Settings, raw: unknown): void {
@@ -196,7 +197,13 @@ export function applyPublic(draft: Settings, raw: unknown): void {
   }
   const tunnelEnabled = raw.tunnelEnabled === undefined ? cur.tunnelEnabled : raw.tunnelEnabled
   if (typeof tunnelEnabled !== 'boolean') throw new SettingsError('bad-request')
-  draft.public = { enabled, port, domain, tunnelEnabled }
+  // Guide progress: null ends it; anything else must be a complete, valid progress.
+  let wizard = cur.wizard
+  if (raw.wizard !== undefined) {
+    wizard = raw.wizard === null ? null : cleanWizard(raw.wizard)
+    if (raw.wizard !== null && !wizard) throw new SettingsError('bad-request')
+  }
+  draft.public = { enabled, port, domain, tunnelEnabled, wizard }
 }
 
 export interface SettingsPatch {
@@ -240,6 +247,8 @@ export interface SettingsDoc {
     activeKeys: number
     /** The saved tunnel token, masked (never the token itself). */
     tunnel: { hasToken: boolean, maskedToken: string | null }
+    /** cloudflared on this machine: already copied under data/runtime, installed elsewhere, or none (downloaded on first start). */
+    cloudflared: 'runtime' | 'system' | 'none'
   }
   setupDone: boolean
   /** The saved port differs from the one this process is listening on. */

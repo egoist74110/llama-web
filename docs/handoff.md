@@ -16,6 +16,15 @@
 
 ---
 
+## 2026-10-01 · 工作包 4-6（未完：阶段 4 更新 / 回退验收） · Opus 5.5
+- 完成：plan 阶段 4「公网模块合并 + 引导」。`SettingsPublicAccess.vue`（未开启 / 引导 / 总览），`PublicWizard`（端口 → key → 方式 → 一键：API token / 地址 / 预览执行（`PublicCfRun`），或手动：教程 / 粘贴 token → 连接），`PublicOverview`、`PublicStatus`、`PublicAddresses`（地址 + 检测）、`PublicKeys`（原 SettingsKeys）、`PublicAdvanced`；`useCloudflareSetup` 共享 4-5 状态。删掉 SettingsPublic / SettingsTunnel / SettingsCloudflare。settings v3：`public.wizard`（`cleanWizard`，迁移）。`core/public-check.ts` + `POST /api/public/check`。`tunnel.ts`：`ingressHostnames` 从 cloudflared 的 `Updated to new configuration` 行取指向本机端口的主机名 → `TunnelInfo.hostnames`。`SettingsDoc.public.cloudflared`。README 公网一节改写。
+- 验证：`bun test` 532 通过、`bun run typecheck`、`bun run build` 通过。构建产物 + 临时数据目录 + 假 Cloudflare（已停已删）在内置浏览器走完两条分支、再加一个地址、关闭、保存进度后刷新继续、v2→v3 真实文件迁移、错端口 / 错 token 被拒、深色 + 375px 无横向滚动、日志无 token / key。用户在真实环境（start.bat）远端跑通。
+- 剩余：**阶段 4 验收「打开时自动下载新版 + 回退后用旧版本加载真实模型」仍未做**（占 GPU、下载约 1 GB，在临时数据目录里做：先装比 b11146 旧的真实版本 → 启动让更新器下载 b11146 → 回退 → 真实模型加载确认版本）。做完后给出阶段 4 验收结果表，再勾 plan「真机试用」。**没测**：真实 cloudflared 的配置行解析（只有按真实格式写的假进程单测；用户远端跑通但没核对地址列表）。
+- 决定 / 坑：`useSettings.save` 正在保存时会拒绝第二次保存——引导里先保存再切步骤（`go()`），连接步骤等前一次保存结束再打开入口。Bun 的 fetch 把域名解析失败报成 `ConnectionRefused`，检测失败时再 `dns.lookup` 区分。Bun 下 `AbortSignal.timeout` 不算挂起任务，测试会卡死，用自己的定时器。`bun run dev` 下没有公网入口和隧道 → 530（用户踩到，已加醒目提示）；用户的 dev 服务器热重载时把真实 settings.json 迁到了 v3（有备份）。TaskStop 后 bun 子进程仍在，按 PID `taskkill /T`。
+- 下一步：接续 4-6 剩余（阶段 4 更新 / 回退验收），之后阶段关口 4。
+
+---
+
 ## 2026-10-01 · 工作包 4-5 · Opus 5.5
 - 完成：plan 阶段 4「一键建隧道」。`server/core/cloudflare.ts`：`CfClient`（可注入 fetch，token 只放 Authorization 头）、`inspect`（校验用户 / 账号 token，列 zone，探测 Tunnel / DNS / Zone 读权限，缺哪项指出来；只有 active zone 可用）、`planSetup`（同名隧道 / CNAME 指向的隧道 / 当前托管隧道 → 选择；入口规则合并保留其他主机名；A/AAAA 或多条记录 → blocked；fingerprint）、`CloudflareSetup`（tunnel → ingress → dns → token → save，失败停在该步，重试从失败步继续，放弃只删本次新建的隧道 / DNS）。secrets.json → v3（`cloudflareToken`，迁移）。接口 `/api/cloudflare`、`/token`、`/zones`、`/preview`、`/apply`、`/retry`、`/cleanup`、`/dismiss`。界面 `SettingsCloudflare.vue`（token、建 token / 域名接入的说明、选域名、预览、确认框、步骤结果）。真机后追加：默认沿用正在托管的隧道（由隧道 token 解出 ID，`tunnelIdOf`），换域名 = 给它加一个地址；隧道名移入「高级」。README 公网一节重写（先决条件 / 方式 A 一键 / 方式 B 手动）。
 - 验证：`bun test` 519 通过（新增 cloudflare 29、keys 3、tunnel 1）；`bun run typecheck`、`bun run build` 通过。构建产物 + 临时数据目录 + 假 Cloudflare（HTTP 包一层 fixture，已停已删）在内置浏览器：错 token 拒绝、好 token 列 zone、冲突选择、注入 DNS 失败 → 重试成功、403 失败 → 放弃只删新隧道、A 记录 blocked、手机宽度 + 深色无横向滚动；日志 / 接口无 token。真机（用户自己在界面操作）：第一个域名经隧道带 key 200、无 key 401、吊销 401、`/`、`/api/state` 404；第二个域名 401（可达）。

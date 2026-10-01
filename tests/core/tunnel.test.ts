@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { isAlive, PidRegistry } from '../../server/core/runner'
 import {
-  candidatePaths, cloudflaredPath, extractToken, tunnelIdOf, findCloudflared, maskToken, prepareCloudflared, redact, releaseAssetName,
+  candidatePaths, cloudflaredPath, extractToken, ingressHostnames, tunnelIdOf, findCloudflared, maskToken, prepareCloudflared, redact, releaseAssetName,
   TunnelError, TunnelManager, type PrepareOptions, type TunnelConfig, type TunnelInfo, type TunnelStatus,
 } from '../../server/core/tunnel'
 
@@ -196,7 +196,47 @@ function makeManager(mode: () => string, over: Partial<ConstructorParameters<typ
 
 const errorOf = (m: TunnelManager) => { const s = m.status().status; return s.state === 'error' ? s : null }
 
+describe('ingressHostnames', () => {
+  const line = (cfg: unknown) => `2026-10-01T00:00:01Z INF Updated to new configuration config=${JSON.stringify(JSON.stringify(cfg))} version=3`
+
+  test('host names whose service is this public entry port, lower-cased, no duplicates', () => {
+    const l = line({ ingress: [
+      { hostname: 'LLM.example.com', service: 'http://127.0.0.1:8080' },
+      { hostname: 'llm.example.com', service: 'http://127.0.0.1:8080' },
+      { hostname: 'b.example.net', service: 'https://localhost:8080/' },
+      { hostname: 'c.example.org', service: 'http://[::1]:8080' },
+      { hostname: 'other.example.com', service: 'http://127.0.0.1:3000' },
+      { hostname: '*.example.com', service: 'http://127.0.0.1:8080' },
+      { hostname: 'far.example.com', service: 'http://192.168.1.5:8080' },
+      { service: 'http_status:404' },
+    ] })
+    expect(ingressHostnames(l, 8080)).toEqual(['llm.example.com', 'b.example.net', 'c.example.org'])
+    expect(ingressHostnames(l, 3000)).toEqual(['other.example.com'])
+  })
+
+  test('an update without our port is an empty list; other lines and junk are null', () => {
+    expect(ingressHostnames(line({ ingress: [{ service: 'http_status:404' }] }), 8080)).toEqual([])
+    expect(ingressHostnames('INF Registered tunnel connection connIndex=0', 8080)).toBeNull()
+    expect(ingressHostnames('INF Updated to new configuration config="{not json" version=1', 8080)).toBeNull()
+    expect(ingressHostnames('INF Updated to new configuration version=1', 8080)).toBeNull()
+  })
+})
+
 describe('TunnelManager', () => {
+  test('host names come from the configuration cloudflared receives, and are forgotten with the token', async () => {
+    const { m } = makeManager(() => 'config')
+    m.apply(baseCfg())
+    await until(() => m.status().hostnames?.length)
+    expect(m.status().hostnames).toEqual(['llm.example.com', 'b.example.net'])
+    m.apply(baseCfg({ tunnelEnabled: false }))
+    await until(() => m.status().status.state === 'off')
+    expect(m.status().hostnames).toEqual(['llm.example.com', 'b.example.net'])
+    m.apply(baseCfg({ token: '' }))
+    await new Promise(r => setTimeout(r, 50))
+    expect(m.status().hostnames).toBeNull()
+    await m.shutdown()
+  })
+
   test('reasons for staying off', async () => {
     const { m } = makeManager(() => 'connect')
     const reasonOf = async (c: Partial<TunnelConfig>) => {

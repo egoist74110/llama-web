@@ -6,6 +6,7 @@
 //   crash     prints an error and exits with 2
 //   child     like connect, plus a long-lived grandchild (`child=<pid>`)
 //   quiet     prints one ERR line and never connects
+//   config    connects, then prints the remotely managed configuration (like the real one)
 const mode = process.argv[2] ?? 'connect'
 const token = process.env.TUNNEL_TOKEN ?? ''
 console.log(`fake cloudflared mode=${mode} token-length=${token.length}`)
@@ -31,6 +32,18 @@ if (mode === 'child') {
   const child = Bun.spawn([process.execPath, '-e', 'setInterval(() => {}, 1000)'], { stdout: 'ignore', stderr: 'ignore' })
   console.log(`child=${child.pid}`)
 }
-if (mode === 'quiet') console.error('2026-10-01T00:00:00Z ERR Unable to establish connection with Cloudflare edge')
+if (mode === 'config') {
+  connect()
+  const cfg = {
+    ingress: [
+      { hostname: 'llm.example.com', service: 'http://127.0.0.1:8080', originRequest: {} },
+      { hostname: 'other.example.com', service: 'http://localhost:3000' },
+      { hostname: 'b.example.net', service: 'http://localhost:8080/' },
+      { service: 'http_status:404' },
+    ],
+    'warp-routing': { enabled: false },
+  }
+  console.error(`2026-10-01T00:00:01Z INF Updated to new configuration config=${JSON.stringify(JSON.stringify(cfg))} version=2`)
+} else if (mode === 'quiet') console.error('2026-10-01T00:00:00Z ERR Unable to establish connection with Cloudflare edge')
 else connect()
 setInterval(() => {}, 1000)

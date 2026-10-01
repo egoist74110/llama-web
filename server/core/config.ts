@@ -11,10 +11,30 @@ export interface ImagePreprocess {
   quality: number
 }
 
+/** Step of the public access guide (4-6). */
+export type WizardStep = 'port' | 'key' | 'path' | 'cf-token' | 'cf-zone' | 'cf-run' | 'guide' | 'paste' | 'connect'
+export const WIZARD_STEPS: WizardStep[] = ['port', 'key', 'path', 'cf-token', 'cf-zone', 'cf-run', 'guide', 'paste', 'connect']
+
+/**
+ * Progress of the public access guide, saved on the server so it continues where it was left.
+ * Only non-secret drafts: tokens are saved (and verified) by their own endpoints.
+ */
+export interface PublicWizard {
+  step: WizardStep
+  /** `setup` = first run (port, key, …); `add` = add another address to the running tunnel. */
+  mode: 'setup' | 'add'
+  /** Branch: Cloudflare API token (one click) or the dashboard guide + pasted tunnel token. */
+  path: 'api' | 'manual' | null
+  zoneId: string
+  subdomain: string
+  /** Host name the user entered in the manual branch. */
+  domain: string
+}
+
 export interface Settings {
   version: number
   server: { host: string, port: number }
-  public: { enabled: boolean, port: number, domain: string, tunnelEnabled: boolean }
+  public: { enabled: boolean, port: number, domain: string, tunnelEnabled: boolean, wizard: PublicWizard | null }
   modelDirs: ModelDir[]
   llamacpp: { cudaRuntime: string, current: string, keepVersions: number, autoUpdate: boolean }
   scheduler: {
@@ -60,14 +80,14 @@ export interface ModelsDoc {
   models: ModelConfig[]
 }
 
-export const SETTINGS_VERSION = 2
+export const SETTINGS_VERSION = 3
 export const MODELS_VERSION = 1
 
 export function defaultSettings(): Settings {
   return {
     version: SETTINGS_VERSION,
     server: { host: '0.0.0.0', port: 5001 },
-    public: { enabled: false, port: 8080, domain: '', tunnelEnabled: false },
+    public: { enabled: false, port: 8080, domain: '', tunnelEnabled: false, wizard: null },
     modelDirs: [],
     llamacpp: { cudaRuntime: '13.3', current: '', keepVersions: 2, autoUpdate: true },
     scheduler: { maxLoaded: 1, loadTimeoutSec: 600, drainTimeoutSec: 300, heartbeatSec: 15, portRange: [7100, 7199] },
@@ -87,6 +107,11 @@ export const SETTINGS_MIGRATIONS: Record<number, (old: any) => any> = {
       delete old.public.tunnelName
       old.public.tunnelEnabled ??= false
     }
+    return old
+  },
+  // 3: progress of the public access guide (none in progress).
+  2: (old) => {
+    if (isObj(old.public)) old.public.wizard ??= null
     return old
   },
 }
@@ -117,9 +142,22 @@ export function normalizeSettings(doc: Settings): Settings {
   }
   delete (out.public as Record<string, unknown>).tunnelName
   if (typeof out.public.tunnelEnabled !== 'boolean') out.public.tunnelEnabled = false
+  out.public.wizard = cleanWizard(out.public.wizard)
   // Placeholder (decision 9): the field exists but the online limit stays fixed at 1.
   out.scheduler.maxLoaded = 1
   return out as Settings
+}
+
+const WIZARD_TEXT_MAX = 253
+
+/** A valid wizard progress or null (a hand-edited or broken value just restarts the guide). */
+export function cleanWizard(raw: unknown): PublicWizard | null {
+  if (!isObj(raw)) return null
+  if (!WIZARD_STEPS.includes(raw.step)) return null
+  if (raw.mode !== 'setup' && raw.mode !== 'add') return null
+  const path = raw.path === 'api' || raw.path === 'manual' ? raw.path : null
+  const text = (v: unknown) => (typeof v === 'string' && v.length <= WIZARD_TEXT_MAX && !/[\u0000-\u001f]/.test(v) ? v.trim() : '')
+  return { step: raw.step, mode: raw.mode, path, zoneId: text(raw.zoneId), subdomain: text(raw.subdomain).toLowerCase(), domain: text(raw.domain).toLowerCase() }
 }
 
 export function normalizeModels(doc: ModelsDoc): ModelsDoc {

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
-import { defaultModels, defaultSettings, normalizeSettings, SETTINGS_MIGRATIONS, type ModelConfig, type ModelsDoc, type Settings } from '../../server/core/config'
+import { cleanWizard, defaultModels, defaultSettings, normalizeSettings, SETTINGS_MIGRATIONS, type ModelConfig, type ModelsDoc, type Settings } from '../../server/core/config'
 import {
   applyDefaults, applyImagePreprocess, applyModelDirs, applyPublic, applyServer, applySettingsPatch, dirStatus, isFirstRun, SettingsError,
 } from '../../server/core/settings-admin'
@@ -223,7 +223,47 @@ describe('settings version 2 (tunnel hosted by llama-web)', () => {
 
   test('normalize fills the switch and removes a leftover tunnel name', () => {
     const s = normalizeSettings({ ...defaultSettings(), public: { enabled: true, port: 8080, domain: '', tunnelName: 'x' } } as never)
-    expect(s.public).toEqual({ enabled: true, port: 8080, domain: '', tunnelEnabled: false })
+    expect(s.public).toEqual({ enabled: true, port: 8080, domain: '', tunnelEnabled: false, wizard: null })
+  })
+})
+
+describe('settings version 3 (public access guide progress)', () => {
+  const progress = { step: 'cf-zone', mode: 'setup', path: 'api', zoneId: 'z1', subdomain: 'LLM', domain: '' }
+
+  test('migration 2 -> 3 adds "no guide in progress", keeping the rest', () => {
+    const old = { version: 2, public: { enabled: true, port: 8081, domain: 'a.example.com', tunnelEnabled: true } }
+    expect(SETTINGS_MIGRATIONS[2]!(old).public).toEqual({ enabled: true, port: 8081, domain: 'a.example.com', tunnelEnabled: true, wizard: null })
+    const doc = normalizeSettings(SETTINGS_MIGRATIONS[2]!(SETTINGS_MIGRATIONS[1]!({ version: 1, public: { enabled: false, port: 8080, domain: '', tunnelName: 'x' } })))
+    expect(doc.public.wizard).toBeNull()
+  })
+
+  test('a valid progress survives normalize; a broken one becomes null', () => {
+    const ok = normalizeSettings({ ...defaultSettings(), public: { ...defaultSettings().public, wizard: progress } } as never)
+    expect(ok.public.wizard).toEqual({ ...progress, subdomain: 'llm' } as never)
+    for (const wizard of ['x', 42, { ...progress, step: 'nope' }, { ...progress, mode: 'other' }, []]) {
+      expect(normalizeSettings({ ...defaultSettings(), public: { ...defaultSettings().public, wizard } } as never).public.wizard).toBeNull()
+    }
+  })
+
+  test('cleanWizard: unknown path is null, overlong or control-character text is dropped, extra keys are not kept', () => {
+    expect(cleanWizard({ ...progress, path: 'x' })?.path).toBeNull()
+    expect(cleanWizard({ ...progress, subdomain: 'a'.repeat(300) })?.subdomain).toBe('')
+    expect(cleanWizard({ ...progress, domain: 'a\nb' })?.domain).toBe('')
+    const w = cleanWizard({ ...progress, token: 'eyJ-secret' })
+    expect(JSON.stringify(w)).not.toContain('eyJ-secret')
+  })
+
+  test('applyPublic saves, clears and validates the progress; omitting it keeps it', () => {
+    const s = settingsWith()
+    applyPublic(s, { wizard: progress })
+    expect(s.public.wizard?.step).toBe('cf-zone')
+    applyPublic(s, { enabled: true })
+    expect(s.public.wizard?.step).toBe('cf-zone')
+    expect(codeOf(() => applyPublic(s, { wizard: { ...progress, step: 'bad' } }))).toBe('bad-request')
+    expect(codeOf(() => applyPublic(s, { wizard: 'connect' }))).toBe('bad-request')
+    expect(s.public.wizard?.step).toBe('cf-zone')
+    applyPublic(s, { wizard: null })
+    expect(s.public.wizard).toBeNull()
   })
 })
 
@@ -231,14 +271,14 @@ describe('applyPublic', () => {
   test('saves on/off, port, lower-cased domain and the tunnel switch', () => {
     const s = settingsWith()
     applyPublic(s, { enabled: true, port: 8081, domain: '  LLM.Example.com ', tunnelEnabled: true })
-    expect(s.public).toEqual({ enabled: true, port: 8081, domain: 'llm.example.com', tunnelEnabled: true })
+    expect(s.public).toEqual({ enabled: true, port: 8081, domain: 'llm.example.com', tunnelEnabled: true, wizard: null })
   })
 
   test('missing keys are kept; an empty domain is allowed', () => {
     const s = settingsWith()
     applyPublic(s, { domain: 'a.example.com', tunnelEnabled: true })
     applyPublic(s, { enabled: true })
-    expect(s.public).toEqual({ enabled: true, port: 8080, domain: 'a.example.com', tunnelEnabled: true })
+    expect(s.public).toEqual({ enabled: true, port: 8080, domain: 'a.example.com', tunnelEnabled: true, wizard: null })
     applyPublic(s, { domain: '' })
     expect(s.public.domain).toBe('')
   })

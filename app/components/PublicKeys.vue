@@ -1,11 +1,12 @@
 <script setup lang="ts">
 // API keys for the public entry: create (random), masked list, show / copy, revoke (confirmed).
+// Part of the public access module (overview and the guide's last step); no card of its own.
 import t from '~~/i18n/zh-CN'
 import type { KeyView } from '~~/server/core/keys'
 
 const s = t.keys
 const toast = useToast()
-// The public entry card warns when no key is usable; keep its count current.
+// The module shows how many keys are usable; keep the count current.
 const { load: refreshSettings } = useSettings()
 
 const keys = ref<KeyView[] | null>(null)
@@ -107,7 +108,7 @@ const when = (iso: string | null) => iso ? new Date(iso).toLocaleString('zh-CN',
 </script>
 
 <template>
-  <AppCard :title="s.title" :hint="s.hint">
+  <div>
     <p v-if="loadError" class="text-sm text-error">
       {{ s.loadFailed }}：{{ loadError }}
     </p>
@@ -167,5 +168,5 @@ const when = (iso: string | null) => iso ? new Date(iso).toLocaleString('zh-CN',
         </div>
       </template>
     </UModal>
-  </AppCard>
+  </div>
 </template>

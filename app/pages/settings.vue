@@ -24,10 +24,7 @@ onMounted(load)
       <SettingsDefaults />
       <SettingsImage />
       <SettingsServer />
-      <SettingsPublic />
-      <SettingsCloudflare />
-      <SettingsTunnel />
-      <SettingsKeys />
+      <SettingsPublicAccess />
     </template>
 
     <ImportCard @imported="load" />

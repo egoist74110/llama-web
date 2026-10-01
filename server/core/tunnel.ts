@@ -235,6 +235,38 @@ export type TunnelStatus =
 export interface TunnelInfo {
   status: TunnelStatus
   cloudflared: { source: 'system' | 'downloaded', version: string | null } | null
+  /**
+   * Host names the tunnel routes to this public entry, from the configuration cloudflared
+   * received from Cloudflare (null = not seen yet for this token).
+   */
+  hostnames: string[] | null
+}
+
+const HOST = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/
+
+/**
+ * Host names in a cloudflared `Updated to new configuration config="{…}"` line whose service is
+ * this machine's public entry port. Null when the line is not such an update (or cannot be read).
+ */
+export function ingressHostnames(line: string, port: number): string[] | null {
+  if (!/Updated to new configuration/i.test(line)) return null
+  const m = /config="((?:[^"\\]|\\.)*)"/.exec(line)
+  if (!m) return null
+  let cfg: unknown
+  try {
+    cfg = JSON.parse(JSON.parse(`"${m[1]}"`))
+  } catch {
+    return null
+  }
+  const ingress = (cfg as { ingress?: unknown })?.ingress
+  if (!Array.isArray(ingress)) return null
+  const local = new RegExp(`^https?://(?:127\\.0\\.0\\.1|localhost|\\[::1\\]):${port}/?$`, 'i')
+  const out: string[] = []
+  for (const r of ingress) {
+    const host = typeof r?.hostname === 'string' ? r.hostname.toLowerCase() : ''
+    if (HOST.test(host) && typeof r.service === 'string' && local.test(r.service) && !out.includes(host)) out.push(host)
+  }
+  return out
 }
 
 export interface TunnelConfig {
@@ -287,8 +319,9 @@ export class TunnelManager {
   private queue: Promise<void> = Promise.resolve()
   private closed = false
   private lines: string[] = []
-  private info: TunnelInfo = { status: { state: 'off', reason: 'disabled' }, cloudflared: null }
+  private info: TunnelInfo = { status: { state: 'off', reason: 'disabled' }, cloudflared: null, hostnames: null }
   private lastKey = ''
+  private hostsToken: string | null = null
 
   constructor(private readonly opts: TunnelManagerOptions) {}
 
@@ -339,12 +372,16 @@ export class TunnelManager {
     if (reason) {
       if (this.activeToken !== null || this.info.status.state !== 'off') await this.teardown()
       this.activeToken = null
+      if (!cfg.token) this.forgetHosts()
       this.set({ state: 'off', reason })
       return
     }
     if (this.activeToken === cfg.token) return
     await this.teardown()
     this.activeToken = cfg.token
+    // Host names belong to a tunnel: a different token may be a different tunnel.
+    if (this.hostsToken !== cfg.token) this.forgetHosts()
+    this.hostsToken = cfg.token
     this.attempt = 0
     this.begin()
   }
@@ -445,6 +482,11 @@ export class TunnelManager {
       try { this.opts.onLine?.(line) } catch { /* listeners must not break capture */ }
       if (gen !== this.gen) return
       if (BAD_TOKEN.test(line)) badToken = true
+      const hosts = ingressHostnames(line, port)
+      if (hosts) {
+        this.info = { ...this.info, hostnames: hosts }
+        this.set(this.info.status)
+      }
       if (/Registered tunnel connection/i.test(line)) {
         connections++
         if (!connectedAt) connectedAt = now()
@@ -495,8 +537,13 @@ export class TunnelManager {
     }
   }
 
+  private forgetHosts(): void {
+    this.hostsToken = null
+    this.info = { ...this.info, hostnames: null }
+  }
+
   private set(status: TunnelStatus): void {
-    const key = JSON.stringify(status) + JSON.stringify(this.info.cloudflared)
+    const key = JSON.stringify(status) + JSON.stringify(this.info.cloudflared) + JSON.stringify(this.info.hostnames)
     this.info = { ...this.info, status }
     if (key === this.lastKey) return
     this.lastKey = key

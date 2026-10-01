@@ -471,7 +471,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
     <li class="task" data-done="true"><span class="t">隧道托管（4-4）：设置页填隧道 token + 开关；自动检测本机已装的 <code>cloudflared</code>（没有则从官方下载并校验）；llama-web 启停并监控 cloudflared 进程（token 走环境变量 <code>TUNNEL_TOKEN</code>，等价于 <code>--token</code>）；界面显示连通状态；设置页内置「在 Cloudflare 后台建隧道」的分步图文指引（含公共主机名填 <code>http://127.0.0.1:8080</code>）</span><span class="when">2026-10-01</span></li>
     <li class="task" data-done="false"><span class="t">真机试用：经隧道带 key / 不带 key / 访问管理路径；更新与回退，并如实报告（2026-10-01 已验证：经隧道带 key 流式对话并触发模型加载、无 key / 错 key / 吊销后 401、管理路径 404、pre-commit 拒绝 <code>data/</code>；<b>未验证</b>：官方出新版时的自动下载安装、真实模型下的版本回退——当前官方最新仍是已装的 b11146，只有一个版本）</span><span class="when"></span></li>
     <li class="task" data-done="true"><span class="t">一键建隧道（4-5）：用户在设置页输入 Cloudflare 操作 token（保存到 <code>data/secrets.json</code>，打码显示、不进日志）；llama-web 通过 Cloudflare API 校验 token 权限、列出账号下的域名（zone）、让用户选域名并填子域名，然后创建隧道、写入入口规则（<code>子域名.域名 → http://127.0.0.1:公网端口</code>）、创建 / 校验 DNS 记录、取回隧道 token 并保存、自动打开托管开关；遇到已存在的同名隧道 / DNS 记录时展示现状并让用户确认，绝不静默覆盖；界面展示每一步的结果，失败可重试；原来的手动分步图文指引保留为备选；默认沿用正在托管的隧道（换域名 = 加一个地址）</span><span class="when">2026-10-01</span></li>
-    <li class="task" data-done="false"><span class="t">公网模块合并 + 引导（4-6）：把「公网入口」「一键建隧道」「Cloudflare 隧道」「API key」四张卡片合并成一个「公网访问」模块。默认关闭，只显示一个开关 / 「开启」按钮；开启后进入分步引导（能自动填的自动填默认值，每步让用户确认是 / 否，可「保存进度」下次继续）；分叉：给 Cloudflare API token → 一键完成，不给 → 按图文教程在 Cloudflare 网页上自己建隧道并粘贴隧道 token；完成后显示简洁的总览（地址、连通状态、key、自检），其余放进「高级」</span><span class="when"></span></li>
+    <li class="task" data-done="true"><span class="t">公网模块合并 + 引导（4-6）：把「公网入口」「一键建隧道」「Cloudflare 隧道」「API key」四张卡片合并成一个「公网访问」模块。默认关闭，只显示一个开关 / 「开启」按钮；开启后进入分步引导（能自动填的自动填默认值，每步让用户确认是 / 否，可「保存进度」下次继续）；分叉：给 Cloudflare API token → 一键完成，不给 → 按图文教程在 Cloudflare 网页上自己建隧道并粘贴隧道 token；完成后显示简洁的总览（地址、连通状态、key、自检），其余放进「高级」</span><span class="when">2026-10-01</span></li>
   </ul>
   <div class="accept"><h3>验收标准</h3>
     <ul>
@@ -536,6 +536,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
   <h2>变更记录</h2>
   <table>
     <tr><th>日期</th><th>内容</th></tr>
+      <tr><td>2026-10-01</td><td>工作包 4-6：设置页四张公网卡片合并为「公网访问」模块（未开启 / 引导 / 总览三种状态）。引导步骤：入口端口 → API key（没有就生成，默认名 <code>server-1</code>）→ 选择方式 → ①一键（API token → 地址 → 预览并执行）/ ②手动（图文教程 + 地址 → 粘贴隧道 token）→ 连接；「再加一个地址」从「选择方式」开始。进度存服务端：<b>settings.json 升到 v3</b>，新增 <code>public.wizard</code>（只存步骤和非敏感草稿，迁移补 null）。新增 <code>POST /api/public/check</code>（服务端不带 key 请求每个地址的 <code>/v1/models</code>，401 = 通）；客户端地址 = 保存的域名 ∪ cloudflared 收到的远程配置里指向本机入口端口的主机名。开发模式下模块顶部提示「不会启动隧道」。</td></tr>
     <tr><td>2026-09-30</td><td>初版：根据 24 轮需求问答整理</td></tr>
     <tr><td>2026-09-30</td><td>开发改为按工作包分会话进行，新增 claude-guide.html 与 handoff.md；每个工作包结束即推送</td></tr>
     <tr><td>2026-09-30</td><td>工作包 1-1 技术验证：sharp 可用、流式不缓冲、Bun 子进程随父进程退出；新增关键决定 25（自定义 Bun 入口），更新「风险与待验证」</td></tr>

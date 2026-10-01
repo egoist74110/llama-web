@@ -3,14 +3,15 @@
 // schematic SVGs (labels use the dashboard's own English wording); nothing here is account data.
 import t from '~~/i18n/zh-CN'
 
-const props = defineProps<{ ingress: string }>()
+// `open`: start expanded; `bare`: no separator above (inside the public access guide).
+const props = defineProps<{ ingress: string, open?: boolean, bare?: boolean }>()
 const g = t.tunnel.guide
 const m = g.mock
 const steps = computed(() => g.steps.map(x => ({ title: x.title, body: fmt(x.body, { url: props.ingress }) })))
 </script>
 
 <template>
-  <details class="mt-4 border-t border-default pt-4">
+  <details :open="props.open" :class="props.bare ? '' : 'mt-4 border-t border-default pt-4'">
     <summary class="cursor-pointer text-sm font-medium text-highlighted">
       {{ g.title }}
     </summary>

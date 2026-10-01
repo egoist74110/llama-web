@@ -2,13 +2,21 @@
 import { DEFAULT_LAUNCH_DEFAULTS } from '../core/args'
 import { fmt, t } from '../core/i18n'
 import { StoreError } from '../core/store'
-import { maskToken, TunnelError } from '../core/tunnel'
+import { existsSync } from 'node:fs'
+import { cloudflaredPath, findCloudflared, maskToken, TunnelError } from '../core/tunnel'
 import { dirStatus, SettingsError, type SettingsDoc } from '../core/settings-admin'
 import { getContext } from './context'
 
 /** What the page may know about the saved tunnel token. */
 export function tunnelTokenView(token: string): { hasToken: boolean, maskedToken: string | null } {
   return token ? { hasToken: true, maskedToken: maskToken(token) } : { hasToken: false, maskedToken: null }
+}
+
+/** Where cloudflared would come from if the tunnel started now (file checks only, no process). */
+function cloudflaredState(dataDir: string): SettingsDoc['public']['cloudflared'] {
+  const own = cloudflaredPath(dataDir)
+  if (existsSync(own)) return 'runtime'
+  return findCloudflared({ skip: [own] }) ? 'system' : 'none'
 }
 
 export function describeSettings(): SettingsDoc {
@@ -31,6 +39,7 @@ export function describeSettings(): SettingsDoc {
       status: ctx.publicEntry.status(),
       activeKeys: ctx.getSecrets().apiKeys.filter(k => !k.revoked).length,
       tunnel: tunnelTokenView(ctx.getSecrets().tunnelToken),
+      cloudflared: cloudflaredState(ctx.dataDir),
     },
     setupDone: s.setup.done,
     restartRequired: s.server.port !== ctx.bootPort,
