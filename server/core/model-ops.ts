@@ -103,7 +103,8 @@ export class ModelOps {
     const up = mine.filter(s => UP.has(s.state))
     const pending = this.pending.get(modelId)
     const settled = !pending && up.length > 0 && up.every(s => LIVE.has(s.state) && s.profile === profile)
-    const queuedOther = this.sched.snapshot().queue.some(q => q.modelId === modelId && q.profile !== profile)
+    // Any other queued target (another profile or another model) would take it down again.
+    const queuedOther = this.sched.snapshot().queue.some(q => q.modelId !== modelId || q.profile !== profile)
     if (settled && !queuedOther) return { restarted: false, work: null }
     // Already on it, but requests for another profile are queued: come back to it after them.
     if (settled) return { restarted: false, work: this.startLast({ modelId, profile }) }

@@ -364,6 +364,53 @@ describe('management targets go after kept requests and are not merged into them
     await sched.shutdown()
   })
 
+  test('already loading the profile with another model queued behind: comes back to it after that model', async () => {
+    const { sched, ops, launched, states, procs, open } = setup({ gate: true })
+    const other: Target = { modelId: 'other', profile: 'X' }
+    const clientB = sched.acquire(at('B'))
+    await until(() => procs.length === 1) // m:B loading
+    const clientX = sched.acquire(other)
+    await tick()
+    const r = ops.switchTo('m', 'B')
+    expect(r.work).not.toBeNull()
+    open()
+    ;(await clientB).release()
+    await until(() => procs.length === 2)
+    open()
+    ;(await clientX).release()
+    await until(() => procs.length === 3)
+    open()
+    await r.work
+    expect(launched).toEqual(['B', 'X', 'B'])
+    expect(states()).toEqual(['B:ready'])
+
+    await sched.shutdown()
+  })
+
+  test('that tail target is cancelled by a later explicit stop', async () => {
+    const { sched, ops, launched, procs, open } = setup({ gate: true })
+    const other: Target = { modelId: 'other', profile: 'X' }
+    const clientB = sched.acquire(at('B'))
+    await until(() => procs.length === 1)
+    const clientX = sched.acquire(other)
+    await tick()
+    const r = ops.switchTo('m', 'B')
+    expect(r.work).not.toBeNull()
+    const outcome = r.work!.catch(e => e)
+    open()
+    ;(await clientB).release()
+    const stopped = ops.stop('m')
+    await until(() => procs.length === 2)
+    open()
+    ;(await clientX).release()
+    await stopped
+    expect((await outcome as SchedulerError).code).toBe('stopped')
+    await tick(10)
+    expect(launched).toEqual(['B', 'X'])
+    expect(sched.snapshot().models.map(s => `${s.modelId}:${s.profile}:${s.state}`)).toEqual(['other:X:ready'])
+    await sched.shutdown()
+  })
+
   test('a later switch or an explicit stop drops the queued management target', async () => {
     const { sched, ops, launched, states } = setup()
     await sched.start(at('H'))
