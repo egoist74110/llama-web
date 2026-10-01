@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { isAlive, PidRegistry } from '../../server/core/runner'
 import {
-  candidatePaths, cloudflaredPath, extractToken, findCloudflared, maskToken, prepareCloudflared, redact, releaseAssetName,
+  candidatePaths, cloudflaredPath, extractToken, tunnelIdOf, findCloudflared, maskToken, prepareCloudflared, redact, releaseAssetName,
   TunnelError, TunnelManager, type PrepareOptions, type TunnelConfig, type TunnelInfo, type TunnelStatus,
 } from '../../server/core/tunnel'
 
@@ -38,6 +38,12 @@ describe('token', () => {
       expect(codeOf(() => extractToken(bad))).toBe('bad-token')
     }
     try { extractToken(`xx ${noSecret} xx`) } catch (e) { expect(String(e)).not.toContain(noSecret.slice(0, 12)) }
+  })
+
+  test('tunnel id comes out of the token; junk gives null', () => {
+    expect(tunnelIdOf(TOKEN)).toBe('11111111-2222-3333-4444-555555555555')
+    expect(tunnelIdOf('')).toBeNull()
+    expect(tunnelIdOf(Buffer.from(JSON.stringify({ a: 'x', t: '../x', s: 'y' })).toString('base64'))).toBeNull()
   })
 
   test('mask keeps only the end', () => {

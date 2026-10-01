@@ -201,3 +201,26 @@ describe('secrets.json version 2 (tunnel token)', () => {
     expect(authenticate(d, 'Bearer eyJ-token-eyJ-token').ok).toBe(false)
   })
 })
+
+describe('secrets.json version 3 (Cloudflare API token)', () => {
+  test('defaults and old files get an empty API token; a wrong type is refused', () => {
+    expect(defaultSecrets().cloudflareToken).toBe('')
+    expect(normalizeSecrets({ version: 3, apiKeys: [], tunnelToken: '' } as any).cloudflareToken).toBe('')
+    expect(normalizeSecrets({ version: 3, apiKeys: [], cloudflareToken: null } as any).cloudflareToken).toBe('')
+    expect(() => normalizeSecrets({ version: 3, apiKeys: [], cloudflareToken: 5 } as any)).toThrow()
+  })
+
+  test('migration 2 -> 3 keeps the keys and the tunnel token', () => {
+    const old = { version: 2, apiKeys: [{ id: 'k1', key: 'sk-0123456789abcdef' }], tunnelToken: 'eyJ-x' }
+    const next = SECRETS_MIGRATIONS[2]!(old)
+    expect(next.apiKeys).toEqual(old.apiKeys)
+    expect(next.tunnelToken).toBe('eyJ-x')
+    expect(next.cloudflareToken).toBe('')
+  })
+
+  test('the API token is not an API key', () => {
+    const d = defaultSecrets()
+    d.cloudflareToken = 'cf-api-token-value-0123456789abcdef'
+    expect(authenticate(d, `Bearer ${d.cloudflareToken}`).ok).toBe(false)
+  })
+})

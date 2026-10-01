@@ -25,6 +25,7 @@ onMounted(load)
       <SettingsImage />
       <SettingsServer />
       <SettingsPublic />
+      <SettingsCloudflare />
       <SettingsTunnel />
       <SettingsKeys />
     </template>

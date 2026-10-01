@@ -39,6 +39,12 @@ function decodeToken(token: string): { a: string, t: string, s: string } | null 
   }
 }
 
+/** Tunnel id inside a tunnel token (a UUID), or null. */
+export function tunnelIdOf(token: string | null | undefined): string | null {
+  const t = token ? decodeToken(token)?.t : null
+  return t && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(t) ? t.toLowerCase() : null
+}
+
 /**
  * The tunnel token inside what the user pasted. The Cloudflare page shows it inside a command
  * (`cloudflared.exe service install eyJ…`); both the bare token and the whole command work.

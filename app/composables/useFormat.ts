@@ -57,6 +57,16 @@ export function tunnelErrorText(code: string, detail = ''): string {
   return fmt(codes[code] ?? code, { detail: detail ? `：${detail}` : '' })
 }
 
+/** Chinese reason for a one-click setup error (same wording as the server's HTTP errors). */
+export function cfErrorText(code: string, detail = ''): string {
+  const errors = t.cloudflare.errors as Record<string, string>
+  if (code === 'forbidden') {
+    const perm = (t.cloudflare.permissions as Record<string, string>)[detail]
+    return perm ? fmt(errors['forbidden-perm']!, { perm }) : errors.forbidden!
+  }
+  return fmt(errors[code] ?? code, { detail: detail ? `（${detail}）` : '' })
+}
+
 export function eventText(e: ActivityEvent, modelName: (id: string) => string): string {
   if (e.kind === 'state') {
     const vars = { model: modelName(e.modelId), profile: e.profile, from: stateLabel(e.from), to: stateLabel(e.to) }

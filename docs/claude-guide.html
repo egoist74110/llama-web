@@ -377,6 +377,21 @@ ol.steps li{margin:4px 0}
 会改动用户的 Cloudflare 账号（隧道、DNS），真机测试前先告诉我要创建 / 修改什么。做完按指南的「会话收尾流程」结束。</pre></div>
   </div>
 
+  <div class="pkg" id="p4-6">
+    <div class="pkg-head"><b>4-6 公网模块合并 + 引导 + 阶段 4 验收</b><span class="m opus">Opus 5.5</span></div>
+    <ul class="scope">
+      <li>plan 阶段 4「公网模块合并 + 引导」一项。设置页里的「公网入口」「一键建隧道」「Cloudflare 隧道」「API key」四张卡片合并成一个「公网访问」模块（可以拆成多个组件，但对用户是一个模块）。后端接口和 4-1 ～ 4-5 的行为规则不变（鉴权、只绑 127.0.0.1、token 打码、预览确认、不静默覆盖）。</li>
+      <li><b>未开启时</b>只显示一句说明 + 「开启公网访问」按钮。<b>点开启</b>进入分步引导，能自动填的直接填默认值（入口端口 8080、没有 key 时自动生成一个、本机已有的 cloudflared、已保存的 token、能推断的域名 / 子域名），每一步让用户确认「是 / 改一下」再点下一步；任意一步可以「保存进度」，下次打开从这一步继续（进度存服务端：settings.json 升版本 + 迁移函数，不能放 localStorage）。</li>
+      <li><b>分叉只有两条</b>：① 给 Cloudflare API token → 一键完成（复用 4-5 的校验 / 选域名 / 预览 / 执行 / 重试 / 放弃）；② 不给 → 按图文教程在 Cloudflare 网页上自己建隧道（复用 <code>TunnelGuide</code>），把隧道 token 粘贴回来。两条最后都汇合到：保存 token → 打开入口和托管 → 等「已连通」→ 显示客户端地址和 key。没有域名时（token 看不到任何 zone）给出「域名从哪里来、怎么把 NS 指向 Cloudflare」的说明，不假装能一键创建域名。</li>
+      <li><b>完成后</b>显示简洁的总览：状态（已连通 / 连接中 / 出错 + 原因）、客户端地址（托管隧道上的全部地址）、API key 列表（新建 / 查看 / 吊销）、「检测」按钮（服务端请求自己的公网地址，期望 401 = 通；失败给出原因，并提示「某些网络（如公司网络）可能屏蔽该域名，可再加一个域名」）、「再加一个地址」「重新运行引导」「关闭公网访问」。端口、手动改 token 等放进「高级」。</li>
+      <li>补测试（引导进度的迁移和保存、检测接口用假 fetch）；内置浏览器里走完两条分支（一键分支用假 Cloudflare：<code>LLAMA_WEB_CLOUDFLARE_API</code> + <code>tests/fixtures/fake-cloudflare.ts</code>），看深色模式和手机宽度；README 公网一节改成新流程。</li>
+      <li><b>阶段 4 剩余验收</b>（会占用 GPU，先告诉用户）：官方「最新」指针仍是已装版本时，在临时数据目录里先装一个更旧的真实版本，启动后让更新器自动下载最新版并设为当前；再回退到旧版本，用真实模型加载确认用的是旧版本；最后给出阶段 4 验收结果表。真机改用户 Cloudflare 账号前先告诉用户要改什么。</li>
+    </ul>
+    <div class="prompt"><button type="button">复制</button><pre>执行工作包 4-6（含阶段 4 验收）。
+按 AGENTS.md 的规则开始：先读 docs/claude-guide.html 里「工作包 4-6」的卡片和「会话规则」，再读 docs/handoff.md 最新交接和 docs/plan.html 阶段 4 的任务、验收标准与变更记录里 4-5、4-6 的几条。
+先给我看引导的步骤设计（每一步显示什么、默认值、分叉）再动手。会占用 GPU 或改动我的 Cloudflare 账号之前先告诉我。做完按指南的「会话收尾流程」结束。</pre></div>
+  </div>
+
   <div class="gatebox"><span class="m gate">阶段关口 4</span> 你试用（经隧道带 key / 不带 key）→ Codex 审查（阶段号 4）→ Claude 处理意见 → 完成。之后自行吊销旧 key、归档旧目录。</div>
 </section>
 

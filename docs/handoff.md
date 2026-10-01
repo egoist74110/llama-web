@@ -16,6 +16,15 @@
 
 ---
 
+## 2026-10-01 · 工作包 4-5 · Opus 5.5
+- 完成：plan 阶段 4「一键建隧道」。`server/core/cloudflare.ts`：`CfClient`（可注入 fetch，token 只放 Authorization 头）、`inspect`（校验用户 / 账号 token，列 zone，探测 Tunnel / DNS / Zone 读权限，缺哪项指出来；只有 active zone 可用）、`planSetup`（同名隧道 / CNAME 指向的隧道 / 当前托管隧道 → 选择；入口规则合并保留其他主机名；A/AAAA 或多条记录 → blocked；fingerprint）、`CloudflareSetup`（tunnel → ingress → dns → token → save，失败停在该步，重试从失败步继续，放弃只删本次新建的隧道 / DNS）。secrets.json → v3（`cloudflareToken`，迁移）。接口 `/api/cloudflare`、`/token`、`/zones`、`/preview`、`/apply`、`/retry`、`/cleanup`、`/dismiss`。界面 `SettingsCloudflare.vue`（token、建 token / 域名接入的说明、选域名、预览、确认框、步骤结果）。真机后追加：默认沿用正在托管的隧道（由隧道 token 解出 ID，`tunnelIdOf`），换域名 = 给它加一个地址；隧道名移入「高级」。README 公网一节重写（先决条件 / 方式 A 一键 / 方式 B 手动）。
+- 验证：`bun test` 519 通过（新增 cloudflare 29、keys 3、tunnel 1）；`bun run typecheck`、`bun run build` 通过。构建产物 + 临时数据目录 + 假 Cloudflare（HTTP 包一层 fixture，已停已删）在内置浏览器：错 token 拒绝、好 token 列 zone、冲突选择、注入 DNS 失败 → 重试成功、403 失败 → 放弃只删新隧道、A 记录 blocked、手机宽度 + 深色无横向滚动；日志 / 接口无 token。真机（用户自己在界面操作）：第一个域名经隧道带 key 200、无 key 401、吊销 401、`/`、`/api/state` 404；第二个域名 401（可达）。
+- 剩余：阶段 4 验收里**仍未验证**：真实的自动更新下载、真实模型下的回退（放进 4-6）。**没测**：「默认沿用当前隧道」在真实账号上的执行（只有单测 + 真实账号的只读预览）。
+- 决定 / 坑：用户公司网络打不开第一个域名（不是程序问题；DSH 在别的机器上，本机测不到）。用户第二次建隧道时新建了隧道 llama-web 并替换了托管 token（多半是在修复生效前跑的），所以**第一个域名现在 530**（CNAME 仍指向无连接的旧隧道 llm）；用新界面对该域名再跑一次即可改指（会改 DNS，先问用户），或在后台删掉旧隧道 / 记录。Cloudflare 不提供免费域名、API 不能代注册。测试用 `LLAMA_WEB_CLOUDFLARE_API` 指向假 Cloudflare。界面目前四张公网卡片并列，用户认为太复杂 → 4-6。
+- 下一步：工作包 4-6「公网模块合并 + 引导 + 阶段 4 验收」（Opus 5.5，见 claude-guide）；阶段关口 4 顺延到它之后。
+
+---
+
 ## 2026-10-01 · 工作包 4-4（含阶段 4 验收） · Opus 5.5
 - 完成：plan 阶段 4「隧道托管」。`server/core/tunnel.ts`：`extractToken`（裸 token 或整条命令）、打码 / `redact`；查找 cloudflared（PATH + 常见安装位置）→ 复制到 `data/runtime/cloudflared/`，没有就从官方 Release 下载并校验 SHA-256；`TunnelManager`（token 走环境变量 `TUNNEL_TOKEN`，输出逐行脱敏，识别 Registered / Unregistered tunnel connection → 已连通；意外退出退避重试，token 无效不重试；pid 记入 pids.json，停止杀进程树）。仅在「公网入口监听中 + 已存 token + 托管开关开」时运行。settings.json → v2（删 `tunnelName`，加 `public.tunnelEnabled`，迁移函数）；secrets.json → v2（加 `tunnelToken`）。接口 `/api/tunnel/token`、`/api/tunnel/retry`；快照 `tunnel`、事件 `kind:'tunnel'`。界面：设置页「Cloudflare 隧道」卡片 + 带 SVG 示意图的分步指引；公网入口卡片去掉隧道名 / DNS 命令。README 隧道一节改写（并更正 secrets.json 是明文而非哈希）。
 - 验证：`bun test` 全部通过（新增 tunnel 21 条含真实子进程、keys / settings / residue 若干）；`bun run typecheck`、`bun run build` 通过。真机（临时数据目录，端口 5097 / 18090，已停已删，GPU 回到基线）：已装 cloudflared 2026.5.0 被复制并运行；伪造 token 连不上时显示「正在连接」+ 最近报错；用户自己的 token：状态已连通（4 条连接）；经隧道无 key / 错 key / 吊销后的 key → 401，带 key 的 /v1/models 200，/api/state、/api/keys、/settings、/upstream、/ → 404；带 key 流式对话触发 Qwen3.8-27B 加载（41 秒）并出流；请求记录 source=public + key 名；token / key 未出现在日志、事件、server 输出；真实 settings.json 副本迁移到 v2 且生成备份；`git add -f data/x` 被 pre-commit 拒绝。

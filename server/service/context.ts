@@ -23,6 +23,7 @@ import { SpeedMeter } from '../core/speed'
 import { isFirstRun } from '../core/settings-admin'
 import { JsonStore, resolveDataDir, type VersionedDoc } from '../core/store'
 import { TunnelManager, type TunnelInfo } from '../core/tunnel'
+import { CloudflareSetup } from '../core/cloudflare'
 import { Updater } from '../core/updater'
 
 export interface AppContext {
@@ -56,6 +57,8 @@ export interface AppContext {
   tunnel: TunnelManager
   /** Bring the tunnel in line with settings, listener state and the saved token. */
   applyTunnel(): void
+  /** One-click tunnel setup through the Cloudflare API (the run in progress / last failed run). */
+  cloudflare: CloudflareSetup
   /** Live state for /api/stream and /api/state. */
   live: LiveHub
   /** Log files under data/logs (model output, events, request records). */
@@ -280,6 +283,22 @@ function createContext(): AppContext {
     })
   }
 
+  // On success: save the tunnel token, then switch the public entry and hosting on and show the
+  // hostname as the client address. The token itself is never logged.
+  const cloudflare = new CloudflareSetup({
+    onSaved: ({ tunnelToken, hostname }) => {
+      secretsRef.update((draft) => { draft.tunnelToken = tunnelToken })
+      settingsRef.update((draft) => { draft.public = { ...draft.public, enabled: true, tunnelEnabled: true, domain: hostname } })
+    },
+    onChange: (job) => {
+      if (job?.state === 'done') log(`cloudflare: set up ${job.hostname}`)
+      else if (job?.state === 'failed') {
+        const f = job.steps.find(s => s.state === 'failed')
+        logError(`cloudflare: setup of ${job.hostname} failed at ${f?.id}: ${f?.error?.code}${f?.error?.detail ? ` ${f.error.detail}` : ''}`)
+      }
+    },
+  })
+
   /** Bring the public listener in line with settings.public and log what changed. */
   function applyPublic() {
     try { applyPublicListener() } finally { applyTunnel() }
@@ -304,7 +323,7 @@ function createContext(): AppContext {
   let closing: Promise<void> | null = null
   return {
     dataDir, bootPort: getSettings().server.port, getSettings, getModels, updateSettings: settingsRef.update, updateModels: modelsRef.update,
-    getSecrets: secretsRef.get, updateSecrets: secretsRef.update, tunnel, applyTunnel,
+    getSecrets: secretsRef.get, updateSecrets: secretsRef.update, tunnel, applyTunnel, cloudflare,
     refresh: () => { settingsRef.refresh(); modelsRef.refresh() },
     getRuntimeStatus: () => updater.getStatus(), updater, runner, scheduler, ops, proxy, publicEntry, applyPublic, live, logs, cleanupDone,
     shutdown() {

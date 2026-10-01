@@ -36,7 +36,7 @@ start.bat build    # 重新构建后运行
 | --- | --- |
 | `settings.json` | 端口、模型目录、默认参数、调度、图片压缩、日志保留、llama.cpp 版本等 |
 | `models.json` | 已启用的模型和参数方案 |
-| `secrets.json` | API key 和隧道 token（明文保存；界面默认打码，不进日志和请求记录） |
+| `secrets.json` | API key、隧道 token、Cloudflare API token（明文保存；界面默认打码，不进日志和请求记录） |
 | `templates/` | 自定义聊天模板 |
 | `runtime/` | 下载的 llama.cpp 版本目录，以及隧道用的 cloudflared（`runtime/cloudflared/`） |
 | `logs/` | 模型输出、事件、请求记录（请求记录不含对话内容） |
@@ -49,15 +49,46 @@ OpenAI 兼容：Base URL 填 `http://<本机地址>:5001/v1`，`model` 填模型
 
 ## 公网访问（Cloudflare 隧道）
 
-公网入口是独立的 `:8080`：只绑定 `127.0.0.1`，只开放 `/v1/*`，必须带 `Authorization: Bearer <key>`；管理界面和 `/api/*` 在这个入口上一律 404。隧道由 llama-web 自己启动和看管（`cloudflared`），你只需要在 Cloudflare 后台建一次隧道、把隧道 token 填到设置页。
+公网入口是独立的 `:8080`：只绑定 `127.0.0.1`，只开放 `/v1/*`，必须带 `Authorization: Bearer <key>`；管理界面和 `/api/*` 在这个入口上一律 404。隧道由 llama-web 自己启动和看管（`cloudflared`）。建隧道有两种方式：
 
-1. **建隧道**（只需要一次，需要一个已添加到 Cloudflare 的域名）。设置页「Cloudflare 隧道」卡片里有带示意图的分步说明，要点是：
+### 0. 先决条件：域名已接入 Cloudflare
+
+隧道只能用**已添加到你 Cloudflare 账号、状态为 Active** 的域名（zone）。Cloudflare 通过「域名的 NS 指向 Cloudflare」确认域名归你所有，这一步只能你自己做：
+
+1. Cloudflare 后台首页 → Add a domain，输入根域名（例如 `example.com`），选 Free 套餐；
+2. Cloudflare 给出两个名称服务器（`xxx.ns.cloudflare.com`），到域名注册商后台把域名的 NS 改成这两个；
+3. 等 Cloudflare 里该域名状态变成 Active（几分钟到 24 小时）。不允许修改 NS 的域名（部分免费二级域名）不能接入。
+
+Cloudflare 不提供免费域名，也不能通过 API 代你注册；域名要从注册商获得（免费二级域名服务，或付费购买）。
+
+### 方式 A：一键建隧道（推荐）
+
+1. 创建 Cloudflare API token：右上角头像 → My Profile → API Tokens → Create Token → Create Custom Token。权限三行：
+   - Account · Cloudflare Tunnel · Edit
+   - Zone · DNS · Edit
+   - Zone · Zone · Read
+
+   Account Resources 选你的账号，Zone Resources 选要用的域名（或 All zones）。
+2. 「设置 → 一键建隧道」：粘贴 API token，点「校验并保存」（会先向 Cloudflare 校验，缺权限会指出缺哪项）。
+3. 选域名、填子域名（例如 `llm`）和隧道名，点「预览」。预览列出将要做的事：新建 / 复用隧道、入口规则 `子域名.域名 → http://127.0.0.1:<入口端口>`、新建或修改 DNS CNAME（`<隧道ID>.cfargotunnel.com`，代理开启）、保存隧道 token、打开公网入口和托管开关。
+   - 已有同名隧道、或该地址的 CNAME 已指向别的隧道时，会列出现状让你选「复用」还是「新建 + 改指」；
+   - 该地址已有 A / AAAA 等其他记录时不会继续（llama-web 不替你删记录），换个子域名或自己去后台删；
+   - 复用的隧道上有其他在线连接器、或有其他主机名时会提示。
+4. 确认执行。执行前会再读一次账号，情况有变就停下来让你重新预览；某一步失败可以「从失败处重试」，或「放弃并删除这次新建的内容」（只删这次新建的隧道 / DNS 记录）。
+5. 「设置 → API key」新建一个 key，等「Cloudflare 隧道」状态变成「已连通」即可。用完可以在 Cloudflare 后台删掉 API token，已建好的隧道不受影响。
+6. **再加一个地址**（例如某个网络打不开当前域名）：选另一个域名再跑一次。默认沿用 llama-web 正在托管的那条隧道，只加一条入口规则和一条 DNS 记录，原来的地址照常可用；想用别的隧道点「换一条隧道」。
+
+### 方式 B：在 Cloudflare 后台手动建
+
+1. **建隧道**（只需要一次）。设置页「Cloudflare 隧道」卡片里有带示意图的分步说明，要点是：
    - Cloudflare 后台 → Zero Trust → Networks → Tunnels → Create a tunnel → 类型选 Cloudflared，起个名字；
    - 下一页 Install and run connectors 里复制 token（以 `eyJ` 开头；整条 `cloudflared.exe service install eyJ…` 命令也行），**不要**在电脑上运行那条命令；
    - Public Hostname：填子域名和域名，Service 类型选 `HTTP`，URL 填 `127.0.0.1:8080`（和设置页「入口端口」一致）。
 2. 「设置 → API key」新建一个 key（明文可在列表里再次查看，请妥善保存）。
 3. 「设置 → 公网入口」：打开启用开关（域名可选，只用来显示客户端地址），保存即生效。
 4. 「设置 → Cloudflare 隧道」：粘贴隧道 token 并保存，打开「由 llama-web 托管隧道」。状态变成「已连通」就可以用了。
+
+改了「入口端口」之后，隧道的入口规则不会自动跟着改：重新跑一次一键建隧道（选复用这条隧道），或到后台改 Public Hostname。
 
 cloudflared 的来源：优先使用本机已装的（PATH、常见安装位置），会复制到 `data/runtime/cloudflared/` 再从那里运行；本机没有就从官方 Release 下载并校验 SHA-256。隧道随 llama-web 启动和退出；意外退出会自动重试（token 无效不会重试，需要你改好后点「立即重试」）。token 保存在 `data/secrets.json`，通过环境变量交给 cloudflared，不出现在命令行、日志、事件和界面（界面只显示打码结果）。
 
