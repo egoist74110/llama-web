@@ -16,6 +16,15 @@
 
 ---
 
+## 2026-10-01 · 工作包 4-4（含阶段 4 验收） · Opus 5.5
+- 完成：plan 阶段 4「隧道托管」。`server/core/tunnel.ts`：`extractToken`（裸 token 或整条命令）、打码 / `redact`；查找 cloudflared（PATH + 常见安装位置）→ 复制到 `data/runtime/cloudflared/`，没有就从官方 Release 下载并校验 SHA-256；`TunnelManager`（token 走环境变量 `TUNNEL_TOKEN`，输出逐行脱敏，识别 Registered / Unregistered tunnel connection → 已连通；意外退出退避重试，token 无效不重试；pid 记入 pids.json，停止杀进程树）。仅在「公网入口监听中 + 已存 token + 托管开关开」时运行。settings.json → v2（删 `tunnelName`，加 `public.tunnelEnabled`，迁移函数）；secrets.json → v2（加 `tunnelToken`）。接口 `/api/tunnel/token`、`/api/tunnel/retry`；快照 `tunnel`、事件 `kind:'tunnel'`。界面：设置页「Cloudflare 隧道」卡片 + 带 SVG 示意图的分步指引；公网入口卡片去掉隧道名 / DNS 命令。README 隧道一节改写（并更正 secrets.json 是明文而非哈希）。
+- 验证：`bun test` 全部通过（新增 tunnel 21 条含真实子进程、keys / settings / residue 若干）；`bun run typecheck`、`bun run build` 通过。真机（临时数据目录，端口 5097 / 18090，已停已删，GPU 回到基线）：已装 cloudflared 2026.5.0 被复制并运行；伪造 token 连不上时显示「正在连接」+ 最近报错；用户自己的 token：状态已连通（4 条连接）；经隧道无 key / 错 key / 吊销后的 key → 401，带 key 的 /v1/models 200，/api/state、/api/keys、/settings、/upstream、/ → 404；带 key 流式对话触发 Qwen3.8-27B 加载（41 秒）并出流；请求记录 source=public + key 名；token / key 未出现在日志、事件、server 输出；真实 settings.json 副本迁移到 v2 且生成备份；`git add -f data/x` 被 pre-commit 拒绝。
+- 剩余：阶段 4 验收里**未验证**两项：官方出新版时的自动下载安装（当前官方最新仍是 b11146，没有可下载的）、真实模型下的版本回退（只有一个版本；回退逻辑在 4-2 用假目录验证过）。**没测**：cloudflared 下载路径的真实网络（只有假 fetch 的单测；本机已装）；Windows 服务形式的 cloudflared 与本隧道并存；深色模式 / 手机宽度下的新卡片；`nuxt dev` 下（只会显示「开发模式没有公网入口」）。
+- 决定 / 坑：与 4-3 记录的差异——用 `TUNNEL_TOKEN` 环境变量代替 `--token`（不进进程列表）；已装的 cloudflared 复制到 `data/runtime/cloudflared/` 再运行，这样残留清理只杀 runtime 下进程的规则同样覆盖隧道。真实 cloudflared 遇到不存在的隧道 token 不会退出而是一直内部重试，所以界面显示「正在连接」+ 最近报错，而不是错误卡片。`dnsCommand` / `routeDnsCommand` / `bad-tunnel` 已删。Windows 上硬杀 llama-web 时 cloudflared 随管道关闭自己退出（观察到，不依赖它）。
+- 下一步：阶段关口 4——你试用（经隧道带 key / 不带 key）→ Codex 审查（阶段号 4）→ Claude 处理意见；上面两项未验证的自行确认。之后吊销旧 key、归档旧目录。
+
+---
+
 ## 2026-10-01 · 工作包 4-3 · Sonnet 5.5
 - 完成：plan 阶段 4 第 7–8 项。`scripts/pre-commit`（POSIX sh）：拒绝 `data/`、`secrets.json`、`.env*`，扫描新增行的 `sk-…`、32 位以上十六进制串、Bearer token（报错不打印值）；行内标记 `pre-commit:allow` 放行假值；`docs/reviews/` 不查十六进制串（引用提交哈希）。`.gitattributes` 固定该脚本为 LF（`core.autocrlf=true` 下 CRLF 会让 sh 失败）。启用：`git config core.hooksPath scripts`（每个克隆一次）。`README.md`（中文）。
 - 验证：`bun test` 457 通过（新增 `tests/platform/pre-commit.test.ts` 8 条，在临时 git 仓库里真实运行脚本）；`bun run typecheck` 通过；真实仓库里 `git add -f data/settings.json` 后运行脚本被拒绝。**没运行**：`bun run build`；阶段 4 真机试用（见下）。

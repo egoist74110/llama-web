@@ -11,7 +11,7 @@ import type { ModelDir } from './types'
 export type SettingsErrorCode =
   | 'bad-request' | 'dir-path' | 'dir-duplicate' | 'dir-depth' | 'dir-in-use' | 'dir-limit'
   | 'bad-param' | 'bad-extra-args' | 'bad-image' | 'bad-port' | 'bad-port-range' | 'bad-timeout'
-  | 'bad-public-port' | 'bad-domain' | 'bad-tunnel'
+  | 'bad-public-port' | 'bad-domain'
 
 export class SettingsError extends Error {
   constructor(public code: SettingsErrorCode, public detail = '') {
@@ -173,12 +173,11 @@ export function applyServer(draft: Settings, raw: unknown): void {
 
 // A bare host name such as `llm.example.com` (no scheme, port or path).
 const DOMAIN = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/
-// Cloudflare tunnel names: letters, digits, dot, dash, underscore (also safe to show in a command line).
-const TUNNEL = /^[A-Za-z0-9._-]{1,64}$/
 
 /**
  * Public entry (plan 关键决定 3): on/off, its port (loopback only, never the main port or inside
- * the llama-server range), and the tunnel name / domain used for the DNS command hint.
+ * the llama-server range), the public domain (display only) and whether llama-web hosts the tunnel.
+ * The tunnel token is not part of this patch: it has its own endpoint and is never echoed back.
  */
 export function applyPublic(draft: Settings, raw: unknown): void {
   if (!isObj(raw)) throw new SettingsError('bad-request')
@@ -195,13 +194,9 @@ export function applyPublic(draft: Settings, raw: unknown): void {
     domain = raw.domain.trim().toLowerCase()
     if (domain && !DOMAIN.test(domain)) throw new SettingsError('bad-domain', raw.domain.trim().slice(0, 100))
   }
-  let tunnelName = cur.tunnelName
-  if (raw.tunnelName !== undefined) {
-    if (typeof raw.tunnelName !== 'string') throw new SettingsError('bad-tunnel')
-    tunnelName = raw.tunnelName.trim()
-    if (tunnelName && !TUNNEL.test(tunnelName)) throw new SettingsError('bad-tunnel', tunnelName.slice(0, 100))
-  }
-  draft.public = { enabled, port, domain, tunnelName }
+  const tunnelEnabled = raw.tunnelEnabled === undefined ? cur.tunnelEnabled : raw.tunnelEnabled
+  if (typeof tunnelEnabled !== 'boolean') throw new SettingsError('bad-request')
+  draft.public = { enabled, port, domain, tunnelEnabled }
 }
 
 export interface SettingsPatch {
@@ -241,10 +236,10 @@ export interface SettingsDoc {
   public: Settings['public'] & {
     /** State of the public listener right now. */
     status: PublicStatus
-    /** DNS command for the tunnel, once tunnel name and domain are set. */
-    dnsCommand: string | null
     /** Keys that would be accepted (not revoked). */
     activeKeys: number
+    /** The saved tunnel token, masked (never the token itself). */
+    tunnel: { hasToken: boolean, maskedToken: string | null }
   }
   setupDone: boolean
   /** The saved port differs from the one this process is listening on. */

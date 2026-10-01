@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { defaultModels, defaultSettings, normalizeModels, normalizeSettings, type ModelsDoc, type Settings } from '../../server/core/config'
+import { defaultModels, defaultSettings, normalizeModels, normalizeSettings, SETTINGS_VERSION, type ModelsDoc, type Settings } from '../../server/core/config'
 import { JsonStore } from '../../server/core/store'
 import { aliasOf, commitImport, ImportError, ImportSaveError, importSwapConfig, parseSwapConfig, readImportSource } from '../../server/core/importer'
 import { mmprojSpec, modelSpec, writeGguf } from '../fixtures/gguf-builder'
@@ -284,7 +284,7 @@ test('a template copy failing midway removes the templates already copied', asyn
 
 test('commitImport keeps hand edits of settings.json / models.json not yet seen by the watcher', async () => {
   writeGguf(join(root, 'A-Q4_0.gguf'), modelSpec())
-  const sStore = new JsonStore<Settings>({ dataDir: data, name: 'settings.json', version: 1, defaults: defaultSettings, validate: normalizeSettings })
+  const sStore = new JsonStore<Settings>({ dataDir: data, name: 'settings.json', version: SETTINGS_VERSION, defaults: defaultSettings, validate: normalizeSettings })
   const mStore = new JsonStore<ModelsDoc>({ dataDir: data, name: 'models.json', version: 1, defaults: defaultModels, validate: normalizeModels })
   sStore.load()
   mStore.load()
@@ -311,7 +311,7 @@ test('commitImport keeps hand edits of settings.json / models.json not yet seen 
 
 test('commitImport writes nothing when a config file on disk is invalid', async () => {
   writeGguf(join(root, 'A-Q4_0.gguf'), modelSpec())
-  const sStore = new JsonStore<Settings>({ dataDir: data, name: 'settings.json', version: 1, defaults: defaultSettings, validate: normalizeSettings })
+  const sStore = new JsonStore<Settings>({ dataDir: data, name: 'settings.json', version: SETTINGS_VERSION, defaults: defaultSettings, validate: normalizeSettings })
   const mStore = new JsonStore<ModelsDoc>({ dataDir: data, name: 'models.json', version: 1, defaults: defaultModels, validate: normalizeModels })
   sStore.load()
   mStore.load()

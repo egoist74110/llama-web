@@ -10,6 +10,7 @@ import type { RequestRecord } from './request-log'
 import type { LogStream } from './runner'
 import type { ModelState, SchedulerEvent, SchedulerSnapshot } from './scheduler'
 import type { SpeedDoc } from './speed'
+import type { TunnelInfo } from './tunnel'
 import type { FileRef, ModelDir } from './types'
 
 export interface StateInstance {
@@ -50,6 +51,8 @@ export interface StateDoc {
     /** Older version to suggest when a model fails to load (current is the newest installed); null when none. */
     rollback: string | null
   }
+  /** Cloudflare tunnel hosted by llama-web: state and the cloudflared in use. */
+  tunnel: TunnelInfo
   /** Nothing configured yet and the setup wizard has not been dismissed. */
   firstRun: boolean
 }
@@ -58,12 +61,14 @@ export type ActivityEvent =
   | { id: number, at: number, kind: 'state', modelId: string, profile: string, from: ModelState, to: ModelState, error: string | null }
   | { id: number, at: number, kind: 'drain-timeout', modelId: string, profile: string, inflight: number }
   | { id: number, at: number, kind: 'runtime', state: RuntimeStatus['state'], tag: string | null, code: string | null, note?: string | null, from?: string | null }
+  | { id: number, at: number, kind: 'tunnel', state: 'connected' | 'error', code: string | null }
 
 /** Activity event without the id / time the hub assigns. */
 export type ActivityInput =
   | { kind: 'state', modelId: string, profile: string, from: ModelState, to: ModelState, error: string | null }
   | { kind: 'drain-timeout', modelId: string, profile: string, inflight: number }
   | { kind: 'runtime', state: RuntimeStatus['state'], tag: string | null, code: string | null, note?: string | null, from?: string | null }
+  | { kind: 'tunnel', state: 'connected' | 'error', code: string | null }
 
 /** Short reason key (the diagnosed kind when the output was recognised) or message; null when none. */
 export function errorText(e: unknown): string | null {
@@ -194,6 +199,16 @@ export class LiveHub {
     })
   }
 
+  /** The tunnel changed. Only reaching `connected` or failing is history; progress and connection counts are state. */
+  onTunnelStatus(info: TunnelInfo): void {
+    const s = info.status
+    if (s.state !== 'connected' && s.state !== 'error') return this.notify()
+    const code = s.state === 'error' ? s.code : null
+    const last = [...this.history].reverse().find(h => h.kind === 'tunnel')
+    if (last?.kind === 'tunnel' && last.state === s.state && last.code === code) return this.notify()
+    this.record({ kind: 'tunnel', state: s.state, code })
+  }
+
   /** A finished /v1 request (already stripped of conversation content). */
   onRequest(record: RequestRecord): void {
     this.requests.push(record)
@@ -236,7 +251,7 @@ export class LiveHub {
   }
 
   snapshot(): StateDoc {
-    const { scheduler, models, queue, llamacpp, firstRun } = this.opts.snapshot()
+    const { scheduler, models, queue, llamacpp, tunnel, firstRun } = this.opts.snapshot()
     return {
       now: this.now(),
       models: models.map(m => ({
@@ -249,7 +264,7 @@ export class LiveHub {
             progress: s.state === 'loading' ? (this.progress.get(instKey(m.id, s.profile)) ?? null) : null,
           })),
       })),
-      queue, llamacpp, firstRun: firstRun === true,
+      queue, llamacpp, tunnel, firstRun: firstRun === true,
     }
   }
 

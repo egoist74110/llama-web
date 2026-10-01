@@ -25,6 +25,7 @@ onMounted(load)
       <SettingsImage />
       <SettingsServer />
       <SettingsPublic />
+      <SettingsTunnel />
       <SettingsKeys />
     </template>
 

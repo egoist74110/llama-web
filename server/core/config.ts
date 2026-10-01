@@ -14,7 +14,7 @@ export interface ImagePreprocess {
 export interface Settings {
   version: number
   server: { host: string, port: number }
-  public: { enabled: boolean, port: number, domain: string, tunnelName: string }
+  public: { enabled: boolean, port: number, domain: string, tunnelEnabled: boolean }
   modelDirs: ModelDir[]
   llamacpp: { cudaRuntime: string, current: string, keepVersions: number, autoUpdate: boolean }
   scheduler: {
@@ -60,14 +60,14 @@ export interface ModelsDoc {
   models: ModelConfig[]
 }
 
-export const SETTINGS_VERSION = 1
+export const SETTINGS_VERSION = 2
 export const MODELS_VERSION = 1
 
 export function defaultSettings(): Settings {
   return {
     version: SETTINGS_VERSION,
     server: { host: '0.0.0.0', port: 5001 },
-    public: { enabled: false, port: 8080, domain: '', tunnelName: '' },
+    public: { enabled: false, port: 8080, domain: '', tunnelEnabled: false },
     modelDirs: [],
     llamacpp: { cudaRuntime: '13.3', current: '', keepVersions: 2, autoUpdate: true },
     scheduler: { maxLoaded: 1, loadTimeoutSec: 600, drainTimeoutSec: 300, heartbeatSec: 15, portRange: [7100, 7199] },
@@ -77,6 +77,18 @@ export function defaultSettings(): Settings {
     gpu: { sampleSec: 2 },
     setup: { done: false },
   }
+}
+
+/** `migrations[n]` turns a version-n settings.json into version n + 1. */
+export const SETTINGS_MIGRATIONS: Record<number, (old: any) => any> = {
+  // 2: the tunnel is hosted by llama-web (token in secrets.json); the tunnel name is gone.
+  1: (old) => {
+    if (isObj(old.public)) {
+      delete old.public.tunnelName
+      old.public.tunnelEnabled ??= false
+    }
+    return old
+  },
 }
 
 export function defaultModels(): ModelsDoc {
@@ -103,6 +115,8 @@ export function normalizeSettings(doc: Settings): Settings {
   if (!Array.isArray(pr) || pr.length !== 2 || !pr.every((p: unknown) => Number.isInteger(p)) || pr[0] > pr[1]) {
     throw new Error('"scheduler.portRange" must be [from, to]')
   }
+  delete (out.public as Record<string, unknown>).tunnelName
+  if (typeof out.public.tunnelEnabled !== 'boolean') out.public.tunnelEnabled = false
   // Placeholder (decision 9): the field exists but the online limit stays fixed at 1.
   out.scheduler.maxLoaded = 1
   return out as Settings

@@ -132,7 +132,7 @@ const modelRows = computed<TextRow[]>(() => {
 const eventRows = computed<TextRow[]>(() => {
   const list: ActivityEvent[] = inFile.value ? parseJsonl<ActivityEvent>(file.value?.lines ?? []) : [...events.value].reverse()
   return list
-    .filter(e => !wantModel.value || e.kind === 'runtime' || e.modelId === wantModel.value)
+    .filter(e => !wantModel.value || e.kind === 'runtime' || e.kind === 'tunnel' || e.modelId === wantModel.value)
     .map((e, i) => ({ key: inFile.value ? String(i) : String(e.id), at: e.at, tag: '', text: eventText(e, modelName), error: e.kind === 'state' && !!e.error }))
 })
 

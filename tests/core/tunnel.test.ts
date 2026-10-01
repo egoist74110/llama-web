@@ -1,0 +1,342 @@
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { createHash } from 'node:crypto'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { isAlive, PidRegistry } from '../../server/core/runner'
+import {
+  candidatePaths, cloudflaredPath, extractToken, findCloudflared, maskToken, prepareCloudflared, redact, releaseAssetName,
+  TunnelError, TunnelManager, type PrepareOptions, type TunnelConfig, type TunnelInfo, type TunnelStatus,
+} from '../../server/core/tunnel'
+
+const FIXTURE = join(import.meta.dir, '..', 'fixtures', 'fake-cloudflared.ts')
+const SECRET = 'supersecretvalue1234567890'
+const TOKEN = Buffer.from(JSON.stringify({ a: 'acct0123456789', t: '11111111-2222-3333-4444-555555555555', s: SECRET })).toString('base64')
+
+let dir: string
+beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'lw-tunnel-')) })
+afterEach(() => { rmSync(dir, { recursive: true, force: true }) })
+
+const sha = (b: string) => createHash('sha256').update(b).digest('hex')
+const codeOf = (fn: () => unknown) => {
+  try { fn() } catch (e) { return e instanceof TunnelError ? e.code : `other:${(e as Error).message}` }
+  return 'none'
+}
+
+describe('token', () => {
+  test('bare token, whole command, surrounding whitespace', () => {
+    expect(extractToken(TOKEN)).toBe(TOKEN)
+    expect(extractToken(`  ${TOKEN}\n`)).toBe(TOKEN)
+    expect(extractToken(`cloudflared.exe service install ${TOKEN}`)).toBe(TOKEN)
+    expect(extractToken(`cloudflared tunnel run --token ${TOKEN}`)).toBe(TOKEN)
+  })
+
+  test('anything else is refused, and the error never echoes the input', () => {
+    const notJson = Buffer.from('not json at all, definitely').toString('base64')
+    const noSecret = Buffer.from(JSON.stringify({ a: 'x', t: 'y' })).toString('base64')
+    for (const bad of ['', 'hello', 'eyJ', notJson, noSecret, 'x'.repeat(5000), 42, null, undefined, {}]) {
+      expect(codeOf(() => extractToken(bad))).toBe('bad-token')
+    }
+    try { extractToken(`xx ${noSecret} xx`) } catch (e) { expect(String(e)).not.toContain(noSecret.slice(0, 12)) }
+  })
+
+  test('mask keeps only the end', () => {
+    const m = maskToken(TOKEN)
+    expect(m).toBe(`${TOKEN.slice(0, 4)}…${TOKEN.slice(-4)}`)
+    expect(m).not.toContain(SECRET)
+    expect(maskToken('short')).toBe('…')
+  })
+
+  test('redact removes the token, its secret part, token-shaped text and --token / TUNNEL_TOKEN values', () => {
+    const line = `a ${TOKEN} b ${SECRET} c eyJhIjoiMTIzNDU2Nzg5MDEyMzQ1Njc4OTAifQ d --token abc123 e TUNNEL_TOKEN=zzz f`
+    const out = redact(line, TOKEN)
+    for (const leak of [TOKEN, SECRET, 'eyJhIjoi', 'abc123', 'zzz']) expect(out).not.toContain(leak)
+    expect(out).toContain('--token [token]')
+    expect(redact('plain line', TOKEN)).toBe('plain line')
+    expect(redact(`x ${TOKEN}`)).not.toContain(TOKEN)
+  })
+})
+
+describe('finding cloudflared', () => {
+  const env = { PATH: 'C:\\tools;"C:\\Program Files\\bin"', ProgramFiles: 'C:\\Program Files', LOCALAPPDATA: 'C:\\Users\\u\\AppData\\Local' }
+
+  test('PATH entries come first, then the common install locations', () => {
+    const list = candidatePaths(env, 'win32')
+    expect(list[0]).toBe('C:\\tools\\cloudflared.exe')
+    expect(list[1]).toBe('C:\\Program Files\\bin\\cloudflared.exe')
+    expect(list).toContain('C:\\Program Files\\cloudflared\\cloudflared.exe')
+    expect(list).toContain('C:\\Users\\u\\AppData\\Local\\Microsoft\\WinGet\\Links\\cloudflared.exe')
+    expect(new Set(list).size).toBe(list.length)
+  })
+
+  test('first existing candidate wins; our own copy is skipped; none gives null', () => {
+    const have = new Set(['C:\\Program Files\\cloudflared\\cloudflared.exe', 'C:\\tools\\cloudflared.exe'])
+    expect(findCloudflared({ env, platform: 'win32', exists: f => have.has(f) })).toBe('C:\\tools\\cloudflared.exe')
+    expect(findCloudflared({ env, platform: 'win32', exists: f => have.has(f), skip: ['c:\\TOOLS\\cloudflared.exe'] })).toBe('C:\\Program Files\\cloudflared\\cloudflared.exe')
+    expect(findCloudflared({ env, platform: 'win32', exists: () => false })).toBeNull()
+  })
+})
+
+describe('prepareCloudflared', () => {
+  const noEnv = { PATH: '' }
+
+  function release(body: string, opts: { digest?: string | null, omit?: boolean } = {}) {
+    const name = releaseAssetName()!
+    const calls: string[] = []
+    const fetchFn = async (url: string) => {
+      calls.push(url)
+      if (url.endsWith('/releases/latest')) {
+        const digest = opts.digest === undefined ? `sha256:${sha(body)}` : opts.digest
+        return Response.json({ assets: opts.omit ? [] : [{ name, browser_download_url: `https://dl.test/${name}`, digest }] })
+      }
+      if (url === `https://dl.test/${name}`) return new Response(body)
+      return new Response('nope', { status: 404 })
+    }
+    return { fetchFn, calls }
+  }
+
+  test('an installed cloudflared is copied under data/runtime/cloudflared and used from there', async () => {
+    const sys = join(dir, 'sys', 'cloudflared.exe')
+    mkdirSync(join(dir, 'sys'))
+    writeFileSync(sys, 'SYSTEM-BUILD')
+    const r = await prepareCloudflared({ dataDir: dir, env: { PATH: join(dir, 'sys') }, platform: 'win32', fetch: release('x').fetchFn })
+    expect(r).toEqual({ exe: cloudflaredPath(dir, 'win32'), source: 'system' })
+    expect(readFileSync(r.exe, 'utf8')).toBe('SYSTEM-BUILD')
+  })
+
+  test('the copy is refreshed only when the installed one changed', async () => {
+    const sysDir = join(dir, 'sys')
+    mkdirSync(sysDir)
+    const sys = join(sysDir, 'cloudflared.exe')
+    writeFileSync(sys, 'V1')
+    const o: PrepareOptions = { dataDir: dir, env: { PATH: sysDir }, platform: 'win32' }
+    const first = await prepareCloudflared(o)
+    // Same content: the copy stays untouched (an old mtime on ours would be replaced by a re-copy).
+    const old = new Date(Date.now() - 3_600_000)
+    utimesSync(first.exe, old, old)
+    utimesSync(sys, new Date(Date.now() - 7_200_000), new Date(Date.now() - 7_200_000))
+    await prepareCloudflared(o)
+    expect(statSync(first.exe).mtimeMs).toBeLessThan(Date.now() - 3_000_000)
+    writeFileSync(sys, 'V2-longer')
+    await prepareCloudflared(o)
+    expect(readFileSync(first.exe, 'utf8')).toBe('V2-longer')
+  })
+
+  test('nothing installed: downloads the official build and verifies SHA-256', async () => {
+    const rel = release('OFFICIAL-BINARY')
+    const steps: string[] = []
+    const r = await prepareCloudflared({ dataDir: dir, env: noEnv, platform: 'win32', fetch: rel.fetchFn, exists: () => false, onStep: s => steps.push(s) })
+    expect(r.source).toBe('downloaded')
+    expect(readFileSync(r.exe, 'utf8')).toBe('OFFICIAL-BINARY')
+    expect(steps).toEqual(['find', 'download'])
+    // Already there: no second download.
+    const before = rel.calls.length
+    expect((await prepareCloudflared({ dataDir: dir, env: noEnv, platform: 'win32', fetch: rel.fetchFn, exists: () => false })).source).toBe('downloaded')
+    expect(rel.calls.length).toBe(before)
+  })
+
+  test('a download that fails verification leaves nothing behind', async () => {
+    for (const rel of [release('BAD', { digest: `sha256:${sha('other')}` }), release('x', { digest: null }), release('x', { omit: true })]) {
+      const err = await prepareCloudflared({ dataDir: dir, env: noEnv, platform: 'win32', fetch: rel.fetchFn, exists: () => false }).catch(e => e)
+      expect(err).toBeInstanceOf(TunnelError)
+      expect((err as TunnelError).code).toBe('download-failed')
+      expect(existsSync(cloudflaredPath(dir, 'win32'))).toBe(false)
+      const d = join(dir, 'runtime', 'cloudflared')
+      expect(existsSync(d) ? readdirSync(d).length : 0).toBe(0)
+    }
+  })
+
+  test('offline gives download-failed, not a crash', async () => {
+    const err = await prepareCloudflared({ dataDir: dir, env: noEnv, platform: 'win32', exists: () => false, fetch: async () => { throw new Error('offline') } }).catch(e => e)
+    expect((err as TunnelError).code).toBe('download-failed')
+  })
+})
+
+// ---------------------------------------------------------------------------------------
+// Manager, with a real child process (the fixture run by bun)
+
+async function until<T>(fn: () => T | undefined | false | null, ms = 8000): Promise<T> {
+  const end = Date.now() + ms
+  for (;;) {
+    const v = fn()
+    if (v) return v
+    if (Date.now() > end) throw new Error('timed out')
+    await new Promise(r => setTimeout(r, 25))
+  }
+}
+
+const baseCfg = (over: Partial<TunnelConfig> = {}): TunnelConfig => ({
+  tunnelEnabled: true, publicEnabled: true, publicState: 'listening', token: TOKEN, port: 8080, ...over,
+})
+
+function makeManager(mode: () => string, over: Partial<ConstructorParameters<typeof TunnelManager>[0]> = {}) {
+  const statuses: TunnelStatus[] = []
+  const lines: string[] = []
+  const registry = new PidRegistry(join(dir, 'run', 'pids.json'))
+  let spawns = 0
+  const m = new TunnelManager({
+    dataDir: dir,
+    registry,
+    prepare: async () => ({ exe: process.execPath, source: 'system' }),
+    version: async () => '2099.1.0',
+    buildArgs: () => { spawns++; return [FIXTURE, mode()] },
+    retryDelaysMs: [30, 30],
+    onStatus: (i: TunnelInfo) => statuses.push(i.status),
+    onLine: l => lines.push(l),
+    ...over,
+  })
+  return { m, statuses, lines, registry, spawns: () => spawns }
+}
+
+const errorOf = (m: TunnelManager) => { const s = m.status().status; return s.state === 'error' ? s : null }
+
+describe('TunnelManager', () => {
+  test('reasons for staying off', async () => {
+    const { m } = makeManager(() => 'connect')
+    const reasonOf = async (c: Partial<TunnelConfig>) => {
+      m.apply(baseCfg(c))
+      await new Promise(r => setTimeout(r, 30))
+      const s = m.status().status
+      return s.state === 'off' ? s.reason : s.state
+    }
+    expect(await reasonOf({ tunnelEnabled: false })).toBe('disabled')
+    expect(await reasonOf({ token: '' })).toBe('no-token')
+    expect(await reasonOf({ publicEnabled: false })).toBe('public-off')
+    expect(await reasonOf({ publicState: 'unavailable' })).toBe('public-unavailable')
+    expect(await reasonOf({ publicState: 'error' })).toBe('public-error')
+    await m.shutdown()
+  })
+
+  test('connects: token in the environment (not argv), pid recorded, then removed on stop', async () => {
+    const { m, registry, statuses } = makeManager(() => 'connect')
+    m.apply(baseCfg())
+    await until(() => { const s = m.status().status; return s.state === 'connected' && s.connections === 2 })
+    expect(m.status().status).toEqual({ state: 'connected', connections: 2 })
+    expect(m.status().cloudflared).toEqual({ source: 'system', version: '2099.1.0' })
+    expect(statuses.map(s => s.state)).toContain('preparing')
+    const rec = registry.list()
+    expect(rec).toHaveLength(1)
+    expect(rec[0]).toMatchObject({ tag: 'tunnel', port: 8080 })
+    expect(m.tail().join('\n')).toContain(`token-length=${TOKEN.length}`)
+    const pid = rec[0]!.pid
+    m.apply(baseCfg({ tunnelEnabled: false }))
+    await until(() => m.status().status.state === 'off')
+    await until(() => !isAlive(pid))
+    expect(registry.list()).toEqual([])
+    await m.shutdown()
+  })
+
+  test('the token never shows up in status, output lines, tail or errors', async () => {
+    const { m, statuses, lines } = makeManager(() => 'leak')
+    m.apply(baseCfg())
+    await until(() => m.status().status.state === 'connected')
+    await m.shutdown()
+    const everything = JSON.stringify([statuses, lines, m.tail(200), m.status()])
+    expect(everything).not.toContain(TOKEN)
+    expect(everything).not.toContain(SECRET)
+    expect(lines.some(l => l.includes('debug token=[token] secret=[secret]'))).toBe(true)
+  })
+
+  test('an invalid token is an error that is not retried', async () => {
+    const { m, spawns } = makeManager(() => 'badtoken')
+    m.apply(baseCfg())
+    const st = await until(() => errorOf(m))
+    expect(st).toMatchObject({ code: 'bad-token', retryAt: null })
+    await new Promise(r => setTimeout(r, 200))
+    expect(spawns()).toBe(1)
+    expect(m.status().status.state).toBe('error')
+    await m.shutdown()
+  })
+
+  test('an unexpected exit is retried after a delay; retry() starts at once', async () => {
+    const { m, spawns } = makeManager(() => 'crash', { retryDelaysMs: [40, 10_000] })
+    m.apply(baseCfg())
+    const first = await until(() => errorOf(m))
+    expect(first).toMatchObject({ code: 'exited', detail: 'exit code 2' })
+    expect(first.tail.join('\n')).toContain('something broke')
+    await until(() => spawns() >= 2)
+    // The wait after the second failure is 10 s: retry() skips it.
+    await until(() => { const s = errorOf(m); return s !== null && s.retryAt !== null && s.retryAt - Date.now() > 5000 })
+    const n = spawns()
+    m.retry()
+    await until(() => spawns() > n)
+    await m.shutdown()
+  })
+
+  test('only an error line while connecting is shown as starting with the last error', async () => {
+    const { m } = makeManager(() => 'quiet')
+    m.apply(baseCfg())
+    const st = await until(() => { const s = m.status().status; return s.state === 'starting' && s.lastError ? s : null })
+    expect(st.lastError).toContain('Unable to establish connection')
+    await m.shutdown()
+  })
+
+  test('a changed token restarts with the new one; the same token does not', async () => {
+    const { m, spawns } = makeManager(() => 'connect')
+    m.apply(baseCfg())
+    await until(() => m.status().status.state === 'connected')
+    m.apply(baseCfg({ port: 8099 }))
+    await new Promise(r => setTimeout(r, 150))
+    expect(spawns()).toBe(1)
+    const other = Buffer.from(JSON.stringify({ a: 'a', t: 't', s: 'another-secret-value' })).toString('base64')
+    m.apply(baseCfg({ token: other }))
+    await until(() => spawns() === 2)
+    await until(() => m.status().status.state === 'connected' && m.tail(50).join('\n').includes(`token-length=${other.length}`))
+    await m.shutdown()
+  })
+
+  test('stopping kills the whole process tree', async () => {
+    const { m } = makeManager(() => 'child')
+    m.apply(baseCfg())
+    await until(() => m.status().status.state === 'connected')
+    const child = Number(/child=(\d+)/.exec(m.tail(50).join('\n'))![1])
+    expect(isAlive(child)).toBe(true)
+    await m.shutdown()
+    await until(() => !isAlive(child))
+  })
+
+  test('turning it off while cloudflared is still being prepared starts nothing', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((r) => { release = r })
+    const { m, spawns } = makeManager(() => 'connect', { prepare: async () => { await gate; return { exe: process.execPath, source: 'system' } } })
+    m.apply(baseCfg())
+    await until(() => m.status().status.state === 'preparing')
+    m.apply(baseCfg({ tunnelEnabled: false }))
+    await until(() => m.status().status.state === 'off')
+    release()
+    await new Promise(r => setTimeout(r, 200))
+    expect(spawns()).toBe(0)
+    expect(m.status().status.state).toBe('off')
+    await m.shutdown()
+  })
+
+  test('a failed preparation is an error with the reason, and is retried', async () => {
+    let tries = 0
+    const { m } = makeManager(() => 'connect', {
+      prepare: async () => {
+        tries++
+        if (tries === 1) throw new TunnelError('download-failed', `network: ${TOKEN}`)
+        return { exe: process.execPath, source: 'downloaded' }
+      },
+    })
+    m.apply(baseCfg())
+    const st = await until(() => errorOf(m))
+    expect(st).toMatchObject({ code: 'download-failed' })
+    expect(JSON.stringify(st)).not.toContain(TOKEN)
+    await until(() => m.status().status.state === 'connected')
+    expect(m.status().cloudflared?.source).toBe('downloaded')
+    await m.shutdown()
+  })
+
+  test('waits for the startup cleanup before starting anything', async () => {
+    let done!: () => void
+    const ready = new Promise<void>((r) => { done = r })
+    const { m, spawns } = makeManager(() => 'connect', { ready })
+    m.apply(baseCfg())
+    await new Promise(r => setTimeout(r, 150))
+    expect(spawns()).toBe(0)
+    done()
+    await until(() => m.status().status.state === 'connected')
+    await m.shutdown()
+  })
+})

@@ -5,7 +5,7 @@ import { defaultSettings, type ModelsDoc } from '../../server/core/config'
 import { authenticate, createKey, defaultSecrets, revokeKey, type SecretsDoc } from '../../server/core/keys'
 import { createProxy } from '../../server/core/proxy'
 import {
-  handlePublic, isPublicPath, PUBLIC_HOST, PublicListener, routeDnsCommand, type PublicServe, type PublicServeOptions,
+  handlePublic, isPublicPath, PUBLIC_HOST, PublicListener, type PublicServe, type PublicServeOptions,
 } from '../../server/core/public-entry'
 import type { RequestMeta, RequestRecord } from '../../server/core/request-log'
 
@@ -195,12 +195,6 @@ describe('PublicListener', () => {
     expect(f.stopped).toBe(1)
     expect(l.status()).toEqual({ state: 'off' })
   })
-})
-
-test('routeDnsCommand', () => {
-  expect(routeDnsCommand('my-tunnel', 'llm.example.com')).toBe('cloudflared tunnel route dns my-tunnel llm.example.com')
-  expect(routeDnsCommand('', 'llm.example.com')).toBeNull()
-  expect(routeDnsCommand('my-tunnel', '')).toBeNull()
 })
 
 // ---------------------------------------------------------------------------------------

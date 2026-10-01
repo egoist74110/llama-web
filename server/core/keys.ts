@@ -19,12 +19,20 @@ export interface ApiKey {
 export interface SecretsDoc {
   version: number
   apiKeys: ApiKey[]
+  /** Cloudflare tunnel token (plain text by decision, like the keys); '' = none. Never in logs, events or API responses. */
+  tunnelToken: string
 }
 
-export const SECRETS_VERSION = 1
+export const SECRETS_VERSION = 2
+
+/** `migrations[n]` turns a version-n secrets.json into version n + 1. */
+export const SECRETS_MIGRATIONS: Record<number, (old: any) => any> = {
+  // 2: tunnel token.
+  1: old => ({ ...old, tunnelToken: '' }),
+}
 
 export function defaultSecrets(): SecretsDoc {
-  return { version: SECRETS_VERSION, apiKeys: [] }
+  return { version: SECRETS_VERSION, apiKeys: [], tunnelToken: '' }
 }
 
 const isObj = (v: unknown): v is Record<string, any> => !!v && typeof v === 'object' && !Array.isArray(v)
@@ -34,6 +42,8 @@ export function normalizeSecrets(doc: SecretsDoc): SecretsDoc {
   if (!isObj(doc)) throw new Error('secrets must be an object')
   if (doc.apiKeys === undefined) doc.apiKeys = []
   if (!Array.isArray(doc.apiKeys)) throw new Error('"apiKeys" must be an array')
+  if (doc.tunnelToken === undefined || doc.tunnelToken === null) doc.tunnelToken = ''
+  if (typeof doc.tunnelToken !== 'string') throw new Error('"tunnelToken" must be a string')
   const ids = new Set<string>()
   for (const k of doc.apiKeys) {
     if (!isObj(k) || typeof k.id !== 'string' || !k.id) throw new Error('every API key needs a string "id"')

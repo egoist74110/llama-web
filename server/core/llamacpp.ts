@@ -53,11 +53,11 @@ export interface LatestBuild {
   cudart: ReleaseAsset
 }
 
-type FetchFn = (url: string, init?: RequestInit) => Promise<Response>
+export type FetchFn = (url: string, init?: RequestInit) => Promise<Response>
 
 const HEADERS = { 'User-Agent': 'llama-web', Accept: 'application/vnd.github+json' }
 
-async function getOk(fetchFn: FetchFn, url: string): Promise<Response> {
+export async function getOk(fetchFn: FetchFn, url: string): Promise<Response> {
   let res: Response
   try {
     res = await fetchFn(url, { headers: HEADERS })
@@ -117,7 +117,7 @@ async function sha256File(file: string): Promise<string> {
   return h.digest('hex')
 }
 
-async function download(fetchFn: FetchFn, asset: ReleaseAsset, file: string): Promise<void> {
+export async function download(fetchFn: FetchFn, asset: ReleaseAsset, file: string): Promise<void> {
   const expected = /^sha256:([0-9a-f]{64})$/i.exec(asset.digest ?? '')?.[1]?.toLowerCase()
   if (!expected) throw new RuntimeError('no-digest', 'Release asset has no SHA-256 digest', asset.name)
   const res = await getOk(fetchFn, asset.browser_download_url)

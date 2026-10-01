@@ -36,9 +36,9 @@ start.bat build    # 重新构建后运行
 | --- | --- |
 | `settings.json` | 端口、模型目录、默认参数、调度、图片压缩、日志保留、llama.cpp 版本等 |
 | `models.json` | 已启用的模型和参数方案 |
-| `secrets.json` | API key 的哈希（只存哈希，明文只在创建 / 查看时出现） |
+| `secrets.json` | API key 和隧道 token（明文保存；界面默认打码，不进日志和请求记录） |
 | `templates/` | 自定义聊天模板 |
-| `runtime/` | 下载的 llama.cpp 版本目录 |
+| `runtime/` | 下载的 llama.cpp 版本目录，以及隧道用的 cloudflared（`runtime/cloudflared/`） |
 | `logs/` | 模型输出、事件、请求记录（请求记录不含对话内容） |
 
 绝大部分设置可以在界面「设置」页修改。`autoUpdate`、`keepVersions`、`cudaRuntime` 目前只能手改 `settings.json`。配置文件写入是原子的并保留备份（`data/backups/`）。
@@ -49,28 +49,17 @@ OpenAI 兼容：Base URL 填 `http://<本机地址>:5001/v1`，`model` 填模型
 
 ## 公网访问（Cloudflare 隧道）
 
-公网入口是独立的 `:8080`：只绑定 `127.0.0.1`，只开放 `/v1/*`，必须带 `Authorization: Bearer <key>`；管理界面和 `/api/*` 在这个入口上一律 404。隧道把外部请求转到它。
+公网入口是独立的 `:8080`：只绑定 `127.0.0.1`，只开放 `/v1/*`，必须带 `Authorization: Bearer <key>`；管理界面和 `/api/*` 在这个入口上一律 404。隧道由 llama-web 自己启动和看管（`cloudflared`），你只需要在 Cloudflare 后台建一次隧道、把隧道 token 填到设置页。
 
-1. 在界面「设置 → API key」新建一个 key（明文只显示一次，可在列表里再次查看，请妥善保存）。
-2. 「设置 → 公网入口」：填写域名和隧道名，打开启用开关，保存即生效。
-3. 安装并登录 [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)，创建隧道：
-   ```bash
-   cloudflared tunnel create <隧道名>
-   ```
-4. 设置页会显示要手动执行的 DNS 命令，形如：
-   ```bash
-   cloudflared tunnel route dns <隧道名> <域名>
-   ```
-5. 隧道配置（`config.yml`）里把域名指向本机 `:8080`：
-   ```yaml
-   tunnel: <隧道名>
-   credentials-file: <凭据文件路径>
-   ingress:
-     - hostname: <域名>
-       service: http://127.0.0.1:8080
-     - service: http_status:404
-   ```
-6. 运行隧道：`cloudflared tunnel run <隧道名>`。
+1. **建隧道**（只需要一次，需要一个已添加到 Cloudflare 的域名）。设置页「Cloudflare 隧道」卡片里有带示意图的分步说明，要点是：
+   - Cloudflare 后台 → Zero Trust → Networks → Tunnels → Create a tunnel → 类型选 Cloudflared，起个名字；
+   - 下一页 Install and run connectors 里复制 token（以 `eyJ` 开头；整条 `cloudflared.exe service install eyJ…` 命令也行），**不要**在电脑上运行那条命令；
+   - Public Hostname：填子域名和域名，Service 类型选 `HTTP`，URL 填 `127.0.0.1:8080`（和设置页「入口端口」一致）。
+2. 「设置 → API key」新建一个 key（明文可在列表里再次查看，请妥善保存）。
+3. 「设置 → 公网入口」：打开启用开关（域名可选，只用来显示客户端地址），保存即生效。
+4. 「设置 → Cloudflare 隧道」：粘贴隧道 token 并保存，打开「由 llama-web 托管隧道」。状态变成「已连通」就可以用了。
+
+cloudflared 的来源：优先使用本机已装的（PATH、常见安装位置），会复制到 `data/runtime/cloudflared/` 再从那里运行；本机没有就从官方 Release 下载并校验 SHA-256。隧道随 llama-web 启动和退出；意外退出会自动重试（token 无效不会重试，需要你改好后点「立即重试」）。token 保存在 `data/secrets.json`，通过环境变量交给 cloudflared，不出现在命令行、日志、事件和界面（界面只显示打码结果）。
 
 验证：
 

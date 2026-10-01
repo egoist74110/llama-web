@@ -138,11 +138,3 @@ export class PublicListener {
   }
 }
 
-// ---------------------------------------------------------------------------------------
-// Tunnel hints
-
-/** `cloudflared tunnel route dns <tunnel> <domain>`, or null until both are set. */
-export function routeDnsCommand(tunnelName: string, domain: string): string | null {
-  if (!tunnelName || !domain) return null
-  return `cloudflared tunnel route dns ${tunnelName} ${domain}`
-}

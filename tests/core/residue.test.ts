@@ -51,6 +51,19 @@ describe('cleanupResidue (injected process table)', () => {
     expect(registry.list()).toEqual([])
   })
 
+  test('a tunnel left behind (cloudflared under runtime/) is killed; the user own cloudflared is not', async () => {
+    registry.add({ ...rec(301, 'X:\\app\\data\\runtime\\cloudflared\\cloudflared.exe'), tag: 'tunnel' })
+    registry.add({ ...rec(302, 'C:\\Program Files\\cloudflared\\cloudflared.exe'), tag: 'tunnel' })
+    const killed: number[] = []
+    await cleanupResidue(registry, runtime, {
+      platform: 'win32',
+      isAlive: () => true,
+      getExePaths: async () => new Map([[301, 'X:\\app\\data\\runtime\\cloudflared\\cloudflared.exe'], [302, 'C:\\Program Files\\cloudflared\\cloudflared.exe']]),
+      killTree: async (pid) => { killed.push(pid) },
+    })
+    expect(killed).toEqual([301])
+  })
+
   test('a user-started llama-server outside runtime/ is never killed', async () => {
     registry.add(rec(201, 'X:\\tools\\llama-server.exe'))
     const killed: number[] = []

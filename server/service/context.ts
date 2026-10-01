@@ -3,10 +3,10 @@
 // and shared by the custom Bun entry, the Nitro plugin and the dev-mode routes.
 import { join } from 'node:path'
 import {
-  defaultModels, defaultSettings, MODELS_VERSION, normalizeModels, normalizeSettings, SETTINGS_VERSION,
+  defaultModels, defaultSettings, MODELS_VERSION, normalizeModels, normalizeSettings, SETTINGS_MIGRATIONS, SETTINGS_VERSION,
   type ModelsDoc, type Settings,
 } from '../core/config'
-import { authenticate, defaultSecrets, normalizeSecrets, SECRETS_VERSION, type SecretsDoc } from '../core/keys'
+import { authenticate, defaultSecrets, normalizeSecrets, SECRETS_MIGRATIONS, SECRETS_VERSION, type SecretsDoc } from '../core/keys'
 import { LaunchConfigError, planLaunch } from '../core/launch'
 import { LogStore } from '../core/logs'
 import type { RuntimeStatus } from '../core/llamacpp'
@@ -22,6 +22,7 @@ import { Scheduler, type SchedulerEvent } from '../core/scheduler'
 import { SpeedMeter } from '../core/speed'
 import { isFirstRun } from '../core/settings-admin'
 import { JsonStore, resolveDataDir, type VersionedDoc } from '../core/store'
+import { TunnelManager, type TunnelInfo } from '../core/tunnel'
 import { Updater } from '../core/updater'
 
 export interface AppContext {
@@ -49,8 +50,12 @@ export interface AppContext {
   proxy: Proxy
   /** Public entry on 127.0.0.1 (settings.public); the custom Bun entry attaches the listener. */
   publicEntry: PublicListener
-  /** Apply settings.public to the listener now (after attaching it, and on every settings change). */
+  /** Apply settings.public to the listener now (after attaching it, and on every settings change); also re-evaluates the tunnel. */
   applyPublic(): void
+  /** Cloudflare tunnel hosted by llama-web (cloudflared with the saved token). */
+  tunnel: TunnelManager
+  /** Bring the tunnel in line with settings, listener state and the saved token. */
+  applyTunnel(): void
   /** Live state for /api/stream and /api/state. */
   live: LiveHub
   /** Log files under data/logs (model output, events, request records). */
@@ -130,21 +135,21 @@ const totalUsedMiB = async (): Promise<number | null> => {
 function createContext(): AppContext {
   const dataDir = resolveDataDir()
   const settingsStore = new JsonStore<Settings>({
-    dataDir, name: 'settings.json', version: SETTINGS_VERSION, defaults: defaultSettings, validate: normalizeSettings,
+    dataDir, name: 'settings.json', version: SETTINGS_VERSION, defaults: defaultSettings, validate: normalizeSettings, migrations: SETTINGS_MIGRATIONS,
   })
   const modelsStore = new JsonStore<ModelsDoc>({
     dataDir, name: 'models.json', version: MODELS_VERSION, defaults: defaultModels, validate: normalizeModels,
   })
   // `live` is created below; stores only call it after startup.
   const secretsStore = new JsonStore<SecretsDoc>({
-    dataDir, name: 'secrets.json', version: SECRETS_VERSION, defaults: defaultSecrets, validate: normalizeSecrets,
+    dataDir, name: 'secrets.json', version: SECRETS_VERSION, defaults: defaultSecrets, validate: normalizeSecrets, migrations: SECRETS_MIGRATIONS,
   })
   const changed = () => live.notify()
   // Settings edits (page or by hand) also start / stop / move the public listener.
   const settingsRef = openStore(settingsStore, defaultSettings, () => { changed(); applyPublic() })
   const modelsRef = openStore(modelsStore, defaultModels, changed)
-  // An unreadable secrets.json falls back to "no keys": every public request is refused.
-  const secretsRef = openStore(secretsStore, defaultSecrets)
+  // An unreadable secrets.json falls back to "no keys": every public request is refused. A new tunnel token restarts the tunnel.
+  const secretsRef = openStore(secretsStore, defaultSecrets, () => applyTunnel())
   const getSettings = settingsRef.get
   const getModels = modelsRef.get
   const logs = new LogStore({ dir: join(dataDir, 'logs'), retention: () => getSettings().logs })
@@ -192,6 +197,7 @@ function createContext(): AppContext {
       models: describeModels(getModels(), { dirs: getSettings().modelDirs }),
       queue: scheduler.snapshot().queue.map(q => ({ modelId: q.modelId, profile: q.profile, started: q.started, waiting: q.waiting })),
       llamacpp: { current: getSettings().llamacpp.current, runtime: updater.getStatus(), versions: updater.versions(), rollback: updater.rollbackTarget() },
+      tunnel: tunnel.status(),
       firstRun: isFirstRun(getSettings(), getModels()),
     }),
   })
@@ -252,8 +258,33 @@ function createContext(): AppContext {
     authenticate: header => authenticate(secretsRef.get(), header),
     handleV1: (r, meta) => proxy.handleV1(r, meta),
   }, ip))
+  // The tunnel runs only while the public entry listens (the tunnel's target) and a token is saved.
+  // Output is not logged (it is redacted and kept in memory for the error state); only transitions are.
+  const tunnel = new TunnelManager({
+    dataDir,
+    registry: new PidRegistry(join(dataDir, 'run', 'pids.json')),
+    ready: cleanupDone,
+    onStatus: (info: TunnelInfo) => {
+      live.onTunnelStatus(info)
+      const s = info.status
+      if (s.state === 'preparing' && s.step === 'download') log('tunnel: downloading cloudflared')
+      else if (s.state === 'connected') log(`tunnel: connected (${s.connections} connection(s))`)
+      else if (s.state === 'error') logError(`tunnel: ${s.code}${s.detail ? ` ${s.detail}` : ''}${s.retryAt ? ' (retrying)' : ''}`)
+    },
+  })
+  function applyTunnel() {
+    const s = getSettings().public
+    tunnel.apply({
+      tunnelEnabled: s.tunnelEnabled, publicEnabled: s.enabled, publicState: publicEntry.status().state,
+      token: secretsRef.get().tunnelToken, port: s.port,
+    })
+  }
+
   /** Bring the public listener in line with settings.public and log what changed. */
   function applyPublic() {
+    try { applyPublicListener() } finally { applyTunnel() }
+  }
+  function applyPublicListener() {
     const before = JSON.stringify(publicEntry.status())
     const st = publicEntry.apply(getSettings().public)
     if (JSON.stringify(st) === before) return
@@ -267,15 +298,19 @@ function createContext(): AppContext {
   // After residue cleanup, so leftovers of the last run do not hold a version directory.
   void cleanupDone.then(() => updater.run())
 
+  // Under `nuxt dev` nothing attaches the public listener; this still reports why the tunnel is off.
+  applyTunnel()
+
   let closing: Promise<void> | null = null
   return {
     dataDir, bootPort: getSettings().server.port, getSettings, getModels, updateSettings: settingsRef.update, updateModels: modelsRef.update,
-    getSecrets: secretsRef.get, updateSecrets: secretsRef.update,
+    getSecrets: secretsRef.get, updateSecrets: secretsRef.update, tunnel, applyTunnel,
     refresh: () => { settingsRef.refresh(); modelsRef.refresh() },
     getRuntimeStatus: () => updater.getStatus(), updater, runner, scheduler, ops, proxy, publicEntry, applyPublic, live, logs, cleanupDone,
     shutdown() {
       closing ??= (async () => {
         publicEntry.close()
+        await tunnel.shutdown()
         settingsStore.close()
         modelsStore.close()
         secretsStore.close()

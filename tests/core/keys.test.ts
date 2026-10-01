@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
   authenticate, createKey, defaultSecrets, findKey, generateKey, KeyError, listKeys, maskKey, MAX_KEYS, normalizeSecrets,
-  revokeKey, type SecretsDoc,
+  revokeKey, SECRETS_MIGRATIONS, type SecretsDoc,
 } from '../../server/core/keys'
 
 function codeOf(fn: () => unknown): string {
@@ -140,16 +140,64 @@ describe('authenticate', () => {
 
 describe('normalizeSecrets', () => {
   test('fills defaults of hand-edited entries', () => {
-    const doc = normalizeSecrets({ version: 1, apiKeys: [{ id: 'k1', key: 'sk-0123456789abcdef' } as any] })
+    const doc = normalizeSecrets({ version: 2, apiKeys: [{ id: 'k1', key: 'sk-0123456789abcdef' } as any] })
     expect(doc.apiKeys[0]).toMatchObject({ id: 'k1', name: 'k1', revoked: false, allowSwitch: true, createdAt: '' })
     expect(normalizeSecrets({ version: 1 } as any).apiKeys).toEqual([])
   })
 
   test('rejects wrong shapes, short keys and duplicate ids', () => {
     expect(() => normalizeSecrets({ version: 1, apiKeys: {} } as any)).toThrow()
-    expect(() => normalizeSecrets({ version: 1, apiKeys: [{ id: 'k1', key: 'short' }] } as any)).toThrow()
+    expect(() => normalizeSecrets({ version: 2, apiKeys: [{ id: 'k1', key: 'short' }] } as any)).toThrow()
     expect(() => normalizeSecrets({ version: 1, apiKeys: [{ key: 'sk-0123456789abcdef' }] } as any)).toThrow()
     const k = { id: 'k1', key: 'sk-0123456789abcdef' }
     expect(() => normalizeSecrets({ version: 1, apiKeys: [k, { ...k }] } as any)).toThrow()
+  })
+})
+
+describe('secrets.json version 2 (tunnel token)', () => {
+  test('defaults and old files get an empty token; a wrong type is refused', () => {
+    expect(defaultSecrets().tunnelToken).toBe('')
+    expect(normalizeSecrets({ version: 2, apiKeys: [] } as any).tunnelToken).toBe('')
+    expect(normalizeSecrets({ version: 2, apiKeys: [], tunnelToken: null } as any).tunnelToken).toBe('')
+    expect(() => normalizeSecrets({ version: 2, apiKeys: [], tunnelToken: 5 } as any)).toThrow()
+  })
+
+  test('migration 1 -> 2 keeps the keys and adds the token', () => {
+    const old = { version: 1, apiKeys: [{ id: 'k1', key: 'sk-0123456789abcdef' }] }
+    const next = SECRETS_MIGRATIONS[1]!(old)
+    expect(next.apiKeys).toEqual(old.apiKeys)
+    expect(next.tunnelToken).toBe('')
+  })
+
+  test('keys are still checked the same way with a token present', () => {
+    const d = defaultSecrets()
+    d.tunnelToken = 'eyJ-token'
+    const k = createKey(d, 'phone')
+    expect(authenticate(d, `Bearer ${k.key}`).ok).toBe(true)
+    expect(authenticate(d, 'Bearer eyJ-token').ok).toBe(false)
+  })
+})
+
+describe('secrets.json version 2 (tunnel token)', () => {
+  test('defaults and old files get an empty token; a wrong type is refused', () => {
+    expect(defaultSecrets().tunnelToken).toBe('')
+    expect(normalizeSecrets({ version: 2, apiKeys: [] } as any).tunnelToken).toBe('')
+    expect(normalizeSecrets({ version: 2, apiKeys: [], tunnelToken: null } as any).tunnelToken).toBe('')
+    expect(() => normalizeSecrets({ version: 2, apiKeys: [], tunnelToken: 5 } as any)).toThrow()
+  })
+
+  test('migration 1 -> 2 keeps the keys and adds the token', () => {
+    const old = { version: 1, apiKeys: [{ id: 'k1', key: 'sk-0123456789abcdef' }] }
+    const next = SECRETS_MIGRATIONS[1]!(old)
+    expect(next.apiKeys).toEqual(old.apiKeys)
+    expect(next.tunnelToken).toBe('')
+  })
+
+  test('keys are checked the same way with a token present; the token is not a key', () => {
+    const d = defaultSecrets()
+    d.tunnelToken = 'eyJ-token-eyJ-token'
+    const k = createKey(d, 'phone')
+    expect(authenticate(d, `Bearer ${k.key}`).ok).toBe(true)
+    expect(authenticate(d, 'Bearer eyJ-token-eyJ-token').ok).toBe(false)
   })
 })

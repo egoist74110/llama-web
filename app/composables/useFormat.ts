@@ -51,6 +51,12 @@ export function runtimeText(r: StateDoc['llamacpp']['runtime'] | undefined): str
   }
 }
 
+/** Chinese reason for a tunnel error code (`detail` is appended after a colon when present). */
+export function tunnelErrorText(code: string, detail = ''): string {
+  const codes = t.tunnel.codes as Record<string, string>
+  return fmt(codes[code] ?? code, { detail: detail ? `：${detail}` : '' })
+}
+
 export function eventText(e: ActivityEvent, modelName: (id: string) => string): string {
   if (e.kind === 'state') {
     const vars = { model: modelName(e.modelId), profile: e.profile, from: stateLabel(e.from), to: stateLabel(e.to) }
@@ -58,6 +64,9 @@ export function eventText(e: ActivityEvent, modelName: (id: string) => string): 
   }
   if (e.kind === 'drain-timeout') {
     return fmt(t.events.drainTimeout, { model: modelName(e.modelId), profile: e.profile, count: e.inflight })
+  }
+  if (e.kind === 'tunnel') {
+    return e.state === 'connected' ? t.events.tunnel.connected : fmt(t.events.tunnel.error, { reason: tunnelErrorText(e.code ?? '') })
   }
   const rt = t.events.runtime
   const vars = { tag: e.tag ?? '', code: e.code ?? '', from: e.from ?? '' }

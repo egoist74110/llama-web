@@ -1,9 +1,15 @@
 // Shared by the settings routes: the document the settings page works with.
 import { DEFAULT_LAUNCH_DEFAULTS } from '../core/args'
 import { fmt, t } from '../core/i18n'
-import { routeDnsCommand } from '../core/public-entry'
+import { StoreError } from '../core/store'
+import { maskToken, TunnelError } from '../core/tunnel'
 import { dirStatus, SettingsError, type SettingsDoc } from '../core/settings-admin'
 import { getContext } from './context'
+
+/** What the page may know about the saved tunnel token. */
+export function tunnelTokenView(token: string): { hasToken: boolean, maskedToken: string | null } {
+  return token ? { hasToken: true, maskedToken: maskToken(token) } : { hasToken: false, maskedToken: null }
+}
 
 export function describeSettings(): SettingsDoc {
   const ctx = getContext()
@@ -23,8 +29,8 @@ export function describeSettings(): SettingsDoc {
     public: {
       ...s.public,
       status: ctx.publicEntry.status(),
-      dnsCommand: routeDnsCommand(s.public.tunnelName, s.public.domain),
       activeKeys: ctx.getSecrets().apiKeys.filter(k => !k.revoked).length,
+      tunnel: tunnelTokenView(ctx.getSecrets().tunnelToken),
     },
     setupDone: s.setup.done,
     restartRequired: s.server.port !== ctx.bootPort,
@@ -39,5 +45,13 @@ export function settingsError(e: unknown): never {
     const status = e.code === 'dir-in-use' ? 409 : 400
     throw createError({ statusCode: status, message: fmt(errors[e.code] ?? e.code, { detail: e.detail }) })
   }
+  throw e
+}
+
+/** Turn a tunnel token / store failure into an HTTP error with a Chinese message (never echoing the input). */
+export function tunnelError(e: unknown): never {
+  const errors = t.tunnel.errors
+  if (e instanceof TunnelError) throw createError({ statusCode: 400, message: errors['bad-token'] })
+  if (e instanceof StoreError) throw createError({ statusCode: 409, message: fmt(errors.store, { detail: e.message }) })
   throw e
 }

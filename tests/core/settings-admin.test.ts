@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
-import { defaultModels, defaultSettings, normalizeSettings, type ModelConfig, type ModelsDoc, type Settings } from '../../server/core/config'
+import { defaultModels, defaultSettings, normalizeSettings, SETTINGS_MIGRATIONS, type ModelConfig, type ModelsDoc, type Settings } from '../../server/core/config'
 import {
   applyDefaults, applyImagePreprocess, applyModelDirs, applyPublic, applyServer, applySettingsPatch, dirStatus, isFirstRun, SettingsError,
 } from '../../server/core/settings-admin'
@@ -214,21 +214,33 @@ describe('first run and directory status', () => {
   })
 })
 
-describe('applyPublic', () => {
-  test('saves on/off, port, lower-cased domain and tunnel name', () => {
-    const s = settingsWith()
-    applyPublic(s, { enabled: true, port: 8081, domain: '  LLM.Example.com ', tunnelName: ' my-tunnel ' })
-    expect(s.public).toEqual({ enabled: true, port: 8081, domain: 'llm.example.com', tunnelName: 'my-tunnel' })
+describe('settings version 2 (tunnel hosted by llama-web)', () => {
+  test('migration 1 -> 2 drops the tunnel name and adds the switch, keeping the rest', () => {
+    const old = { version: 1, public: { enabled: true, port: 8081, domain: 'a.example.com', tunnelName: 'my-tunnel' } }
+    const next = SETTINGS_MIGRATIONS[1]!(old)
+    expect(next.public).toEqual({ enabled: true, port: 8081, domain: 'a.example.com', tunnelEnabled: false })
   })
 
-  test('missing keys are kept; empty domain / tunnel are allowed', () => {
+  test('normalize fills the switch and removes a leftover tunnel name', () => {
+    const s = normalizeSettings({ ...defaultSettings(), public: { enabled: true, port: 8080, domain: '', tunnelName: 'x' } } as never)
+    expect(s.public).toEqual({ enabled: true, port: 8080, domain: '', tunnelEnabled: false })
+  })
+})
+
+describe('applyPublic', () => {
+  test('saves on/off, port, lower-cased domain and the tunnel switch', () => {
     const s = settingsWith()
-    applyPublic(s, { domain: 'a.example.com', tunnelName: 't' })
+    applyPublic(s, { enabled: true, port: 8081, domain: '  LLM.Example.com ', tunnelEnabled: true })
+    expect(s.public).toEqual({ enabled: true, port: 8081, domain: 'llm.example.com', tunnelEnabled: true })
+  })
+
+  test('missing keys are kept; an empty domain is allowed', () => {
+    const s = settingsWith()
+    applyPublic(s, { domain: 'a.example.com', tunnelEnabled: true })
     applyPublic(s, { enabled: true })
-    expect(s.public).toEqual({ enabled: true, port: 8080, domain: 'a.example.com', tunnelName: 't' })
-    applyPublic(s, { domain: '', tunnelName: '' })
+    expect(s.public).toEqual({ enabled: true, port: 8080, domain: 'a.example.com', tunnelEnabled: true })
+    applyPublic(s, { domain: '' })
     expect(s.public.domain).toBe('')
-    expect(s.public.tunnelName).toBe('')
   })
 
   test('port must be free of the main port and the llama-server range', () => {
@@ -243,10 +255,11 @@ describe('applyPublic', () => {
     }
   })
 
-  test('tunnel name is a plain word (safe in the shown command)', () => {
-    for (const tunnelName of ['my tunnel', 'a&b', 'a;b', '"t"', 'x'.repeat(65), 1]) {
-      expect(codeOf(() => applyPublic(settingsWith(), { tunnelName }))).toBe('bad-tunnel')
-    }
+  test('the tunnel switch must be a boolean; the token is not part of this patch', () => {
+    expect(codeOf(() => applyPublic(settingsWith(), { tunnelEnabled: 'yes' }))).toBe('bad-request')
+    const s = settingsWith()
+    applyPublic(s, { tunnelToken: 'eyJ-should-be-ignored' } as never)
+    expect(JSON.stringify(s)).not.toContain('eyJ-should-be-ignored')
   })
 
   test('enabled must be a boolean; the section goes through applySettingsPatch', () => {
