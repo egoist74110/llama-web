@@ -1,6 +1,6 @@
-# Windows desktop · 5-2 in progress
+# Windows desktop
 
-本地 Windows x64 测试包 0.0.1 已生成，本机可做的验收已完成（见文末「第三次接续」）；干净机 / 无 NVIDIA / 无 WebView2 等需要另一台机器的项目未验，等待用户安装试用。不进入 5-3 或 Mac。
+5-2 本地测试包已由用户试用确认（未在干净机 / 无 NVIDIA 上试用）。5-3 起由 GitHub Actions 生成草稿 Release，结果见文末「5-3」。Mac 未开始。
 
 ## 构建
 
@@ -82,3 +82,12 @@ bun run desktop:build
 最终本地测试包：`dist/desktop/llama-web_0.0.1_x64-5-2-setup.exe`（未签名，约 34 MiB）。SHA256：`7b6ad14c54d32cede1a9726254707f4b721af1312d8986ca739df2b99cb3d728`。 <!-- pre-commit:allow: public installer checksum -->
 
 清理：上两轮记录的残留目录（旧构建临时目录、首次失败夹具、CPU 验收 EACCES 目录等）本轮已核对归属后删除；本轮测试安装均已卸载，测试数据目录删除，测试在应用本地数据目录生成的 WebView 数据和运行缓存已删除，无遗留进程。`.cache/` 中的验收脚本、截图和日志及 `dist/desktop` 中的三个本地包有意保留。
+
+## 5-3：首个 Windows Release 与应用内更新（2026-10-02 ~ 10-03）
+
+- 用户确认：版本 `0.1.0-beta.1`（只写在 `package.json`，tauri.conf 引用它），MIT，未签名。
+- 流程：`.github/workflows/release-windows.yml` 手动触发 → Windows runner 冻结安装、`bun test`、typecheck、`desktop:build`（`LLAMA_WEB_RELEASE=1`）、`cargo test`（必须在构建之后：tauri-build 需要生成的 resources）→ `desktop/check-package.ts` 检查 resources 与 7-Zip 解开的安装包 → SHA256SUMS、构建清单、许可 → `gh release create --draft --prerelease`。发布前不建 tag。
+- 应用更新：服务按 `server/core/app-update.ts` 检查 GitHub Releases；桌面版下载到 `data/run/app-update`，GitHub 资产摘要与 SHA256SUMS 都要一致；服务经私有管道发 `install`，壳在服务退出后复核文件位置、文件名和 SHA-256（BCrypt），以 `/P /R /UPDATE` 启动安装程序后退出，装完由安装程序重开。`LLAMA_WEB_UPDATE_FEED` 只接受回环地址，仅供本机验收。
+- 坑：NSIS `displayLanguageSelector: true` 时，被动安装也会弹「Installer Language」并卡住升级，已关闭（按系统语言自动选择）。CI 上 5-1 的进程身份测试一次因冷启动 PowerShell 超过 5 秒失败，重跑通过（产品逻辑在超时时保守地不记录身份）。
+- 验收（从草稿下载的安装包，SHA256 与草稿 SHA256SUMS、GitHub 资产摘要一致）：包内 326 个文件 allowlist / 拒绝项 / 本机路径检查通过；中文空格目录静默安装、版本清单 0.1.0-beta.1 / unsigned / MIT、四页面、`/v1` 假模型应答、真实 GitHub 检查为「已是最新」（草稿不可见）、关窗后托管树结束且端口释放、卸载保留数据。应用内升级：假更新源提供本机构建的 0.1.0-beta.2 测试包（未发布）→ 自动检查后提示条与更新说明对话框、跳过 / 恢复提示、下载校验、确认对话框 → 旧壳 0.6 秒退出、被动安装、注册表与安装资源变为 0.1.0-beta.2、自动重开 → 同一数据目录字节不变、模型可应答、不再提示更新。
+- 未验证：真实发布后从 GitHub 下载的升级（需要两个已发布版本）；干净 Windows / 无 NVIDIA / 缺 WebView2；源码版提示只做了单元测试和类型检查，未在浏览器中点击；SmartScreen 实际提示（本机下载不带网络标记时不出现）。
