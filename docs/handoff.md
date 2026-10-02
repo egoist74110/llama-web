@@ -16,6 +16,15 @@
 
 ---
 
+## 2026-10-02 · 工作包 4-6（接续：阶段 4 更新 / 回退验收） · Opus 5.5
+- 完成：plan 阶段 4「真机试用」打勾，阶段 4 任务全部完成。没有改代码。
+- 验证：`bun run build`、`bun test` 532 通过、`bun run typecheck` 通过。真机（临时数据目录：复制 settings.json（关公网 / 托管，端口 5099，模型端口 7300–7399）、models.json、templates/，不复制 secrets.json；已停已删，GPU 回到基线以下）：用 `installBuild` 真实下载安装旧版 b11140（CUDA 13.4，55 秒）并设为当前 → 启动构建产物，先监听、后台检查到官方最新 b11146 → 自动下载、校验、解压、设为当前（`ready / updated / from b11140`，约 30 秒）→ `POST /api/llamacpp/current {tag:b11140}` 回退（`switched`，settings.json 已写 b11140）→ Qwen3.8-27B 加载 43 秒 ready，对话返回 `ok`；系统进程表里 llama-server 的路径在 b11140 目录，该 exe `--version` 为 build 11140；`/api/llamacpp` 显示 b11140 current + inUse → 卸载、停止。用户真实 data 未改动（仍是 b11146）。
+- 剩余：无（阶段 4 工作包全部完成）。**没测**：这次回退走的是接口，不是界面按钮（界面确认框在 4-2 用假目录验证过）；真实 cloudflared 配置行解析仍只有单测（见上一条）。
+- 决定 / 坑：临时数据目录必须连 `data/templates/` 一起复制，否则带自定义模板的模型 `chat template not found` → failed，修好后要 `POST /api/models/:id/retry`（failed 不会被下一个请求自动重试，符合设计）。官方「最新」指针 2026-10-02 仍是 b11146（Release 列表里已有 b113xx，但指针没动）。
+- 下一步：阶段关口 4（用户试用 → Codex 审查阶段 4 → 处理意见）。
+
+---
+
 ## 2026-10-01 · 工作包 4-6（未完：阶段 4 更新 / 回退验收） · Opus 5.5
 - 完成：plan 阶段 4「公网模块合并 + 引导」。`SettingsPublicAccess.vue`（未开启 / 引导 / 总览），`PublicWizard`（端口 → key → 方式 → 一键：API token / 地址 / 预览执行（`PublicCfRun`），或手动：教程 / 粘贴 token → 连接），`PublicOverview`、`PublicStatus`、`PublicAddresses`（地址 + 检测）、`PublicKeys`（原 SettingsKeys）、`PublicAdvanced`；`useCloudflareSetup` 共享 4-5 状态。删掉 SettingsPublic / SettingsTunnel / SettingsCloudflare。settings v3：`public.wizard`（`cleanWizard`，迁移）。`core/public-check.ts` + `POST /api/public/check`。`tunnel.ts`：`ingressHostnames` 从 cloudflared 的 `Updated to new configuration` 行取指向本机端口的主机名 → `TunnelInfo.hostnames`。`SettingsDoc.public.cloudflared`。README 公网一节改写。
 - 验证：`bun test` 532 通过、`bun run typecheck`、`bun run build` 通过。构建产物 + 临时数据目录 + 假 Cloudflare（已停已删）在内置浏览器走完两条分支、再加一个地址、关闭、保存进度后刷新继续、v2→v3 真实文件迁移、错端口 / 错 token 被拒、深色 + 375px 无横向滚动、日志无 token / key。用户在真实环境（start.bat）远端跑通。
