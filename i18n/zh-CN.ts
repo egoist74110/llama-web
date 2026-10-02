@@ -20,6 +20,8 @@ export default {
     importFailed: '复制或恢复失败。请检查目录权限、配置格式和磁盘空间后重试；原目录和已有备份保留。',
     runtimeMissing: '安装资源不完整，请重新安装本地测试包。用户数据会保留。',
     readyTimeout: '本地服务启动超时，请检查数据目录与端口占用后重试。',
+    portInUse: '端口 {port} 已被其他程序占用（例如源码版 llama-web 或其他服务）。llama-web 不会结束它，也不会自动换端口。请先关闭占用端口的程序，或在数据目录的 settings.json 中修改 server.port，然后重试。',
+    listenFailed: '无法在端口 {port} 上启动本地服务。请检查 settings.json 中的 server.host / server.port 后重试。',
     start: '开始使用', import: '从旧 data 目录复制',
     starting: '正在启动本地服务……',
     ready: '服务已启动，正在打开管理界面……',

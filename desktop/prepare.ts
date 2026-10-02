@@ -78,7 +78,7 @@ try {
   const bunLicense = await fetch(`https://raw.githubusercontent.com/oven-sh/bun/bun-v${BUN_VERSION}/LICENSE.md`)
   if (!bunLicense.ok) throw new Error('Cannot obtain bundled Bun license')
   writeFileSync(join(resources, 'THIRD-PARTY-NOTICES.txt'), `Bun ${BUN_VERSION}\n${await bunLicense.text()}\n${notices.join('\n')}`)
-  writeFileSync(join(resources, 'versions.json'), JSON.stringify({ application: '0.0.0-local-test', bun: BUN_VERSION,
+  writeFileSync(join(resources, 'versions.json'), JSON.stringify({ application: `${JSON.parse(readFileSync(join(root, 'src-tauri', 'tauri.conf.json'), 'utf8')).version}-local-test`, bun: BUN_VERSION,
     bunSha256: digest(join(resources, 'bun.exe')), resourceId: resourceDigest(), target: 'windows-x64', signature: 'unsigned-local-test' }, null, 2))
   console.log('Prepared desktop resources from isolated build')
 } finally {

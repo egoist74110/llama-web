@@ -30,6 +30,22 @@ fn ready_port(line: &str, session: &str, pid: u32) -> Option<u16> {
         .filter(|n| *n > 0 && *n <= 65535)
         .map(|n| n as u16)
 }
+/// Startup failure reported over the private channel, as a launcher string key plus the port.
+fn failure_reason(line: &str, session: &str, pid: u32) -> Option<String> {
+    let msg: serde_json::Value = serde_json::from_str(line.strip_prefix(PREFIX)?).ok()?;
+    if msg["version"] != 1
+        || msg["session"] != session
+        || msg["pid"] != pid
+        || msg["type"] != "error"
+    {
+        return None;
+    }
+    let reason = msg["reason"]
+        .as_str()
+        .filter(|r| matches!(*r, "portInUse" | "listenFailed"))?;
+    let port = msg["port"].as_u64().filter(|n| *n > 0 && *n <= 65535)?;
+    Some(format!("{reason}:{port}"))
+}
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Status {
@@ -374,9 +390,15 @@ fn start(app: tauri::AppHandle) {
                     *text = line.chars().take(1200).collect();
                 }
             });
+            let reported = Arc::new(Mutex::new(None::<String>));
+            let report = reported.clone();
             let reader_app = app.clone();
-            thread::spawn(move || {
+            let reader = thread::spawn(move || {
                 for line in BufReader::new(output).lines().map_while(Result::ok) {
+                    if let Some(reason) = failure_reason(&line, &session, pid) {
+                        *report.lock().unwrap() = Some(reason);
+                        continue;
+                    }
                     let Some(port) = ready_port(&line, &session, pid) else {
                         continue;
                     };
@@ -405,6 +427,15 @@ fn start(app: tauri::AppHandle) {
                     return Ok(());
                 };
                 if let Some(code) = running.child.try_wait().map_err(|e| e.to_string())? {
+                    drop(inner);
+                    // The pipe closes with the process; give the reader a bounded moment for a final report.
+                    let wait = Instant::now() + Duration::from_secs(2);
+                    while !reader.is_finished() && Instant::now() < wait {
+                        thread::sleep(Duration::from_millis(20));
+                    }
+                    if let Some(reason) = reported.lock().unwrap().take() {
+                        return Err(reason);
+                    }
                     return Err(format!(
                         "Service exited ({code}). {}",
                         error_tail.lock().unwrap()
@@ -442,6 +473,24 @@ mod tests {
         assert_eq!(ready_port(&msg("current", 7, 0), "current", 7), None);
         assert_eq!(ready_port(&msg("current", 7, 65536), "current", 7), None);
         assert_eq!(ready_port("HTTP/1.1 200 OK", "current", 7), None);
+    }
+    #[test]
+    fn private_failure_reason_requires_identity_and_known_code() {
+        let msg = |session: &str, pid: u32, reason: &str| {
+            format!(
+                "{PREFIX}{}",
+                serde_json::json!({
+            "version": 1, "type": "error", "session": session, "pid": pid, "reason": reason, "port": 5001 })
+            )
+        };
+        assert_eq!(
+            failure_reason(&msg("current", 7, "portInUse"), "current", 7),
+            Some("portInUse:5001".into())
+        );
+        assert_eq!(failure_reason(&msg("old", 7, "portInUse"), "current", 7), None);
+        assert_eq!(failure_reason(&msg("current", 8, "portInUse"), "current", 7), None);
+        assert_eq!(failure_reason(&msg("current", 7, "<b>x</b>"), "current", 7), None);
+        assert_eq!(ready_port(&msg("current", 7, "portInUse"), "current", 7), None);
     }
     #[test]
     fn main_navigation_origin_rejects_other_ports_hosts_and_userinfo() {

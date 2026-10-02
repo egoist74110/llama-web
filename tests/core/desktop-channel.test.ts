@@ -41,3 +41,13 @@ test('parent EOF and broken output request cleanup; close detaches listeners', a
   expect(g.reasons).toEqual(['desktop pipe failed'])
   g.channel.close()
 })
+test('startup failure reports only a fixed reason code and port, and nothing after close', () => {
+  const f = fixture()
+  f.channel.failed('portInUse', 5001)
+  expect(JSON.parse(f.text().slice(DESKTOP_PREFIX.length))).toEqual({ version: 1, session, pid: 123, type: 'error', reason: 'portInUse', port: 5001 })
+  f.channel.close()
+  const before = f.text()
+  f.channel.failed('listenFailed', 5001)
+  expect(f.text()).toBe(before)
+  expect(f.reasons).toEqual([])
+})

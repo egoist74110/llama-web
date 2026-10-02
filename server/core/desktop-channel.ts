@@ -34,6 +34,11 @@ export function desktopChannel(options: {
       if (closed || stopping) return
       output.write(DESKTOP_PREFIX + JSON.stringify({ version: 1, session, pid, type: 'ready', port }) + '\n')
     },
+    /** Startup failure the shell can explain; only a fixed reason code and the port, never error text. */
+    failed(reason: 'portInUse' | 'listenFailed', port: number) {
+      if (closed) return
+      output.write(DESKTOP_PREFIX + JSON.stringify({ version: 1, session, pid, type: 'error', reason, port }) + '\n')
+    },
     close() {
       if (closed) return
       closed = true

@@ -24,7 +24,9 @@
     try {
       const state = await invoke('desktop_status')
       status.textContent = strings[state.phase] || strings.error
-      detail.textContent = strings[state.detail] || state.detail || ''
+      const [key, port] = state.detail.split(':')
+      detail.textContent = (/^\d+$/.test(port || '') && ['portInUse', 'listenFailed'].includes(key))
+        ? strings[key].replace('{port}', port) : strings[state.detail] || state.detail || ''
       document.getElementById('data').textContent = strings.data + state.dataDir
       retry.hidden = !['error', 'choose'].includes(state.phase)
       retry.textContent = state.phase === 'choose' ? strings.start : strings.retry

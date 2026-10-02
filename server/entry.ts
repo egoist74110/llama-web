@@ -23,9 +23,10 @@ const nitroApp = useNitroApp()
 const ctx = getContext()
 const cfg = ctx.getSettings().server
 
+const listenPort = Number(process.env.NITRO_PORT || process.env.PORT) || cfg.port
 const server = (() => {
 try { return Bun.serve({
-  port: Number(process.env.NITRO_PORT || process.env.PORT) || cfg.port,
+  port: listenPort,
   hostname: process.env.NITRO_HOST || process.env.HOST || cfg.host,
   async fetch(req, srv) {
     srv.timeout(req, 0)
@@ -44,6 +45,7 @@ try { return Bun.serve({
     })
   },
 }) } catch (error) {
+  desktop?.failed((error as { code?: string })?.code === 'EADDRINUSE' ? 'portInUse' : 'listenFailed', listenPort)
   desktop?.close()
   console.error('[llama-web] cannot listen:', error)
   const guard = setTimeout(() => process.exit(1), 15_000)
