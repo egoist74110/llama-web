@@ -52,12 +52,14 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun test
       - run: bun run typecheck
-      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
 
       - name: Build installer
         run: bun run desktop:build
         env:
           LLAMA_WEB_RELEASE: '1'
+
+      # After the build: tauri-build needs the generated src-tauri/resources and launcher strings.
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
 
       - name: Package checks (allowlist, no data / secrets / logs / local paths)
         shell: pwsh
