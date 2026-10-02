@@ -17,32 +17,42 @@ fi
 
 # Names that usually hold a credential (case-insensitive): Cloudflare API token / key, CF_TOKEN, tunnel token ...
 NAMES='(cloudflare|cf)[_-]?(api[_-]?)?(token|key)|api[_-]?token|tunnel[_-]?token|auth[_-]?token'
-# 30+ credential characters right after such a name (and a few separator characters such as `": "`, ` = '`).
-# A real token has digits; long identifiers and function calls (extractTokenFromPastedCommand(raw)) do not.
-named_value() {
-  printf '%s\n' "$1" | grep -Eio "($NAMES)[^A-Za-z0-9]{1,6}[A-Za-z0-9_.-]{30,}" | grep -q '[0-9]'
+# A quoted literal of 30+ credential characters right after such a name (and a few separator
+# characters such as `": "`, ` = `): a credential whatever it looks like.
+Q="[\"']"
+BARE_END="(\$|[^A-Za-z0-9_.(-])"
+named_literal() {
+  printf '%s\n' "$1" | grep -Eiq "($NAMES)[^A-Za-z0-9]{0,5}$Q[A-Za-z0-9_.-]{30,}"
 }
-# The name ends the previous added line (`cloudflareToken:` / `= `), the value starts this one.
+# An unquoted value (.env, yaml, shell; not a const / let / var declaration) must contain a digit and must not be a call (`name(`): long
+# identifiers and function calls after such a name are code, not credentials.
+named_bare() {
+  # A source declaration cannot hold an unquoted credential: what follows the name is code.
+  if printf '%s\n' "$1" | grep -Eq '^[[:space:]]*(export[[:space:]]+)?(const|let|var)[[:space:]]'; then return 1; fi
+  printf '%s\n' "$1" | grep -Eio "($NAMES)[^A-Za-z0-9]{1,6}[A-Za-z0-9_.-]{30,}$BARE_END" | grep -q '[0-9]'
+}
+# The value on the line after the name (the name is on the previous line, which may be unchanged context).
 value_line() {
-  printf '%s\n' "$1" | grep -Eio '^[^A-Za-z0-9]{0,6}[A-Za-z0-9_.-]{30,}' | grep -q '[0-9]'
+  printf '%s\n' "$1" | grep -Eq "^[[:space:]]*$Q[A-Za-z0-9_.-]{30,}" ||
+    printf '%s\n' "$1" | grep -Eio "^[^A-Za-z0-9]{0,6}[A-Za-z0-9_.-]{30,}$BARE_END" | grep -q '[0-9]'
 }
 
 # 2. Scan added lines for key-like strings: sk-..., long hex runs, Bearer tokens, tunnel tokens
 #    (base64 starting eyJ), Cloudflare API token assignments and --token / TUNNEL_TOKEN values.
 file=""
-prev=""
+lineno=0
 hits=$(git -c core.quotepath=off diff --cached -U0 --no-color --diff-filter=ACMR |
   while IFS= read -r line; do
     case "$line" in
-      '+++ b/'*) file=${line#'+++ b/'}; prev=""; continue ;;
-      '@@'*) prev=""; continue ;;
+      '+++ b/'*) file=${line#'+++ b/'}; lineno=0; continue ;;
+      '@@'*) lineno=$(printf '%s' "$line" | sed -n 's/^@@ -[0-9,]* +\([0-9]*\).*/\1/p'); lineno=${lineno:-0}; continue ;;
       '+++'*|'---'*) continue ;;
       '+'*) ;;
       *) continue ;;
     esac
     body=${line#+}
-    before=$prev
-    prev=$body
+    cur=$lineno
+    lineno=$((lineno + 1))
     case "$body" in *pre-commit:allow*) continue ;; esac
     # review reports quote commit hashes (40 hex); only hex runs are skipped there.
     hexcheck=1
@@ -54,9 +64,11 @@ hits=$(git -c core.quotepath=off diff --cached -U0 --no-color --diff-filter=ACMR
       reason="Bearer token"
     elif printf '%s\n' "$body" | grep -Eq 'eyJ[A-Za-z0-9+/_=-]{16,}'; then
       reason="tunnel token (base64) or JWT"
-    elif named_value "$body"; then
+    elif named_literal "$body" || named_bare "$body"; then
       reason="Cloudflare / tunnel token assignment"
-    elif printf '%s\n' "$before" | grep -Eiq "($NAMES)[^A-Za-z0-9]{0,6}\$" && value_line "$body"; then
+    elif value_line "$body" && [ "$cur" -gt 1 ] &&
+      git show ":$file" </dev/null 2>/dev/null | sed -n "$((cur - 1))p" | grep -Eiq "($NAMES)[^A-Za-z0-9]{0,6}$"; then
+      # The staged file's previous line (even unchanged, so a value-only change is seen) ends with the name.
       reason="Cloudflare / tunnel token on the line after its name"
     elif printf '%s\n' "$body" | grep -Eiq '(--token[= ]|TUNNEL_TOKEN=)[[:space:]]*[A-Za-z0-9+/_=-]{20,}'; then
       reason="tunnel token on a command line"

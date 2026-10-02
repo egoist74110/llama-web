@@ -168,6 +168,48 @@ describe.skipIf(!available)('scripts/pre-commit', () => {
     expect(hook().code).toBe(0)
   })
 
+  test('changing only the value of an existing multi-line credential field is caught (the name line is unchanged context)', () => {
+    reset()
+    const api = 'Ab1_'.repeat(10)
+    stage('src/existing.ts', ['const cfg = {', '  cloudflareToken:', "    'placeholder',", '}', ''].join('\n'))
+    run(['commit', '-q', '--no-verify', '-m', 'seed'])
+    stage('src/existing.ts', `const cfg = {
+  cloudflareToken:
+    '${api}',
+}
+`)
+    const r = hook()
+    expect(r.code).toBe(1)
+    expect(r.err).toContain('src/existing.ts')
+    expect(r.err).not.toContain(api)
+    run(['reset', '-q', '--hard'])
+  }, 30_000)
+
+  test('a quoted literal after a credential name is rejected with or without digits; bare values need a digit', () => {
+    const letters = 'abcdefghij'.repeat(4)
+    for (const body of [`cloudflareToken: '${letters}'`, `const apiToken = "${letters}"`, `{ "cfToken": "${letters}" }`]) {
+      reset()
+      stage('src/q.ts', `${body}
+`)
+      expect(hook().code).toBe(1)
+    }
+    reset()
+    stage('src/bare.ts', `CF_TOKEN=${letters}
+`)
+    expect(hook().code).toBe(0)
+  }, 30_000)
+
+  test('long names with digits (versions) and calls after a credential name are code, not credentials', () => {
+    reset()
+    stage('src/v2.ts', [
+      'const tunnelToken = extractTokenFromPastedCloudflaredV2Command(raw)', // pre-commit:allow
+      'const apiToken = readSavedApiTokenWithSha256Check2024(file, { strict: true })', // pre-commit:allow
+      'const cloudflareToken = loadCloudflareTokenFromSecretsStoreV3', // pre-commit:allow
+      '',
+    ].join('\n'))
+    expect(hook().code).toBe(0)
+  })
+
   test('ordinary token handling code and docs are not flagged', () => {
     reset()
     stage('src/ok.ts', [

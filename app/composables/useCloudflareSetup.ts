@@ -25,12 +25,14 @@ export function useCloudflareSetup() {
   }, { immediate: true })
 
   /**
-   * Once the live stream has delivered a snapshot it is the only source of the job: a response that
-   * arrives late (a slow GET from before a reload, a POST of another tab) must not turn a newer
-   * state back. Without a snapshot (stream not connected yet) the responses are all there is.
+   * While the live stream is connected (and has delivered a snapshot) it is the only source of the
+   * job: a response that arrives late (a slow GET from before a reload, a POST of another tab) must
+   * not turn a newer state back. When the stream is down (or has not delivered anything yet) its
+   * last snapshot is stale, so the responses are all there is; the snapshot that comes with the
+   * reconnect then replaces whatever they set.
    */
   const takeJob = (j: SetupJob | null) => {
-    if (live.state.value) return
+    if (live.state.value && live.connected.value) return
     job.value = j
   }
 

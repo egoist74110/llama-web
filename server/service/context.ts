@@ -300,7 +300,11 @@ function createContext(): AppContext {
         () => secretsRef.update((draft) => { draft.tunnelToken = previous }),
       ), applyPublic)
     },
-    localPort: () => getSettings().public.port,
+    // Read fresh: a hand edit the file watcher has not delivered yet counts too (and is then applied like any other).
+    localPort: () => {
+      try { settingsRef.refresh() } catch { /* unreadable file: the cached settings are all there is */ }
+      return getSettings().public.port
+    },
     onChange: (job) => {
       live.notify()
       if (job?.state === 'done') log(`cloudflare: set up ${job.hostname}`)

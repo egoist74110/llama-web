@@ -16,6 +16,15 @@
 
 ---
 
+## 2026-10-02 · 阶段 4 第三轮复审意见处理（docs/reviews/stage-4-codex-r3.md） · Sonnet 5.5
+- 完成：CR-023～CR-026 共 4 条逐条核实，**全部成立并已修复**：pre-commit 用暂存文件的上一行判断分行凭据（只改值也能拦住），带引号字面量不要求数字、不带引号的值要求含数字且 `const/let/var` 声明和函数调用不算（023、024）；Cloudflare 任务的端口守卫先读磁盘再比较（025）；live 断线后 HTTP 结果重新生效、重连快照再接管（026）。
+- 验证：`bun test` 571 通过 / 0 失败（39 个文件，sh 在 PATH 上，16 条 hook 测试全部执行）；`bun run typecheck` 退出码 0。**没运行**：build、浏览器、真实 Cloudflare、真机。
+- 剩余：同上一条（CR-007 两次写之间被杀、CR-009 解压无时限、CR-010 混合日志待确认、CR-013 历史、`context` 接线无集成测试）。pre-commit 的已知误报边界：非声明语句里「属性 = 含数字的长标识符」，加 `pre-commit:allow`。
+- 决定 / 坑：pre-commit 为查上一行对每个「像值」的新增行调用一次 `git show` + `sed`（仅这类行）。
+- 下一步：没有新的工作包；第四轮复审可选。
+
+---
+
 ## 2026-10-02 · 阶段 4 复审意见处理（docs/reviews/stage-4-codex-r2.md） · Sonnet 5.5
 - 完成：复审 CR-014～CR-022 共 9 条逐条核实，**全部成立并已修复**（处理结果写在复审文件里）：pre-commit 分行赋值 / `CF_*` 名称 / 要求值含数字避免误报（014、015）；`mergeIngress` 按主机名 + 路径的实际命中验证，带 path 的通配规则不再算宽泛规则（016）；ingress 步骤用 `configHash` / `resultHash` 区分「仍是预览版本」与「恰好是预期结果」，混合则 changed（017）；`localPort` 钩子，端口变了就停（018）；`Hold` 退出时无论成败都对账一次（019）；`abortable` 预取消不留未处理拒绝、已取消不发请求（020）；收到 live 快照后 job 只由 live 更新（021）；DNS 恢复比较 `proxied`，被改过则拒绝清理并保留任务（022）。
 - 验证：`bun test` 566 通过 / 0 失败（39 个文件，sh 在 PATH 上，pre-commit 测试全部执行；新增 composable、Hold、预取消、分行凭据、路径命中、端口、代理开关等约 11 条）；`bun run typecheck` 退出码 0。**没运行**：`bun run build`、浏览器、真实 Cloudflare、真机。
