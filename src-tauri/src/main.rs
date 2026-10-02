@@ -143,7 +143,7 @@ fn desktop_import(
                 .map_err(|e| e.to_string())?
                 .join("resources");
             let mut command = Command::new(resource.join("bun.exe"));
-            let cached = resources::writable_resources(&resource, &PathBuf::from(&target))?;
+            let cached = resources::writable_resources(&resource, &cache_root(&app)?)?;
             command.arg(cached.join("import-data.mjs"));
             if recovering {
                 command.arg("--recover");
@@ -233,6 +233,14 @@ fn desktop_import(
         }
     });
     Ok(())
+}
+/// Short per-user runtime cache shared by every data directory (single-instance shell is its only writer).
+fn cache_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(app
+        .path()
+        .app_local_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("rc"))
 }
 fn fail(app: &tauri::AppHandle, generation: u64, detail: String) {
     let state = app.state::<State>();
@@ -334,7 +342,7 @@ fn start(app: tauri::AppHandle) {
                 return Err("importPending".into());
             }
             let bun = resource.join("bun.exe");
-            let cached = resources::writable_resources(&resource, &PathBuf::from(&data_dir))?;
+            let cached = resources::writable_resources(&resource, &cache_root(&app)?)?;
             let entry = cached.join("app/server/index.mjs");
             if !bun.is_file() || !entry.is_file() {
                 return Err("runtimeMissing".into());
@@ -487,10 +495,22 @@ mod tests {
             failure_reason(&msg("current", 7, "portInUse"), "current", 7),
             Some("portInUse:5001".into())
         );
-        assert_eq!(failure_reason(&msg("old", 7, "portInUse"), "current", 7), None);
-        assert_eq!(failure_reason(&msg("current", 8, "portInUse"), "current", 7), None);
-        assert_eq!(failure_reason(&msg("current", 7, "<b>x</b>"), "current", 7), None);
-        assert_eq!(ready_port(&msg("current", 7, "portInUse"), "current", 7), None);
+        assert_eq!(
+            failure_reason(&msg("old", 7, "portInUse"), "current", 7),
+            None
+        );
+        assert_eq!(
+            failure_reason(&msg("current", 8, "portInUse"), "current", 7),
+            None
+        );
+        assert_eq!(
+            failure_reason(&msg("current", 7, "<b>x</b>"), "current", 7),
+            None
+        );
+        assert_eq!(
+            ready_port(&msg("current", 7, "portInUse"), "current", 7),
+            None
+        );
     }
     #[test]
     fn main_navigation_origin_rejects_other_ports_hosts_and_userinfo() {

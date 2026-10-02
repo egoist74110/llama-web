@@ -43,7 +43,9 @@ fn check_tree(path: &Path) -> io::Result<()> {
     }
     Ok(())
 }
-pub fn writable_resources(resource: &Path, data: &Path) -> Result<PathBuf, String> {
+/// `base` is the shell's own short cache directory, independent of the user data path:
+/// a deep custom data directory would push sharp's DLL beyond LoadLibrary's legacy path limit.
+pub fn writable_resources(resource: &Path, base: &Path) -> Result<PathBuf, String> {
     let result = (|| -> io::Result<PathBuf> {
         let manifest: serde_json::Value =
             serde_json::from_slice(&fs::read(resource.join("versions.json"))?)?;
@@ -51,12 +53,7 @@ pub fn writable_resources(resource: &Path, data: &Path) -> Result<PathBuf, Strin
             .as_str()
             .filter(|s| s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit()))
             .ok_or_else(|| io::Error::other("Invalid bundled resource identity"))?;
-        checked_dir(data)?;
-        let run = data.join("run");
-        checked_dir(&run)?;
-        // Keep native DLL paths below Windows LoadLibrary's legacy path limit.
-        let base = run.join("desktop");
-        checked_dir(&base)?;
+        checked_dir(base)?;
         // This managed directory has one writer: the single-instance shell.
         // A dead shell can leave an unpublished staging tree; never use it as a cache.
         for entry in fs::read_dir(&base)? {
@@ -108,7 +105,7 @@ mod tests {
     fn publication_is_complete_and_failed_copy_can_retry() {
         let root = std::env::temp_dir().join(format!("desktop-cache-{}", uuid::Uuid::new_v4()));
         let resource = root.join("resource");
-        let data = root.join("data");
+        let base = root.join("rc");
         fs::create_dir_all(resource.join("app/server")).unwrap();
         fs::write(
             resource.join("versions.json"),
@@ -116,22 +113,20 @@ mod tests {
         )
         .unwrap();
         fs::write(resource.join("app/server/index.mjs"), "fixture").unwrap();
-        let first = writable_resources(&resource, &data);
+        let first = writable_resources(&resource, &base);
         assert!(first.is_err());
-        assert_eq!(fs::read_dir(data.join("run/desktop")).unwrap().count(), 0);
+        assert_eq!(fs::read_dir(&base).unwrap().count(), 0);
         fs::write(resource.join("import-data.mjs"), "helper").unwrap();
-        let leftover = data
-            .join("run/desktop")
-            .join(format!(".tmp-{}", uuid::Uuid::new_v4()));
+        let leftover = base.join(format!(".tmp-{}", uuid::Uuid::new_v4()));
         fs::create_dir(&leftover).unwrap();
         fs::write(leftover.join("partial"), "incomplete").unwrap();
-        let cache = writable_resources(&resource, &data).unwrap();
+        let cache = writable_resources(&resource, &base).unwrap();
         assert!(!leftover.exists());
         assert_eq!(
             fs::read_to_string(cache.join("app/server/index.mjs")).unwrap(),
             "fixture"
         );
-        assert_eq!(writable_resources(&resource, &data).unwrap(), cache);
+        assert_eq!(writable_resources(&resource, &base).unwrap(), cache);
         fs::remove_dir_all(root).unwrap();
     }
 }
