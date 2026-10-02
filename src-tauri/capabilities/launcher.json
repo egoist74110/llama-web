@@ -1,0 +1,7 @@
+{
+  "identifier": "launcher",
+  "description": "Only the bundled launch screen can query or retry its own service. HTTP pages have no native permissions.",
+  "windows": ["launcher"],
+  "local": true,
+  "permissions": ["allow-desktop-status", "allow-desktop-retry", "allow-desktop-quit", "allow-desktop-import"]
+}

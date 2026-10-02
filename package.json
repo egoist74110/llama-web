@@ -3,6 +3,8 @@
   "type": "module",
   "private": true,
   "scripts": {
+    "desktop:prepare": "bun desktop/prepare.ts",
+    "desktop:build": "bun run desktop:prepare && tauri build --bundles nsis",
     "dev": "nuxt dev",
     "build": "nuxt build",
     "preview": "bun .output/server/index.mjs",
@@ -19,6 +21,7 @@
     "vue-router": "^5.3.1"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "2",
     "@types/bun": "^1.4.2",
     "typescript": "^5",
     "vue-tsc": "^3.3.11"

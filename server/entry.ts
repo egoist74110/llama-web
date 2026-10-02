@@ -12,12 +12,19 @@ import '#nitro-internal-pollyfills'
 import { useNitroApp } from 'nitropack/runtime'
 import { handleStream } from './core/live'
 import { getContext } from './service/context'
+import { desktopChannel } from './core/desktop-channel'
+
+const desktop = process.env.LLAMA_WEB_DESKTOP_SESSION
+  ? desktopChannel({ session: process.env.LLAMA_WEB_DESKTOP_SESSION, input: process.stdin, output: process.stdout,
+      pid: process.pid, shutdown: reason => void stop(reason) })
+  : null
 
 const nitroApp = useNitroApp()
 const ctx = getContext()
 const cfg = ctx.getSettings().server
 
-const server = Bun.serve({
+const server = (() => {
+try { return Bun.serve({
   port: Number(process.env.NITRO_PORT || process.env.PORT) || cfg.port,
   hostname: process.env.NITRO_HOST || process.env.HOST || cfg.host,
   async fetch(req, srv) {
@@ -36,8 +43,17 @@ const server = Bun.serve({
       body,
     })
   },
-})
+}) } catch (error) {
+  desktop?.close()
+  console.error('[llama-web] cannot listen:', error)
+  const guard = setTimeout(() => process.exit(1), 15_000)
+  void ctx.shutdown().finally(() => { clearTimeout(guard); process.exit(1) })
+  return null
+}
+})()
+if (server) {
 console.log(`[llama-web] listening on ${server.url}`)
+desktop?.ready(Number(server.url.port))
 
 ctx.publicEntry.attach((opts) => {
   const s = Bun.serve({
@@ -54,6 +70,7 @@ ctx.publicEntry.attach((opts) => {
   return { stop: () => void s.stop(true) }
 })
 ctx.applyPublic()
+}
 
 let stopping = false
 async function stop(signal: string) {
@@ -68,7 +85,8 @@ async function stop(signal: string) {
     console.error('[llama-web] shutdown failed', e)
   }
   clearTimeout(guard)
-  server.stop(true)
+  desktop?.close()
+  server?.stop(true)
   process.exit(0)
 }
 for (const s of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) process.on(s, () => void stop(s))

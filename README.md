@@ -11,6 +11,8 @@
 
 ## 安装
 
+Windows 桌面薄壳与本地 NSIS 测试包正在工作包 5-2 验收，尚未公开发布。构建方式、数据目录和已测 / 未测项见 [Windows 桌面记录](docs/windows-desktop.md)。源码版继续使用下述方式。
+
 需要 [Bun](https://bun.sh)（装好后 `bun` 在 PATH 里）。不需要自己下载 llama.cpp：首次启动会从官方 Release 下载 CUDA 版（含 cudart）并校验 SHA-256。
 
 ```bash

@@ -1,6 +1,16 @@
 // All user-facing UI strings live here. Components must not hard-code Chinese text.
 // `{name}` placeholders are filled by `fmt()` in server/core/i18n.ts.
 export default {
+  desktop: {
+    choose: '开始使用，或选择旧版 llama-web 的 data 目录。复制前会保留备份，原目录保持不变；请先退出旧版。',
+    importing: '正在备份并复制旧数据，请稍候……',
+    start: '开始使用', import: '从旧 data 目录复制',
+    starting: '正在启动本地服务……',
+    ready: '服务已启动，正在打开管理界面……',
+    stopping: '正在停止服务与托管进程……',
+    error: '本地服务未能启动或已退出。请检查端口与数据目录是否被其他实例占用，再重试。',
+    retry: '重试', quit: '退出', data: '数据目录：',
+  },
   platform: {
     runtimeHint: '运行库按系统、架构和加速类型隔离。需要选择时，在 settings.json 的 llamacpp.acceleration 填 auto、cuda、cpu 或 metal 后重启；既有模型参数不变。未知 NVIDIA 设备不会自动下载 CUDA。',
   },

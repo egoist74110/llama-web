@@ -16,6 +16,16 @@
 
 ---
 
+## 2026-10-02 · 工作包 5-2（部分完成，需接续） · Codex
+- 完成：Tauri 2 薄壳、固定 Bun + 完整 Nuxt 产物、stdin/stdout 私有 ready/shutdown（本次 UUID / PID）、单实例、15 秒退出与 Job Object、HTTP 页面无原生权限、导航限制、启动页重试 / 退出；显式旧 data 备份复制；本地 Windows x64 NSIS 包 0.0.0（未签名、未发布）。详细记录 `docs/windows-desktop.md`；plan 两项均未勾选。
+- 用户确认：允许安装 Rust MSVC、Visual Studio C++ Build Tools / SDK 和项目 Tauri 构建依赖；工具安装完成。用户按 Escape 停止电脑操作后，不再调用窗口自动化，本轮结束。
+- 验证：标准 `bun test` 643 pass / 0 fail（43 文件，无 skip）、`bun run typecheck`、`cargo check --locked`、Rust 3 项测试、隔离 Nuxt 构建 / Tauri debug / NSIS 构建通过；打包 Bun + sharp 输出 200×133 JPEG。调试壳中文首次向导、实时连接指示、重复启动只留原壳 / Bun、关主窗口后端口释放通过；NSIS 中文空格目录安装与卸载退出码 0。安装版已启动但页面未继续确认。
+- 剩余：安装版页面 / 深浅色 / 长请求 / 动态 SSE、冲突 / 重试、真实模型流式 / 切换 / 回退、CPU 和无开发工具干净环境、只读资源、加载 / 下载 / 解压中关闭、强杀恢复、覆盖升级 / 回退保留数据、导入 GUI / 跨系统路径 / 中断恢复；不得声明 5-2 完成或进入 5-3。未运行 GPU、真实配置 / secrets / Cloudflare、Mac。
+- 决定 / 坑：Bun 1.3.14、Rust 1.99.0、Tauri CLI 2.12.1；默认数据目录来自系统 API（固定 app identifier），绝对 LLAMA_WEB_DATA 可覆盖。首次数据目录先选择开始 / 复制旧 data；导入有完整备份和中断标记，硬杀后的恢复引导仍未完善。Bun license 文件名是 LICENSE.md；Nitro 默认 es2019 不支持 entry 顶层 await，使用同步监听 + 异步失败清理。
+- 清理：自有壳 / Bun / 安装测试进程已停，测试安装已卸载，后来临时工作树全清；首次失败构建长路径目录残留（递归删除被自动审批拒绝，只返回 blocked by policy），.cache 测试夹具 / 日志也保留。未干预用户实例。dist/desktop 本地包与构建缓存保留，SHA256 在桌面记录。
+- 下一步：另开会话接续 5-2，推荐 Opus 5.5；先读剩余与桌面记录，完成未测项、修正导入恢复 / 文案并安全清理本轮残留，再提交推送；完成后交包停下等用户安装试用，不做 5-3 或 Mac。
+
+---
 ## 2026-10-02 · 工作包 5-1（跨平台兼容基础） · Codex
 - 完成：plan 5-1 三项打勾；platform / 资产选择、zip / tar.gz / tgz 安装、可选 cudart / chmod / 摘要验证、解压取消 / 时限 / 越界检查；Windows 杀树与非 Windows 独立进程组 TERM → 有限等待 → KILL；可信实际路径 / birth / PGID 残留检查及配置加载前数据目录互斥。接口、迁移与边界见 `docs/platform-foundation.md`。
 - 用户确认：settings v4 新增 `llamacpp.acceleration`（auto / cuda / cpu / metal）；旧配置迁移为 cuda，原参数 / current 保留，新配置 auto。JsonStore 备份旧 settings；PID v2 先备份 v1 原始字节，备份失败不覆盖，退出取消身份探测。新 runtime 按 OS / arch / acceleration 隔离；旧平铺 Windows CUDA 目录保留供加载 / 回退。

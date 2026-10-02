@@ -8,6 +8,10 @@ node_modules/
 .nitro/
 .cache/
 dist/
+src-tauri/target/
+src-tauri/gen/
+src-tauri/resources/
+desktop/ui/strings.json
 
 # env / local
 .env

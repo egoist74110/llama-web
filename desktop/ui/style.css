@@ -1,0 +1,3 @@
+:root{color-scheme:light dark;--bg:#f6f7f9;--fg:#1f2328;--muted:#5b6470;--panel:#fff;--accent:#3b6fd8}
+@media(prefers-color-scheme:dark){:root{--bg:#1b1d21;--fg:#d7dbe0;--muted:#8e96a1;--panel:#23262b;--accent:#7aa2f0}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.7 system-ui,'Microsoft YaHei UI',sans-serif}main{margin:36px;padding:24px;background:var(--panel);border-radius:12px}h1{font-size:24px;margin:0 0 20px}#detail,#data{color:var(--muted);overflow-wrap:anywhere}button{border:0;border-radius:6px;padding:9px 20px;background:var(--accent);color:var(--panel);cursor:pointer;margin-right:12px}button:disabled{opacity:.5;cursor:wait}

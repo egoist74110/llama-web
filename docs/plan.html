@@ -247,9 +247,9 @@ li.task .when{color:var(--ok);font-size:12px;white-space:nowrap}
     <tr><td>23</td><td>启动时加载</td><td>不自动加载，等第一个请求</td></tr>
     <tr><td>24</td><td>交付方式</td><td>原有 4 个功能阶段之后增加阶段 5（兼容基础 → Windows 套壳 → Windows Release）；每工作包一个会话。Windows 套壳完成后额外停下来让用户试用确认，才进入 Release；Mac 套壳与发包须另获用户启动指令</td></tr>
     <tr><td>25</td><td>HTTP 入口</td><td>不用 Nitro 自带的 bun 入口，改用自定义 Bun 入口：<code>/v1/*</code>、<code>/upstream/*</code> 由 Bun 原生处理；其余交给 Nitro，并把断开信号和客户端 IP 传给处理函数；关闭每个请求的空闲超时（原因见「风险与待验证」）</td></tr>
-    <tr><td>26</td><td>桌面壳选型（拟议）</td><td>优先 Tauri 2 + 内置 Bun + Nuxt 构建产物，复用现有页面与服务。先在 5-2 验证 Windows WebView2、sharp 和服务生命周期；若验证失败，记录具体失败再讨论 Electron 备选。本轮只写计划，不安装依赖或开始实现</td></tr>
+    <tr><td>26</td><td>桌面壳选型（验证中）</td><td>5-2 已实现 Tauri 2 + 固定 Bun 1.3.14 + Nuxt 构建产物，Windows 调试窗口、中文首次向导、重复启动、关闭退出及打包 sharp 已验证；本地 NSIS 测试包已生成。完整安装版与异常生命周期验收未完成，继续在 5-2 验证；若验证失败再讨论 Electron。记录见 <a href="windows-desktop.md">Windows 桌面记录</a></td></tr>
     <tr><td>27</td><td>跨平台与首发</td><td>5-1 已实现 OS / arch / 推理加速与运行库隔离；用户确认 settings v4：旧配置迁移为 CUDA，新配置 auto，另有 CPU / Metal。旧 Windows runtime 原地保留供加载与回退，PID v2 迁移先备份。Windows 本机回归通过；macOS arm64 / x64 分支仅构造验证，真实安装包、进程、sharp 和推理后续验收。接口与迁移见 <a href="platform-foundation.md">5-1 设计记录</a></td></tr>
-    <tr><td>28</td><td>桌面运行资源（拟议）</td><td>安装包内置固定版本 Bun、Nuxt 产物和对应平台 sharp/libvips；不带模型、用户数据和大体积 llama.cpp / cudart。推理运行库继续按需下载并校验，已有可用版本时可离线运行；应用自身首版手动升级，与 llama.cpp 自动更新分开</td></tr>
+    <tr><td>28</td><td>桌面运行资源（本地测试）</td><td>5-2 本地包内置 Bun 1.3.14、Nuxt 产物、Windows sharp 原生资源和第三方许可；不带模型、用户数据和 llama.cpp / cudart。推理运行库继续按需下载并校验；离线模型、手动覆盖升级和保留数据尚待完整安装验收，应用更新仍与 llama.cpp 自动更新分开</td></tr>
   </table>
 </section>
 
@@ -538,6 +538,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
   <p><b>5-1 验收：</b>Windows 全量测试和类型检查通过，现有加载 / 调度 / 转发 / 更新规则保持一致；构造的平台测试证明分支选择和边界。macOS 的真实进程、sharp 和推理运行记录列为后续验收，不把本机模拟分支通过写成“Mac 已支持”。该工作包不创建桌面安装包、不发布 Release。</p>
 
   <h3>5-2 · Windows 套壳与本地测试包（完成后停）</h3>
+  <p>2026-10-02：薄壳与本地 NSIS 测试包已实现，调试页面 / 关闭退出及部分安装验证通过；用户按 Escape 停止电脑操作后结束本轮。任务保持未勾选，真实模型、安装版完整验收与导入中断恢复等需接续 5-2，不能进入 5-3。详见 <a href="windows-desktop.md">Windows 桌面记录</a>。</p>
   <ul class="tasks">
     <li class="task" data-done="false"><span class="t">Windows Tauri 2 验证与薄壳：从干净的 Nuxt 构建产物启动内置 Bun（参数数组、隐藏控制台），窗口加载本机 HTTP 页面；验证 WebView2 下 SSE、长请求、中文、深浅色与 sharp 图片处理。窗口不开放通用 shell / 文件系统权限，不给 HTTP 页面原生执行权限；外链交给系统浏览器，拒绝把其他来源页面导航进带权限的窗口</span><span class="when"></span></li>
     <li class="task" data-done="false"><span class="t">壳生命周期与安装：单实例重复启动聚焦已有窗口；通过私有父子通道获取本次服务的 ready、实际端口与身份，不仅凭端口返回 200 认领服务。端口占用显示原因和重试 / 退出，不自动换端口、不杀未知服务；初始化不等待 llama.cpp 下载。关主窗口 / 应用退出先请求既有 shutdown，最多等待 15 秒后结束本次托管树；壳崩溃通过父子通道 EOF / 看护触发清理，下一次启动再安全处理残留。桌面版经系统目录 API 选取稳定用户数据目录并传 LLAMA_WEB_DATA，安装资源使用绝对路径；旧源码 data 由用户选择后备份复制，不自动搜个人路径，路径不能跨 Windows / Mac 生搬。打出本地 Windows x64 NSIS 测试安装包，检查 WebView2 bootstrapper、应用图标 / 版本与第三方许可；无 Bun / Node / Rust / Git 的干净环境能安装运行，卸载和覆盖安装保留用户数据</span><span class="when"></span></li>
@@ -625,6 +626,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
   <h2>变更记录</h2>
   <table>
     <tr><th>日期</th><th>内容</th></tr>
+    <tr><td>2026-10-02</td><td>工作包 5-2 部分完成：用户确认安装 Rust MSVC / C++ 构建工具和项目 Tauri 依赖；实现薄壳、私有身份管道、Job Object、单实例、权限 / 导航隔离、旧数据备份复制及 NSIS 本地测试包。643 项 Bun 测试、类型检查、3 项 Rust 测试、构建和部分安装冒烟通过。用户停止电脑操作后结束本轮，5-2 两项不打勾，未做 GPU / Release / Mac；完整验证及临时残留清理见桌面记录。</td></tr>
     <tr><td>2026-10-02</td><td>工作包 5-1 完成：平台目标与资产选择、归档取消 / 时限 / 越界检查、进程组与 PID 身份、数据目录互斥及 runtime 隔离。用户确认 settings v4（旧配置 CUDA、新配置 auto、CPU / Metal 可选）、PID v2 备份迁移；旧 Windows 版本保留可加载 / 回退。Windows 638 项测试、类型检查、隔离构建及假进程构建产物冒烟通过；Mac 仅构造验证，真机进程 / sharp / 推理待后续。无壳、安装包或 Release。详见 <a href="platform-foundation.md">5-1 设计记录</a>。</td></tr>
     <tr><td>2026-10-02</td><td>新增阶段 5 发布计划（仅规划）：用户要求 Windows / Mac 兼容与桌面套壳，随后明确“先做兼容，再做 Windows 套壳，不直接往下做”。工作包顺序为 5-1 跨平台服务基础、5-2 Windows Tauri 薄壳与本地测试包（完成即停）、5-3 首个 Windows Release（用户试用确认后）。同步范围、决定 2 / 24，新增拟议决定 26–28；Mac 套壳与发包只保留后续路线。所有实现任务均未打勾。</td></tr>
       <tr><td>2026-10-01</td><td>工作包 4-6：设置页四张公网卡片合并为「公网访问」模块（未开启 / 引导 / 总览三种状态）。引导步骤：入口端口 → API key（没有就生成，默认名 <code>server-1</code>）→ 选择方式 → ①一键（API token → 地址 → 预览并执行）/ ②手动（图文教程 + 地址 → 粘贴隧道 token）→ 连接；「再加一个地址」从「选择方式」开始。进度存服务端：<b>settings.json 升到 v3</b>，新增 <code>public.wizard</code>（只存步骤和非敏感草稿，迁移补 null）。新增 <code>POST /api/public/check</code>（服务端不带 key 请求每个地址的 <code>/v1/models</code>，401 = 通）；客户端地址 = 保存的域名 ∪ cloudflared 收到的远程配置里指向本机入口端口的主机名。开发模式下模块顶部提示「不会启动隧道」。</td></tr>
