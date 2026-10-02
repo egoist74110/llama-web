@@ -71,16 +71,19 @@ export interface NetOptions {
 const DEFAULT_TIMEOUT_MS = 30_000
 const DEFAULT_STALL_MS = 30_000
 
-/** Settles like `p`, but rejects as soon as `signal` aborts (also when `p` itself ignores the signal). */
+/**
+ * Settles like `p`, but rejects as soon as `signal` aborts (also when `p` itself ignores the signal).
+ * `p` always gets its handlers first, so a rejection of `p` after the abort is never unhandled.
+ */
 function abortable<T>(p: Promise<T>, signal: AbortSignal): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    if (signal.aborted) return reject(signal.reason)
     const onAbort = () => reject(signal.reason)
-    signal.addEventListener('abort', onAbort, { once: true })
     p.then(
       (v) => { signal.removeEventListener('abort', onAbort); resolve(v) },
       (e) => { signal.removeEventListener('abort', onAbort); reject(e) },
     )
+    if (signal.aborted) return onAbort()
+    signal.addEventListener('abort', onAbort, { once: true })
   })
 }
 
@@ -109,6 +112,8 @@ function guard(outer: AbortSignal | undefined, ms: number) {
 async function fetchChecked(fetchFn: FetchFn, url: string, signal: AbortSignal): Promise<Response> {
   let res: Response
   try {
+    // Already cancelled (shutdown while an earlier step was still running): do not start a request at all.
+    if (signal.aborted) throw signal.reason ?? new Error('aborted')
     res = await abortable(fetchFn(url, { headers: HEADERS, signal }), signal)
   } catch (e) {
     throw new RuntimeError('network', `Cannot reach ${new URL(url).host}`, (e as Error)?.message ?? String(e))

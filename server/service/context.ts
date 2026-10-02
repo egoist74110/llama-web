@@ -25,7 +25,7 @@ import { JsonStore, resolveDataDir, type VersionedDoc } from '../core/store'
 import { TunnelManager, type TunnelInfo } from '../core/tunnel'
 import { CloudflareSetup } from '../core/cloudflare'
 import { Updater } from '../core/updater'
-import { writePair } from '../core/write-pair'
+import { Hold, writePair } from '../core/write-pair'
 
 export interface AppContext {
   dataDir: string
@@ -150,12 +150,12 @@ function createContext(): AppContext {
   })
   const changed = () => live.notify()
   // Settings edits (page or by hand) also start / stop / move the public listener.
-  // `hold` is raised while a pair of writes is in flight (see onSaved of the Cloudflare setup): nothing reacts to half of it.
-  let hold = 0
-  const settingsRef = openStore(settingsStore, defaultSettings, () => { changed(); if (!hold) applyPublic() })
+  // `hold` is raised while a pair of writes is in flight (see onSaved of the Cloudflare setup): nothing reacts to half of it, one reconciliation runs afterwards.
+  const hold = new Hold()
+  const settingsRef = openStore(settingsStore, defaultSettings, () => { changed(); if (!hold.held) applyPublic() })
   const modelsRef = openStore(modelsStore, defaultModels, changed)
   // An unreadable secrets.json falls back to "no keys": every public request is refused. A new tunnel token restarts the tunnel.
-  const secretsRef = openStore(secretsStore, defaultSecrets, () => { if (!hold) applyTunnel() })
+  const secretsRef = openStore(secretsStore, defaultSecrets, () => { if (!hold.held) applyTunnel() })
   const getSettings = settingsRef.get
   const getModels = modelsRef.get
   const logs = new LogStore({ dir: join(dataDir, 'logs'), retention: () => getSettings().logs })
@@ -293,18 +293,14 @@ function createContext(): AppContext {
     // Both files or neither: the hosted tunnel is only switched after both writes went through.
     onSaved: ({ tunnelToken, hostname }) => {
       const previous = secretsRef.get().tunnelToken
-      hold++
-      try {
-        writePair(
-          () => secretsRef.update((draft) => { draft.tunnelToken = tunnelToken }),
-          () => settingsRef.update((draft) => { draft.public = { ...draft.public, enabled: true, tunnelEnabled: true, domain: hostname } }),
-          () => secretsRef.update((draft) => { draft.tunnelToken = previous }),
-        )
-      } finally {
-        hold--
-      }
-      applyPublic()
+      // One reconciliation afterwards, whether the writes went through or not (see Hold).
+      hold.run(() => writePair(
+        () => secretsRef.update((draft) => { draft.tunnelToken = tunnelToken }),
+        () => settingsRef.update((draft) => { draft.public = { ...draft.public, enabled: true, tunnelEnabled: true, domain: hostname } }),
+        () => secretsRef.update((draft) => { draft.tunnelToken = previous }),
+      ), applyPublic)
     },
+    localPort: () => getSettings().public.port,
     onChange: (job) => {
       live.notify()
       if (job?.state === 'done') log(`cloudflare: set up ${job.hostname}`)

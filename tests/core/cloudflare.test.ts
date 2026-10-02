@@ -14,6 +14,12 @@ async function codeOf(p: Promise<unknown>): Promise<string> {
   return 'none'
 }
 
+/** Which service answers host + path: first matching rule from the top, like cloudflared. */
+function route(rules: { hostname?: string, path?: string, service: string }[], host: string, path: string): string | null {
+  const hostOk = (p?: string) => !p || p.toLowerCase() === host || (p.startsWith('*.') && host.endsWith(p.slice(1).toLowerCase()))
+  return rules.find(r => hostOk(r.hostname) && (!r.path || new RegExp(r.path).test(path)))?.service ?? null
+}
+
 function setup(cf: FakeCloudflare) {
   const saved: { tunnelToken: string, hostname: string }[] = []
   const s = new CloudflareSetup({ onSaved: (r) => { saved.push(r) } })
@@ -52,6 +58,26 @@ describe('token and helpers', () => {
     expect(mergeIngress(null, 'a.example.com', 's').rules).toEqual([{ hostname: 'a.example.com', service: 's' }, { service: 'http_status:404' }])
   })
 
+  test('requests keep their route: a wildcard with a path in front of the new rule stays reachable, and so does the new rule', () => {
+    const host = 'llm.example.com'
+    const before = [
+      { hostname: '*.example.com', path: '/api/.*', service: 'api' },
+      { hostname: '*.example.com', service: 'site' },
+      { service: 'http_status:404' },
+    ]
+    const m = mergeIngress(before, host, 'ours')
+    expect(route(m.rules, host, '/api/x')).toBe('api') // was 'api' before, still is
+    expect(route(m.rules, host, '/')).toBe('ours')
+    for (const other of ['a.example.com', 'b.other.example.net']) {
+      expect(route(m.rules, other, '/')).toBe(route(before, other, '/'))
+      expect(route(m.rules, other, '/api/1')).toBe(route(before, other, '/api/1'))
+    }
+    // The own rule sitting behind a broad rule moves in front of it, otherwise it could never be reached.
+    const shadowed = mergeIngress([{ hostname: '*.example.com', service: 'site' }, { hostname: host, service: 'old' }, { service: 'http_status:404' }], host, 'ours')
+    expect(route(shadowed.rules, host, '/')).toBe('ours')
+    expect(shadowed.rules.filter(r => r.hostname === host)).toHaveLength(1)
+  })
+
   test('a new rule never shadows a rule that matched before (path rules, wildcards, catch-all)', () => {
     const host = 'llm.example.com'
     // The hostname's own path rule keeps priority; the new rule comes right after it.
@@ -68,13 +94,14 @@ describe('token and helpers', () => {
       { service: 'http_status:404' },
     ], host, 's')
     expect(wild.rules.map(r => r.hostname ?? '*')).toEqual(['x.example.com', host, '*.example.com', '*'])
-    // ...but this hostname's path rule sitting behind that wildcard is not shadowed by the new rule.
+    // This hostname's path rule sitting behind a broad wildcard was never reachable; the new rule must be.
     const late = mergeIngress([
       { hostname: '*.example.com', service: 'b' },
       { hostname: host, path: '/p', service: 'c' },
       { service: 'http_status:404' },
     ], host, 's')
-    expect(late.rules.map(r => `${r.hostname ?? '*'}${r.path ?? ''}`)).toEqual(['*.example.com', `${host}/p`, host, '*'])
+    expect(route(late.rules, host, '/x')).toBe('s')
+    expect(route(late.rules, 'z.example.com', '/x')).toBe('b')
     // A different wildcard does not matter; the new rule goes in front of the catch-all.
     const other = mergeIngress([{ hostname: '*.other.example', service: 'b' }, { service: 'http_status:404' }], host, 's')
     expect(other.rules.map(r => r.hostname ?? '*')).toEqual(['*.other.example', host, '*'])
@@ -430,6 +457,66 @@ describe('apply', () => {
     const again = await s.retry(client(cf))
     expect(again.state).toBe('done')
     expect(again.steps[1]!.state).toBe('skipped')
+  })
+
+  test('an ingress that already equals the target but whose global settings were changed meanwhile is refused', async () => {
+    const cf = new FakeCloudflare()
+    const t = cf.addTunnel({ name: 'llama-web', ingress: [{ service: 'http_status:404' }], extraConfig: { originRequest: { connectTimeout: 5 } } })
+    const inp = input({ tunnel: `reuse:${t.id}` })
+    const p = await planSetup(client(cf), inp)
+    cf.failures.push({ method: 'PUT', path: /configurations$/, status: 500 })
+    const { s, saved } = setup(cf)
+    expect((await s.apply(client(cf), inp, p.fingerprint)).state).toBe('failed')
+    // Somebody sets the same service by hand and changes a tunnel-wide setting at the same time.
+    t.ingress = [{ hostname: 'llm.example.com', service: 'http://127.0.0.1:8080' }, { service: 'http_status:404' }]
+    t.extraConfig = { originRequest: { connectTimeout: 60 } }
+    const again = await s.retry(client(cf))
+    expect(again.state).toBe('failed')
+    expect(again.steps[1]!.error).toEqual({ code: 'changed', detail: 'ingress-changed' })
+    expect(saved).toEqual([])
+  })
+
+  test('a run whose confirmed port no longer matches the public entry stops instead of pointing the tunnel at the old port', async () => {
+    const cf = new FakeCloudflare()
+    const t = cf.addTunnel({ name: 'llama-web', ingress: [{ service: 'http_status:404' }] })
+    const inp = input({ tunnel: `reuse:${t.id}` })
+    const p = await planSetup(client(cf), inp)
+    let port = 8080
+    const saved: unknown[] = []
+    const s = new CloudflareSetup({ onSaved: (r) => { saved.push(r) }, localPort: () => port })
+    cf.failures.push({ method: 'PUT', path: /configurations$/, status: 500 })
+    expect((await s.apply(client(cf), inp, p.fingerprint)).state).toBe('failed')
+    port = 8081
+    const again = await s.retry(client(cf))
+    expect(again.state).toBe('failed')
+    expect(again.steps[1]!.error).toEqual({ code: 'changed', detail: 'port-changed' })
+    expect(t.ingress!.length).toBe(1)
+    expect(saved).toEqual([])
+    // Back on the confirmed port the same run can go on.
+    port = 8080
+    expect((await s.retry(client(cf))).state).toBe('done')
+  })
+
+  test('cleanup keeps the run and the new tunnel when somebody changed the proxy switch of the re-pointed record', async () => {
+    const cf = new FakeCloudflare()
+    const old = cf.addTunnel({ name: 'old' })
+    const rec = cf.addRecord({ type: 'CNAME', name: 'llm.example.com', content: `${old.id}.cfargotunnel.com`, proxied: true })
+    const { s } = setup(cf)
+    const inp = input({ tunnel: 'create', dns: 'repoint' })
+    const p = await planSetup(client(cf), inp)
+    cf.failures.push({ method: 'GET', path: /\/token$/, status: 500, sticky: true })
+    cf.tokenInCreate = false
+    const job = await s.apply(client(cf), inp, p.fingerprint)
+    const content = cf.records[0]!.content
+    rec.proxied = false // edited by somebody, still pointing at the new tunnel
+    expect(await codeOf(s.cleanup(client(cf)))).toBe('changed')
+    expect(cf.records[0]).toMatchObject({ content, proxied: false })
+    expect(cf.tunnels.find(t => t.name === 'llama-web')!.deleted_at).toBeNull()
+    expect(s.status()?.created.dnsRestore).toEqual(job.created.dnsRestore)
+    // After the user dealt with the record, abandoning works again.
+    rec.content = 'elsewhere.example.net'
+    expect(await s.cleanup(client(cf))).toBeNull()
+    expect(cf.tunnels.find(t => t.name === 'llama-web')!.deleted_at).not.toBeNull()
   })
 
   test('dismiss / retry / cleanup without a failed run', async () => {

@@ -16,6 +16,15 @@
 
 ---
 
+## 2026-10-02 · 阶段 4 复审意见处理（docs/reviews/stage-4-codex-r2.md） · Sonnet 5.5
+- 完成：复审 CR-014～CR-022 共 9 条逐条核实，**全部成立并已修复**（处理结果写在复审文件里）：pre-commit 分行赋值 / `CF_*` 名称 / 要求值含数字避免误报（014、015）；`mergeIngress` 按主机名 + 路径的实际命中验证，带 path 的通配规则不再算宽泛规则（016）；ingress 步骤用 `configHash` / `resultHash` 区分「仍是预览版本」与「恰好是预期结果」，混合则 changed（017）；`localPort` 钩子，端口变了就停（018）；`Hold` 退出时无论成败都对账一次（019）；`abortable` 预取消不留未处理拒绝、已取消不发请求（020）；收到 live 快照后 job 只由 live 更新（021）；DNS 恢复比较 `proxied`，被改过则拒绝清理并保留任务（022）。
+- 验证：`bun test` 566 通过 / 0 失败（39 个文件，sh 在 PATH 上，pre-commit 测试全部执行；新增 composable、Hold、预取消、分行凭据、路径命中、端口、代理开关等约 11 条）；`bun run typecheck` 退出码 0。**没运行**：`bun run build`、浏览器、真实 Cloudflare、真机。
+- 剩余：CR-007 两次写入之间进程被杀的恢复未做；CR-009 解压无取消 / 时限；CR-010 匿名注册 + 带索引注销的混合日志格式待确认；CR-013 已推送历史里的真实隧道名由用户决定；`context` 的 Hold / 保存接线没有集成测试；没有浏览器 / 真实 Cloudflare 验证。
+- 决定 / 坑：`mergeIngress` 的语义见函数注释（新规则在会遮蔽它的无 path 规则之前、带 path 规则之后；自己的规则被宽泛规则遮蔽时移到前面）。`SetupPlan.resultHash`、`SetupHooks.localPort`、`i18n` 的 `changed-*` 新增，向后兼容。`tests/app/` 里用 `mock.module` 替代 Nuxt 的 `~~` 别名。pre-commit 现在对每个新增行多启动几次 grep，大提交会更慢（本机一次提交约 1 分钟）。
+- 下一步：没有新的工作包；等 Codex 第三轮复审（可选）。
+
+---
+
 ## 2026-10-02 · 阶段 4 审查意见处理（docs/reviews/stage-4-codex.md） · Sonnet 5.5
 - 完成：13 条逐条对照代码核实，**12 条成立并已修复，CR-006 用户选方案 A（保持现状，失败卡片补恢复提示），0 条不成立**；每条的处理结果写在审查文件里。没有勾选 plan 任务。修复：pre-commit 识别隧道 token / API token 赋值（CR-001）；Cloudflare 放弃时恢复被改指的 DNS（002）；沿用隧道时保留完整远程 config（003）；ingress 合并保持优先级（004）；ingress 写入前校验配置未变、识别丢响应的自身写入（005）；secrets + settings 成对写入失败回滚、成功后才切换托管（007，`core/write-pair.ts`）；cloudflared 准备可取消、关闭 / 换 token 时等待（008）；更新 / 下载 HTTP 时限与关机取消（009，`NetOptions`、`Updater.stop()`）；Unregistered 日志按 connIndex 计数（010）；pid 登记失败不留 child（011）；Cloudflare 任务进入 live 快照（012）；交接里的真实隧道名改为泛化描述（013）。
 - 验证：`bun test` 555 通过 / 0 失败（新增约 25 条，含 sh 下的 pre-commit 测试）；`bun run typecheck` 通过（退出码 0）。**没运行**：`bun run build`、浏览器里的「运行中刷新 / 另一标签页」场景（只有单测）、真实 Cloudflare（002/003/005 只有 FakeCloudflare）、真机。

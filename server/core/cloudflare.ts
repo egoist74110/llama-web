@@ -314,9 +314,17 @@ export interface SetupPlan {
   fingerprint: string
   /** Hash of the reused tunnel's remote configuration as previewed; the ingress step refuses when it changed. */
   configHash: string
+  /** Hash of the configuration this setup will leave behind (the previewed one with our rule merged in). */
+  resultHash: string
 }
 
-const hashOf = (v: unknown) => createHash('sha256').update(JSON.stringify(v ?? null)).digest('hex').slice(0, 16)
+/** Key order of a JSON document does not matter to Cloudflare, so it does not matter to the hash. */
+function canonical(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(canonical)
+  if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([k, x]) => [k, canonical(x)]))
+  return v ?? null
+}
+const hashOf = (v: unknown) => createHash('sha256').update(JSON.stringify(canonical(v))).digest('hex').slice(0, 16)
 
 const LABEL = /^(?!-)[a-z0-9-]{1,63}(?<!-)$/
 const TUNNEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/
@@ -354,11 +362,15 @@ const viewTunnel = (t: RawTunnel): TunnelView => ({
 })
 
 /**
- * Replace the rule for `hostname` (no path) where it is, or insert a new one so that nothing that
- * matched before is shadowed: ingress rules match from the top, so the new rule goes after this
- * hostname's own path rules and in front of the first rule that would also catch the hostname
- * (a matching wildcard, a path-only rule or the catch-all). A catch-all is kept / added last.
- * `others` lists what else is routed: other hostnames and this hostname's path rules (`host/path`).
+ * Put the rule for `hostname` (no path) where it is reachable without shadowing anything that was
+ * reachable before. Ingress rules match from the top, so: the hostname's own rule is replaced in
+ * place; a new one goes in front of the first rule without a path that would also catch the
+ * hostname (a matching wildcard or the catch-all) and behind every path rule (rules with a path are
+ * more specific, they stay in front). A rule of the same hostname that already sat behind such a
+ * broad rule was never reachable and stays that way. If the hostname's own rule sits behind a
+ * broad rule it could never be reached either, so it moves in front of it. A catch-all is kept /
+ * added last. `others` lists what else is routed: other hostnames and this hostname's path rules
+ * (`host/path`).
  */
 export function mergeIngress(rules: IngressRule[] | null | undefined, hostname: string, service: string): { rules: IngressRule[], change: IngressChange, others: string[] } {
   const list = Array.isArray(rules) ? [...rules] : []
@@ -368,18 +380,20 @@ export function mergeIngress(rules: IngressRule[] | null | undefined, hostname: 
     const h = r.hostname?.toLowerCase()
     return !!h && h.startsWith('*.') && hostname.endsWith(h.slice(1)) && hostname.length > h.length - 1
   }
+  const broad = (r: IngressRule) => !r.path && (!r.hostname || wildcardCatches(r))
   const at = list.findIndex(r => same(r) && !r.path)
   const ours = at >= 0 ? list[at]! : null
   const rule: IngressRule = { ...(ours ?? {}), hostname, service }
+  const first = list.findIndex(broad)
   if (at >= 0) {
-    list[at] = rule
-  } else {
-    let pos = list.findIndex(r => !r.hostname || wildcardCatches(r))
-    if (pos < 0) pos = list.length
-    for (let i = list.length - 1; i >= pos; i--) {
-      if (same(list[i]!)) { pos = i + 1; break }
+    if (first >= 0 && first < at) {
+      list.splice(at, 1)
+      list.splice(first, 0, rule)
+    } else {
+      list[at] = rule
     }
-    list.splice(pos, 0, rule)
+  } else {
+    list.splice(first >= 0 ? first : list.length, 0, rule)
   }
   if (!list.some(isCatchAll)) list.push({ service: 'http_status:404' })
   const others = list
@@ -505,9 +519,11 @@ function buildPlan(o: Observed, input: SetupInput): SetupPlan {
   const warnings: SetupPlan['warnings'] = []
   let ingress: SetupPlan['ingress'] = null
   let dns: DnsAction | null = null
+  let resultHash = ''
   if (tunnel) {
     const m = mergeIngress(tunnel.kind === 'reuse' ? o.config?.ingress : null, o.hostname, service)
     ingress = { change: m.change, others: m.others }
+    if (tunnel.kind === 'reuse') resultHash = hashOf({ ...(o.config ?? {}), ingress: m.rules })
     // The current tunnel's connectors and other addresses are llama-web's own.
     if (tunnel.kind === 'reuse' && !tunnel.current) {
       if (tunnel.tunnel.connections > 0) warnings.push('tunnel-busy')
@@ -545,7 +561,7 @@ function buildPlan(o: Observed, input: SetupInput): SetupPlan {
     hostname: o.hostname,
     zone: { id: o.zone.id, name: o.zone.name },
     account: { id: o.zone.accountId, name: o.zone.accountName },
-    service, tunnelName: name, tunnelChoices: choices, tunnel, autoChosen, ingress, dnsRecords: o.records, dns, needs, warnings, ready, fingerprint, configHash: hashOf(o.config),
+    service, tunnelName: name, tunnelChoices: choices, tunnel, autoChosen, ingress, dnsRecords: o.records, dns, needs, warnings, ready, fingerprint, configHash: hashOf(o.config), resultHash,
   }
 }
 
@@ -589,6 +605,8 @@ export interface SetupHooks {
   /** Save the tunnel token and switch hosting on (secrets + settings). Must not log the token. */
   onSaved: (r: { tunnelToken: string, hostname: string }) => void | Promise<void>
   onChange?: (job: SetupJob | null) => void
+  /** The public entry port right now: a run whose confirmed port no longer matches stops (changed). */
+  localPort?: () => number
   now?: () => number
 }
 
@@ -659,9 +677,12 @@ export class CloudflareSetup {
       if (created.dnsRestore) {
         const r = created.dnsRestore
         const target = this.job.tunnelId ? cnameTarget(this.job.tunnelId) : null
-        const now = (await api.list<{ id: string, content: string }>(`/zones/${plan.zone.id}/dns_records?name=${encodeURIComponent(plan.hostname)}`, 'dns', 2))
+        const now = (await api.list<{ id: string, content: string, proxied?: boolean }>(`/zones/${plan.zone.id}/dns_records?name=${encodeURIComponent(plan.hostname)}`, 'dns', 2))
           .find(x => x.id === r.id)
         if (now && target && now.content.toLowerCase().replace(/\.$/, '') === target) {
+          // Still pointing at the new tunnel, but not as this run wrote it (we wrote proxied = true): somebody
+          // edited it. Do not overwrite that and do not delete what it depends on; the run stays open.
+          if (now.proxied !== true) throw new CfError('changed', 'dns-modified')
           await api.call('PATCH', `/zones/${plan.zone.id}/dns_records/${r.id}`, { content: r.content, proxied: r.proxied }, 'dns')
         }
         created.dnsRestore = null
@@ -736,6 +757,9 @@ export class CloudflareSetup {
     const job = this.job!
     const plan = this.plan!
     const acc = plan.account.id
+    // The preview was confirmed for one local port; the tunnel must keep pointing at what listens.
+    const port = this.hooks.localPort?.()
+    if (port !== undefined && serviceFor(port) !== plan.service) throw new CfError('changed', 'port-changed')
     switch (id) {
       case 'tunnel': {
         if (plan.tunnel!.kind === 'reuse') {
@@ -762,10 +786,12 @@ export class CloudflareSetup {
         const m = mergeIngress(remote?.ingress, plan.hostname, plan.service)
         const url = `/accounts/${acc}/cfd_tunnel/${job.tunnelId}/configurations`
         if (reuse) {
-          // Only what the user confirmed may be overwritten: a changed configuration needs a new preview.
-          // A configuration that already equals our result is an earlier write whose answer was lost.
-          if (JSON.stringify(m.rules) === JSON.stringify(remote?.ingress)) return { note: `${plan.hostname} → ${plan.service}`, skipped: true }
-          if (hashOf(remote) !== plan.configHash) throw new CfError('changed', 'ingress-changed')
+          // Only what the user confirmed may be overwritten: the configuration must still be the previewed
+          // one (write), or exactly the previewed result (an earlier write whose answer was lost: skip).
+          // Anything else, also a mix of both, needs a new preview.
+          const now = hashOf(remote)
+          if (now === plan.resultHash) return { note: `${plan.hostname} → ${plan.service}`, skipped: true }
+          if (now !== plan.configHash) throw new CfError('changed', 'ingress-changed')
         }
         // Everything beside `ingress` (tunnel-wide originRequest, ...) is sent back unchanged.
         await api.call('PUT', url, { config: { ...(remote ?? {}), ingress: m.rules } }, 'tunnel')

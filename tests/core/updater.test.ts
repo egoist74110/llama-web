@@ -268,3 +268,29 @@ test('stop() cancels a running check and waits for it', async () => {
   expect(Date.now() - t0).toBeLessThan(2000)
   expect(await running).toMatchObject({ state: 'error', code: 'network' })
 })
+
+test('a request started after the signal was already cancelled makes no request and leaves no unhandled rejection', async () => {
+  const { getBody, getOk } = await import('../../server/core/llamacpp')
+  const unhandled: unknown[] = []
+  const onUnhandled = (e: unknown) => { unhandled.push(e) }
+  process.on('unhandledRejection', onUnhandled)
+  try {
+    const ac = new AbortController()
+    ac.abort(new Error('shutdown'))
+    let calls = 0
+    // A fetch that rejects on its own when cancelled (like the real one), and one that ignores the signal.
+    const rejecting = (async (_u: string, init?: RequestInit) => { calls++; throw init?.signal?.reason ?? new Error('x') }) as never
+    const ignoring = (async () => { calls++; return new Response('{}') }) as never
+    for (const f of [rejecting, ignoring]) {
+      await expect(getBody(f, 'https://example.test/x', 'json', { signal: ac.signal })).rejects.toMatchObject({ code: 'network' })
+      await expect(getOk(f, 'https://example.test/x', { signal: ac.signal })).rejects.toMatchObject({ code: 'network' })
+    }
+    // Also the native fetch with an already aborted signal.
+    await expect(getBody(fetch as never, 'https://example.test/x', 'json', { signal: ac.signal })).rejects.toMatchObject({ code: 'network' })
+    await new Promise(r => setTimeout(r, 50))
+    expect(calls).toBe(0)
+    expect(unhandled).toEqual([])
+  } finally {
+    process.off('unhandledRejection', onUnhandled)
+  }
+})

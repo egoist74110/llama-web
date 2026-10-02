@@ -128,6 +128,46 @@ describe.skipIf(!available)('scripts/pre-commit', () => {
     }
   })
 
+  test('rejects a credential whose value is on the line after its name, and CF_TOKEN / CF_API_KEY style names', () => {
+    const api = 'Ab1_'.repeat(10)
+    const cases: Record<string, string> = {
+      'multi-line object': `const cfg = {
+  cloudflareToken:
+    '${api}',
+}
+`,
+      'multi-line assignment': `const apiToken =
+  "${api}"
+`,
+      'CF_TOKEN': `CF_TOKEN=${api}
+`,
+      'CF_API_KEY': `export CF_API_KEY="${api}"
+`,
+      'yaml': `cloudflare_api_token:
+  ${api}
+`,
+    }
+    for (const [name, body] of Object.entries(cases)) {
+      reset()
+      stage('src/m.ts', body)
+      const r = hook()
+      expect({ name, code: r.code }).toEqual({ name, code: 1 })
+      expect(r.err).not.toContain(api)
+    }
+  }, 30_000)
+
+  test('long identifiers and calls after a token-like name are not credentials', () => {
+    reset()
+    stage('src/long.ts', [
+      'const tunnelToken = extractTokenFromPastedCloudflaredCommand(raw)',
+      'const cloudflareToken = readSavedCloudflareApiTokenFromSecretsFile',
+      'const apiToken =',
+      '  readTheSavedApiTokenFromTheSecretsStoreOrThrow()',
+      '',
+    ].join('\n'))
+    expect(hook().code).toBe(0)
+  })
+
   test('ordinary token handling code and docs are not flagged', () => {
     reset()
     stage('src/ok.ts', [

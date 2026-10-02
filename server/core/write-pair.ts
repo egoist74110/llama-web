@@ -16,3 +16,27 @@ export function writePair(first: () => void, second: () => void, undoFirst: () =
     throw e
   }
 }
+
+/**
+ * Mutes the reactions to config changes while a group of writes is in flight and runs one
+ * reconciliation afterwards, on success and on failure alike: changes that arrived meanwhile (a
+ * hand edit read by the writes' own refresh) are never lost, and a failed group leaves the running
+ * state matching whatever the files finally say.
+ */
+export class Hold {
+  private depth = 0
+
+  get held(): boolean {
+    return this.depth > 0
+  }
+
+  run<T>(fn: () => T, reconcile: () => void): T {
+    this.depth++
+    try {
+      return fn()
+    } finally {
+      this.depth--
+      if (this.depth === 0) reconcile()
+    }
+  }
+}

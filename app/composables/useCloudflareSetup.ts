@@ -24,6 +24,16 @@ export function useCloudflareSetup() {
     if (j !== undefined) job.value = j
   }, { immediate: true })
 
+  /**
+   * Once the live stream has delivered a snapshot it is the only source of the job: a response that
+   * arrives late (a slow GET from before a reload, a POST of another tab) must not turn a newer
+   * state back. Without a snapshot (stream not connected yet) the responses are all there is.
+   */
+  const takeJob = (j: SetupJob | null) => {
+    if (live.state.value) return
+    job.value = j
+  }
+
   const usable = computed(() => inspection.value?.zones.filter(z => z.usable) ?? [])
   const unusable = computed(() => inspection.value?.zones.filter(z => !z.usable) ?? [])
 
@@ -45,7 +55,7 @@ export function useCloudflareSetup() {
     await run('info', async () => {
       const r = await $fetch<{ hasToken: boolean, maskedToken: string | null, job: SetupJob | null }>('/api/cloudflare')
       info.value = { hasToken: r.hasToken, maskedToken: r.maskedToken, loaded: true }
-      job.value = r.job
+      takeJob(r.job)
     })
   }
 
@@ -96,14 +106,14 @@ export function useCloudflareSetup() {
   async function apply() {
     await run('apply', async () => {
       const r = await $fetch<{ job: SetupJob }>('/api/cloudflare/apply', { method: 'POST', body: { ...body(), fingerprint: plan.value?.fingerprint } })
-      job.value = r.job
+      takeJob(r.job)
       plan.value = null
     })
   }
 
   async function jobAction(name: 'retry' | 'cleanup' | 'dismiss') {
     await run(name, async () => {
-      job.value = (await $fetch<{ job: SetupJob | null }>(`/api/cloudflare/${name}`, { method: 'POST' })).job
+      takeJob((await $fetch<{ job: SetupJob | null }>(`/api/cloudflare/${name}`, { method: 'POST' })).job)
     })
   }
 

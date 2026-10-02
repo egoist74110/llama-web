@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { JsonStore } from '../../server/core/store'
-import { writePair } from '../../server/core/write-pair'
+import { Hold, writePair } from '../../server/core/write-pair'
 
 interface Doc { version: number, value: string }
 
@@ -52,4 +52,21 @@ test('undo failing as well reports both', () => {
     expect((e as Error).message).toContain('second')
     expect((e as Error).message).toContain('undo')
   }
+})
+
+test('Hold: muted while held, one reconciliation afterwards on success and on failure, nested groups reconcile once at the end', () => {
+  const hold = new Hold()
+  const log: string[] = []
+  const onChange = () => { if (!hold.held) log.push('apply'); else log.push('muted') }
+  hold.run(() => { onChange(); onChange() }, () => log.push('reconcile'))
+  expect(log).toEqual(['muted', 'muted', 'reconcile'])
+  expect(hold.held).toBe(false)
+  log.length = 0
+  expect(() => hold.run(() => { onChange(); throw new Error('write failed') }, () => log.push('reconcile'))).toThrow('write failed')
+  expect(log).toEqual(['muted', 'reconcile'])
+  log.length = 0
+  hold.run(() => hold.run(() => onChange(), () => log.push('inner')), () => log.push('outer'))
+  expect(log).toEqual(['muted', 'outer'])
+  onChange()
+  expect(log.at(-1)).toBe('apply')
 })
