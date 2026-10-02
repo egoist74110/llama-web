@@ -83,7 +83,7 @@ export default {
         'auto-off': '使用 {tag}（已关闭自动更新）',
         'switched': '已切换到 {tag}',
       },
-      error: '获取失败：{code}。{detail}',
+      error: '获取失败：{code}。{detail} 检查网络后重新打开 llama-web 会再次下载。',
       errorUsing: '检查更新失败（{code}），继续使用 {using}。{detail}',
     },
   },
