@@ -16,6 +16,17 @@
 
 ---
 
+## 2026-10-02 · 工作包 5-2（第三次接续，本机验收完成） · Opus 5.5
+- 完成：plan 5-2 第一项（Tauri 验证与薄壳）打勾。第二项本机部分全部通过，但缺干净 Windows / 无 NVIDIA，不打勾。修复：端口冲突经私有管道报原因码，启动页显示中文原因（原来只有 `Service exited`）；运行缓存从 `data/run/desktop` 移到应用本地数据目录的 `rc`（深数据目录使 sharp DLL 超出 LoadLibrary 路径上限，服务起不来）；首次下载失败提示重新打开会重试；测试包版本 0.0.1。
+- 验证：`bun test` 653 pass / 0 fail，`bun run typecheck`，Rust 5 pass，`cargo fmt --check`。安装版窗口经 WebView2 调试端口（只对测试壳设环境变量）+ WM_CLOSE + 窗口消息填文件夹对话框：四页面中文 / 深浅色、窗口内 SSE 与 12 秒静默流式、HTTP 页面原生命令全被 ACL 拒绝、端口冲突重试 / 退出、导入对话框、从备份恢复、209 字符数据目录 + sharp 缩图、断网启动（测试壳设不可达代理）。真机：b11146 CUDA 下载中 / 解压中关窗、27B 模型 GPU 加载中关窗（显存回基线）后重开加载流式；0.0.0 → 0.0.1 升级、强杀安装后回装 0.0.0、再升级、卸载，数据字节不变。结果详见 `docs/windows-desktop.md` 第三次接续。
+- 剩余：干净 Windows（无开发工具 / 无 WebView2 bootstrapper 实测）、无 NVIDIA 的 CPU 路径与旧 CPU 指令集下限——本机无 Windows Sandbox，需用户试用。中断安装时写到哪些文件未逐一核对。gui-1 有一次无输出超时，重跑通过，原因未查。
+- 决定 / 坑：`tauri build` 会重写 `src-tauri/Cargo.lock` 并去掉 `pre-commit:allow` 注释，构建后 `git checkout src-tauri/Cargo.lock`（改包版本时只改那一行）。`desktop:build` 从 HEAD 的 worktree 构建 Nuxt，服务端改动要先提交。Windows PowerShell 5 读无 BOM 的 .ps1 会乱码中文。文件夹对话框底部控件在 UIA 中只是 Pane，用 WM_SETTEXT / BM_CLICK。导航拒绝测试会把外链交给系统浏览器。
+- 包：`dist/desktop/llama-web_0.0.1_x64-5-2-setup.exe`（未签名、未发布），SHA256 在桌面记录。
+- 清理：上两轮残留目录已删；本轮测试安装 / 数据 / 应用本地目录（EBWebView、rc）已删，无遗留进程。`.cache/gui-*` 脚本、截图、日志和本地包有意保留。
+- 下一步：Windows 套壳试用关口——用户安装试用并确认后，另开会话执行 5-3（Opus 5.5）。不做 Release / Mac。
+
+---
+
 ## 2026-10-02 · 工作包 5-2（接续，仍部分完成） · Codex
 - 完成：旧 data 导入 v2 阶段标记、完整备份摘要、可重复恢复、旧标记兼容、中文恢复入口；跨系统模型路径 / linked run / backup 拒绝。只读安装资源改用短运行缓存原子复制（完整摘要认领、异常暂存清理），未换技术栈 / 配置结构 / 调度规则；plan 两项继续未勾选。
 - 验证：标准 `bun test` 652 pass / 0 fail（43 文件，无 skip）；`bun run typecheck`、`cargo check --locked` 通过，Rust 4 pass；`bun run desktop:build` 和后续 `bun x tauri build --bundles nsis` 通过。导入 11 项含真实强杀复制进程后恢复 / 恢复再次中断 / 篡改拒绝。
