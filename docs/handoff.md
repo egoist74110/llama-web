@@ -17,11 +17,11 @@
 ---
 
 ## 2026-10-02 · 阶段 4 审查意见处理（docs/reviews/stage-4-codex.md） · Sonnet 5.5
-- 完成：13 条逐条对照代码核实，**12 条成立并已修复，1 条需要用户决定（CR-006），0 条不成立**；每条的处理结果写在审查文件里。没有勾选 plan 任务。修复：pre-commit 识别隧道 token / API token 赋值（CR-001）；Cloudflare 放弃时恢复被改指的 DNS（002）；沿用隧道时保留完整远程 config（003）；ingress 合并保持优先级（004）；ingress 写入前校验配置未变、识别丢响应的自身写入（005）；secrets + settings 成对写入失败回滚、成功后才切换托管（007，`core/write-pair.ts`）；cloudflared 准备可取消、关闭 / 换 token 时等待（008）；更新 / 下载 HTTP 时限与关机取消（009，`NetOptions`、`Updater.stop()`）；Unregistered 日志按 connIndex 计数（010）；pid 登记失败不留 child（011）；Cloudflare 任务进入 live 快照（012）；交接里的真实隧道名改为泛化描述（013）。
+- 完成：13 条逐条对照代码核实，**12 条成立并已修复，CR-006 用户选方案 A（保持现状，失败卡片补恢复提示），0 条不成立**；每条的处理结果写在审查文件里。没有勾选 plan 任务。修复：pre-commit 识别隧道 token / API token 赋值（CR-001）；Cloudflare 放弃时恢复被改指的 DNS（002）；沿用隧道时保留完整远程 config（003）；ingress 合并保持优先级（004）；ingress 写入前校验配置未变、识别丢响应的自身写入（005）；secrets + settings 成对写入失败回滚、成功后才切换托管（007，`core/write-pair.ts`）；cloudflared 准备可取消、关闭 / 换 token 时等待（008）；更新 / 下载 HTTP 时限与关机取消（009，`NetOptions`、`Updater.stop()`）；Unregistered 日志按 connIndex 计数（010）；pid 登记失败不留 child（011）；Cloudflare 任务进入 live 快照（012）；交接里的真实隧道名改为泛化描述（013）。
 - 验证：`bun test` 555 通过 / 0 失败（新增约 25 条，含 sh 下的 pre-commit 测试）；`bun run typecheck` 通过（退出码 0）。**没运行**：`bun run build`、浏览器里的「运行中刷新 / 另一标签页」场景（只有单测）、真实 Cloudflare（002/003/005 只有 FakeCloudflare）、真机。
-- 剩余：**CR-006（需要用户决定）**：创建隧道响应丢失后的孤立隧道——现状是放弃后重新预览，同名隧道作为「沿用」选项出现；可选 A 保持并加提示 / B 认领「任务开始后创建且无连接」的同名隧道 / C 创建前用一次性隧道名。CR-003 真实 API 对缺省字段的语义未核实（现在原样回传，不依赖它）。CR-007：进程恰好在两次写入之间被杀的恢复未做。CR-013：已推送的历史提交里仍有真实隧道名，是否改写历史由用户决定。
+- 剩余：CR-006 已按方案 A 处理（不自动认领；`tunnel-exists` / `dns-appeared` / `ingress-changed` 失败时提示「放弃后重新预览并确认」）。CR-003 真实 API 对缺省字段的语义未核实（现在原样回传，不依赖它）。CR-007：进程恰好在两次写入之间被杀的恢复未做。CR-013：已推送的历史提交里仍有真实隧道名，是否改写历史由用户决定。
 - 决定 / 坑：`mergeIngress` 顺序变了（原位替换 / 插在会遮蔽它的规则之前），旧测试里「新规则在最前」的断言已改。`TunnelManager` 的 teardown 会等 prepare 结束，自定义 prepare 需要响应 `net.signal`。`SetupPlan` 新增 `configHash`，`SetupJob.created` 新增 `dnsRestore`，`StateDoc` 新增 `cloudflare`（均向后兼容）。
-- 下一步：没有新的工作包（开发共 4 个阶段，阶段 4 已全部完成）。等用户决定 CR-006 的处理方式，并决定是否让 Codex 复审。
+- 下一步：没有新的工作包（开发共 4 个阶段，阶段 4 已全部完成）。等 Codex 复审。
 
 ---
 

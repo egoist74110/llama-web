@@ -64,6 +64,8 @@ export function cfErrorText(code: string, detail = ''): string {
     const perm = (t.cloudflare.permissions as Record<string, string>)[detail]
     return perm ? fmt(errors['forbidden-perm']!, { perm }) : errors.forbidden!
   }
+  const specific = code === 'changed' ? errors[`changed-${detail}`] : undefined
+  if (specific) return specific
   return fmt(errors[code] ?? code, { detail: detail ? `（${detail}）` : '' })
 }
 
