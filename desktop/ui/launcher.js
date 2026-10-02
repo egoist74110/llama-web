@@ -6,7 +6,16 @@
   const retry = document.getElementById('retry'), quit = document.getElementById('quit')
   const importButton = document.getElementById('import')
   importButton.textContent = strings.import
-  importButton.onclick = async () => { importButton.disabled = true; try { await invoke('desktop_import') } finally { importButton.disabled = false } }
+  const recovery = document.getElementById('recover')
+  recovery.textContent = strings.restore
+  async function copy(recover) {
+    importButton.disabled = recovery.disabled = true
+    try { await invoke('desktop_import', { recover }) }
+    catch (e) { detail.textContent = strings[String(e)] || String(e) }
+    finally { importButton.disabled = recovery.disabled = false }
+  }
+  importButton.onclick = () => copy(false)
+  recovery.onclick = () => copy(true)
   retry.textContent = strings.retry
   quit.textContent = strings.quit
   retry.onclick = async () => { retry.disabled = true; try { await invoke('desktop_retry') } finally { retry.disabled = false } }
@@ -15,11 +24,12 @@
     try {
       const state = await invoke('desktop_status')
       status.textContent = strings[state.phase] || strings.error
-      detail.textContent = state.detail || ''
+      detail.textContent = strings[state.detail] || state.detail || ''
       document.getElementById('data').textContent = strings.data + state.dataDir
       retry.hidden = !['error', 'choose'].includes(state.phase)
       retry.textContent = state.phase === 'choose' ? strings.start : strings.retry
       importButton.hidden = state.phase !== 'choose'
+      recovery.hidden = state.phase !== 'recover'
     } catch (e) { detail.textContent = String(e) }
     setTimeout(poll, 500)
   }

@@ -247,9 +247,9 @@ li.task .when{color:var(--ok);font-size:12px;white-space:nowrap}
     <tr><td>23</td><td>启动时加载</td><td>不自动加载，等第一个请求</td></tr>
     <tr><td>24</td><td>交付方式</td><td>原有 4 个功能阶段之后增加阶段 5（兼容基础 → Windows 套壳 → Windows Release）；每工作包一个会话。Windows 套壳完成后额外停下来让用户试用确认，才进入 Release；Mac 套壳与发包须另获用户启动指令</td></tr>
     <tr><td>25</td><td>HTTP 入口</td><td>不用 Nitro 自带的 bun 入口，改用自定义 Bun 入口：<code>/v1/*</code>、<code>/upstream/*</code> 由 Bun 原生处理；其余交给 Nitro，并把断开信号和客户端 IP 传给处理函数；关闭每个请求的空闲超时（原因见「风险与待验证」）</td></tr>
-    <tr><td>26</td><td>桌面壳选型（验证中）</td><td>5-2 已实现 Tauri 2 + 固定 Bun 1.3.14 + Nuxt 构建产物，Windows 调试窗口、中文首次向导、重复启动、关闭退出及打包 sharp 已验证；本地 NSIS 测试包已生成。完整安装版与异常生命周期验收未完成，继续在 5-2 验证；若验证失败再讨论 Electron。记录见 <a href="windows-desktop.md">Windows 桌面记录</a></td></tr>
+    <tr><td>26</td><td>桌面壳选型（验证中）</td><td>5-2 保留 Tauri 2 + 固定 Bun 1.3.14 + 完整 Nuxt 产物；调试窗口和本地 NSIS 包、安装 HTTP / SSE / 长请求、真实 NVIDIA 切换 / b11140 回退、显式 CPU 推理已验证。Bun 在禁止写入的源文件上报 EPERM，壳改为原子复制到用户数据目录的短运行缓存后启动，安装资源仍可只读。WebView 视觉 / GUI 与干净机等验收未完成，继续 5-2；若整体方案失败再讨论 Electron。记录见 <a href="windows-desktop.md">Windows 桌面记录</a></td></tr>
     <tr><td>27</td><td>跨平台与首发</td><td>5-1 已实现 OS / arch / 推理加速与运行库隔离；用户确认 settings v4：旧配置迁移为 CUDA，新配置 auto，另有 CPU / Metal。旧 Windows runtime 原地保留供加载与回退，PID v2 迁移先备份。Windows 本机回归通过；macOS arm64 / x64 分支仅构造验证，真实安装包、进程、sharp 和推理后续验收。接口与迁移见 <a href="platform-foundation.md">5-1 设计记录</a></td></tr>
-    <tr><td>28</td><td>桌面运行资源（本地测试）</td><td>5-2 本地包内置 Bun 1.3.14、Nuxt 产物、Windows sharp 原生资源和第三方许可；不带模型、用户数据和 llama.cpp / cudart。推理运行库继续按需下载并校验；离线模型、手动覆盖升级和保留数据尚待完整安装验收，应用更新仍与 llama.cpp 自动更新分开</td></tr>
+    <tr><td>28</td><td>桌面运行资源（本地测试）</td><td>5-2 本地包内置 Bun 1.3.14、Nuxt 产物、Windows sharp 原生资源和第三方许可；不带模型、用户数据和 llama.cpp / cudart。推理运行库继续按需下载并校验。按完整摘要区分的运行缓存位于 data/run/desktop，旧缓存保留供回退，不随数据导入复制；短目录名仍核对完整身份，避免 sharp DLL 路径过长。同版本号的前后本地构建覆盖 / 回装及默认卸载保留数据通过；真实版本升级、故障安装、离线与干净机尚待完整验收。应用更新仍与 llama.cpp 自动更新分开</td></tr>
   </table>
 </section>
 
@@ -489,7 +489,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 
 <section id="s5" class="stage">
   <div class="stage-head"><h2>阶段 5 · 兼容基础与 Windows 桌面首发</h2><div class="stage-meta"><span class="count"></span><div class="bar"><i></i></div></div></div>
-  <div class="stage-goal">用户要求（2026-10-02）：<b>先做兼容，再做出 Windows 套壳；Windows 套壳完成后停下来，不自动往下做。</b>5-1 兼容基础已完成 Windows 回归；桌面壳与 Release 待实施，首发优先 Windows，Mac 套壳和发包后续另开工作包。</div>
+  <div class="stage-goal">用户要求（2026-10-02）：<b>先做兼容，再做出 Windows 套壳；Windows 套壳完成后停下来，不自动往下做。</b>5-1 兼容基础已完成 Windows 回归；5-2 薄壳与本地包已有，完整验收仍需接续；Release 等用户试用确认后另开会话，Mac 套壳和发包后续另行启动。</div>
   <div class="note">5-1 / 5-2 / 5-3 必须分会话执行；5-2 交付本地测试包后必须等待用户试用确认，再进入 5-3。兼容基础完成不等于已完成 macOS 真机验证，也不授权直接发布 Release。</div>
 
   <h3>兼容基础与桌面发包边界</h3>
@@ -538,7 +538,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
   <p><b>5-1 验收：</b>Windows 全量测试和类型检查通过，现有加载 / 调度 / 转发 / 更新规则保持一致；构造的平台测试证明分支选择和边界。macOS 的真实进程、sharp 和推理运行记录列为后续验收，不把本机模拟分支通过写成“Mac 已支持”。该工作包不创建桌面安装包、不发布 Release。</p>
 
   <h3>5-2 · Windows 套壳与本地测试包（完成后停）</h3>
-  <p>2026-10-02：薄壳与本地 NSIS 测试包已实现，调试页面 / 关闭退出及部分安装验证通过；用户按 Escape 停止电脑操作后结束本轮。任务保持未勾选，真实模型、安装版完整验收与导入中断恢复等需接续 5-2，不能进入 5-3。详见 <a href="windows-desktop.md">Windows 桌面记录</a>。</p>
+  <p>2026-10-02 接续：补齐导入中断恢复、系统路径 / 链接拒绝与只读安装资源的短运行缓存；652 项 Bun 测试、类型检查、4 项 Rust 测试和本地 NSIS 构建通过。安装 HTTP / SSE / 长请求、真实 NVIDIA 加载 / 切换 / b11140 回退、CPU 推理和同版本本地包重装保留数据已验证。仍未恢复 Escape 停止的窗口自动化，WebView / GUI、干净环境、下载 / 解压中关窗等需接续；清理有自动审批拒绝及 EACCES 残留。两项继续未勾选，不能进入 5-3。详见 <a href="windows-desktop.md">Windows 桌面记录</a>。</p>
   <ul class="tasks">
     <li class="task" data-done="false"><span class="t">Windows Tauri 2 验证与薄壳：从干净的 Nuxt 构建产物启动内置 Bun（参数数组、隐藏控制台），窗口加载本机 HTTP 页面；验证 WebView2 下 SSE、长请求、中文、深浅色与 sharp 图片处理。窗口不开放通用 shell / 文件系统权限，不给 HTTP 页面原生执行权限；外链交给系统浏览器，拒绝把其他来源页面导航进带权限的窗口</span><span class="when"></span></li>
     <li class="task" data-done="false"><span class="t">壳生命周期与安装：单实例重复启动聚焦已有窗口；通过私有父子通道获取本次服务的 ready、实际端口与身份，不仅凭端口返回 200 认领服务。端口占用显示原因和重试 / 退出，不自动换端口、不杀未知服务；初始化不等待 llama.cpp 下载。关主窗口 / 应用退出先请求既有 shutdown，最多等待 15 秒后结束本次托管树；壳崩溃通过父子通道 EOF / 看护触发清理，下一次启动再安全处理残留。桌面版经系统目录 API 选取稳定用户数据目录并传 LLAMA_WEB_DATA，安装资源使用绝对路径；旧源码 data 由用户选择后备份复制，不自动搜个人路径，路径不能跨 Windows / Mac 生搬。打出本地 Windows x64 NSIS 测试安装包，检查 WebView2 bootstrapper、应用图标 / 版本与第三方许可；无 Bun / Node / Rust / Git 的干净环境能安装运行，卸载和覆盖安装保留用户数据</span><span class="when"></span></li>
@@ -626,6 +626,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
   <h2>变更记录</h2>
   <table>
     <tr><th>日期</th><th>内容</th></tr>
+    <tr><td>2026-10-02</td><td>5-2 接续：导入新增 v2 阶段标记、完整备份摘要、重复恢复及中文恢复入口；跨系统模型路径与链接拒绝。Bun 1.3.14 读取禁止写入的源代码报 EPERM，壳原子复制到短运行缓存并核对完整摘要，保持安装资源只读；未换技术栈或改调度 / 配置结构。652 项 Bun 测试、类型检查、4 项 Rust 测试、NSIS 构建及安装 / 真实 GPU 切换回退 / CPU 验证通过；窗口 / 干净机等仍待验，清理有拒绝 / EACCES 残留，5-2 两项不打勾。未进入 Release 或 Mac。</td></tr>
     <tr><td>2026-10-02</td><td>工作包 5-2 部分完成：用户确认安装 Rust MSVC / C++ 构建工具和项目 Tauri 依赖；实现薄壳、私有身份管道、Job Object、单实例、权限 / 导航隔离、旧数据备份复制及 NSIS 本地测试包。643 项 Bun 测试、类型检查、3 项 Rust 测试、构建和部分安装冒烟通过。用户停止电脑操作后结束本轮，5-2 两项不打勾，未做 GPU / Release / Mac；完整验证及临时残留清理见桌面记录。</td></tr>
     <tr><td>2026-10-02</td><td>工作包 5-1 完成：平台目标与资产选择、归档取消 / 时限 / 越界检查、进程组与 PID 身份、数据目录互斥及 runtime 隔离。用户确认 settings v4（旧配置 CUDA、新配置 auto、CPU / Metal 可选）、PID v2 备份迁移；旧 Windows 版本保留可加载 / 回退。Windows 638 项测试、类型检查、隔离构建及假进程构建产物冒烟通过；Mac 仅构造验证，真机进程 / sharp / 推理待后续。无壳、安装包或 Release。详见 <a href="platform-foundation.md">5-1 设计记录</a>。</td></tr>
     <tr><td>2026-10-02</td><td>新增阶段 5 发布计划（仅规划）：用户要求 Windows / Mac 兼容与桌面套壳，随后明确“先做兼容，再做 Windows 套壳，不直接往下做”。工作包顺序为 5-1 跨平台服务基础、5-2 Windows Tauri 薄壳与本地测试包（完成即停）、5-3 首个 Windows Release（用户试用确认后）。同步范围、决定 2 / 24，新增拟议决定 26–28；Mac 套壳与发包只保留后续路线。所有实现任务均未打勾。</td></tr>

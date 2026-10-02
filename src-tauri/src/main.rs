@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod job;
+mod resources;
 
 use serde::Serialize;
 use std::{
@@ -81,32 +82,59 @@ fn desktop_quit(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<(
     Ok(())
 }
 #[tauri::command]
-fn desktop_import(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<(), String> {
+fn desktop_import(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    recover: Option<bool>,
+) -> Result<(), String> {
     local_launcher(&window)?;
     let state = app.state::<State>();
     let mut inner = state.lock().unwrap();
-    if inner.status.phase != "choose" || inner.running.is_some() || inner.quitting {
+    let recovering = recover.unwrap_or(false);
+    if inner.status.phase != (if recovering { "recover" } else { "choose" })
+        || inner.running.is_some()
+        || inner.quitting
+    {
         return Err("Import is available only before first launch".into());
     }
-    inner.status.phase = "importing".into();
+    inner.status.phase = if recovering {
+        "recovering"
+    } else {
+        "importing"
+    }
+    .into();
+    inner.status.detail.clear();
     inner.generation += 1;
     let generation = inner.generation;
     let target = inner.status.data_dir.clone();
     drop(inner);
     thread::spawn(move || {
-        let source = rfd::FileDialog::new().pick_folder();
+        let source = if recovering {
+            None
+        } else {
+            rfd::FileDialog::new().pick_folder()
+        };
         let result = (|| -> Result<bool, String> {
-            let Some(source) = source else {
+            if !recovering && source.is_none() {
                 return Ok(false);
-            };
+            }
+            if app.state::<State>().lock().unwrap().quitting {
+                return Ok(false);
+            }
             let resource = app
                 .path()
                 .resource_dir()
                 .map_err(|e| e.to_string())?
                 .join("resources");
-            let mut child = Command::new(resource.join("bun.exe"))
-                .arg(resource.join("import-data.mjs"))
-                .arg(source)
+            let mut command = Command::new(resource.join("bun.exe"));
+            let cached = resources::writable_resources(&resource, &PathBuf::from(&target))?;
+            command.arg(cached.join("import-data.mjs"));
+            if recovering {
+                command.arg("--recover");
+            } else {
+                command.arg(source.unwrap());
+            }
+            let mut child = command
                 .arg(&target)
                 .creation_flags(NO_WINDOW)
                 .stdin(Stdio::piped())
@@ -138,12 +166,13 @@ fn desktop_import(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result
                 _job: job,
             });
             drop(inner);
-            let error = BufReader::new(errors)
-                .lines()
-                .map_while(Result::ok)
-                .take(5)
-                .collect::<Vec<_>>()
-                .join("\n");
+            let error = Arc::new(Mutex::new(String::new()));
+            let tail = error.clone();
+            thread::spawn(move || {
+                for line in BufReader::new(errors).lines().map_while(Result::ok) {
+                    *tail.lock().unwrap() = line.chars().take(1200).collect();
+                }
+            });
             loop {
                 thread::sleep(Duration::from_millis(100));
                 let state = app.state::<State>();
@@ -155,7 +184,7 @@ fn desktop_import(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result
                     if let Some(code) = running.child.try_wait().map_err(|e| e.to_string())? {
                         inner.running.take();
                         if !code.success() {
-                            return Err(error);
+                            return Err(error.lock().unwrap().clone());
                         }
                         return Ok(true);
                     }
@@ -170,12 +199,20 @@ fn desktop_import(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result
             return;
         }
         inner.running.take();
-        inner.status.phase = "choose".into();
+        inner.status.phase = if PathBuf::from(&target)
+            .join("run/import.pending.json")
+            .exists()
+        {
+            "recover"
+        } else {
+            "choose"
+        }
+        .into();
         if let Err(ref error) = result {
             inner.status.detail = error.clone();
         }
         drop(inner);
-        if matches!(result, Ok(true)) {
+        if matches!(result, Ok(true)) && PathBuf::from(&target).join("settings.json").is_file() {
             start(app);
         }
     });
@@ -253,6 +290,14 @@ fn start(app: tauri::AppHandle) {
     {
         return;
     }
+    if PathBuf::from(&inner.status.data_dir)
+        .join("run/import.pending.json")
+        .exists()
+    {
+        inner.status.phase = "recover".into();
+        inner.status.detail.clear();
+        return;
+    }
     inner.generation += 1;
     let generation = inner.generation;
     inner.status.phase = "starting".into();
@@ -270,18 +315,19 @@ fn start(app: tauri::AppHandle) {
                 .join("run/import.pending.json")
                 .exists()
             {
-                return Err("An interrupted data import requires recovery from import-backups before starting".into());
+                return Err("importPending".into());
             }
             let bun = resource.join("bun.exe");
-            let entry = resource.join("app/server/index.mjs");
+            let cached = resources::writable_resources(&resource, &PathBuf::from(&data_dir))?;
+            let entry = cached.join("app/server/index.mjs");
             if !bun.is_file() || !entry.is_file() {
-                return Err("Bundled runtime is missing".into());
+                return Err("runtimeMissing".into());
             }
             let session = uuid::Uuid::new_v4().to_string();
             let mut command = Command::new(&bun);
             command
                 .arg(&entry)
-                .current_dir(resource.join("app"))
+                .current_dir(cached.join("app"))
                 .env("LLAMA_WEB_DATA", data_dir)
                 .env("LLAMA_WEB_DESKTOP_SESSION", &session)
                 .env_remove("PORT")
@@ -365,7 +411,7 @@ fn start(app: tauri::AppHandle) {
                     ));
                 }
                 if inner.status.phase == "starting" && Instant::now() > deadline {
-                    return Err("Private ready handshake timed out".into());
+                    return Err("readyTimeout".into());
                 }
             }
         })();
@@ -502,17 +548,25 @@ fn main() {
                 None => app.path().app_local_data_dir()?.join("data"),
             };
             let first = !data_dir.join("settings.json").exists();
+            let pending = data_dir.join("run/import.pending.json").exists();
             app.manage(Arc::new(Mutex::new(Inner {
                 running: None,
                 generation: 0,
                 quitting: false,
                 status: Status {
-                    phase: if first { "choose" } else { "idle" }.into(),
+                    phase: if pending {
+                        "recover"
+                    } else if first {
+                        "choose"
+                    } else {
+                        "idle"
+                    }
+                    .into(),
                     detail: String::new(),
                     data_dir: data_dir.to_string_lossy().into(),
                 },
             })));
-            if !first {
+            if !first && !pending {
                 start(app.handle().clone());
             }
             Ok(())

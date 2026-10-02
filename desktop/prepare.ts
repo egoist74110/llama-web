@@ -13,6 +13,20 @@ async function run(argv: string[], cwd = root) {
   if (await p.exited !== 0) throw new Error(`Command failed: ${argv[0]} ${argv[1]}`)
 }
 function digest(path: string) { return createHash('sha256').update(readFileSync(path)).digest('hex') }
+function resourceDigest() {
+  const hash = createHash('sha256')
+  function visit(path: string) {
+    for (const entry of readdirSync(path, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const full = join(path, entry.name)
+      if (entry.isSymbolicLink()) throw new Error('Linked desktop resource')
+      if (entry.isDirectory()) visit(full)
+      else { hash.update(JSON.stringify(full.slice(resources.length))); hash.update(digest(full)) }
+    }
+  }
+  visit(join(resources, 'app'))
+  hash.update(digest(join(resources, 'import-data.mjs')))
+  return hash.digest('hex')
+}
 function licenses(path: string, result: string[], base = path) {
   for (const file of readdirSync(path, { withFileTypes: true })) {
     if (file.isSymbolicLink()) continue
@@ -65,7 +79,7 @@ try {
   if (!bunLicense.ok) throw new Error('Cannot obtain bundled Bun license')
   writeFileSync(join(resources, 'THIRD-PARTY-NOTICES.txt'), `Bun ${BUN_VERSION}\n${await bunLicense.text()}\n${notices.join('\n')}`)
   writeFileSync(join(resources, 'versions.json'), JSON.stringify({ application: '0.0.0-local-test', bun: BUN_VERSION,
-    bunSha256: digest(join(resources, 'bun.exe')), target: 'windows-x64', signature: 'unsigned-local-test' }, null, 2))
+    bunSha256: digest(join(resources, 'bun.exe')), resourceId: resourceDigest(), target: 'windows-x64', signature: 'unsigned-local-test' }, null, 2))
   console.log('Prepared desktop resources from isolated build')
 } finally {
   if (added) {

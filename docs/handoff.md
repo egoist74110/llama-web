@@ -16,6 +16,19 @@
 
 ---
 
+## 2026-10-02 · 工作包 5-2（接续，仍部分完成） · Codex
+- 完成：旧 data 导入 v2 阶段标记、完整备份摘要、可重复恢复、旧标记兼容、中文恢复入口；跨系统模型路径 / linked run / backup 拒绝。只读安装资源改用短运行缓存原子复制（完整摘要认领、异常暂存清理），未换技术栈 / 配置结构 / 调度规则；plan 两项继续未勾选。
+- 验证：标准 `bun test` 652 pass / 0 fail（43 文件，无 skip）；`bun run typecheck`、`cargo check --locked` 通过，Rust 4 pass；`bun run desktop:build` 和后续 `bun x tauri build --bundles nsis` 通过。导入 11 项含真实强杀复制进程后恢复 / 恢复再次中断 / 篡改拒绝。
+- 安装：最终包中文空格目录、PATH 无开发工具时内置 Bun、四页面 HTTP 200、动态 SSE、假上游静默 12 秒、假模型切换 / 回退、加载中强杀 / 重开、前后同为 0.0.0 的本地构建覆盖 / 回装及卸载保留构造配置 / key / 模型引用通过。未知 HTTP 200 占端口不被认领，释放后 private ready / shutdown 通过；未点 GUI 重试。
+- 真机：最终候选包两个真实文本 GGUF 的 NVIDIA 加载 / 流式 / 切换、官方 b11140 CUDA 下载校验 / 解压后回退重载和流式通过；只读安装 ACL 下短缓存启动、官方 b11140 CPU / 0 GPU 层真实流式通过（本机仍有 NVIDIA）。真实 settings 仅只读定位路径，夹具配置自行构造，无真实 secrets / Cloudflare 读取或修改。
+- 剩余：WebView 可见页面 / 深浅色 / 窗口内长请求与 SSE；GUI 冲突 / 重试、导入选择 / 恢复按钮；正常关窗时真实加载 / 下载 / 解压中止；无开发工具 / 无 NVIDIA 的干净环境、旧 CPU 指令集下限；不同版本号升级 / 故障安装回退、极深自定义数据路径。继续 5-2，不得进入 5-3 / Mac；建议导入恢复 / 运行缓存独立复审（未派发）。
+- 决定 / 坑：Bun 1.3.14 模块加载在 write-denied ACL 上报 EPERM，普通读取成功；字节流复制到 data/run/desktop 的短摘要目录后解决。Windows 原生 sharp DLL 对过长路径失败，目录内仍核对完整摘要；缓存按包保留，导入不复制 run。NSIS `/D=` 必须为未加引号的最后参数，参数数组在 Bun 上要 windowsVerbatimArguments；静默默认卸载保留数据，GUI「删除应用数据」选项会删除默认目录。
+- 包：`dist/desktop/llama-web_0.0.0_x64-5-2-setup.exe`，0.0.0、未签名、未发布；SHA256 与完整结果见 `docs/windows-desktop.md`。旧本地包留作测试回装。
+- 清理：自有壳 / Bun / llama-server、安装与测试端口已收回，ACL 与本轮 NSIS 安装位置改动已恢复，临时 worktree 已清。CPU 验收脚本功能通过但收尾 rmSync 报 EACCES、退出 1；Native 递归 / 逐文件删除又被自动审批拒绝（仅 blocked by policy）。旧临时构建 / 夹具、首次安装失败夹具、CPU 残目录及探针 / 路径定位信息保留在忽略目录，不绕过审批；具体位置在 `.cache/desktop-5-2-continuation-resources.json`。未干预用户实例。
+- 下一步：接续 5-2（Opus 5.5），先按剩余和桌面记录补人工窗口 / 干净机等验收。完成后交包停下等用户安装试用确认，仍不做 5-3 / Release / Mac。
+
+---
+
 ## 2026-10-02 · 工作包 5-2（部分完成，需接续） · Codex
 - 完成：Tauri 2 薄壳、固定 Bun + 完整 Nuxt 产物、stdin/stdout 私有 ready/shutdown（本次 UUID / PID）、单实例、15 秒退出与 Job Object、HTTP 页面无原生权限、导航限制、启动页重试 / 退出；显式旧 data 备份复制；本地 Windows x64 NSIS 包 0.0.0（未签名、未发布）。详细记录 `docs/windows-desktop.md`；plan 两项均未勾选。
 - 用户确认：允许安装 Rust MSVC、Visual Studio C++ Build Tools / SDK 和项目 Tauri 构建依赖；工具安装完成。用户按 Escape 停止电脑操作后，不再调用窗口自动化，本轮结束。
