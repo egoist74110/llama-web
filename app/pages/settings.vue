@@ -26,6 +26,7 @@ onMounted(load)
       <SettingsServer />
       <SettingsPublicAccess />
     </template>
+    <SettingsAbout />
 
     <ImportCard @imported="load" />
   </div>

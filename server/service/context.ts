@@ -25,6 +25,8 @@ import { JsonStore, resolveDataDir, type VersionedDoc } from '../core/store'
 import { TunnelManager, type TunnelInfo } from '../core/tunnel'
 import { CloudflareSetup } from '../core/cloudflare'
 import { Updater } from '../core/updater'
+import { APP_REPO, APP_VERSION } from '../core/app-info'
+import { AppUpdater } from '../core/app-update'
 import { Hold } from '../core/write-pair'
 import { cloudflareHooks } from './cloudflare-hooks'
 import { acquireDataLock, type DataLock } from '../core/data-lock'
@@ -50,6 +52,8 @@ export interface AppContext {
   getRuntimeStatus(): RuntimeStatus
   /** llama.cpp versions: list, switch (rollback), pruning. */
   updater: Updater
+  /** Updates of llama-web itself (check / download / desktop install hand-off). */
+  appUpdate: AppUpdater
   runner: Runner
   scheduler: Scheduler
   /** Management actions (start / stop / restart / switch); use these instead of the scheduler directly. */
@@ -221,6 +225,15 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
       live.notify()
     },
   })
+  // LLAMA_WEB_UPDATE_FEED: loopback release list for local acceptance tests only (checked by AppUpdater).
+  const appUpdateOpts = { current: APP_VERSION, repo: APP_REPO, dataDir, onChange: () => live.notify() }
+  let appUpdate: AppUpdater
+  try { appUpdate = new AppUpdater({ ...appUpdateOpts, feed: process.env.LLAMA_WEB_UPDATE_FEED || undefined }) }
+  catch (e) {
+    logError('ignored LLAMA_WEB_UPDATE_FEED:', (e as Error).message)
+    appUpdate = new AppUpdater(appUpdateOpts)
+  }
+  startupClose.push(() => appUpdate.stop())
   const speed = new SpeedMeter({ onChange: () => live.notifyMetrics() })
   // Samples nvidia-smi every settings.gpu.sampleSec seconds (2 by default), but only while a browser is connected to /api/stream.
   const gpu = new GpuSampler({ intervalMs: () => Math.max(500, getSettings().gpu.sampleSec * 1000), active: () => platform.os === 'win32' && live.subscriberCount > 0, onChange: () => live.notifyMetrics() })
@@ -236,6 +249,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
       queue: scheduler.snapshot().queue.map(q => ({ modelId: q.modelId, profile: q.profile, started: q.started, waiting: q.waiting })),
       llamacpp: { current: getSettings().llamacpp.current, runtime: updater.getStatus(), versions: updater.versions(), rollback: updater.rollbackTarget() },
       tunnel: tunnel.status(),
+      appUpdate: appUpdate.view(),
       // Job and its version from one view: the page orders snapshots and HTTP responses by it.
       ...(({ job, rev }) => ({ cloudflare: job, cloudflareRev: rev }))(cloudflare.view()),
       firstRun: isFirstRun(getSettings(), getModels()),
@@ -351,6 +365,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
   // release and make it current, prune old versions. Loads meanwhile use the current version.
   // After residue cleanup, so leftovers of the last run do not hold a version directory.
   void cleanupDone.then(() => updater.run())
+  appUpdate.start()
 
   // Under `nuxt dev` nothing attaches the public listener; this still reports why the tunnel is off.
   applyTunnel()
@@ -361,13 +376,14 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     platform, runtimeTarget: selectedTarget,
     getSecrets: secretsRef.get, updateSecrets: secretsRef.update, tunnel, applyTunnel, cloudflare,
     refresh: () => { settingsRef.refresh(); modelsRef.refresh() },
-    getRuntimeStatus: () => updater.getStatus(), updater, runner, scheduler, ops, proxy, publicEntry, applyPublic, live, logs, cleanupDone,
+    getRuntimeStatus: () => updater.getStatus(), updater, appUpdate, runner, scheduler, ops, proxy, publicEntry, applyPublic, live, logs, cleanupDone,
     shutdown() {
       closing ??= (async () => {
         await cleanupDone
         publicEntry.close()
         await tunnel.shutdown()
         await updater.stop()
+        appUpdate.stop()
         settingsStore.close()
         modelsStore.close()
         secretsStore.close()

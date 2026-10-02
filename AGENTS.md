@@ -52,9 +52,11 @@ start.bat            # 用户实际使用的启动方式（1-5 实现）
 - `server/entry.ts`：自定义 Bun 入口（关键决定 25，只在构建产物里生效）：`/v1/*`、`/upstream/*`、`GET /api/stream` 原生处理，其余交给 Nitro
 - `server/service/`：进程级接线（`context.ts`：配置、runner、scheduler、转发的单例）
 - `server/routes/v1/`、`server/routes/upstream/`：只在 `nuxt dev` 下起作用，调用和入口相同的 `core/proxy.ts`
-- `server/core/`：scheduler、model-ops（管理操作，路由里不要直接调 scheduler 的 start/stop）、runner、args、scanner、gguf、preprocess、proxy、routing、config、launch、logs（`data/logs` 落盘与保留）、request-log（请求记录：只存白名单参数、token 数，不存对话内容）、live、errors、updater、gpu、store、backends
+- `server/core/`：scheduler、model-ops（管理操作，路由里不要直接调 scheduler 的 start/stop）、runner、args、scanner、gguf、preprocess、proxy、routing、config、launch、logs（`data/logs` 落盘与保留）、request-log（请求记录：只存白名单参数、token 数，不存对话内容）、live、errors、updater（llama.cpp）、app-update / app-info（llama-web 自身更新与版本，版本号只在 `package.json`）、desktop-channel（桌面壳私有管道）、gpu、store、backends
 - `server/plugins/`：启动时执行的逻辑
 - `tests/`：单元测试
+- `src-tauri/`、`desktop/`：Windows 桌面壳（Rust）、打包脚本与包内容检查（`desktop/check-package.ts`）
+- `.github/workflows/release-windows.yml`、`docs/release-notes/`：手动触发的 Windows 草稿 Release 与各版本发布说明
 - `docs/plan.html`：开发计划与进度
 - `data/`：运行数据（已加入 .gitignore，见下文）
 

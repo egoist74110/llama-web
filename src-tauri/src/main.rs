@@ -1,12 +1,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod job;
 mod resources;
+mod update;
 
 use serde::Serialize;
 use std::{
     io::{BufRead, BufReader, Write},
     os::windows::process::CommandExt,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Child, ChildStdin, Command, Stdio},
     sync::{Arc, Mutex},
     thread,
@@ -64,6 +65,8 @@ struct Inner {
     status: Status,
     generation: u64,
     quitting: bool,
+    /// Update installer the service asked for; started after the service has stopped.
+    install: Option<update::Request>,
 }
 type State = Arc<Mutex<Inner>>;
 
@@ -407,6 +410,17 @@ fn start(app: tauri::AppHandle) {
                         *report.lock().unwrap() = Some(reason);
                         continue;
                     }
+                    if let Some(request) = update::request(&line, &session, pid) {
+                        let state = reader_app.state::<State>();
+                        let mut inner = state.lock().unwrap();
+                        if generation != inner.generation || inner.quitting {
+                            continue;
+                        }
+                        inner.install = Some(request);
+                        drop(inner);
+                        quit(reader_app.clone());
+                        continue;
+                    }
                     let Some(port) = ready_port(&line, &session, pid) else {
                         continue;
                     };
@@ -561,9 +575,19 @@ fn quit(app: tauri::AppHandle) {
         return;
     }
     inner.quitting = true;
-    inner.status.phase = "stopping".into();
+    let updating = inner.install.is_some();
+    inner.status.phase = if updating { "updating" } else { "stopping" }.into();
     let running = inner.running.take();
     drop(inner);
+    if updating {
+        if let Some(main) = app.get_webview_window("main") {
+            let _ = main.hide();
+        }
+        if let Some(launcher) = app.get_webview_window("launcher") {
+            let _ = launcher.show();
+            let _ = launcher.set_focus();
+        }
+    }
     thread::spawn(move || {
         if let Some(mut running) = running {
             let command =
@@ -583,6 +607,34 @@ fn quit(app: tauri::AppHandle) {
             }
             drop(running._job);
             let _ = running.child.wait();
+        }
+        let state = app.state::<State>();
+        let mut inner = state.lock().unwrap();
+        let install = inner.install.take();
+        let data_dir = PathBuf::from(&inner.status.data_dir);
+        drop(inner);
+        if let Some(request) = install {
+            // Checked now that the service (the only other writer of that directory) has stopped.
+            let started = update::verify(&request, Path::new(&data_dir)).and_then(|file| {
+                Command::new(file)
+                    .args(["/P", "/R", "/UPDATE"])
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
+                    .map_err(|e| e.to_string())
+            });
+            if started.is_err() {
+                let mut inner = state.lock().unwrap();
+                inner.quitting = false;
+                inner.status.phase = "error".into();
+                inner.status.detail = "updateFailed".into();
+                drop(inner);
+                if let Some(main) = app.get_webview_window("main") {
+                    let _ = main.destroy();
+                }
+                return;
+            }
         }
         app.exit(0);
     });
@@ -622,6 +674,7 @@ fn main() {
                 running: None,
                 generation: 0,
                 quitting: false,
+                install: None,
                 status: Status {
                     phase: if pending {
                         "recover"

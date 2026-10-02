@@ -8,9 +8,18 @@ const root = resolve(import.meta.dir, '..')
 const resources = join(root, 'src-tauri', 'resources')
 const work = join(root, '..', `lw-build-${crypto.randomUUID().slice(0, 8)}`)
 const BUN_VERSION = '1.3.14'
+// LLAMA_WEB_RELEASE=1 (the release workflow): versions.json carries the plain application version.
+const release = process.env.LLAMA_WEB_RELEASE === '1'
+const appVersion: string = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version
 async function run(argv: string[], cwd = root) {
   const p = Bun.spawn(argv, { cwd, stdout: 'inherit', stderr: 'inherit', stdin: 'ignore' })
   if (await p.exited !== 0) throw new Error(`Command failed: ${argv[0]} ${argv[1]}`)
+}
+async function gitHead() {
+  const p = Bun.spawn(['git', 'rev-parse', 'HEAD'], { cwd: root, stdout: 'pipe', stderr: 'inherit' })
+  const out = (await new Response(p.stdout).text()).trim()
+  if (await p.exited !== 0 || !/^[0-9a-f]{40}$/.test(out)) throw new Error('Cannot read the commit being packaged')
+  return out
 }
 function digest(path: string) { return createHash('sha256').update(readFileSync(path)).digest('hex') }
 function resourceDigest() {
@@ -77,9 +86,11 @@ try {
   // Bun's MIT license and bundled dependency acknowledgments are kept next to the runtime.
   const bunLicense = await fetch(`https://raw.githubusercontent.com/oven-sh/bun/bun-v${BUN_VERSION}/LICENSE.md`)
   if (!bunLicense.ok) throw new Error('Cannot obtain bundled Bun license')
+  cpSync(join(root, 'LICENSE'), join(resources, 'LICENSE.txt'))
   writeFileSync(join(resources, 'THIRD-PARTY-NOTICES.txt'), `Bun ${BUN_VERSION}\n${await bunLicense.text()}\n${notices.join('\n')}`)
-  writeFileSync(join(resources, 'versions.json'), JSON.stringify({ application: `${JSON.parse(readFileSync(join(root, 'src-tauri', 'tauri.conf.json'), 'utf8')).version}-local-test`, bun: BUN_VERSION,
-    bunSha256: digest(join(resources, 'bun.exe')), resourceId: resourceDigest(), target: 'windows-x64', signature: 'unsigned-local-test' }, null, 2))
+  writeFileSync(join(resources, 'versions.json'), JSON.stringify({ application: release ? appVersion : `${appVersion}-local-test`, bun: BUN_VERSION,
+    bunSha256: digest(join(resources, 'bun.exe')), resourceId: resourceDigest(), target: 'windows-x64', signature: 'unsigned',
+    license: 'MIT', commit: (await gitHead()).slice(0, 40) }, null, 2))
   console.log('Prepared desktop resources from isolated build')
 } finally {
   if (added) {

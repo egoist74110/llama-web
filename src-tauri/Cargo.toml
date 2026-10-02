@@ -1,7 +1,8 @@
 [package]
 name = "llama-web-desktop"
-version = "0.0.1"
+version = "0.1.0-beta.1"
 edition = "2021"
+license = "MIT"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -14,7 +15,7 @@ serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
 open = "5"
 rfd = "0.15"
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Security"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Security", "Win32_Security_Cryptography"] }
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]

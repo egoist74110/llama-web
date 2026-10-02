@@ -80,6 +80,8 @@ const themeMenu = computed(() => [modes.map(m => ({
       {{ t.layout.disconnected }}
     </div>
 
+    <AppUpdatePrompt />
+
     <div class="flex flex-1 flex-col md:flex-row">
       <nav class="flex gap-1 border-b border-default p-2 md:w-52 md:flex-col md:border-b-0 md:border-r md:p-3">
         <NuxtLink

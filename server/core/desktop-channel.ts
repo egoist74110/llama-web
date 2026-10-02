@@ -39,6 +39,11 @@ export function desktopChannel(options: {
       if (closed) return
       output.write(DESKTOP_PREFIX + JSON.stringify({ version: 1, session, pid, type: 'error', reason, port }) + '\n')
     },
+    /** Ask the shell to stop this service and start a verified update installer (see app-update.ts). */
+    install(r: { file: string, sha256: string, version: string }) {
+      if (closed || stopping) return
+      output.write(DESKTOP_PREFIX + JSON.stringify({ version: 1, session, pid, type: 'install', file: r.file, sha256: r.sha256, appVersion: r.version }) + '\n')
+    },
     close() {
       if (closed) return
       closed = true

@@ -7,6 +7,7 @@ import { missingFiles, type ModelFile } from './models-admin'
 import type { JobRev, SetupJob } from './cloudflare'
 import type { RuntimeStatus } from './llamacpp'
 import type { VersionView } from './updater'
+import type { AppUpdateView } from './app-update'
 import type { RequestRecord } from './request-log'
 import type { LogStream } from './runner'
 import type { ModelState, SchedulerEvent, SchedulerSnapshot } from './scheduler'
@@ -56,6 +57,8 @@ export interface StateDoc {
   }
   /** Cloudflare tunnel hosted by llama-web: state and the cloudflared in use. */
   tunnel: TunnelInfo
+  /** Updates of llama-web itself; absent in tests that do not wire them. */
+  appUpdate?: AppUpdateView
   /** The one-click tunnel setup run (non-secret view), so every open page follows it; null when there is none. */
   cloudflare: SetupJob | null
   /** Version of `cloudflare` (see JobRev): HTTP responses carry one too, the page keeps the newer. */
@@ -258,7 +261,7 @@ export class LiveHub {
   }
 
   snapshot(): StateDoc {
-    const { scheduler, models, queue, llamacpp, tunnel, cloudflare, cloudflareRev, firstRun, platform } = this.opts.snapshot()
+    const { scheduler, models, queue, llamacpp, tunnel, cloudflare, cloudflareRev, firstRun, platform, appUpdate } = this.opts.snapshot()
     return {
       now: this.now(),
       models: models.map(m => ({
@@ -272,6 +275,7 @@ export class LiveHub {
           })),
       })),
       queue, llamacpp, tunnel, cloudflare: cloudflare ?? null, cloudflareRev: cloudflareRev ?? null, firstRun: firstRun === true, platform,
+      ...(appUpdate ? { appUpdate } : {}),
     }
   }
 

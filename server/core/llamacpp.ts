@@ -81,6 +81,8 @@ export interface NetOptions {
   signal?: AbortSignal
   timeoutMs?: number
   stallMs?: number
+  /** Download progress: bytes received so far and the announced size (null when unknown). */
+  onProgress?: (received: number, total: number | null) => void
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000
@@ -230,8 +232,15 @@ export async function download(fetchFn: FetchFn, asset: ReleaseAsset, file: stri
     if (!res.body) throw new RuntimeError('network', 'Empty response body', asset.name)
     try {
       const src = Readable.fromWeb(res.body as never)
+      const size = Number(res.headers.get('content-length'))
+      const total = Number.isSafeInteger(size) && size > 0 ? size : null
+      let received = 0
       g.arm()
-      src.on('data', () => g.arm())
+      src.on('data', (chunk: Buffer) => {
+        g.arm()
+        received += chunk.length
+        net.onProgress?.(received, total)
+      })
       await pipeline(src, createWriteStream(file), { signal: g.signal })
     } catch (e) {
       throw new RuntimeError('network', `Download interrupted: ${asset.name}`, (e as Error).message)

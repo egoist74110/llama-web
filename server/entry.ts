@@ -23,6 +23,9 @@ const nitroApp = useNitroApp()
 const ctx = getContext()
 const cfg = ctx.getSettings().server
 
+// Only the desktop app can install updates: the shell starts the installer after this process stops.
+if (desktop) ctx.appUpdate.setInstaller(r => desktop.install(r))
+
 const listenPort = Number(process.env.NITRO_PORT || process.env.PORT) || cfg.port
 const server = (() => {
 try { return Bun.serve({

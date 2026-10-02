@@ -250,6 +250,7 @@ li.task .when{color:var(--ok);font-size:12px;white-space:nowrap}
     <tr><td>26</td><td>桌面壳选型（本机验收完成，待干净机试用）</td><td>5-2 保留 Tauri 2 + 固定 Bun 1.3.14 + 完整 Nuxt 产物；本地 NSIS 包的窗口页面 / 深浅色 / SSE / 长请求、GUI 冲突与导入恢复、真实 NVIDIA 切换 / 回退、下载 / 解压 / 加载中关窗、跨版本升级与回装、断网和显式 CPU 推理已在本机验证。Bun 在禁止写入的源文件上报 EPERM，壳改为原子复制到应用本地数据目录的短运行缓存后启动，安装资源仍可只读。干净 Windows / 无 NVIDIA 未验证；若整体方案失败再讨论 Electron。记录见 <a href="windows-desktop.md">Windows 桌面记录</a></td></tr>
     <tr><td>27</td><td>跨平台与首发</td><td>5-1 已实现 OS / arch / 推理加速与运行库隔离；用户确认 settings v4：旧配置迁移为 CUDA，新配置 auto，另有 CPU / Metal。旧 Windows runtime 原地保留供加载与回退，PID v2 迁移先备份。Windows 本机回归通过；macOS arm64 / x64 分支仅构造验证，真实安装包、进程、sharp 和推理后续验收。接口与迁移见 <a href="platform-foundation.md">5-1 设计记录</a></td></tr>
     <tr><td>28</td><td>桌面运行资源（本地测试）</td><td>5-2 本地包内置 Bun 1.3.14、Nuxt 产物、Windows sharp 原生资源和第三方许可；不带模型、用户数据和 llama.cpp / cudart。推理运行库继续按需下载并校验。按完整摘要区分的运行缓存位于应用本地数据目录的 rc（0.0.1 起；0.0.0 包在 data/run/desktop，深数据目录会使 sharp DLL 路径超限），与自定义数据目录无关，旧缓存保留供回退，不随数据导入复制；短目录名仍核对完整身份。0.0.0 → 0.0.1 升级、安装中断后回装旧版、卸载保留数据与断网启动已通过；干净机尚待验收。应用更新仍与 llama.cpp 自动更新分开</td></tr>
+    <tr><td>29</td><td>首个 Windows Release 与应用更新（5-3）</td><td>用户确认：版本 <code>0.1.0-beta.1</code>（SemVer 预发布，GitHub 标 prerelease），项目许可 MIT，安装包未签名（无证书，发布说明写明 SmartScreen 提示）。版本号只写在 <code>package.json</code>（tauri.conf 引用它）。Release 由手动触发的 Windows workflow 生成<b>草稿</b>，从草稿下载验收后由维护者确认再发布（发布时才建 tag）。用户要求应用内现代更新：设置页「关于与更新」显示版本、手动检查、自动检查开关（默认开，启动约 15 秒后和每天一次，只读 GitHub Releases）；发现新版时顶部提示并弹出更新说明（Release 正文按纯文本显示），可跳过此版本。桌面版应用内下载，GitHub 资产摘要与 SHA256SUMS 一致才可安装；确认后服务经私有管道请求，壳停止服务后重新计算 SHA-256、限定 <code>data/run/app-update</code> 内的预期文件名，再以被动模式（<code>/P /R /UPDATE</code>）启动安装程序并退出，装完自动重开。源码版只提示和打开发布页。预发布用户接收更新的预发布和正式版，正式版用户只接收正式版。偏好存 <code>data/app-update.json</code>（不改 settings 结构）。不使用 Tauri updater 签名包（无需额外密钥），后台静默更新仍为坑位</td></tr>
   </table>
 </section>
 
@@ -595,7 +596,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
     <tr><td><span class="tag slot">界面</span></td><td>英文界面：新增 <code>i18n/en.ts</code></td></tr>
     <tr><td><span class="tag slot">运行</span></td><td>开机自启服务：加一个注册脚本即可，架构不变</td></tr>
     <tr><td><span class="tag slot">安全</span></td><td>源码版数据目录可用 <code>LLAMA_WEB_DATA</code> 挪到项目外；阶段 5 桌面版默认使用用户数据目录</td></tr>
-    <tr><td><span class="tag slot">桌面</span></td><td>Mac 套壳与 DMG、应用自动更新、系统托盘、Universal 包、Windows ARM：本阶段不实施；Mac 后续须用户另行启动</td></tr>
+    <tr><td><span class="tag slot">桌面</span></td><td>Mac 套壳与 DMG、后台静默自动安装 / 签名增量更新（Tauri updater）、系统托盘、Universal 包、Windows ARM：本阶段不实施；Mac 后续须用户另行启动。应用内检查 / 提示 / 下载校验后安装已在 5-3 实现（关键决定 29）</td></tr>
   </table>
 </section>
 

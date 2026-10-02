@@ -11,7 +11,11 @@
 
 ## 安装
 
-Windows 桌面薄壳与本地 NSIS 测试包正在工作包 5-2 验收，尚未公开发布。构建方式、数据目录和已测 / 未测项见 [Windows 桌面记录](docs/windows-desktop.md)。源码版继续使用下述方式。
+### Windows 桌面版（推荐）
+
+从 [Releases](https://github.com/egoist74110/llama-web/releases) 下载 `llama-web_<版本>_x64-setup.exe` 安装（当前用户安装，不需要管理员权限），可用同页的 `SHA256SUMS` 核对。安装包未做代码签名，SmartScreen 提示时选「更多信息 → 仍要运行」。不需要安装 Bun / Node；首次启动会联网下载 llama.cpp。系统要求、已验证 / 未验证的环境和已知问题见每个版本的发布说明，构建方式与数据目录见 [Windows 桌面记录](docs/windows-desktop.md)。
+
+### 源码版
 
 需要 [Bun](https://bun.sh)（装好后 `bun` 在 PATH 里）。不需要自己下载 llama.cpp：首次启动会从官方 Release 下载 CUDA 版（含 cudart）并校验 SHA-256。
 
@@ -121,6 +125,18 @@ key 在界面里吊销后立即失效（返回 401）。
 ## llama.cpp 更新与回退
 
 启动后会在后台检查官方最新版本：有新版就下载、校验、解压到新的版本目录并设为当前；网络失败只记事件，本次继续用旧版本。默认保留最近 2 个版本（正在运行的模型所在版本不会被删）。「设置 → llama.cpp 版本」可手动切换 / 回退（有确认框）；新版本加载模型失败时失败卡片会提示回退。切换版本不会重启正在运行的模型，卸载后再加载才使用新版本。
+
+## 应用更新
+
+「设置 → 关于与更新」显示当前版本，可以手动检查更新、关闭自动检查（默认打开后约 15 秒和之后每天检查一次 GitHub Releases，只读取版本信息）。发现新版时顶部出现提示，并弹出该版本的更新说明，可以「跳过此版本」。
+
+- 桌面版：「立即更新」在应用内下载安装包，GitHub 资产摘要与 `SHA256SUMS` 都一致才算下载完成；「关闭并安装」会停止所有模型和服务，桌面壳再次校验后启动安装程序，装完自动重新打开。配置和数据保留。
+- 源码版：只提示和打开发布页面，不自动安装。
+- 预发布版用户会收到更新的预发布和正式版；正式版用户只收到正式版。
+
+## 发布（维护者）
+
+GitHub Actions →「Windows release (draft)」→ 输入与 `package.json` 相同的版本号运行。流程在 Windows runner 上冻结依赖安装、测试、类型检查、构建 NSIS 包，用 `desktop/check-package.ts` 按 allowlist 检查包内文件（拒绝 data / secrets / .env / 日志 / 本机路径），生成 SHA256SUMS 与构建清单，创建**草稿** prerelease；发布说明取自 `docs/release-notes/v<版本>.md`。从草稿下载安装包验收后再手动发布（发布时才创建 tag）。
 
 ## 开发
 

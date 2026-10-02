@@ -1,0 +1,105 @@
+# Windows release build. Started by hand (Actions → "Windows release (draft)" → Run workflow)
+# with the version from package.json. It only ever creates a DRAFT prerelease: the tag v<version>
+# is created by GitHub when a maintainer publishes the draft after testing the downloaded installer.
+name: Windows release (draft)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version without "v"; must equal package.json
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-windows
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-2025
+    timeout-minutes: 90
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Rust toolchain (rust-toolchain.toml)
+        shell: pwsh
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustc --version
+          cargo --version
+
+      - name: Check version and release notes
+        shell: pwsh
+        run: |
+          $pkg = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ($pkg -ne $env:VERSION) { throw "package.json version $pkg differs from input $env:VERSION" }
+          if (-not (Test-Path "docs/release-notes/v$env:VERSION.md")) { throw "Missing docs/release-notes/v$env:VERSION.md" }
+          $existing = gh release view "v$env:VERSION" --json tagName 2>$null
+          if ($LASTEXITCODE -eq 0) { throw "Release v$env:VERSION already exists" }
+          $global:LASTEXITCODE = 0
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - run: bun install --frozen-lockfile
+      - run: bun test
+      - run: bun run typecheck
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+
+      - name: Build installer
+        run: bun run desktop:build
+        env:
+          LLAMA_WEB_RELEASE: '1'
+
+      - name: Package checks (allowlist, no data / secrets / logs / local paths)
+        shell: pwsh
+        run: |
+          bun desktop/check-package.ts src-tauri/resources
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $installer = "src-tauri/target/release/bundle/nsis/llama-web_$($env:VERSION)_x64-setup.exe"
+          if (-not (Test-Path $installer)) { throw "Installer not found: $installer" }
+          bun desktop/check-package.ts $installer
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Assemble release files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release | Out-Null
+          $name = "llama-web_$($env:VERSION)_x64-setup.exe"
+          Copy-Item "src-tauri/target/release/bundle/nsis/$name" "release/$name"
+          Copy-Item src-tauri/resources/THIRD-PARTY-NOTICES.txt release/THIRD-PARTY-NOTICES.txt
+          Copy-Item LICENSE release/LICENSE.txt
+          $hash = (Get-FileHash "release/$name" -Algorithm SHA256).Hash.ToLower()
+          [IO.File]::WriteAllText("$PWD/release/SHA256SUMS", "$hash  $name`n")
+          $versions = Get-Content src-tauri/resources/versions.json -Raw | ConvertFrom-Json
+          $manifest = [ordered]@{
+            application = $env:VERSION
+            commit = "$env:GITHUB_SHA"
+            target = 'windows-x64'
+            installer = [ordered]@{ name = $name; sha256 = $hash; bytes = (Get-Item "release/$name").Length }
+            signature = 'unsigned'
+            license = 'MIT'
+            bundled = [ordered]@{ bun = $versions.bun; bunSha256 = $versions.bunSha256; resourceId = $versions.resourceId }
+            toolchain = [ordered]@{ rust = (rustc --version); bunBuild = (bun --version); runner = "$env:ImageOS $env:ImageVersion" }
+            excludes = 'llama.cpp, cudart, models and user data are not bundled; llama.cpp is downloaded on first start'
+            workflowRun = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+          }
+          [IO.File]::WriteAllText("$PWD/release/llama-web-$($env:VERSION)-manifest.json", ($manifest | ConvertTo-Json -Depth 5))
+          Get-ChildItem release | Format-Table Name, Length
+
+      - name: Create draft prerelease
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v$env:VERSION" --draft --prerelease --target "$env:GITHUB_SHA" `
+            --title "llama-web v$env:VERSION" --notes-file "docs/release-notes/v$env:VERSION.md" `
+            (Get-ChildItem release | ForEach-Object { $_.FullName })

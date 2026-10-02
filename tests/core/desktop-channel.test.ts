@@ -51,3 +51,15 @@ test('startup failure reports only a fixed reason code and port, and nothing aft
   expect(f.text()).toBe(before)
   expect(f.reasons).toEqual([])
 })
+test('update install request carries the current identity, file and digest; nothing while stopping', () => {
+  const f = fixture()
+  f.channel.install({ file: 'X:\data\run\app-update\llama-web_0.2.0_x64-setup.exe', sha256: 'a'.repeat(64), version: '0.2.0' })
+  expect(JSON.parse(f.text().slice(DESKTOP_PREFIX.length))).toEqual({
+    version: 1, session, pid: 123, type: 'install', file: 'X:\data\run\app-update\llama-web_0.2.0_x64-setup.exe', sha256: 'a'.repeat(64), appVersion: '0.2.0',
+  })
+  f.input.write(JSON.stringify({ version: 1, session, type: 'shutdown' }) + '\n')
+  const before = f.text()
+  f.channel.install({ file: 'x', sha256: 'b'.repeat(64), version: '0.3.0' })
+  expect(f.text()).toBe(before)
+  f.channel.close()
+})
