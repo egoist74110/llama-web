@@ -104,6 +104,7 @@ li.task .when{color:var(--ok);font-size:12px;white-space:nowrap}
   <a href="#s2">阶段 2 · 界面</a>
   <a href="#s3">阶段 3 · 可观测性</a>
   <a href="#s4">阶段 4 · 公网与更新</a>
+  <a href="#s5">阶段 5 · 兼容与 Windows 桌面版</a>
   <a href="#verify">验收方式</a>
   <a href="#slots">坑位（暂不实现）</a>
   <a href="#risks">风险与待验证</a>
@@ -127,12 +128,13 @@ li.task .when{color:var(--ok);font-size:12px;white-space:nowrap}
   <ul>
     <li><b>一个进程</b>：自己启动和管理 <code>llama-server.exe</code>，同时提供 OpenAI 兼容 API 和中文管理界面。</li>
     <li><b>一个主端口</b> <code>:5001</code>（本机与局域网，完整功能），外加一个只给 Cloudflare 隧道用的 <code>:8080</code>（只开放 <code>/v1/*</code>，强制校验 key）。</li>
-    <li><b>手动启动</b>：双击 <code>start.bat</code>，关闭窗口即停止服务并结束所有 llama-server。</li>
+    <li><b>手动启动</b>：源码版双击 <code>start.bat</code>；阶段 5 增加 Windows 桌面套壳，双击应用打开现有管理界面，关闭主窗口即停止服务并结束所有托管子进程。</li>
+    <li><b>交付顺序</b>：先做 Windows / macOS 的兼容基础，再做出 Windows 套壳并停下来试用；确认后才准备首个 Windows Release。Mac 套壳与发包另行启动，尚未验证的平台不宣称支持。</li>
   </ul>
   <h3>不做什么</h3>
   <ul>
     <li>不支持 vLLM 等其他后端（只留接口）。</li>
-    <li>不做开机自启、系统托盘、桌面程序。</li>
+    <li>不做开机自启、系统托盘；桌面程序只做承载现有网页和管理服务生命周期的薄壳。</li>
     <li>不做多用户和登录。</li>
     <li>不做历史统计图表（只显示实时速度）。</li>
   </ul>
@@ -216,7 +218,7 @@ li.task .when{color:var(--ok);font-size:12px;white-space:nowrap}
     <tr><th>#</th><th>问题</th><th>决定</th></tr>
     <tr><td>1</td><td>替换还是包装 llama-swap</td><td>彻底替换，自己管理 llama-server 进程</td></tr>
     <tr><td>1b</td><td>技术栈</td><td>Nuxt 前后端一体，Bun 管理</td></tr>
-    <tr><td>2</td><td>运行方式</td><td>手动启动；关窗口 = 全部停止；启动时清理上次残留</td></tr>
+    <tr><td>2</td><td>运行方式</td><td>手动启动；关窗口 = 全部停止；启动时清理上次残留。阶段 5 的桌面版沿用此规则，不关闭到托盘；源码版继续保留</td></tr>
     <tr><td>—</td><td>端口</td><td>只用 <code>:5001</code>，客户端地址不变；5002 / 5003 废弃</td></tr>
     <tr><td>3</td><td>公网</td><td>纳入；独立端口 <code>:8080</code> 只给隧道用，只开放 <code>/v1/*</code>，必须带 key</td></tr>
     <tr><td>4</td><td>vLLM</td><td>后端抽象成「启动模板」，只实现 llama-server，vLLM 留坑</td></tr>
@@ -243,8 +245,11 @@ li.task .when{color:var(--ok);font-size:12px;white-space:nowrap}
     <tr><td>21</td><td>界面</td><td>Nuxt UI；总览 / 模型 / 日志 / 设置 四页；简洁、留白、分组卡片；显存每 2 秒采样</td></tr>
     <tr><td>22</td><td>加载失败 / 崩溃</td><td>不自动重试；中文原因 + 最后 30 行日志；崩溃后下一个请求最多自动重载一次，再失败需手动重试（额度按进程计：自动重载出来的进程再崩溃即 failed，不因成功服务过请求而重置；手动启动 / 重试后重新获得一次）；加载超时默认 600 秒</td></tr>
     <tr><td>23</td><td>启动时加载</td><td>不自动加载，等第一个请求</td></tr>
-    <tr><td>24</td><td>交付方式</td><td>4 个阶段，每阶段做完停下来让用户试用确认，再继续</td></tr>
+    <tr><td>24</td><td>交付方式</td><td>原有 4 个功能阶段之后增加阶段 5（兼容基础 → Windows 套壳 → Windows Release）；每工作包一个会话。Windows 套壳完成后额外停下来让用户试用确认，才进入 Release；Mac 套壳与发包须另获用户启动指令</td></tr>
     <tr><td>25</td><td>HTTP 入口</td><td>不用 Nitro 自带的 bun 入口，改用自定义 Bun 入口：<code>/v1/*</code>、<code>/upstream/*</code> 由 Bun 原生处理；其余交给 Nitro，并把断开信号和客户端 IP 传给处理函数；关闭每个请求的空闲超时（原因见「风险与待验证」）</td></tr>
+    <tr><td>26</td><td>桌面壳选型（拟议）</td><td>优先 Tauri 2 + 内置 Bun + Nuxt 构建产物，复用现有页面与服务。先在 5-2 验证 Windows WebView2、sharp 和服务生命周期；若验证失败，记录具体失败再讨论 Electron 备选。本轮只写计划，不安装依赖或开始实现</td></tr>
+    <tr><td>27</td><td>跨平台与首发（拟议）</td><td>兼容基础识别 OS / arch / 推理加速，Windows 保留 CUDA，准备 CPU 分支；macOS 准备 arm64 / x64 官方构建与 Metal / CPU 能力。首发先验收 Windows 11 x64，Mac 支持以以后真实安装包和真机验收为准，不以模拟测试代替</td></tr>
+    <tr><td>28</td><td>桌面运行资源（拟议）</td><td>安装包内置固定版本 Bun、Nuxt 产物和对应平台 sharp/libvips；不带模型、用户数据和大体积 llama.cpp / cudart。推理运行库继续按需下载并校验，已有可用版本时可离线运行；应用自身首版手动升级，与 llama.cpp 自动更新分开</td></tr>
   </table>
 </section>
 
@@ -482,6 +487,89 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
   </div>
 </section>
 
+<section id="s5" class="stage">
+  <div class="stage-head"><h2>阶段 5 · 兼容基础与 Windows 桌面首发</h2><div class="stage-meta"><span class="count"></span><div class="bar"><i></i></div></div></div>
+  <div class="stage-goal">用户要求（2026-10-02）：<b>先做兼容，再做出 Windows 套壳；Windows 套壳完成后停下来，不自动往下做。</b>本阶段方案尚待实施；首个 Release 优先 Windows，Mac 套壳和发包后续另开工作包。</div>
+  <div class="note">本轮仅规划。5-1 / 5-2 / 5-3 必须分会话执行；5-2 交付本地测试包后必须等待用户试用确认，再进入 5-3。用户对兼容方向的要求不等于已完成 macOS 验证，也不授权本轮直接发布 Release。</div>
+
+  <h3>现状与需要补齐的地方</h3>
+  <table>
+    <tr><th>现有证据</th><th>对桌面发包的影响</th></tr>
+    <tr><td><code>llamacpp.ts</code> 的资产选择只有 win / linux CUDA x64，安装循环固定 bin + cudart</td><td>macOS 会被错误映射为 Linux；需要按 OS / arch / 加速方式生成资产清单，支持 tar.gz 与可选 cudart</td></tr>
+    <tr><td><code>runner.ts</code> 非 Windows 只杀单个 PID；<code>residue.ts</code> 只在 Windows 读取实际 executable</td><td>需要 macOS 的进程组退出和可信的进程路径 / 身份查询，不能把杀父进程当成杀整棵树，也不能仅凭旧 PID 杀进程</td></tr>
+    <tr><td><code>tunnel.ts</code> 官方下载只支持 Windows / Linux x64</td><td>为 macOS arm64 / x64 选择并解压 cloudflared 的 tgz，复制或安装后验证执行权限</td></tr>
+    <tr><td><code>store.ts</code> 默认 <code>process.cwd()/data</code>；当前依赖源码目录和外部 Bun</td><td>桌面版显式传入用户可写的数据目录、绝对资源路径和内置 Bun；安装目录只读也能启动，不能在安装后运行 bun install / nuxt build</td></tr>
+    <tr><td><code>gpu.ts</code> 使用 nvidia-smi，命令预览提示固定写 CMD</td><td>Mac 不套用 NVIDIA 显存概念；暂无采样时隐藏该卡片，不能显示伪造的统一内存数值。命令说明随平台变化，实际启动始终使用参数数组</td></tr>
+    <tr><td>未发现项目 LICENSE 或 Release workflow；最新交接仍有阶段 4 披露项</td><td>正式发包前确认项目许可、第三方许可告知；解压取消 / 时限纳入兼容工作；其余审查边界逐条评估并披露，不把历史审查写成无遗留</td></tr>
+  </table>
+
+  <h3>推荐结构：Tauri 薄壳 + 原有本机服务</h3>
+<pre>Windows 应用（Tauri 2 / 系统 WebView2）
+  ├─ 壳负责：单实例、启动提示、服务启停、主窗口、错误提示
+  ├─ 主窗口加载 http://127.0.0.1:5001（或用户已配置的主端口）
+  └─ 私有父子进程通道：ready / shutdown / 父进程消失
+       └─ 内置 Bun + resources/server/index.mjs（Nuxt 构建产物）
+            ├─ 原有页面、管理 API、SSE、/v1、/upstream
+            ├─ 原有主服务：默认 :5001，本机 / 局域网
+            ├─ 原有公网入口：127.0.0.1:8080，仅 /v1 + key
+            └─ 管理 llama-server / cloudflared，记录 PID 并清理
+
+安装目录：壳 / Bun / .output / sharp + libvips / 第三方许可（只读）
+用户数据目录：settings / models / secrets / runtime / logs / backups / run
+模型目录：用户自行选择，不复制进安装包</pre>
+  <p>推荐 Tauri 是因为任务只需要一个窗口和服务启动器，已有 Nuxt 页面不必重写。代价是增加少量 Rust 壳代码、Windows 构建工具，以及 Windows / Mac WebView 差异验证。Electron 可以保留 TypeScript 壳并统一 Chromium，但需要携带 Chromium 和自己的运行时；本项目后端仍依赖 Bun，换 Electron 也不能省掉后端平台适配。先验证 Tauri，不预设它已可用。</p>
+  <p>首版采用<b>内置 Bun 可执行文件 + 完整 .output 目录</b>，不以单文件编译为前提。Bun 支持打包 N-API 插件，但 sharp 的平台二进制、libvips 和 Nitro 静态资源仍须逐项验证；先交付可运行的目录结构，单文件体积优化后置。下载运行库的归档必须校验摘要、拒绝越界路径 / 不安全链接，支持取消、解压超时和临时目录清理。</p>
+
+  <h3>兼容目标与发包顺序</h3>
+  <table>
+    <tr><th>目标</th><th>推理运行库</th><th>桌面交付与验收状态</th></tr>
+    <tr><td>Windows 11 x64</td><td>保留 NVIDIA CUDA + 匹配 cudart；准备 CPU 构建供无 NVIDIA 环境使用，未知设备提示选择，不能误下 CUDA</td><td>当前优先：5-2 本地 NSIS 安装包 → 用户试用确认 → 5-3 GitHub Windows Release</td></tr>
+    <tr><td>macOS arm64（Apple Silicon）</td><td>官方 macos-arm64 构建，准备 Metal 能力；无需 cudart</td><td>5-1 只准备服务兼容基础；DMG、签名和真实 Metal 模型验收在后续 Mac 工作包，不自动开始</td></tr>
+    <tr><td>macOS x64（Intel）</td><td>官方 macos-x64 构建，按实际硬件验证 CPU / Metal，不能承诺每台 Intel Mac 都能 GPU 加速</td><td>后续独立 x64 DMG；缺少真机验证时不标为已支持，不强行合并 Universal 包</td></tr>
+  </table>
+  <p>最低系统与 CPU 指令集要求取 Tauri、固定 Bun、sharp 和选用的 llama.cpp 构建的共同要求，并在真实测试后写入 README。首轮只承诺验收后的 Windows 11 x64；Windows ARM、Linux、其他 Windows GPU 后端、开机自启与托盘不进入本阶段。</p>
+
+  <h3>5-1 · 跨平台兼容基础</h3>
+  <ul class="tasks">
+    <li class="task" data-done="false"><span class="t">提取 platform 模块：显式 OS / arch / 加速能力；llama.cpp 与 cloudflared 根据实际 Release 资产选择文件，支持 zip / tar.gz / tgz、可选 cudart、执行权限、下载校验、解压取消 / 时限 / 越界保护。用构造的三平台资产测试缺资产、错误架构、失败和清理分支，不下载真实大包作为单测</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">进程与启动边界：Windows 保留杀树；macOS 管理独立进程组并 TERM → 有限等待 → KILL；残留清理验证实际路径和进程身份，路径未知时不杀。补父进程退出、PID 复用、组退出、只清理 runtime 内托管进程的测试；数据目录的互斥锁覆盖源码版与桌面版，第二个实例不得清理第一个实例的子进程</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">兼容现有数据：需要变更 settings / PID 登记 / runtime 布局时先设计版本迁移，备份旧数据；运行库按 OS / arch / 加速类型区分，旧 bNNNNN Windows 目录仍可使用与回退，不扫描成其他平台版本。新建配置采用经验证的平台默认值，用户已有参数不静默改写；平台化命令提示与 GPU 卡片，所有界面文案放 i18n。测试与构建不读取真实配置，不复用 Windows node_modules 生成 Mac 产物</span><span class="when"></span></li>
+  </ul>
+  <p><b>5-1 验收：</b>Windows 全量测试和类型检查通过，现有加载 / 调度 / 转发 / 更新规则保持一致；构造的平台测试证明分支选择和边界。macOS 的真实进程、sharp 和推理运行记录列为后续验收，不把本机模拟分支通过写成“Mac 已支持”。该工作包不创建桌面安装包、不发布 Release。</p>
+
+  <h3>5-2 · Windows 套壳与本地测试包（完成后停）</h3>
+  <ul class="tasks">
+    <li class="task" data-done="false"><span class="t">Windows Tauri 2 验证与薄壳：从干净的 Nuxt 构建产物启动内置 Bun（参数数组、隐藏控制台），窗口加载本机 HTTP 页面；验证 WebView2 下 SSE、长请求、中文、深浅色与 sharp 图片处理。窗口不开放通用 shell / 文件系统权限，不给 HTTP 页面原生执行权限；外链交给系统浏览器，拒绝把其他来源页面导航进带权限的窗口</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">壳生命周期与安装：单实例重复启动聚焦已有窗口；通过私有父子通道获取本次服务的 ready、实际端口与身份，不仅凭端口返回 200 认领服务。端口占用显示原因和重试 / 退出，不自动换端口、不杀未知服务；初始化不等待 llama.cpp 下载。关主窗口 / 应用退出先请求既有 shutdown，最多等待 15 秒后结束本次托管树；壳崩溃通过父子通道 EOF / 看护触发清理，下一次启动再安全处理残留。桌面版经系统目录 API 选取稳定用户数据目录并传 LLAMA_WEB_DATA，安装资源使用绝对路径；旧源码 data 由用户选择后备份复制，不自动搜个人路径，路径不能跨 Windows / Mac 生搬。打出本地 Windows x64 NSIS 测试安装包，检查 WebView2 bootstrapper、应用图标 / 版本与第三方许可；无 Bun / Node / Rust / Git 的干净环境能安装运行，卸载和覆盖安装保留用户数据</span><span class="when"></span></li>
+  </ul>
+  <div class="accept"><h3>Windows 套壳验收清单</h3>
+    <ul>
+      <li>本地测试包安装后双击即开主窗口；没有源码、开发依赖和 PATH 上的 Bun 仍可运行；安装路径 / 数据路径含中文与空格可用，安装资源不可写也可用。</li>
+      <li>首次运行未下载推理库时界面可用且状态准确；网络失败可重试；已有运行库与模型时断网可启动。无 NVIDIA 的环境进入 CPU 路径，CPU 指令集限制写清楚。</li>
+      <li>总览 / 模型 / 日志 / 设置、首次向导、SSE、图片处理正常；真实 NVIDIA 模型加载、流式响应、模型切换与旧版本回退通过。真机前先告知会占用 GPU。</li>
+      <li>重复启动只保留一个服务；主端口被源码版或其他程序占用时提示冲突；正常关闭、加载中关闭、下载 / 解压中关闭、强杀壳之后，托管进程和监听端口释放，未知进程保持运行；重开可安全恢复。</li>
+      <li>应用升级保留配置 / key / 模型目录引用，失败可重新安装旧应用版本；公网边界仍为 127.0.0.1、/v1、key，测试不修改真实 Cloudflare 账号。</li>
+    </ul>
+  </div>
+  <div class="note"><b>强制停点：</b>5-2 做完提交并推送代码，交付本地 Windows 测试包、实际验收结果和未验证项，然后停下来。用户确认之前不做 5-3、不建公开 Release、不做 Mac 套壳。</div>
+
+  <h3>5-3 · 首个 Windows GitHub Release（5-2 试用确认后）</h3>
+  <ul class="tasks">
+    <li class="task" data-done="false"><span class="t">建立 Windows tag 构建与草稿 Release 流程：建议首版 v0.1.0-beta.1（SemVer，正式名称发布前确认），固定 Bun / Rust / 依赖版本并用冻结 lockfile；Windows runner 本机安装依赖、测试、typecheck、构建、打 NSIS 包，按文件 allowlist 检查归档不含 data / secrets / .env / 调试日志 / 源码 node_modules。产物含安装包、SHA256SUMS、版本清单与第三方许可，签名凭据只放 CI Secrets；从实际下载包重新安装验收后才将草稿发布为 prerelease。发布说明只声明已验收的 Windows 目标，清楚标出在线首次下载、CPU / GPU 要求、签名状态、已知问题与应用手动升级方式</span><span class="when"></span></li>
+  </ul>
+  <p><b>发布前待确定：</b>项目许可证需由维护者确认；Windows 代码签名证书是否提供另行决定，未签名测试包如实说明 SmartScreen 提示。安装包自带 WebView2 检查 / bootstrapper，缺少运行时可能需要联网；不宣称完整离线首装。阶段 4 的 CR-007（成对文件写入之间进程被杀）、CR-010（真实连接日志混合格式）继续评估并记录结果，CR-013 的已推送历史清理须用户决定，不自行重写历史；CR-009 的解压生命周期在 5-1 补齐。</p>
+
+  <h3>Mac 后续路线（仅记录，不自动执行）</h3>
+  <p>用户另行要求启动时，再增加 Mac 工作包：原生 macOS runner 分别构建 arm64 / x64 的 Tauri 壳、Bun、sharp / libvips 资源 → 产出独立 DMG → 真实机器验证下载后的安装、模型推理、退出清理与旧配置迁移 → 同一应用版本补充通过验收的 Mac 资产。开发者签名 / notarization / stapling 要覆盖内置 Bun 和原生依赖，并验证 Bun JIT 所需 entitlements 及下载的推理库能实际执行；没有证书时只能明确标注未公证测试包，不能宣称无提示安装。Apple Silicon 不用 Rosetta 代替原生验证，Intel 无测试机器时延后 Intel 资产。</p>
+
+  <h3>研究依据（2026-10-02，只读核对）</h3>
+  <ul>
+    <li><a href="https://github.com/egoist74110/llama-web/releases">项目 Releases</a> 当前尚无发布；<a href="https://api.github.com/repos/ggml-org/llama.cpp/releases/latest">llama.cpp latest API</a> 的 nightly 指针解析为 <a href="https://github.com/ggml-org/llama.cpp/releases/tag/b11146">b11146</a>，资产含 macos-arm64 / macos-x64 tar.gz、Windows CPU 与 CUDA zip；<a href="https://github.com/cloudflare/cloudflared/releases/tag/2026.9.3">cloudflared 2026.9.3</a> 含 darwin arm64 / amd64 tgz。这些是选择逻辑的研究样本，不写死为未来最新版本。</li>
+    <li><a href="https://v2.tauri.app/develop/sidecar/">Tauri 外部二进制</a> 支持随包携带按目标架构命名的 sidecar；<a href="https://v2.tauri.app/security/capabilities/">capabilities</a> 与 <a href="https://v2.tauri.app/reference/config/">窗口配置</a> 用于限制权限和加载来源；<a href="https://v2.tauri.app/distribute/windows-installer/">Windows Installer</a> 说明 NSIS / WebView2 安装方式。</li>
+    <li><a href="https://sharp.pixelplumbing.com/install/">sharp 安装要求</a> 列出 Windows x64、Mac x64 / arm64 原生依赖；<a href="https://bun.sh/docs/bundler/executables">Bun 可执行文件打包</a> 说明 N-API 和资源打包，不能替代对本项目产物的验证；<a href="https://v2.tauri.app/distribute/sign/macos/">Tauri macOS 签名</a> 说明签名与公证要求；<a href="https://www.electronjs.org/docs/latest/tutorial/process-model">Electron 进程模型</a> 作为备选对照。</li>
+  </ul>
+</section>
+
 <section id="verify">
   <h2>验收方式</h2>
   <ul>
@@ -505,7 +593,8 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
     <tr><td><span class="tag slot">公网</span></td><td>按 key 禁止触发切换：<code>apiKeys[].allowSwitch</code></td></tr>
     <tr><td><span class="tag slot">界面</span></td><td>英文界面：新增 <code>i18n/en.ts</code></td></tr>
     <tr><td><span class="tag slot">运行</span></td><td>开机自启服务：加一个注册脚本即可，架构不变</td></tr>
-    <tr><td><span class="tag slot">安全</span></td><td>数据目录挪到项目外：<code>LLAMA_WEB_DATA</code> 环境变量已支持</td></tr>
+    <tr><td><span class="tag slot">安全</span></td><td>源码版数据目录可用 <code>LLAMA_WEB_DATA</code> 挪到项目外；阶段 5 桌面版默认使用用户数据目录</td></tr>
+    <tr><td><span class="tag slot">桌面</span></td><td>Mac 套壳与 DMG、应用自动更新、系统托盘、Universal 包、Windows ARM：本阶段不实施；Mac 后续须用户另行启动</td></tr>
   </table>
 </section>
 
@@ -536,6 +625,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
   <h2>变更记录</h2>
   <table>
     <tr><th>日期</th><th>内容</th></tr>
+    <tr><td>2026-10-02</td><td>新增阶段 5 发布计划（仅规划）：用户要求 Windows / Mac 兼容与桌面套壳，随后明确“先做兼容，再做 Windows 套壳，不直接往下做”。工作包顺序为 5-1 跨平台服务基础、5-2 Windows Tauri 薄壳与本地测试包（完成即停）、5-3 首个 Windows Release（用户试用确认后）。同步范围、决定 2 / 24，新增拟议决定 26–28；Mac 套壳与发包只保留后续路线。所有实现任务均未打勾。</td></tr>
       <tr><td>2026-10-01</td><td>工作包 4-6：设置页四张公网卡片合并为「公网访问」模块（未开启 / 引导 / 总览三种状态）。引导步骤：入口端口 → API key（没有就生成，默认名 <code>server-1</code>）→ 选择方式 → ①一键（API token → 地址 → 预览并执行）/ ②手动（图文教程 + 地址 → 粘贴隧道 token）→ 连接；「再加一个地址」从「选择方式」开始。进度存服务端：<b>settings.json 升到 v3</b>，新增 <code>public.wizard</code>（只存步骤和非敏感草稿，迁移补 null）。新增 <code>POST /api/public/check</code>（服务端不带 key 请求每个地址的 <code>/v1/models</code>，401 = 通）；客户端地址 = 保存的域名 ∪ cloudflared 收到的远程配置里指向本机入口端口的主机名。开发模式下模块顶部提示「不会启动隧道」。</td></tr>
     <tr><td>2026-09-30</td><td>初版：根据 24 轮需求问答整理</td></tr>
     <tr><td>2026-09-30</td><td>开发改为按工作包分会话进行，新增 claude-guide.html 与 handoff.md；每个工作包结束即推送</td></tr>

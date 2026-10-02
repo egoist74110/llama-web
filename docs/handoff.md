@@ -16,6 +16,17 @@
 
 ---
 
+## 2026-10-02 · 发布与 Windows 套壳规划（仅文档） · Codex
+- 完成：在 plan 新增阶段 5，写明现有平台限制、Tauri 2 + 内置 Bun + 完整 Nuxt 产物的拟议方案、兼容基础 / Windows 本地安装包 / Windows Release 的分包顺序、生命周期与安装验收、Mac 后续路线。同步 guide 5-1～5-3 卡片和 AGENTS 的停点规则；6 个新实现任务全部未打勾，既有任务状态未变。
+- 用户最新要求：先做兼容，再把 Windows 套壳做出来；不直接往下做。5-2 交付本地 Windows 测试包后必须停下来等用户试用确认；Mac 套壳 / 发包须用户另行启动。本会话只写 plan，没有开始实现或创建 Release。
+- 研究：只读核对项目 Releases（尚无发布）、llama.cpp nightly 指针 b11146 的三平台资产、cloudflared 2026.9.3 的 Darwin 资产及 Tauri / Bun / sharp 官方文档；链接在 plan。
+- 验证：`bun test` 564 pass / 51 skip / 0 fail（当前 PATH 缺 sh）；仅为补齐跳过项，在该命令进程的 PATH 加入已安装 Git 的 bin 后运行 `bun test tests/platform/pre-commit.test.ts`，51 pass / 0 fail。`bun run typecheck` 通过。Bun 内联文档检查：ID 唯一、内部锚点与容器闭合有效，6 个新任务未完成、原任务不变；初次任务比较被 HTML 注释及换行差异误报，修正检查后通过。`git diff --check` 通过。
+- 未运行：build、浏览器、GPU / 真实模型、Mac 真机、安装包；未读取 secrets、未修改 Cloudflare、未安装工具。只修改 plan / guide / handoff / AGENTS，无临时文件或常驻进程。
+- 剩余：5-1～5-3 均未实现；选型需在 5-2 最小验证。许可证、签名、正式版本号待发布前确定；阶段 4 已披露边界不抹去（解压时限纳入 5-1，其余按 plan 发布清单评估）。
+- 下一步：另开会话执行 5-1（跨平台兼容基础）；完成后再开 5-2，不在同一会话连续执行。
+
+---
+
 ## 2026-10-02 · 阶段 4 第四轮复审意见处理（docs/reviews/stage-4-codex-r4.md） · Opus 5.5
 - 完成：CR-027～CR-029 全部成立并已修复，CR-025 / CR-018 的「测试不经过生产接线」一并补上。pre-commit：引号加入反引号，声明排除只管不带引号的值，名称后的 TS 类型标注、名称行开串的分行值也拦（027）。Cloudflare 任务加服务端版本号 `{ boot, seq }`（`CloudflareSetup.view()`、快照 `cloudflareRev`、5 个接口都返回 `view()`），前端按版本取新、不再看连接状态（028）。hook 测试一次一跑 + 显式 30 秒预算，hook 加无进程预筛（029）。`server/service/cloudflare-hooks.ts`：端口守卫与成对保存的接线，context 与 `tests/service/` 共用。
 - 验证：标准 `bun test`（不加超时参数，sh 在 PATH 上）两次均 615 通过 / 0 失败；`bun run typecheck` 0；新测试对旧代码的反证：旧 composable 3 条交错用例失败、端口接线改回读缓存后接线测试失败。构建：在临时 worktree 里 `bun run build` 通过，构建产物 + 临时数据目录（自动更新关）冒烟：`/api/cloudflare`、`/api/state`、`/api/stream`、dismiss 均带 rev，首页 200；已停已删。**没运行**：浏览器、真实 Cloudflare、真机。

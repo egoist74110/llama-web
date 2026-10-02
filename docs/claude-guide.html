@@ -95,6 +95,7 @@ ol.steps li{margin:4px 0}
   <a href="#st2">阶段 2 · 界面</a>
   <a href="#st3">阶段 3 · 可观测性</a>
   <a href="#st4">阶段 4 · 公网与更新</a>
+  <a href="#st5">阶段 5 · 兼容与 Windows 桌面版</a>
   <div class="grp">其他提示词</div>
   <a href="#cont">接续未完成的工作包</a>
   <a href="#review">阶段审查（Codex）</a>
@@ -392,7 +393,55 @@ ol.steps li{margin:4px 0}
 先给我看引导的步骤设计（每一步显示什么、默认值、分叉）再动手。会占用 GPU 或改动我的 Cloudflare 账号之前先告诉我。做完按指南的「会话收尾流程」结束。</pre></div>
   </div>
 
-  <div class="gatebox"><span class="m gate">阶段关口 4</span> 你试用（经隧道带 key / 不带 key）→ Codex 审查（阶段号 4）→ Claude 处理意见 → 完成。之后自行吊销旧 key、归档旧目录。</div>
+  <div class="gatebox"><span class="m gate">阶段关口 4</span> 你试用（经隧道带 key / 不带 key）→ Codex 审查（阶段号 4）→ Claude 处理意见 → 完成。阶段 4 遗留项如实保留在交接和阶段 5 发布清单；旧 key、旧目录由用户自行处理。</div>
+</section>
+
+<!-- ============================ 阶段 5 ============================ -->
+<section id="st5">
+  <h2>阶段 5 · 兼容基础与 Windows 桌面版</h2>
+  <p class="lead">用户确认的顺序：先做兼容，再做 Windows 套壳；Windows 套壳完成后停下来。Mac 套壳 / 发包只在 plan 中记录后续路线，不自动进入。</p>
+
+  <div class="pkg" id="p5-1">
+    <div class="pkg-head"><b>5-1 跨平台兼容基础</b><span class="m opus">Opus 5.5</span></div>
+    <ul class="scope">
+      <li>范围以 plan 阶段 5「5-1」三项为准：OS / arch / 加速能力与资产选择、归档安装生命周期、进程组与残留识别、数据互斥、配置 / runtime 迁移、平台提示。先给出平台接口与迁移设计，再写实现；必要配置结构与依赖变更按会话规则确认。</li>
+      <li>现有 Windows CUDA、客户端端口、调度 / 转发 / 公网鉴权规则不变。新平台分支用构造的数据测试；Windows 回归必须通过。Mac 真机进程与推理尚未验证就如实写未验证，不能据此声明已支持。</li>
+      <li>只做服务兼容基础，不创建 Tauri 壳、安装包或 Release。用户正在运行 start.bat 时不得在主目录 build；构建使用隔离 worktree。做完按收尾流程提交并推送，下一工作包为 5-2，需新会话执行。</li>
+    </ul>
+    <div class="prompt"><button type="button">复制</button><pre>执行工作包 5-1：跨平台兼容基础。
+按 AGENTS.md 的规则开始：读 docs/claude-guide.html 中 5-1 卡片与会话规则、docs/handoff.md 最新交接、docs/plan.html 阶段 5 和核心行为规则。
+先给我看平台接口、兼容现有配置 / runtime 的迁移设计，再实现。只做兼容基础，不做桌面壳、安装包或 Release；未在 Mac 真机验证的内容必须标明。会占用 GPU 前先告诉我。做完按会话收尾流程结束。</pre></div>
+  </div>
+
+  <div class="pkg" id="p5-2">
+    <div class="pkg-head"><b>5-2 Windows 套壳与本地测试包</b><span class="m opus">Opus 5.5</span></div>
+    <ul class="scope">
+      <li>仅在 5-1 完成后执行。先用内置 Bun + 完整 Nuxt .output 做 Windows Tauri 2 验证：WebView2、本机页面、sharp、SSE、退出清理；失败要给出证据并讨论备选，不静默换技术栈。</li>
+      <li>壳只负责启动提示、单实例、窗口与托管服务生命周期；不重写现有界面、不做托盘。关主窗口即停服务。私有 ready / shutdown 通道、端口占用、壳崩溃与数据目录互斥按 plan 验收；HTTP 页面不获得通用原生执行权限。</li>
+      <li>生成本地 Windows x64 NSIS 测试包，按 plan 清单验收无开发环境安装、资源路径、升级保留数据、真实模型和清理。界面文案在 i18n，第三方许可与签名状态如实记录；新增构建工具先说明安装影响，按项目和全局规则确认。</li>
+      <li>交付本地测试包、代码和验收结果后停下来。不能直接做 5-3 / GitHub Release / Mac 套壳。</li>
+    </ul>
+    <div class="prompt"><button type="button">复制</button><pre>执行工作包 5-2：先把 Windows 套壳做出来。
+按 AGENTS.md 的规则开始，读取 5-2 卡片、最新交接与 plan 阶段 5。先做 Tauri + 内置 Bun 的最小可行性验证，再实现薄壳并交付本地 Windows 测试安装包。
+保留现有 Nuxt 页面与 API，关主窗口即停服务；按 plan 验证安装、启动、端口冲突、子进程退出和升级保留数据。会占用 GPU 前先告诉我。
+做完提交推送并把包和实际验证结果给我，然后停下来等我试用；不要继续发 Release 或做 Mac 套壳。</pre></div>
+  </div>
+
+  <div class="gatebox"><span class="m gate">Windows 套壳试用关口</span> 5-2 后强制停下 → 用户安装试用并确认 → 另开会话执行 5-3。仅完成兼容代码、构建成功或单测通过都不能跳过这个关口。</div>
+
+  <div class="pkg" id="p5-3">
+    <div class="pkg-head"><b>5-3 首个 Windows Release</b><span class="m opus">Opus 5.5</span></div>
+    <ul class="scope">
+      <li>前置条件：用户明确确认 Windows 套壳试用结果。只做 Windows Release 流程，Mac 发布不能随之自动启动。</li>
+      <li>按 plan 的 5-3 建立 tag 构建、安装包 / SHA256SUMS / 版本清单 / 许可告知与草稿 prerelease；版本号、项目许可证和签名状态发布前确定，打包使用 allowlist，不能携带个人数据。</li>
+      <li>实际下载草稿包安装验收、核对阶段 4 遗留项后再发布；用户仅授权草稿时必须留在草稿。全部结果如实写交接，后续 Mac 工作包由用户另行启动。</li>
+    </ul>
+    <div class="prompt"><button type="button">复制</button><pre>Windows 套壳已经试用确认，执行工作包 5-3：准备首个 Windows Release。
+按 AGENTS.md 的规则开始，读取 5-3 卡片、最新交接与 plan 阶段 5。先确认版本号、许可与签名状态，再建立构建流程并生成草稿 prerelease。
+检查包内敏感数据排除，并从实际下载的安装包验证安装 / 启动 / 退出。给我可审阅的草稿与验证结果，等我确认后发布。不要继续做 Mac 套壳或发包。做完按会话收尾流程结束。</pre></div>
+  </div>
+
+  <div class="gatebox"><span class="m gate">阶段关口 5</span> 首个 Windows Release 经实际安装验收并发布后停下。Mac 的 .app / DMG、签名 / 公证、Metal 与 Intel 真机测试需用户另行要求启动。</div>
 </section>
 
 <!-- ============================ 其他提示词 ============================ -->
