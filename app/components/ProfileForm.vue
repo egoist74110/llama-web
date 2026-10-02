@@ -263,7 +263,7 @@ const globalExtra = computed(() => props.defaults.extraArgs?.trim())
         :class="previewing ? 'opacity-60' : ''"
       >{{ preview?.command ?? edit.preview.loading }}</pre>
       <p class="text-xs text-muted">
-        {{ edit.preview.hint }}
+        {{ preview?.shell === 'posix' ? edit.preview.posixHint : edit.preview.hint }}
       </p>
       <p v-if="previewError" class="text-xs text-error">
         {{ previewError }}

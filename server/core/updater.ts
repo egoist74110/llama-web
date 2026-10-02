@@ -4,11 +4,11 @@
 // old version directories beyond `keepVersions` (at least 2). A version directory that a
 // running or starting llama-server uses, and the current version, are never removed.
 // Pure module (no Nitro): settings and "in use" come in as callbacks.
-import { renameSync, rmSync } from 'node:fs'
+import { mkdirSync, renameSync, rmSync } from 'node:fs'
 import { join, posix, win32 } from 'node:path'
 import { isInsideDir } from './residue'
 import {
-  clearLeftovers, installBuild, listInstalled, resolveLatest, RuntimeError, versionsDir,
+  clearLeftovers, installBuild, installedDir, listInstalled, resolveLatest, RuntimeError, versionsDir,
   type InstallOptions, type NetOptions, type RuntimeStatus,
 } from './llamacpp'
 
@@ -38,7 +38,8 @@ export class UpdateError extends Error {
   }
 }
 
-export interface UpdaterOptions extends Pick<InstallOptions, 'fetch' | 'extract' | 'platform'> {
+export interface UpdaterOptions extends Pick<InstallOptions, 'fetch' | 'extract' | 'platform' | 'target'> {
+  selectionError?: string
   /** HTTP time limits (tests); the shutdown signal is added by the updater. */
   net?: Omit<NetOptions, 'signal'>
   dataDir: string
@@ -64,8 +65,10 @@ export function versionOfExe(dataDir: string, exe: string, platform = process.pl
   if (!isInsideDir(exe, base, platform)) return null
   const path = platform === 'win32' ? win32 : posix
   // Windows paths compare case-insensitively; tags are lower-case `b<digits>`.
-  const first = (path.relative(base, exe).split(/[\\/]/)[0] ?? '').toLowerCase()
-  return TAG_RE.test(first) ? first : null
+  const parts = path.relative(base, exe).toLowerCase().split(/[\\/]/)
+  const first = parts[0] ?? ''
+  if (TAG_RE.test(first)) return first
+  return /^(win32|darwin)-(x64|arm64)-(cuda|cpu|metal)$/.test(first) && TAG_RE.test(parts[1] ?? '') ? parts[1]! : null
 }
 
 /**
@@ -84,7 +87,7 @@ export class Updater {
   private abort = new AbortController()
 
   constructor(private readonly opts: UpdaterOptions) {
-    this.installed = listInstalled(opts.dataDir, opts.platform)
+    this.installed = listInstalled(opts.dataDir, opts.platform, opts.target)
   }
 
   getStatus(): RuntimeStatus {
@@ -93,7 +96,7 @@ export class Updater {
 
   /** Re-read the installed versions from disk. */
   refresh(): string[] {
-    this.installed = listInstalled(this.opts.dataDir, this.opts.platform)
+    this.installed = listInstalled(this.opts.dataDir, this.opts.platform, this.opts.target)
     return this.installed
   }
 
@@ -142,13 +145,14 @@ export class Updater {
     const protect = this.inUse()
     if (current) protect.add(current)
     const result: PruneResult = { removed: [], failed: [] }
-    const base = versionsDir(this.opts.dataDir)
+    const base = versionsDir(this.opts.dataDir, this.opts.target)
+    mkdirSync(base, { recursive: true })
     for (const tag of pruneCandidates(installed, keepVersions, protect)) {
       // Rename first: on Windows this fails while any file inside is open (a process we do not
       // know about), so a directory is either removed as a whole or left intact - never half.
       const trash = join(base, `.del-${tag}-${process.pid}-${Date.now()}`)
       try {
-        renameSync(join(base, tag), trash)
+        renameSync(installedDir(this.opts.dataDir, tag, this.opts.target), trash)
       } catch (e) {
         result.failed.push({ tag, detail: (e as Error).message })
         continue
@@ -181,7 +185,7 @@ export class Updater {
 
   private async check(): Promise<RuntimeStatus> {
     const { dataDir, platform } = this.opts
-    clearLeftovers(dataDir)
+    clearLeftovers(dataDir, this.opts.target)
     const installed = this.refresh()
     let current = this.opts.llamacpp().current
     // Keep a valid setting; adopt the newest installed version when it is empty or stale.
@@ -197,10 +201,11 @@ export class Updater {
 
     const before = current
     try {
+      if (this.opts.selectionError) throw new RuntimeError('asset-missing', 'Choose runtime acceleration in settings.json and restart', this.opts.selectionError)
       this.set({ state: 'working', step: 'resolve', detail: '' })
       const fetchFn = this.opts.fetch ?? fetch
       const net: NetOptions = { ...this.opts.net, signal: this.abort.signal }
-      const latest = await resolveLatest(fetchFn, cfg.cudaRuntime, platform, net)
+      const latest = await resolveLatest(fetchFn, cfg.cudaRuntime, platform, net, this.opts.target)
       if (this.refresh().includes(latest.tag)) {
         // Already installed. A version picked by hand (rollback) stays current.
         const now = this.opts.llamacpp().current
@@ -208,7 +213,7 @@ export class Updater {
         return this.set({ state: 'ready', tag: now, note: now === latest.tag ? 'latest' : 'pinned', latest: latest.tag })
       }
       await installBuild(latest, {
-        dataDir, cudaRuntime: cfg.cudaRuntime, fetch: this.opts.fetch, extract: this.opts.extract, platform, net,
+        dataDir, cudaRuntime: cfg.cudaRuntime, fetch: this.opts.fetch, extract: this.opts.extract, platform, target: this.opts.target, net,
         onStep: (step, detail) => this.set({ state: 'working', step, detail, tag: latest.tag }),
       })
       const installedNow = this.refresh()

@@ -2,6 +2,7 @@
 // Hand-edited files may omit sections; missing values are filled from the defaults.
 import { DEFAULT_LAUNCH_DEFAULTS, type LaunchDefaults, type ParamOverrides } from './args'
 import type { FileRef, ModelDir } from './types'
+import type { Acceleration, PlatformInfo } from './platform'
 
 export interface ImagePreprocess {
   enabled: boolean
@@ -36,7 +37,7 @@ export interface Settings {
   server: { host: string, port: number }
   public: { enabled: boolean, port: number, domain: string, tunnelEnabled: boolean, wizard: PublicWizard | null }
   modelDirs: ModelDir[]
-  llamacpp: { cudaRuntime: string, current: string, keepVersions: number, autoUpdate: boolean }
+  llamacpp: { cudaRuntime: string, current: string, keepVersions: number, autoUpdate: boolean, acceleration: Acceleration }
   scheduler: {
     maxLoaded: number
     loadTimeoutSec: number
@@ -80,18 +81,22 @@ export interface ModelsDoc {
   models: ModelConfig[]
 }
 
-export const SETTINGS_VERSION = 3
+export const SETTINGS_VERSION = 4
 export const MODELS_VERSION = 1
 
-export function defaultSettings(): Settings {
+export function defaultSettings(platform?: PlatformInfo): Settings {
+  const windowsCuda = platform ? platform.os === 'win32' && platform.acceleration === 'cuda' : process.platform === 'win32'
   return {
     version: SETTINGS_VERSION,
     server: { host: '0.0.0.0', port: 5001 },
     public: { enabled: false, port: 8080, domain: '', tunnelEnabled: false, wizard: null },
     modelDirs: [],
-    llamacpp: { cudaRuntime: '13.3', current: '', keepVersions: 2, autoUpdate: true },
+    llamacpp: { cudaRuntime: '13.3', current: '', keepVersions: 2, autoUpdate: true, acceleration: 'auto' },
     scheduler: { maxLoaded: 1, loadTimeoutSec: 600, drainTimeoutSec: 300, heartbeatSec: 15, portRange: [7100, 7199] },
-    defaults: { ...DEFAULT_LAUNCH_DEFAULTS },
+    defaults: windowsCuda ? { ...DEFAULT_LAUNCH_DEFAULTS } : {
+      ...DEFAULT_LAUNCH_DEFAULTS, cacheTypeK: null, cacheTypeV: null, flashAttn: null,
+      gpuLayers: platform?.acceleration === 'cpu' ? 0 : null, extraArgs: '--jinja --no-prefill-assistant --props --slots -cb',
+    },
     preprocess: { image: { enabled: true, maxEdge: 896, format: 'jpeg', quality: 90 } },
     logs: { keepRunsPerModel: 20, keepDays: 14 },
     gpu: { sampleSec: 2 },
@@ -112,6 +117,12 @@ export const SETTINGS_MIGRATIONS: Record<number, (old: any) => any> = {
   // 3: progress of the public access guide (none in progress).
   2: (old) => {
     if (isObj(old.public)) old.public.wizard ??= null
+    return old
+  },
+  // Existing installations are Windows CUDA; never silently change their launch parameters.
+  3: (old) => {
+    if (isObj(old.llamacpp)) old.llamacpp.acceleration ??= 'cuda'
+    else old.llamacpp = { acceleration: 'cuda' }
     return old
   },
 }
@@ -143,6 +154,7 @@ export function normalizeSettings(doc: Settings): Settings {
   delete (out.public as Record<string, unknown>).tunnelName
   if (typeof out.public.tunnelEnabled !== 'boolean') out.public.tunnelEnabled = false
   out.public.wizard = cleanWizard(out.public.wizard)
+  if (!['auto', 'cuda', 'cpu', 'metal'].includes(out.llamacpp.acceleration)) throw new Error('Invalid llamacpp.acceleration')
   // Placeholder (decision 9): the field exists but the online limit stays fixed at 1.
   out.scheduler.maxLoaded = 1
   return out as Settings

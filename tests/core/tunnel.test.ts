@@ -147,7 +147,7 @@ describe('prepareCloudflared', () => {
       expect(err).toBeInstanceOf(TunnelError)
       expect((err as TunnelError).code).toBe('download-failed')
       expect(existsSync(cloudflaredPath(dir, 'win32'))).toBe(false)
-      const d = join(dir, 'runtime', 'cloudflared')
+      const d = join(cloudflaredPath(dir, 'win32'), '..')
       expect(existsSync(d) ? readdirSync(d).length : 0).toBe(0)
     }
   })

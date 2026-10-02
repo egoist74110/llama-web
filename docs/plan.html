@@ -248,7 +248,7 @@ li.task .when{color:var(--ok);font-size:12px;white-space:nowrap}
     <tr><td>24</td><td>交付方式</td><td>原有 4 个功能阶段之后增加阶段 5（兼容基础 → Windows 套壳 → Windows Release）；每工作包一个会话。Windows 套壳完成后额外停下来让用户试用确认，才进入 Release；Mac 套壳与发包须另获用户启动指令</td></tr>
     <tr><td>25</td><td>HTTP 入口</td><td>不用 Nitro 自带的 bun 入口，改用自定义 Bun 入口：<code>/v1/*</code>、<code>/upstream/*</code> 由 Bun 原生处理；其余交给 Nitro，并把断开信号和客户端 IP 传给处理函数；关闭每个请求的空闲超时（原因见「风险与待验证」）</td></tr>
     <tr><td>26</td><td>桌面壳选型（拟议）</td><td>优先 Tauri 2 + 内置 Bun + Nuxt 构建产物，复用现有页面与服务。先在 5-2 验证 Windows WebView2、sharp 和服务生命周期；若验证失败，记录具体失败再讨论 Electron 备选。本轮只写计划，不安装依赖或开始实现</td></tr>
-    <tr><td>27</td><td>跨平台与首发（拟议）</td><td>兼容基础识别 OS / arch / 推理加速，Windows 保留 CUDA，准备 CPU 分支；macOS 准备 arm64 / x64 官方构建与 Metal / CPU 能力。首发先验收 Windows 11 x64，Mac 支持以以后真实安装包和真机验收为准，不以模拟测试代替</td></tr>
+    <tr><td>27</td><td>跨平台与首发</td><td>5-1 已实现 OS / arch / 推理加速与运行库隔离；用户确认 settings v4：旧配置迁移为 CUDA，新配置 auto，另有 CPU / Metal。旧 Windows runtime 原地保留供加载与回退，PID v2 迁移先备份。Windows 本机回归通过；macOS arm64 / x64 分支仅构造验证，真实安装包、进程、sharp 和推理后续验收。接口与迁移见 <a href="platform-foundation.md">5-1 设计记录</a></td></tr>
     <tr><td>28</td><td>桌面运行资源（拟议）</td><td>安装包内置固定版本 Bun、Nuxt 产物和对应平台 sharp/libvips；不带模型、用户数据和大体积 llama.cpp / cudart。推理运行库继续按需下载并校验，已有可用版本时可离线运行；应用自身首版手动升级，与 llama.cpp 自动更新分开</td></tr>
   </table>
 </section>
@@ -295,11 +295,11 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
    └─ requests/2026-09-30.jsonl            不记录对话内容</pre>
 <pre>// settings.json
 {
-  "version": 1,
+  "version": 4,
   "server":   { "host": "0.0.0.0", "port": 5001 },
   "public":   { "enabled": false, "port": 8080, "domain": "", "tunnelEnabled": false },
   "modelDirs": [ { "id": "main", "path": "X:\\models", "enabled": true, "maxDepth": 4 } ],
-  "llamacpp": { "cudaRuntime": "13.3", "current": "b10809", "keepVersions": 2, "autoUpdate": true },
+  "llamacpp": { "cudaRuntime": "13.3", "current": "b10809", "keepVersions": 2, "autoUpdate": true, "acceleration": "cuda" },
   "scheduler": {
     "maxLoaded": 1,              // 界面只读
     "loadTimeoutSec": 600,
@@ -489,17 +489,17 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 
 <section id="s5" class="stage">
   <div class="stage-head"><h2>阶段 5 · 兼容基础与 Windows 桌面首发</h2><div class="stage-meta"><span class="count"></span><div class="bar"><i></i></div></div></div>
-  <div class="stage-goal">用户要求（2026-10-02）：<b>先做兼容，再做出 Windows 套壳；Windows 套壳完成后停下来，不自动往下做。</b>本阶段方案尚待实施；首个 Release 优先 Windows，Mac 套壳和发包后续另开工作包。</div>
-  <div class="note">本轮仅规划。5-1 / 5-2 / 5-3 必须分会话执行；5-2 交付本地测试包后必须等待用户试用确认，再进入 5-3。用户对兼容方向的要求不等于已完成 macOS 验证，也不授权本轮直接发布 Release。</div>
+  <div class="stage-goal">用户要求（2026-10-02）：<b>先做兼容，再做出 Windows 套壳；Windows 套壳完成后停下来，不自动往下做。</b>5-1 兼容基础已完成 Windows 回归；桌面壳与 Release 待实施，首发优先 Windows，Mac 套壳和发包后续另开工作包。</div>
+  <div class="note">5-1 / 5-2 / 5-3 必须分会话执行；5-2 交付本地测试包后必须等待用户试用确认，再进入 5-3。兼容基础完成不等于已完成 macOS 真机验证，也不授权直接发布 Release。</div>
 
-  <h3>现状与需要补齐的地方</h3>
+  <h3>兼容基础与桌面发包边界</h3>
   <table>
     <tr><th>现有证据</th><th>对桌面发包的影响</th></tr>
-    <tr><td><code>llamacpp.ts</code> 的资产选择只有 win / linux CUDA x64，安装循环固定 bin + cudart</td><td>macOS 会被错误映射为 Linux；需要按 OS / arch / 加速方式生成资产清单，支持 tar.gz 与可选 cudart</td></tr>
-    <tr><td><code>runner.ts</code> 非 Windows 只杀单个 PID；<code>residue.ts</code> 只在 Windows 读取实际 executable</td><td>需要 macOS 的进程组退出和可信的进程路径 / 身份查询，不能把杀父进程当成杀整棵树，也不能仅凭旧 PID 杀进程</td></tr>
-    <tr><td><code>tunnel.ts</code> 官方下载只支持 Windows / Linux x64</td><td>为 macOS arm64 / x64 选择并解压 cloudflared 的 tgz，复制或安装后验证执行权限</td></tr>
+    <tr><td>5-1：<code>platform.ts</code> 显式选择 Windows x64 CUDA / CPU、Mac arm64 / x64 Metal / CPU，运行库按目标隔离</td><td>支持 zip / tar.gz / tgz、可选 cudart、校验与有界解压；Mac 实际运行后续验证，未知 NVIDIA 设备须显式选择加速后重启</td></tr>
+    <tr><td>5-1：非 Windows 独立进程组；残留查询实际路径、启动身份及 PGID；配置加载前获得数据目录锁</td><td>Windows 真实进程测试通过；Mac 只有信号 / 身份构造测试。未知身份和旧 PID 无 birth 时跳过，不能仅凭旧 PID 杀进程</td></tr>
+    <tr><td>5-1：<code>tunnel.ts</code> 选择 Darwin arm64 / amd64 tgz，验证摘要、解压并 chmod，Windows 旧副本可保留</td><td>Mac cloudflared 下载资产分支经过构造测试，真实执行权限和运行仍需 Mac 验收</td></tr>
     <tr><td><code>store.ts</code> 默认 <code>process.cwd()/data</code>；当前依赖源码目录和外部 Bun</td><td>桌面版显式传入用户可写的数据目录、绝对资源路径和内置 Bun；安装目录只读也能启动，不能在安装后运行 bun install / nuxt build</td></tr>
-    <tr><td><code>gpu.ts</code> 使用 nvidia-smi，命令预览提示固定写 CMD</td><td>Mac 不套用 NVIDIA 显存概念；暂无采样时隐藏该卡片，不能显示伪造的统一内存数值。命令说明随平台变化，实际启动始终使用参数数组</td></tr>
+    <tr><td>5-1：Windows 使用 nvidia-smi；POSIX / CMD 命令预览随平台变化，Mac 设置页说明采样缺失</td><td>Mac 不套用 NVIDIA 显存概念；暂无采样时隐藏该卡片，不能显示伪造的统一内存数值。实际启动始终使用参数数组</td></tr>
     <tr><td>未发现项目 LICENSE 或 Release workflow；最新交接仍有阶段 4 披露项</td><td>正式发包前确认项目许可、第三方许可告知；解压取消 / 时限纳入兼容工作；其余审查边界逐条评估并披露，不把历史审查写成无遗留</td></tr>
   </table>
 
@@ -531,9 +531,9 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 
   <h3>5-1 · 跨平台兼容基础</h3>
   <ul class="tasks">
-    <li class="task" data-done="false"><span class="t">提取 platform 模块：显式 OS / arch / 加速能力；llama.cpp 与 cloudflared 根据实际 Release 资产选择文件，支持 zip / tar.gz / tgz、可选 cudart、执行权限、下载校验、解压取消 / 时限 / 越界保护。用构造的三平台资产测试缺资产、错误架构、失败和清理分支，不下载真实大包作为单测</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">进程与启动边界：Windows 保留杀树；macOS 管理独立进程组并 TERM → 有限等待 → KILL；残留清理验证实际路径和进程身份，路径未知时不杀。补父进程退出、PID 复用、组退出、只清理 runtime 内托管进程的测试；数据目录的互斥锁覆盖源码版与桌面版，第二个实例不得清理第一个实例的子进程</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">兼容现有数据：需要变更 settings / PID 登记 / runtime 布局时先设计版本迁移，备份旧数据；运行库按 OS / arch / 加速类型区分，旧 bNNNNN Windows 目录仍可使用与回退，不扫描成其他平台版本。新建配置采用经验证的平台默认值，用户已有参数不静默改写；平台化命令提示与 GPU 卡片，所有界面文案放 i18n。测试与构建不读取真实配置，不复用 Windows node_modules 生成 Mac 产物</span><span class="when"></span></li>
+    <li class="task" data-done="true"><span class="t">提取 platform 模块：显式 OS / arch / 加速能力；llama.cpp 与 cloudflared 根据实际 Release 资产选择文件，支持 zip / tar.gz / tgz、可选 cudart、执行权限、下载校验、解压取消 / 时限 / 越界保护。用构造的三平台资产测试缺资产、错误架构、失败和清理分支，不下载真实大包作为单测</span><span class="when">2026-10-02</span></li>
+    <li class="task" data-done="true"><span class="t">进程与启动边界：Windows 保留杀树；macOS 管理独立进程组并 TERM → 有限等待 → KILL；残留清理验证实际路径和进程身份，路径未知时不杀。补父进程退出、PID 复用、组退出、只清理 runtime 内托管进程的测试；数据目录的互斥锁覆盖源码版与桌面版，第二个实例不得清理第一个实例的子进程</span><span class="when">2026-10-02</span></li>
+    <li class="task" data-done="true"><span class="t">兼容现有数据：需要变更 settings / PID 登记 / runtime 布局时先设计版本迁移，备份旧数据；运行库按 OS / arch / 加速类型区分，旧 bNNNNN Windows 目录仍可使用与回退，不扫描成其他平台版本。新建配置采用经验证的平台默认值，用户已有参数不静默改写；平台化命令提示与 GPU 卡片，所有界面文案放 i18n。测试与构建不读取真实配置，不复用 Windows node_modules 生成 Mac 产物</span><span class="when">2026-10-02</span></li>
   </ul>
   <p><b>5-1 验收：</b>Windows 全量测试和类型检查通过，现有加载 / 调度 / 转发 / 更新规则保持一致；构造的平台测试证明分支选择和边界。macOS 的真实进程、sharp 和推理运行记录列为后续验收，不把本机模拟分支通过写成“Mac 已支持”。该工作包不创建桌面安装包、不发布 Release。</p>
 
@@ -625,6 +625,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
   <h2>变更记录</h2>
   <table>
     <tr><th>日期</th><th>内容</th></tr>
+    <tr><td>2026-10-02</td><td>工作包 5-1 完成：平台目标与资产选择、归档取消 / 时限 / 越界检查、进程组与 PID 身份、数据目录互斥及 runtime 隔离。用户确认 settings v4（旧配置 CUDA、新配置 auto、CPU / Metal 可选）、PID v2 备份迁移；旧 Windows 版本保留可加载 / 回退。Windows 638 项测试、类型检查、隔离构建及假进程构建产物冒烟通过；Mac 仅构造验证，真机进程 / sharp / 推理待后续。无壳、安装包或 Release。详见 <a href="platform-foundation.md">5-1 设计记录</a>。</td></tr>
     <tr><td>2026-10-02</td><td>新增阶段 5 发布计划（仅规划）：用户要求 Windows / Mac 兼容与桌面套壳，随后明确“先做兼容，再做 Windows 套壳，不直接往下做”。工作包顺序为 5-1 跨平台服务基础、5-2 Windows Tauri 薄壳与本地测试包（完成即停）、5-3 首个 Windows Release（用户试用确认后）。同步范围、决定 2 / 24，新增拟议决定 26–28；Mac 套壳与发包只保留后续路线。所有实现任务均未打勾。</td></tr>
       <tr><td>2026-10-01</td><td>工作包 4-6：设置页四张公网卡片合并为「公网访问」模块（未开启 / 引导 / 总览三种状态）。引导步骤：入口端口 → API key（没有就生成，默认名 <code>server-1</code>）→ 选择方式 → ①一键（API token → 地址 → 预览并执行）/ ②手动（图文教程 + 地址 → 粘贴隧道 token）→ 连接；「再加一个地址」从「选择方式」开始。进度存服务端：<b>settings.json 升到 v3</b>，新增 <code>public.wizard</code>（只存步骤和非敏感草稿，迁移补 null）。新增 <code>POST /api/public/check</code>（服务端不带 key 请求每个地址的 <code>/v1/models</code>，401 = 通）；客户端地址 = 保存的域名 ∪ cloudflared 收到的远程配置里指向本机入口端口的主机名。开发模式下模块顶部提示「不会启动隧道」。</td></tr>
     <tr><td>2026-09-30</td><td>初版：根据 24 轮需求问答整理</td></tr>

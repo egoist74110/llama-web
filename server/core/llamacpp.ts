@@ -3,12 +3,13 @@
 // unpack into a version directory. The version directory only appears (by rename) once it is
 // complete, so a failed download never leaves a half-installed version. The full update /
 // rollback flow is stage 4 (updater); this module is the initial-fetch part.
-import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs'
+import { chmodSync, createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
+import { checkExtractedTree, extractArchive, type ArchiveOptions } from './archive'
+import { legacyWindows, targetKey, type RuntimeTarget } from './platform'
 
 const REPO = 'ggml-org/llama.cpp'
 const TAG_RE = /^b\d+$/
@@ -23,12 +24,18 @@ export class RuntimeError extends Error {
   }
 }
 
-export const versionsDir = (dataDir: string) => join(dataDir, 'runtime', 'llama.cpp')
+export const versionsDir = (dataDir: string, target?: RuntimeTarget) => join(dataDir, 'runtime', 'llama.cpp', ...(target ? [targetKey(target)] : []))
 export const serverExeName = (platform = process.platform) => (platform === 'win32' ? 'llama-server.exe' : 'llama-server')
 
 /** Installed version tags (`b1234`) that contain a llama-server binary, newest first. */
-export function listInstalled(dataDir: string, platform = process.platform): string[] {
-  const dir = versionsDir(dataDir)
+export function listInstalled(dataDir: string, platform = process.platform, target?: RuntimeTarget): string[] {
+  if (target) return [...new Set([
+    ...listTags(versionsDir(dataDir, target), target.os),
+    ...(legacyWindows(target) ? listTags(versionsDir(dataDir), 'win32') : []),
+  ])].sort((a, b) => Number(b.slice(1)) - Number(a.slice(1)))
+  return listTags(versionsDir(dataDir), platform)
+}
+function listTags(dir: string, platform: NodeJS.Platform): string[] {
   let names: string[]
   try {
     names = readdirSync(dir)
@@ -38,6 +45,14 @@ export function listInstalled(dataDir: string, platform = process.platform): str
   return names
     .filter(n => TAG_RE.test(n) && existsSync(join(dir, n, serverExeName(platform))))
     .sort((a, b) => Number(b.slice(1)) - Number(a.slice(1)))
+}
+export function installedDir(dataDir: string, tag: string, target?: RuntimeTarget): string {
+  const scoped = join(versionsDir(dataDir, target), tag)
+  if (target && legacyWindows(target) && !existsSync(join(scoped, serverExeName(target.os)))) {
+    const old = join(versionsDir(dataDir), tag)
+    if (existsSync(join(old, 'llama-server.exe'))) return old
+  }
+  return scoped
 }
 
 export interface ReleaseAsset {
@@ -50,7 +65,7 @@ export interface ReleaseAsset {
 export interface LatestBuild {
   tag: string
   bin: ReleaseAsset
-  cudart: ReleaseAsset
+  cudart?: ReleaseAsset
 }
 
 export type FetchFn = (url: string, init?: RequestInit) => Promise<Response>
@@ -151,7 +166,7 @@ export async function getBody(fetchFn: FetchFn, url: string, kind: 'json' | 'tex
  * The official "latest" release only carries a pointer (nightly-tag.txt) to the newest binary
  * build; resolve it, then pick that build's CUDA assets.
  */
-export async function resolveLatest(fetchFn: FetchFn, cudaRuntime: string, platform = process.platform, net: NetOptions = {}): Promise<LatestBuild> {
+export async function resolveLatest(fetchFn: FetchFn, cudaRuntime: string, platform = process.platform, net: NetOptions = {}, target?: RuntimeTarget): Promise<LatestBuild> {
   const stable = await getBody(fetchFn, `https://api.github.com/repos/${REPO}/releases/latest`, 'json', net) as { assets?: ReleaseAsset[] }
   const pointer = stable.assets?.find(a => a.name === 'nightly-tag.txt')
   if (!pointer) throw new RuntimeError('no-nightly-tag', 'nightly-tag.txt not found in the latest release')
@@ -160,6 +175,14 @@ export async function resolveLatest(fetchFn: FetchFn, cudaRuntime: string, platf
   const rel = await getBody(fetchFn, `https://api.github.com/repos/${REPO}/releases/tags/${tag}`, 'json', net) as { assets?: ReleaseAsset[] }
   const os = platform === 'win32' ? 'win' : 'linux'
   const assets = rel.assets ?? []
+  if (target && target.acceleration !== 'cuda') {
+    const name = target.os === 'win32' ? `llama-${tag}-bin-win-cpu-${target.arch}.zip`
+      : target.os === 'darwin' ? `llama-${tag}-bin-macos-${target.arch}.tar.gz` : ''
+    const bin = assets.find(a => a.name === name)
+    if (!bin) throw new RuntimeError('asset-missing', 'Release asset not found', name || `${target.os}/${target.arch}`)
+    return { tag, bin }
+  }
+  if (target && (target.os !== 'win32' || target.arch !== 'x64')) throw new RuntimeError('asset-missing', 'Unsupported CUDA target')
   const pair = (cuda: string) => ({
     bin: assets.find(a => a.name === `llama-${tag}-bin-${os}-cuda-${cuda}-x64.zip`),
     cudart: assets.find(a => a.name === `cudart-llama-bin-${os}-cuda-${cuda}-x64.zip`),
@@ -220,29 +243,18 @@ export async function download(fetchFn: FetchFn, asset: ReleaseAsset, file: stri
   if (actual !== expected) throw new RuntimeError('digest-mismatch', `SHA-256 mismatch: ${asset.name}`)
 }
 
-/** Unzip with the system tool (bsdtar ships with Windows 10+; `unzip` elsewhere). No extra dependency. */
-export function extractZip(zip: string, dest: string): Promise<void> {
-  mkdirSync(dest, { recursive: true })
-  const [cmd, args] = process.platform === 'win32'
-    ? [join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe'), ['-xf', zip, '-C', dest]]
-    : ['unzip', ['-q', '-o', zip, '-d', dest]]
-  return new Promise((resolve, reject) => {
-    const p = spawn(cmd, args, { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true })
-    let err = ''
-    p.stderr.on('data', d => { err += d })
-    p.on('error', e => reject(new RuntimeError('extract-failed', `Cannot run ${cmd}`, e.message)))
-    p.on('close', code => (code === 0 ? resolve() : reject(new RuntimeError('extract-failed', `Extract failed (${code})`, err.trim().slice(0, 500)))))
-  })
-}
+/** Compatibility alias for the bounded system archive installer. */
+export const extractZip = extractArchive
 
 export interface InstallOptions {
   dataDir: string
   cudaRuntime: string
   fetch?: FetchFn
-  extract?: (zip: string, dest: string) => Promise<void>
+  extract?: (zip: string, dest: string, options?: ArchiveOptions) => Promise<void>
   platform?: NodeJS.Platform
+  target?: RuntimeTarget
   /** Time limits and the shutdown signal of the HTTP calls. */
-  net?: NetOptions
+  net?: ArchiveOptions
   onStep?: (step: 'resolve' | 'download' | 'extract', detail: string) => void
 }
 
@@ -255,8 +267,9 @@ function findRoot(dir: string, exe: string): string | null {
 }
 
 /** Leftovers of an interrupted install (`.tmp-`) or removal (`.del-`) never count as a version; clear them. */
-export function clearLeftovers(dataDir: string): void {
-  const base = versionsDir(dataDir)
+export function clearLeftovers(dataDir: string, target?: RuntimeTarget): void {
+  if (target && legacyWindows(target)) clearLeftovers(dataDir)
+  const base = versionsDir(dataDir, target)
   let names: string[]
   try { names = readdirSync(base) } catch { return }
   for (const n of names) {
@@ -272,28 +285,33 @@ export function clearLeftovers(dataDir: string): void {
  * rename, so an interrupted download / extract never leaves a usable-looking half version.
  */
 export async function installBuild(build: LatestBuild, opts: InstallOptions): Promise<string> {
-  const platform = opts.platform ?? process.platform
+  const platform = opts.target?.os ?? opts.platform ?? process.platform
   const fetchFn = opts.fetch ?? fetch
   const extract = opts.extract ?? extractZip
   const exe = serverExeName(platform)
-  const base = versionsDir(opts.dataDir)
+  if (!TAG_RE.test(build.tag)) throw new RuntimeError('bad-tag', 'Invalid build tag')
+  const base = versionsDir(opts.dataDir, opts.target)
   mkdirSync(base, { recursive: true })
   const dest = join(base, build.tag)
-  if (existsSync(join(dest, exe))) return build.tag
+  if (listInstalled(opts.dataDir, platform, opts.target).includes(build.tag)) return build.tag
 
   const work = join(base, `.tmp-${build.tag}-${process.pid}`)
   try {
     mkdirSync(join(work, 'dl'), { recursive: true })
     const extracted = join(work, 'out')
-    for (const asset of [build.bin, build.cudart]) {
+    for (const asset of [build.bin, build.cudart].filter((a): a is ReleaseAsset => !!a)) {
+      if (asset.name !== asset.name.split(/[\\/]/).pop() || !/\.(zip|tar\.gz|tgz)$/.test(asset.name)) throw new RuntimeError('extract-failed', 'Invalid archive name')
       const zip = join(work, 'dl', asset.name)
       opts.onStep?.('download', asset.name)
       await download(fetchFn, asset, zip, opts.net)
       opts.onStep?.('extract', asset.name)
-      await extract(zip, extracted)
+      await extract(zip, extracted, opts.net)
+      if (opts.net?.signal?.aborted) throw new RuntimeError('extract-failed', 'Extraction cancelled')
     }
     const root = findRoot(extracted, exe)
     if (!root) throw new RuntimeError('no-server-exe', `${exe} not found in the downloaded archive`)
+    checkExtractedTree(root)
+    if (platform !== 'win32') chmodSync(join(root, exe), 0o755)
     rmSync(dest, { recursive: true, force: true }) // an incomplete directory without the exe
     renameSync(root, dest)
     return build.tag
@@ -304,9 +322,9 @@ export async function installBuild(build: LatestBuild, opts: InstallOptions): Pr
 
 /** Resolve the latest build and install it; returns its tag. */
 export async function installLatest(opts: InstallOptions): Promise<string> {
-  clearLeftovers(opts.dataDir)
+  clearLeftovers(opts.dataDir, opts.target)
   opts.onStep?.('resolve', '')
-  const latest = await resolveLatest(opts.fetch ?? fetch, opts.cudaRuntime, opts.platform ?? process.platform, opts.net)
+  const latest = await resolveLatest(opts.fetch ?? fetch, opts.cudaRuntime, opts.platform ?? process.platform, opts.net, opts.target)
   return installBuild(latest, opts)
 }
 

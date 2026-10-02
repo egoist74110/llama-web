@@ -1,6 +1,9 @@
 // All user-facing UI strings live here. Components must not hard-code Chinese text.
 // `{name}` placeholders are filled by `fmt()` in server/core/i18n.ts.
 export default {
+  platform: {
+    runtimeHint: '运行库按系统、架构和加速类型隔离。需要选择时，在 settings.json 的 llamacpp.acceleration 填 auto、cuda、cpu 或 metal 后重启；既有模型参数不变。未知 NVIDIA 设备不会自动下载 CUDA。',
+  },
   app: {
     title: 'llama-web',
     subtitle: '本地 LLM 控制台',
@@ -84,6 +87,7 @@ export default {
       estimated: '（估算）',
     },
     gpu: {
+      macHint: 'macOS 的 GPU 显存采样尚未实现；Metal、进程退出和推理仍需 Mac 真机验证。',
       title: '显存',
       hint: '每 2 秒读取一次 nvidia-smi',
       used: '{used} / {total}',
@@ -263,6 +267,7 @@ export default {
       preview: {
         title: '命令预览',
         hint: '由后端按启动时完全相同的规则生成。端口在启动时才分配，这里只是示例。命令按 Windows 命令提示符（CMD）的写法转义，请粘贴到 CMD 里运行（PowerShell 的转义规则不同）。',
+        posixHint: '由后端按启动时相同的参数数组生成。端口只是示例；命令按 POSIX shell 转义，可粘贴到 macOS 终端。Mac 真机运行尚未验证。',
         copy: '复制',
         copied: '已复制命令',
         copyFailed: '复制失败，请手动选中复制',

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { cleanupResidue, getExePaths, isInsideDir } from '../../server/core/residue'
 import { isAlive, PidRegistry, type PidRecord } from '../../server/core/runner'
+import { processIdentity } from '../../server/core/process-identity'
 
 let dir: string
 let registry: PidRegistry
@@ -15,7 +16,8 @@ beforeEach(() => {
 afterEach(() => { rmSync(dir, { recursive: true, force: true }) })
 
 const rec = (pid: number, exe = `${runtime}\\llama.cpp\\b1\\llama-server.exe`): PidRecord =>
-  ({ pid, exe, port: 7100, tag: 'm:默认', startedAt: '2026-01-01T00:00:00Z' })
+  ({ pid, exe, port: 7100, tag: 'm:默认', startedAt: '2026-01-01T00:00:00Z', birth: `birth-${pid}` })
+const identities = async (pids: number[]) => new Map(registry.list().filter(r => pids.includes(r.pid)).map(r => [r.pid, { exe: r.exe, birth: r.birth! }]))
 
 test('isInsideDir', () => {
   expect(isInsideDir('X:\\app\\data\\runtime\\llama.cpp\\b1\\llama-server.exe', runtime, 'win32')).toBe(true)
@@ -34,6 +36,7 @@ describe('cleanupResidue (injected process table)', () => {
     const killed: number[] = []
     const r = await cleanupResidue(registry, runtime, {
       platform: 'win32',
+      identities,
       isAlive: pid => pid !== 102,
       getExePaths: async pids => {
         expect(pids).toEqual([101, 103, 104])
@@ -57,6 +60,7 @@ describe('cleanupResidue (injected process table)', () => {
     const killed: number[] = []
     await cleanupResidue(registry, runtime, {
       platform: 'win32',
+      identities,
       isAlive: () => true,
       getExePaths: async () => new Map([[301, 'X:\\app\\data\\runtime\\cloudflared\\cloudflared.exe'], [302, 'C:\\Program Files\\cloudflared\\cloudflared.exe']]),
       killTree: async (pid) => { killed.push(pid) },
@@ -69,6 +73,7 @@ describe('cleanupResidue (injected process table)', () => {
     const killed: number[] = []
     await cleanupResidue(registry, runtime, {
       platform: 'win32',
+      identities,
       isAlive: () => true,
       getExePaths: async () => new Map([[201, 'X:\\tools\\llama-server.exe']]),
       killTree: async (pid) => { killed.push(pid) },
@@ -91,8 +96,8 @@ describe.skipIf(process.platform !== 'win32')('cleanupResidue (real processes)',
     try {
       const exes = await getExePaths([victim.pid, bystander.pid])
       expect(exes.get(victim.pid)?.toLowerCase()).toBe(process.execPath.toLowerCase())
-      registry.add(rec(victim.pid, process.execPath))
-      registry.add(rec(bystander.pid, process.execPath))
+      registry.add({ ...rec(victim.pid, process.execPath), birth: processIdentity(victim.pid)?.birth })
+      registry.add({ ...rec(bystander.pid, process.execPath), birth: processIdentity(bystander.pid)?.birth })
       // Pretend bun's own directory is data/runtime for the victim only.
       const bunDir = join(process.execPath, '..')
       const r = await cleanupResidue(registry, bunDir, {

@@ -33,7 +33,7 @@ export default defineEventHandler(async (event) => {
       draft: refOrNull(files.draft, model.draft),
     }
     return previewLaunch({
-      dataDir: ctx.dataDir, settings: ctx.getSettings(), model: shown, form, host: ctx.runner.host,
+      dataDir: ctx.dataDir, settings: ctx.getSettings(), model: shown, form, host: ctx.runner.host, target: ctx.runtimeTarget,
     })
   } catch (e) {
     if (e instanceof ProfileError) editError(e)

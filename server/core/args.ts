@@ -309,6 +309,10 @@ export function quoteArg(arg: string): string {
 export function formatCommand(exe: string, args: string[]): string {
   return [exe, ...args].map(quoteArg).join(' ')
 }
+/** POSIX shells: prevent substitutions, globbing and operators even in simple-looking args. */
+export function formatPosixCommand(exe: string, args: string[]): string {
+  return [exe, ...args].map(a => `'${a.replace(/'/g, `'"'"'`)}'`).join(' ')
+}
 
 /**
  * Quote one argument for pasting into cmd.exe (Windows 命令提示符). First the quoting the

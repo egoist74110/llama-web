@@ -3,7 +3,9 @@
 // scheduler records them as a load failure.
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { buildLaunchArgs, cmdProgramMayExpand, formatCmdCommand, formatCommand, type ArgWarning, type BuildInput, type LaunchParams, type ParamOverrides } from './args'
+import { buildLaunchArgs, cmdProgramMayExpand, formatCmdCommand, formatPosixCommand, type ArgWarning, type BuildInput, type LaunchParams, type ParamOverrides } from './args'
+import { installedDir } from './llamacpp'
+import type { RuntimeTarget } from './platform'
 import type { ModelConfig, ModelsDoc, Settings } from './config'
 import type { Target } from './scheduler'
 import { resolveFileRef } from './scanner'
@@ -35,13 +37,14 @@ export interface PlanInput {
   host: string
   exists?: (path: string) => boolean
   platform?: NodeJS.Platform
+  target?: RuntimeTarget
 }
 
 /** `data/runtime/llama.cpp/<current>/llama-server(.exe)`, or null when no version is set. */
-export function llamaServerExe(dataDir: string, settings: Settings, platform = process.platform): string | null {
+export function llamaServerExe(dataDir: string, settings: Settings, platform = process.platform, target?: RuntimeTarget): string | null {
   const cur = settings.llamacpp.current
   if (!cur || /[\\/]|\.\./.test(cur)) return null
-  return join(dataDir, 'runtime', 'llama.cpp', cur, platform === 'win32' ? 'llama-server.exe' : 'llama-server')
+  return join(installedDir(dataDir, cur, target), platform === 'win32' ? 'llama-server.exe' : 'llama-server')
 }
 
 export interface PreviewInput {
@@ -53,6 +56,7 @@ export interface PreviewInput {
   host: string
   exists?: (path: string) => boolean
   platform?: NodeJS.Platform
+  target?: RuntimeTarget
 }
 
 export interface LaunchPreview {
@@ -61,6 +65,7 @@ export interface LaunchPreview {
    * it is written for cmd.exe (quoting and ^ escapes), elsewhere in the project's own syntax.
    */
   command: string
+  shell: 'cmd' | 'posix'
   ok: boolean
   warnings: ArgWarning[]
   /** Merged form values before extra-args replacement. */
@@ -79,7 +84,7 @@ export function previewLaunch(input: PreviewInput): LaunchPreview {
   const exists = input.exists ?? existsSync
   const { settings, model, form } = input
   const missing: LaunchPreview['missing'] = []
-  const exe = llamaServerExe(input.dataDir, settings, input.platform)
+  const exe = llamaServerExe(input.dataDir, settings, input.platform, input.target)
   if (!exe || !exists(exe)) missing.push('runtime')
 
   const resolve = (kind: 'model' | 'mmproj' | 'draft', ref: ModelConfig['file'] | null) => {
@@ -110,7 +115,8 @@ export function previewLaunch(input: PreviewInput): LaunchPreview {
   const warnings = [...built.warnings]
   if (win && cmdProgramMayExpand(program)) warnings.push({ code: 'preview-program-percent', severity: 'warning' })
   return {
-    command: win ? formatCmdCommand(program, built.args) : formatCommand(program, built.args),
+    command: win ? formatCmdCommand(program, built.args) : formatPosixCommand(program, built.args),
+    shell: win ? 'cmd' : 'posix',
     ok: built.ok, warnings, effective: built.effective, missing, port,
   }
 }
@@ -123,7 +129,7 @@ export function planLaunch(target: Target, input: PlanInput): LaunchPlan {
   const profile = model.profiles[target.profile]
   if (!profile) throw new LaunchConfigError('profile-missing', `No profile "${target.profile}" in "${model.id}"`)
 
-  const exe = llamaServerExe(input.dataDir, settings, input.platform)
+  const exe = llamaServerExe(input.dataDir, settings, input.platform, input.target)
   if (!exe || !exists(exe)) throw new LaunchConfigError('no-runtime', `llama-server not found: ${exe ?? '(no current version)'}`)
 
   const resolve = (what: string, ref: typeof model.file | null) => {

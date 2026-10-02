@@ -3,10 +3,11 @@
 // data/run/pids.json registry used for residue cleanup. Node APIs only (works under Bun
 // and under the Node dev server).
 import { spawn, type ChildProcess } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { copyFileSync, existsSync, readFileSync, statSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { dirname } from 'node:path'
 import { writeFileAtomic } from './store'
+import { processIdentityAsync } from './process-identity'
 
 // ---------------------------------------------------------------------------------------
 // pids.json
@@ -18,32 +19,66 @@ export interface PidRecord {
   /** Free-form owner tag, e.g. `modelId:profile`. */
   tag: string
   startedAt: string
+  birth?: string
+  pgid?: number
+  ownerPid?: number
 }
 
 interface PidFile {
-  version: 1
+  version: 2
   processes: PidRecord[]
 }
 
 /** Child process registry persisted to `data/run/pids.json` (atomic writes). */
 export class PidRegistry {
+  private probes = new Set<Promise<void>>()
   constructor(readonly file: string) {}
 
   list(): PidRecord[] {
     if (!existsSync(this.file)) return []
+    let doc: Partial<PidFile>
     try {
-      const doc = JSON.parse(readFileSync(this.file, 'utf8')) as Partial<PidFile>
-      if (!Array.isArray(doc.processes)) return []
-      return doc.processes.filter(p => Number.isInteger(p?.pid) && p.pid > 0 && typeof p.exe === 'string')
+      doc = JSON.parse(readFileSync(this.file, 'utf8')) as Partial<PidFile>
     } catch {
       // A torn or hand-mangled run file is not worth failing over; treat it as empty.
       return []
     }
+    if (!Array.isArray(doc?.processes)) return []
+    if ((doc as { version?: number }).version === 1) {
+      const backup = `${this.file}.v1.bak`
+      if (!existsSync(backup)) copyFileSync(this.file, backup)
+      else {
+        if (!statSync(backup).isFile()) throw new Error('PID migration backup is not a file')
+        if (readFileSync(backup, 'utf8') !== readFileSync(this.file, 'utf8')) copyFileSync(this.file, `${backup}.${Date.now()}`)
+      }
+      this.write(doc.processes) // Backup / migration failures must not become an empty registry.
+    } else if (typeof doc.version === 'number' && doc.version > 2) throw new Error('PID registry version is newer than this application')
+    else if (doc.version !== 2) return []
+    return doc.processes.filter(p => Number.isInteger(p?.pid) && p.pid > 0 && typeof p.exe === 'string')
   }
 
   add(rec: PidRecord): void {
     this.write([...this.list().filter(p => p.pid !== rec.pid), rec])
   }
+  identify(rec: PidRecord, child: ChildProcess): Promise<void> {
+    const abort = new AbortController()
+    const onExit = () => abort.abort()
+    child.once('exit', onExit)
+    const pending = (async () => {
+      try {
+        const identity = await processIdentityAsync(rec.pid, abort.signal)
+        if (!identity || abort.signal.aborted) return
+        const current = this.list().find(r => r.pid === rec.pid && r.startedAt === rec.startedAt && r.exe === rec.exe)
+        if (current) this.add({ ...current, birth: identity.birth })
+      } finally {
+        child.removeListener('exit', onExit)
+      }
+    })()
+    this.probes.add(pending)
+    void pending.then(() => this.probes.delete(pending), () => this.probes.delete(pending))
+    return pending
+  }
+  async flushIdentities(): Promise<void> { await Promise.allSettled([...this.probes]) }
 
   remove(pids: number | number[]): void {
     const drop = new Set(Array.isArray(pids) ? pids : [pids])
@@ -53,7 +88,7 @@ export class PidRegistry {
   }
 
   private write(processes: PidRecord[]) {
-    const doc: PidFile = { version: 1, processes }
+    const doc: PidFile = { version: 2, processes }
     writeFileAtomic(this.file, JSON.stringify(doc, null, 2) + '\n')
   }
 }
@@ -74,14 +109,34 @@ export function isAlive(pid: number): boolean {
 /** Kill a process and all its descendants. Resolves once the kill command has run. */
 export function killTree(pid: number): Promise<void> {
   if (process.platform !== 'win32') {
-    try { process.kill(pid, 'SIGKILL') } catch { /* already gone */ }
-    return Promise.resolve()
+    return stopProcessGroup(pid)
   }
   return new Promise((resolve) => {
     const tk = spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true })
-    tk.on('error', () => resolve())
-    tk.on('exit', () => resolve())
+    const timer = setTimeout(() => { tk.kill('SIGKILL') }, 5000)
+    const done = () => { clearTimeout(timer); resolve() }
+    tk.on('error', done)
+    tk.on('close', done)
   })
+}
+/** Owned detached group; works even after its original leader exited. */
+export async function stopProcessGroup(pgid: number, deps: {
+  signal?: (pid: number, signal: NodeJS.Signals | 0) => void,
+  wait?: (ms: number) => Promise<void>, graceMs?: number,
+} = {}): Promise<void> {
+  if (!Number.isInteger(pgid) || pgid <= 1 || pgid === process.pid) throw new Error('Invalid owned process group')
+  const signal = deps.signal ?? ((p, s) => { process.kill(p, s) })
+  const wait = deps.wait ?? (ms => new Promise(r => setTimeout(r, ms)))
+  const send = (s: NodeJS.Signals | 0) => {
+    try { signal(-pgid, s); return true } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === 'ESRCH') return false
+      throw e
+    }
+  }
+  if (!send('SIGTERM')) return
+  let remaining = deps.graceMs ?? 1500
+  while (remaining > 0 && send(0)) { const ms = Math.min(50, remaining); await wait(ms); remaining -= ms }
+  if (send(0)) send('SIGKILL')
 }
 
 /** True when `port` can be bound on `host` right now. */
@@ -193,6 +248,7 @@ export class Runner {
 
   async stopAll(): Promise<void> {
     await Promise.all(this.list().map(p => p.stop()))
+    await this.registry?.flushIdentities()
   }
 
   /** @internal */
@@ -251,6 +307,7 @@ export class RunningProcess {
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
         shell: false,
+        detached: process.platform !== 'win32',
       })
     } catch (e) {
       this.failLoad(new LoadError('spawn-failed', (e as Error).message))
@@ -274,7 +331,9 @@ export class RunningProcess {
     // 'exit' can arrive before the last output is read; wait for 'close' (pipes drained),
     // but not forever in case an orphaned grandchild keeps a pipe open.
     let exit: { code: number | null, signal: string | null } | null = null
+    let exitTimer: ReturnType<typeof setTimeout> | undefined
     const done = () => {
+      clearTimeout(exitTimer)
       if (!exit) return
       const { code, signal } = exit
       if (this.stopRequested) {
@@ -284,20 +343,30 @@ export class RunningProcess {
       }
       this.finish({ code, signal, requested: this.stopRequested })
     }
+    let groupDone: Promise<void> = Promise.resolve()
     child.on('exit', (code, signal) => {
       exit = { code, signal }
-      setTimeout(done, 1000)
+      if (process.platform !== 'win32' && this.pid) groupDone = killTree(this.pid)
+      void groupDone.then(() => { if (!this.exitInfo) { exitTimer = setTimeout(done, 1000); exitTimer.unref?.() } }, () => done())
     })
     child.on('close', (code, signal) => {
       exit ??= { code, signal }
-      done()
+      void groupDone.then(done, done)
     })
 
     // Register only after the exit handlers are in place, so a failed write can still
     // kill the process and settle `ready` / `exited` normally.
     try {
-      this.runner.registry?.add({
+      const record: PidRecord = {
         pid: this.pid, exe, port: this.port, tag: this.spec.tag, startedAt: this.startedAt.toISOString(),
+        ownerPid: process.pid,
+        pgid: process.platform !== 'win32' ? this.pid : undefined,
+      }
+      this.runner.registry?.add(record)
+      const identified = this.runner.registry?.identify(record, child) ?? Promise.resolve()
+      void identified.then(() => { if (!this.settled) this.scheduleHealth(0) }, e => {
+        this.failLoad(new LoadError('register-failed', `Cannot record process identity: ${(e as Error).message}`))
+        void this.stop()
       })
     } catch (e) {
       this.failLoad(new LoadError('register-failed', `Cannot record pid: ${(e as Error).message}`))
@@ -310,7 +379,6 @@ export class RunningProcess {
       this.failLoad(new LoadError('timeout', `Not ready after ${this.spec.loadTimeoutMs} ms`, null, this.tail()))
       void this.stop()
     }, this.spec.loadTimeoutMs)
-    this.scheduleHealth(0)
   }
 
   /** Kill the process tree and wait for exit. Safe to call repeatedly. */
@@ -322,6 +390,7 @@ export class RunningProcess {
       // taskkill can fail on a process that is exiting on its own; fall back to a direct kill.
       const t = setTimeout(() => { try { this.child?.kill('SIGKILL') } catch { /* gone */ } }, 3000)
       const info = await this.exited
+      await this.runner.registry?.flushIdentities()
       clearTimeout(t)
       return info
     }

@@ -1,9 +1,10 @@
 // Startup residue cleanup: kill llama-server processes left over from a previous run.
 // Only processes listed in pids.json AND whose executable lives under data/runtime/ are
 // killed, so a reused PID or a user's own llama-server is never touched.
-import { spawn } from 'node:child_process'
-import { join, posix, win32 } from 'node:path'
+import { join, posix, resolve, win32 } from 'node:path'
 import { isAlive, killTree, PidRegistry, type PidRecord } from './runner'
+import { processIdentityAsync, type ProcessIdentity } from './process-identity'
+import { realpathSync } from 'node:fs'
 
 /** True when `file` is inside directory `dir` (case-insensitive on Windows). */
 export function isInsideDir(file: string, dir: string, platform = process.platform): boolean {
@@ -22,22 +23,7 @@ export function isInsideDir(file: string, dir: string, platform = process.platfo
 export async function getExePaths(pids: number[]): Promise<Map<number, string>> {
   const out = new Map<number, string>()
   const ids = pids.filter(p => Number.isInteger(p) && p > 0)
-  if (ids.length === 0 || process.platform !== 'win32') return out
-  const filter = ids.map(p => `ProcessId=${p}`).join(' OR ')
-  const script = `Get-CimInstance Win32_Process -Filter "${filter}" | ForEach-Object { "$($_.ProcessId)\`t$($_.ExecutablePath)" }`
-  const text = await new Promise<string>((res) => {
-    const ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
-      stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true,
-    })
-    let buf = ''
-    ps.stdout.on('data', (c: Buffer) => { buf += c.toString('utf8') })
-    ps.on('error', () => res(''))
-    ps.on('close', () => res(buf))
-  })
-  for (const line of text.split(/\r?\n/)) {
-    const [pid, exe] = line.split('\t')
-    if (pid && exe) out.set(Number(pid), exe.trim())
-  }
+  for (const pid of ids) { const p = await processIdentityAsync(pid); if (p) out.set(pid, p.exe) }
   return out
 }
 
@@ -55,6 +41,7 @@ export interface ResidueDeps {
   isAlive?: (pid: number) => boolean
   /** Path semantics for comparing exe paths (tests); defaults to the host platform. */
   platform?: NodeJS.Platform
+  identities?: (pids: number[]) => Promise<Map<number, ProcessIdentity>>
 }
 
 /**
@@ -64,17 +51,29 @@ export interface ResidueDeps {
 export async function cleanupResidue(registry: PidRegistry, runtimeDir: string, deps: ResidueDeps = {}): Promise<ResidueResult> {
   const alive = deps.isAlive ?? isAlive
   const kill = deps.killTree ?? killTree
-  const exePaths = deps.getExePaths ?? getExePaths
 
   const records = registry.list()
   const result: ResidueResult = { killed: [], skipped: [], gone: [] }
   const live = records.filter(r => alive(r.pid))
   result.gone.push(...records.filter(r => !live.includes(r)))
 
-  const exes = live.length ? await exePaths(live.map(r => r.pid)) : new Map<number, string>()
+  const exes = live.length && deps.getExePaths ? await deps.getExePaths(live.map(r => r.pid)) : new Map<number, string>()
+  const identities = deps.identities ? await deps.identities(live.map(r => r.pid)) : new Map<number, ProcessIdentity>()
+  if (!deps.identities) for (const r of live) { const p = await processIdentityAsync(r.pid); if (p) identities.set(r.pid, p) }
+  const platform = deps.platform ?? process.platform
+  const same = (a: string, b: string) => platform === 'win32' ? win32.resolve(a).toLowerCase() === win32.resolve(b).toLowerCase() : posix.resolve(a) === posix.resolve(b)
   for (const r of live) {
-    const actual = exes.get(r.pid) ?? null
-    if (actual && isInsideDir(actual, runtimeDir, deps.platform)) {
+    const identity = identities.get(r.pid)
+    const actual = deps.getExePaths ? (exes.get(r.pid) ?? null) : (identity?.exe ?? null)
+    // Probe again immediately before killing: the PID can be reused between the first checks.
+    const fresh = deps.identities ? (await deps.identities([r.pid])).get(r.pid) : await processIdentityAsync(r.pid)
+    let physical = actual, physicalRuntime = runtimeDir
+    if (!deps.identities && actual) {
+      try { physical = realpathSync(actual); physicalRuntime = realpathSync(runtimeDir) } catch { physical = null }
+    }
+    if (actual && physical && r.birth && identity?.birth === r.birth && fresh?.birth === r.birth
+      && same(actual, r.exe) && same(fresh.exe, r.exe) && isInsideDir(physical, physicalRuntime, platform)
+      && (platform === 'win32' || (r.pgid === r.pid && fresh.pgid === r.pgid))) {
       await kill(r.pid)
       result.killed.push(r)
     } else if (actual) {
@@ -88,13 +87,14 @@ export async function cleanupResidue(registry: PidRegistry, runtimeDir: string, 
   return result
 }
 
-let startup: Promise<ResidueResult> | null = null
+const startup = new Map<string, Promise<ResidueResult>>()
 
 /**
  * Run the startup cleanup once per process (memoised). The scheduler must await this
  * before launching anything, so fresh processes are never mistaken for residue.
  */
 export function runStartupCleanup(dataDir: string): Promise<ResidueResult> {
-  startup ??= cleanupResidue(new PidRegistry(join(dataDir, 'run', 'pids.json')), join(dataDir, 'runtime'))
-  return startup
+  const key = resolve(dataDir)
+  if (!startup.has(key)) startup.set(key, cleanupResidue(new PidRegistry(join(dataDir, 'run', 'pids.json')), join(dataDir, 'runtime')))
+  return startup.get(key)!
 }

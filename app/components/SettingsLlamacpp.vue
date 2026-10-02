@@ -22,6 +22,8 @@ const currentIndex = computed(() => info.value?.versions.findIndex(v => v.curren
 <template>
   <AppCard :title="s.title" :hint="fmt(s.hint, { n: keep })">
     <div v-if="info" class="space-y-3">
+      <p class="text-xs text-muted">{{ t.platform.runtimeHint }}</p>
+      <p v-if="state?.platform?.os === 'darwin'" class="text-xs text-muted">{{ t.overview.gpu.macHint }}</p>
       <p class="text-sm">
         <span class="text-muted">{{ s.status }}</span>
         <span class="ml-2 text-default">{{ runtimeText(info.runtime) }}</span>

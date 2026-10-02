@@ -13,6 +13,7 @@ import type { ModelState, SchedulerEvent, SchedulerSnapshot } from './scheduler'
 import type { SpeedDoc } from './speed'
 import type { TunnelInfo } from './tunnel'
 import type { FileRef, ModelDir } from './types'
+import type { PlatformInfo } from './platform'
 
 export interface StateInstance {
   profile: string
@@ -29,6 +30,7 @@ export interface StateInstance {
 }
 
 export interface StateDoc {
+  platform?: PlatformInfo
   /** Server clock (epoch ms) at the time of the snapshot. */
   now: number
   models: Array<{
@@ -256,7 +258,7 @@ export class LiveHub {
   }
 
   snapshot(): StateDoc {
-    const { scheduler, models, queue, llamacpp, tunnel, cloudflare, cloudflareRev, firstRun } = this.opts.snapshot()
+    const { scheduler, models, queue, llamacpp, tunnel, cloudflare, cloudflareRev, firstRun, platform } = this.opts.snapshot()
     return {
       now: this.now(),
       models: models.map(m => ({
@@ -269,7 +271,7 @@ export class LiveHub {
             progress: s.state === 'loading' ? (this.progress.get(instKey(m.id, s.profile)) ?? null) : null,
           })),
       })),
-      queue, llamacpp, tunnel, cloudflare: cloudflare ?? null, cloudflareRev: cloudflareRev ?? null, firstRun: firstRun === true,
+      queue, llamacpp, tunnel, cloudflare: cloudflare ?? null, cloudflareRev: cloudflareRev ?? null, firstRun: firstRun === true, platform,
     }
   }
 

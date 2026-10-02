@@ -13,6 +13,8 @@ import { dirname, join, posix, win32 } from 'node:path'
 import { download, getBody, RuntimeError, type FetchFn, type NetOptions, type ReleaseAsset } from './llamacpp'
 import type { PublicStatus } from './public-entry'
 import { killTree, type PidRegistry } from './runner'
+import { cloudflaredAssetName } from './platform'
+import { extractArchive, type ArchiveOptions } from './archive'
 
 // ---------------------------------------------------------------------------------------
 // Token
@@ -79,8 +81,8 @@ export function redact(text: string, token?: string | null): string {
 // Finding / installing cloudflared
 
 export const cloudflaredName = (platform: NodeJS.Platform = process.platform) => (platform === 'win32' ? 'cloudflared.exe' : 'cloudflared')
-export const cloudflaredDir = (dataDir: string) => join(dataDir, 'runtime', 'cloudflared')
-export const cloudflaredPath = (dataDir: string, platform: NodeJS.Platform = process.platform) => join(cloudflaredDir(dataDir), cloudflaredName(platform))
+export const cloudflaredDir = (dataDir: string, platform: NodeJS.Platform = process.platform, arch: string = process.arch) => join(dataDir, 'runtime', 'cloudflared', `${platform}-${arch}`)
+export const cloudflaredPath = (dataDir: string, platform: NodeJS.Platform = process.platform, arch: string = process.arch) => join(cloudflaredDir(dataDir, platform, arch), cloudflaredName(platform))
 
 /** Places a system-wide cloudflared usually lives: PATH first, then the common install locations. */
 export function candidatePaths(env: Record<string, string | undefined> = process.env, platform: NodeJS.Platform = process.platform): string[] {
@@ -124,14 +126,11 @@ export function findCloudflared(opts: FindOptions = {}): string | null {
 
 const REPO = 'cloudflare/cloudflared'
 
-export function releaseAssetName(platform: NodeJS.Platform = process.platform): string | null {
-  if (process.arch !== 'x64') return null
-  return platform === 'win32' ? 'cloudflared-windows-amd64.exe' : platform === 'linux' ? 'cloudflared-linux-amd64' : null
-}
+export const releaseAssetName = cloudflaredAssetName
 
 /** The official latest release's asset for this machine (with the SHA-256 GitHub publishes for it). */
-export async function resolveCloudflared(fetchFn: FetchFn, platform: NodeJS.Platform = process.platform, net: NetOptions = {}): Promise<ReleaseAsset> {
-  const name = releaseAssetName(platform)
+export async function resolveCloudflared(fetchFn: FetchFn, platform: NodeJS.Platform = process.platform, net: NetOptions = {}, arch: string = process.arch): Promise<ReleaseAsset> {
+  const name = releaseAssetName(platform, arch)
   if (!name) throw new RuntimeError('asset-missing', 'No cloudflared build for this platform', `${platform}/${process.arch}`)
   const rel = await getBody(fetchFn, `https://api.github.com/repos/${REPO}/releases/latest`, 'json', net) as { assets?: ReleaseAsset[] }
   const asset = rel.assets?.find(a => a.name === name)
@@ -143,10 +142,12 @@ export interface PrepareOptions {
   dataDir: string
   env?: Record<string, string | undefined>
   platform?: NodeJS.Platform
+  arch?: string
+  extract?: typeof extractArchive
   fetch?: FetchFn
   exists?: (file: string) => boolean
   /** Time limits and the cancel signal of the download. */
-  net?: NetOptions
+  net?: ArchiveOptions
   onStep?(step: 'find' | 'download', detail: string): void
 }
 
@@ -172,9 +173,11 @@ function sizeAndTime(file: string): { size: number, mtimeMs: number } | null {
  */
 export async function prepareCloudflared(opts: PrepareOptions): Promise<PreparedCloudflared> {
   const platform = opts.platform ?? process.platform
-  const dest = cloudflaredPath(opts.dataDir, platform)
+  const dest = cloudflaredPath(opts.dataDir, platform, opts.arch)
   opts.onStep?.('find', '')
+  const legacy = join(opts.dataDir, 'runtime', 'cloudflared', 'cloudflared.exe')
   const found = findCloudflared({ env: opts.env, platform, exists: opts.exists, skip: [dest] })
+    ?? (platform === 'win32' && (opts.arch ?? process.arch) === 'x64' && sizeAndTime(legacy) ? legacy : null)
   if (found) {
     const src = sizeAndTime(found)
     const have = sizeAndTime(dest)
@@ -184,6 +187,7 @@ export async function prepareCloudflared(opts: PrepareOptions): Promise<Prepared
         mkdirSync(dirname(dest), { recursive: true })
         const tmp = `${dest}.${process.pid}.tmp`
         copyFileSync(found, tmp)
+        if (platform !== 'win32') chmodSync(tmp, 0o755)
         try { renameSync(tmp, dest) } catch (e) { rmSync(tmp, { force: true }); throw e }
       } catch (e) {
         if (!have) throw new TunnelError('prepare-failed', (e as Error).message)
@@ -197,13 +201,25 @@ export async function prepareCloudflared(opts: PrepareOptions): Promise<Prepared
   const fetchFn = opts.fetch ?? fetch
   // Unique per call: two overlapping preparations never share (or delete) each other's file.
   const work = `${dest}.${process.pid}.${++workSeq}.dl`
+  const unpack = `${work}.out`
   try {
     opts.onStep?.('download', '')
-    const asset = await resolveCloudflared(fetchFn, platform, opts.net)
+    const asset = await resolveCloudflared(fetchFn, platform, opts.net, opts.arch)
     mkdirSync(dirname(dest), { recursive: true })
-    await download(fetchFn, asset, work, opts.net)
-    if (platform !== 'win32') chmodSync(work, 0o755)
-    renameSync(work, dest)
+    const archive = /\.(tgz|tar\.gz|zip)$/.test(asset.name)
+    const payload = archive ? `${work}.tgz` : work
+    try {
+      await download(fetchFn, asset, payload, opts.net)
+      let binary = payload
+      if (archive) {
+        await (opts.extract ?? extractArchive)(payload, unpack, opts.net)
+        binary = join(unpack, cloudflaredName(platform))
+        if (!sizeAndTime(binary)) throw new RuntimeError('extract-failed', 'cloudflared not found in archive')
+      }
+      if (opts.net?.signal?.aborted) throw new RuntimeError('extract-failed', 'Preparation cancelled')
+      if (platform !== 'win32') chmodSync(binary, 0o755)
+      renameSync(binary, dest)
+    } finally { rmSync(payload, { force: true }) }
     return { exe: dest, source: 'downloaded' }
   } catch (e) {
     if (e instanceof TunnelError) throw e
@@ -211,6 +227,7 @@ export async function prepareCloudflared(opts: PrepareOptions): Promise<Prepared
     throw new TunnelError('prepare-failed', (e as Error).message)
   } finally {
     rmSync(work, { force: true })
+    rmSync(unpack, { recursive: true, force: true })
   }
 }
 
@@ -412,6 +429,7 @@ export class TunnelManager {
       await this.childDone
       clearTimeout(t)
     }
+    await this.opts.registry?.flushIdentities()
     this.child = null
     this.childDone = null
     this.activeToken = null
@@ -472,6 +490,7 @@ export class TunnelManager {
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
         shell: false,
+        detached: process.platform !== 'win32',
       })
     } catch (e) {
       this.fail(gen, 'spawn-failed', redact((e as Error).message, token), [])
@@ -485,7 +504,16 @@ export class TunnelManager {
     // A process that cannot be recorded would be invisible to the residue cleanup: do not keep it.
     // It is not kept as `this.child` either, so a retry (manual or automatic) starts clean.
     try {
-      this.opts.registry?.add({ pid, exe, port, tag: 'tunnel', startedAt: new Date().toISOString() })
+      const record = { pid, exe, port, tag: 'tunnel', startedAt: new Date().toISOString(),
+        ownerPid: process.pid, pgid: process.platform !== 'win32' ? pid : undefined }
+      this.opts.registry?.add(record)
+      const identified = this.opts.registry?.identify(record, child) ?? Promise.resolve()
+      void identified.catch(e => {
+        if (this.child === child) {
+          this.killing = killTree(pid).catch(() => {})
+          this.fail(gen, 'spawn-failed', redact(`Cannot record process identity: ${(e as Error).message}`, token), [])
+        }
+      })
     } catch (e) {
       this.killing = killTree(pid).catch(() => {})
       this.fail(gen, 'spawn-failed', redact(`Cannot record pid: ${(e as Error).message}`, token), [])
@@ -539,7 +567,9 @@ export class TunnelManager {
     let done: () => void
     this.childDone = new Promise<void>((res) => { done = res })
     let exited = false
+    let exitTimer: ReturnType<typeof setTimeout> | undefined
     const finish = (code: number | null) => {
+      clearTimeout(exitTimer)
       if (exited) return
       exited = true
       try { this.opts.registry?.remove(pid) } catch { /* registry is best effort */ }
@@ -553,8 +583,13 @@ export class TunnelManager {
     }
     let pending: { code: number | null } | null = null
     // 'exit' can arrive before the last output is read; wait for 'close' but not forever.
-    child.on('exit', (code) => { pending = { code }; setTimeout(() => finish(pending?.code ?? null), 1000).unref?.() })
-    child.on('close', code => finish(pending?.code ?? code))
+    let groupDone: Promise<void> = Promise.resolve()
+    child.on('exit', (code) => {
+      pending = { code }
+      if (process.platform !== 'win32') groupDone = killTree(pid)
+      void groupDone.then(() => { if (!exited) { exitTimer = setTimeout(() => finish(pending?.code ?? null), 1000); exitTimer.unref?.() } }, () => finish(pending?.code ?? null))
+    })
+    child.on('close', code => { void groupDone.then(() => finish(pending?.code ?? code), () => finish(pending?.code ?? code)) })
   }
 
   private fail(gen: number, code: TunnelErrorCode, detail: string, tail: string[], retry = true): void {

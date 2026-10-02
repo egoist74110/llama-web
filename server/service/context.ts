@@ -27,9 +27,13 @@ import { CloudflareSetup } from '../core/cloudflare'
 import { Updater } from '../core/updater'
 import { Hold } from '../core/write-pair'
 import { cloudflareHooks } from './cloudflare-hooks'
+import { acquireDataLock, type DataLock } from '../core/data-lock'
+import { detectPlatform, runtimeTarget, type PlatformInfo, type RuntimeTarget } from '../core/platform'
 
 export interface AppContext {
   dataDir: string
+  platform: PlatformInfo
+  runtimeTarget: RuntimeTarget
   /** Port configured when the process started (the listening port only changes on restart). */
   bootPort: number
   getSettings(): Settings
@@ -139,27 +143,51 @@ const totalUsedMiB = async (): Promise<number | null> => {
 
 function createContext(): AppContext {
   const dataDir = resolveDataDir()
+  const dataLock = acquireDataLock(dataDir)
+  const startupClose: Array<() => void> = []
+  try {
+    return createOwnedContext(dataDir, dataLock, startupClose)
+  } catch (e) {
+    for (const close of startupClose.reverse()) close()
+    dataLock.release()
+    throw e
+  }
+}
+
+function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: Array<() => void>): AppContext {
+  const platform = detectPlatform()
+  const newSettings = () => defaultSettings(platform)
   const settingsStore = new JsonStore<Settings>({
-    dataDir, name: 'settings.json', version: SETTINGS_VERSION, defaults: defaultSettings, validate: normalizeSettings, migrations: SETTINGS_MIGRATIONS,
+    dataDir, name: 'settings.json', version: SETTINGS_VERSION, defaults: newSettings, validate: normalizeSettings, migrations: SETTINGS_MIGRATIONS,
   })
+  startupClose.push(() => settingsStore.close())
   const modelsStore = new JsonStore<ModelsDoc>({
     dataDir, name: 'models.json', version: MODELS_VERSION, defaults: defaultModels, validate: normalizeModels,
   })
+  startupClose.push(() => modelsStore.close())
   // `live` is created below; stores only call it after startup.
   const secretsStore = new JsonStore<SecretsDoc>({
     dataDir, name: 'secrets.json', version: SECRETS_VERSION, defaults: defaultSecrets, validate: normalizeSecrets, migrations: SECRETS_MIGRATIONS,
   })
+  startupClose.push(() => secretsStore.close())
   const changed = () => live.notify()
   // Settings edits (page or by hand) also start / stop / move the public listener.
   // `hold` is raised while a pair of writes is in flight (see onSaved of the Cloudflare setup): nothing reacts to half of it, one reconciliation runs afterwards.
   const hold = new Hold()
-  const settingsRef = openStore(settingsStore, defaultSettings, () => { changed(); if (!hold.held) applyPublic() })
+  const settingsRef = openStore(settingsStore, newSettings, () => { changed(); if (!hold.held) applyPublic() })
   const modelsRef = openStore(modelsStore, defaultModels, changed)
   // An unreadable secrets.json falls back to "no keys": every public request is refused. A new tunnel token restarts the tunnel.
   const secretsRef = openStore(secretsStore, defaultSecrets, () => { if (!hold.held) applyTunnel() })
   const getSettings = settingsRef.get
+  let selectedTarget: RuntimeTarget, selectionError: string | undefined
+  try { selectedTarget = runtimeTarget(platform, getSettings().llamacpp.acceleration) }
+  catch (e) {
+    selectionError = (e as Error).message
+    selectedTarget = { os: platform.os, arch: platform.arch, acceleration: 'cpu' }
+  }
   const getModels = modelsRef.get
   const logs = new LogStore({ dir: join(dataDir, 'logs'), retention: () => getSettings().logs })
+  startupClose.push(() => logs.closeAll())
   try { logs.prune() } catch (e) { logError('log retention failed', e) }
 
   const cleanupDone = runStartupCleanup(dataDir).then((r) => {
@@ -176,6 +204,7 @@ function createContext(): AppContext {
   let launchSeq = 0
   const updater = new Updater({
     dataDir,
+    target: selectedTarget, selectionError,
     llamacpp: () => getSettings().llamacpp,
     setCurrent: tag => settingsRef.update((s) => { s.llamacpp.current = tag }),
     usedExes: () => [...runner.list().map(p => p.spec.exe), ...launching.values()],
@@ -194,12 +223,14 @@ function createContext(): AppContext {
   })
   const speed = new SpeedMeter({ onChange: () => live.notifyMetrics() })
   // Samples nvidia-smi every settings.gpu.sampleSec seconds (2 by default), but only while a browser is connected to /api/stream.
-  const gpu = new GpuSampler({ intervalMs: () => Math.max(500, getSettings().gpu.sampleSec * 1000), active: () => live.subscriberCount > 0, onChange: () => live.notifyMetrics() })
+  const gpu = new GpuSampler({ intervalMs: () => Math.max(500, getSettings().gpu.sampleSec * 1000), active: () => platform.os === 'win32' && live.subscriberCount > 0, onChange: () => live.notifyMetrics() })
   gpu.start()
+  startupClose.push(() => gpu.stop())
   const live: LiveHub = new LiveHub({
     onActivity: e => logs.appendEvent(e),
     metrics: () => ({ speed: speed.snapshot(), gpu: gpu.value }),
     snapshot: () => ({
+      platform,
       scheduler: scheduler.snapshot(),
       models: describeModels(getModels(), { dirs: getSettings().modelDirs }),
       queue: scheduler.snapshot().queue.map(q => ({ modelId: q.modelId, profile: q.profile, started: q.started, waiting: q.waiting })),
@@ -218,7 +249,7 @@ function createContext(): AppContext {
     isPrecondition: e => e instanceof LaunchConfigError && e.code === 'no-runtime',
     launch: async (target) => {
       await cleanupDone
-      const plan = planLaunch(target, { dataDir, settings: getSettings(), models: getModels(), host: runner.host })
+      const plan = planLaunch(target, { dataDir, settings: getSettings(), models: getModels(), host: runner.host, target: selectedTarget })
       for (const w of plan.warnings) log(`args ${plan.tag}: ${w.code} ${w.flag ?? ''} ${w.layer ?? ''}`.trim())
       log(`starting ${plan.tag}: ${plan.exe}`)
       const launchId = ++launchSeq
@@ -267,6 +298,7 @@ function createContext(): AppContext {
     authenticate: header => authenticate(secretsRef.get(), header),
     handleV1: (r, meta) => proxy.handleV1(r, meta),
   }, ip))
+  startupClose.push(() => publicEntry.close())
   // The tunnel runs only while the public entry listens (the tunnel's target) and a token is saved.
   // Output is not logged (it is redacted and kept in memory for the error state); only transitions are.
   const tunnel = new TunnelManager({
@@ -326,11 +358,13 @@ function createContext(): AppContext {
   let closing: Promise<void> | null = null
   return {
     dataDir, bootPort: getSettings().server.port, getSettings, getModels, updateSettings: settingsRef.update, updateModels: modelsRef.update,
+    platform, runtimeTarget: selectedTarget,
     getSecrets: secretsRef.get, updateSecrets: secretsRef.update, tunnel, applyTunnel, cloudflare,
     refresh: () => { settingsRef.refresh(); modelsRef.refresh() },
     getRuntimeStatus: () => updater.getStatus(), updater, runner, scheduler, ops, proxy, publicEntry, applyPublic, live, logs, cleanupDone,
     shutdown() {
       closing ??= (async () => {
+        await cleanupDone
         publicEntry.close()
         await tunnel.shutdown()
         await updater.stop()
@@ -341,6 +375,7 @@ function createContext(): AppContext {
         await scheduler.shutdown()
         await runner.stopAll()
         logs.closeAll()
+        dataLock.release()
       })()
       return closing
     },

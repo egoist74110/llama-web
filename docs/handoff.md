@@ -16,6 +16,19 @@
 
 ---
 
+## 2026-10-02 · 工作包 5-1（跨平台兼容基础） · Codex
+- 完成：plan 5-1 三项打勾；platform / 资产选择、zip / tar.gz / tgz 安装、可选 cudart / chmod / 摘要验证、解压取消 / 时限 / 越界检查；Windows 杀树与非 Windows 独立进程组 TERM → 有限等待 → KILL；可信实际路径 / birth / PGID 残留检查及配置加载前数据目录互斥。接口、迁移与边界见 `docs/platform-foundation.md`。
+- 用户确认：settings v4 新增 `llamacpp.acceleration`（auto / cuda / cpu / metal）；旧配置迁移为 cuda，原参数 / current 保留，新配置 auto。JsonStore 备份旧 settings；PID v2 先备份 v1 原始字节，备份失败不覆盖，退出取消身份探测。新 runtime 按 OS / arch / acceleration 隔离；旧平铺 Windows CUDA 目录保留供加载 / 回退。
+- 验证：命令进程 PATH 加入已安装 Git 的 bin 后，标准 `bun test` 638 pass / 0 fail（41 文件，无 skip）；`bun run typecheck` 通过。隔离 worktree 独立 `bun install --frozen-lockfile` 后 `bun run build` 通过（现有 Vue package exports 弃用告警）；没有构建或替换主目录 `.output`。
+- 构建产物冒烟：临时 v3 配置、假模型 / Bun 编译假 llama-server，旧目录加载、迁移备份、CMD 预览、首页 200、/v1 转发、SSE、第二实例拒绝、硬杀父进程后子进程退出、死 owner 锁恢复通过。初次夹具漏传 profile 已修；真实发现服务内同步 PowerShell 身份探测超时，改为异步有界可取消并补 Bun.serve 回归后通过。
+- 未运行：浏览器、真实模型 / GPU 推理、Mac 构建或真机（进程、sharp、Metal / CPU 均未验证）、真实 Cloudflare、大型运行库下载安装。仅只读 NVIDIA 探测，无真实配置 / secrets 读取或修改，无新依赖；没有桌面壳、安装包或 Release。Mac 分支为构造测试，不能声明 Mac 已支持。
+- 决定 / 坑：改 acceleration 须重启；未知 NVIDIA 不自动猜 CUDA，可显式选择。无采样隐藏 GPU 卡片，Mac 提示在设置页，命令预览随平台 shell 变化。旧 PID 无 birth 跳过；实际路径 / 身份不明或 PID 复用时不杀。锁 owner 活着（含疑似复用）不抢；极短持有 guard / 写 owner 窗口被硬杀或锁损坏会保守拒绝，确认全部实例退出后才能人工处理。升级前退出没有锁协议的旧程序。
+- 剩余：5-1 范围无；Mac 真机验收留后续。CR-009 解压生命周期已补齐；CR-007 成对写入硬杀恢复、CR-010 混合日志与 CR-013 历史仍保留，不重写历史。可另做独立复审；本地候选缺 runtime_identity，未冒充隔离复审、未派发或消耗其额度。
+- 清理：本轮专用临时构建 worktree、冒烟脚本 / 数据与自有进程已清理；未干预用户已有实例。
+- 下一步：另开会话执行 5-2，推荐 Opus 5.5；交付本地 Windows 测试安装包后停下等用户试用，不自动继续 5-3 或 Mac。
+
+---
+
 ## 2026-10-02 · 发布与 Windows 套壳规划（仅文档） · Codex
 - 完成：在 plan 新增阶段 5，写明现有平台限制、Tauri 2 + 内置 Bun + 完整 Nuxt 产物的拟议方案、兼容基础 / Windows 本地安装包 / Windows Release 的分包顺序、生命周期与安装验收、Mac 后续路线。同步 guide 5-1～5-3 卡片和 AGENTS 的停点规则；6 个新实现任务全部未打勾，既有任务状态未变。
 - 用户最新要求：先做兼容，再把 Windows 套壳做出来；不直接往下做。5-2 交付本地 Windows 测试包后必须停下来等用户试用确认；Mac 套壳 / 发包须用户另行启动。本会话只写 plan，没有开始实现或创建 Release。
