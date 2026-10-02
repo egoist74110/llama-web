@@ -35,12 +35,14 @@ describe('LiveHub', () => {
   test('carries the one-click tunnel setup run (null when there is none), so reloaded pages and other tabs follow it', async () => {
     const { hub } = setup()
     expect(hub.snapshot().cloudflare).toBeNull()
+    expect(hub.snapshot().cloudflareRev).toBeNull()
     let job: unknown = { state: 'running', hostname: 'llm.example.com', steps: [] }
     const live = new LiveHub({
       coalesceMs: 1,
-      snapshot: () => ({ scheduler: { models: [], queue: [] }, models: [], queue: [], llamacpp: { current: '', runtime: { state: 'idle' }, versions: [], rollback: null }, cloudflare: job as never }),
+      snapshot: () => ({ scheduler: { models: [], queue: [] }, models: [], queue: [], llamacpp: { current: '', runtime: { state: 'idle' }, versions: [], rollback: null }, cloudflare: job as never, cloudflareRev: { boot: 1, seq: 4 } }),
     })
     expect(live.snapshot().cloudflare).toMatchObject({ state: 'running' })
+    expect(live.snapshot().cloudflareRev).toEqual({ boot: 1, seq: 4 })
     const got: string[] = []
     live.subscribe(m => got.push(m.type === 'snapshot' ? String((m.state.cloudflare as { state?: string } | null)?.state) : m.type))
     job = { state: 'failed', hostname: 'llm.example.com', steps: [] }

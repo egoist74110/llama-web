@@ -25,7 +25,8 @@ import { JsonStore, resolveDataDir, type VersionedDoc } from '../core/store'
 import { TunnelManager, type TunnelInfo } from '../core/tunnel'
 import { CloudflareSetup } from '../core/cloudflare'
 import { Updater } from '../core/updater'
-import { Hold, writePair } from '../core/write-pair'
+import { Hold } from '../core/write-pair'
+import { cloudflareHooks } from './cloudflare-hooks'
 
 export interface AppContext {
   dataDir: string
@@ -204,7 +205,8 @@ function createContext(): AppContext {
       queue: scheduler.snapshot().queue.map(q => ({ modelId: q.modelId, profile: q.profile, started: q.started, waiting: q.waiting })),
       llamacpp: { current: getSettings().llamacpp.current, runtime: updater.getStatus(), versions: updater.versions(), rollback: updater.rollbackTarget() },
       tunnel: tunnel.status(),
-      cloudflare: cloudflare.status(),
+      // Job and its version from one view: the page orders snapshots and HTTP responses by it.
+      ...(({ job, rev }) => ({ cloudflare: job, cloudflareRev: rev }))(cloudflare.view()),
       firstRun: isFirstRun(getSettings(), getModels()),
     }),
   })
@@ -287,24 +289,9 @@ function createContext(): AppContext {
     })
   }
 
-  // On success: save the tunnel token, then switch the public entry and hosting on and show the
-  // hostname as the client address. The token itself is never logged.
-  const cloudflare = new CloudflareSetup({
-    // Both files or neither: the hosted tunnel is only switched after both writes went through.
-    onSaved: ({ tunnelToken, hostname }) => {
-      const previous = secretsRef.get().tunnelToken
-      // One reconciliation afterwards, whether the writes went through or not (see Hold).
-      hold.run(() => writePair(
-        () => secretsRef.update((draft) => { draft.tunnelToken = tunnelToken }),
-        () => settingsRef.update((draft) => { draft.public = { ...draft.public, enabled: true, tunnelEnabled: true, domain: hostname } }),
-        () => secretsRef.update((draft) => { draft.tunnelToken = previous }),
-      ), applyPublic)
-    },
-    // Read fresh: a hand edit the file watcher has not delivered yet counts too (and is then applied like any other).
-    localPort: () => {
-      try { settingsRef.refresh() } catch { /* unreadable file: the cached settings are all there is */ }
-      return getSettings().public.port
-    },
+  // Port guard and final save (secrets + settings as a pair): see cloudflare-hooks.ts.
+  const cloudflare = new CloudflareSetup(cloudflareHooks({
+    settingsRef, secretsRef, hold, applyPublic,
     onChange: (job) => {
       live.notify()
       if (job?.state === 'done') log(`cloudflare: set up ${job.hostname}`)
@@ -313,7 +300,7 @@ function createContext(): AppContext {
         logError(`cloudflare: setup of ${job.hostname} failed at ${f?.id}: ${f?.error?.code}${f?.error?.detail ? ` ${f.error.detail}` : ''}`)
       }
     },
-  })
+  }))
 
   /** Bring the public listener in line with settings.public and log what changed. */
   function applyPublic() {

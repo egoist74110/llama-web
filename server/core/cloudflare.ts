@@ -613,6 +613,14 @@ export interface SetupHooks {
 /** Public, non-secret copy of a job. */
 export const viewJob = (j: SetupJob | null): SetupJob | null => (j ? structuredClone(j) : null)
 
+/**
+ * Version of what `view()` returned: `seq` grows whenever the job looks different from the last view,
+ * `boot` tells server processes apart (the job lives in memory). A page receives the job both from the
+ * live stream and from HTTP responses, in any order; it keeps the newest by this, not by arrival.
+ */
+export interface JobRev { boot: number, seq: number }
+export interface JobView { job: SetupJob | null, rev: JobRev }
+
 const STEPS: StepId[] = ['tunnel', 'ingress', 'dns', 'token', 'save']
 
 /**
@@ -625,11 +633,24 @@ export class CloudflareSetup {
   private plan: SetupPlan | null = null
   private tunnelToken: string | null = null
   private busy = false
+  private readonly boot: number
+  private seq = 0
+  private lastView = 'null'
 
-  constructor(private hooks: SetupHooks) {}
+  constructor(private hooks: SetupHooks) {
+    this.boot = hooks.now?.() ?? Date.now()
+  }
 
   status(): SetupJob | null {
     return viewJob(this.job)
+  }
+
+  /** The job with its version: everything sent to a page (snapshot or response) goes through here. */
+  view(): JobView {
+    const job = viewJob(this.job)
+    const key = JSON.stringify(job)
+    if (key !== this.lastView) { this.seq++; this.lastView = key }
+    return { job, rev: { boot: this.boot, seq: this.seq } }
   }
 
   async apply(api: CfClient, input: SetupInput, fingerprint: string): Promise<SetupJob> {

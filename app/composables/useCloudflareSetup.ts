@@ -1,11 +1,22 @@
 // State of the one-click tunnel setup (Cloudflare API), shared by the guide's steps: saved API
 // token (masked), what the token can see, the preview and the run. Calls the 4-5 endpoints only.
 import t from '~~/i18n/zh-CN'
-import type { Inspection, SetupJob, SetupPlan } from '~~/server/core/cloudflare'
+import type { Inspection, JobRev, JobView, SetupJob, SetupPlan } from '~~/server/core/cloudflare'
 
 export function messageOf(e: unknown): string {
   const err = e as { data?: { message?: string }, statusMessage?: string, message?: string }
   return err?.data?.message ?? err?.statusMessage ?? err?.message ?? String(e)
+}
+
+/**
+ * Is `next` at least as new as `cur`? Within one server process by `seq`. From another process (a
+ * restart): a snapshot always is (the stream is one ordered connection to the running server), a
+ * response when its process started later.
+ */
+export function revAtLeast(next: JobRev, cur: JobRev | null, fromStream = false): boolean {
+  if (!cur) return true
+  if (next.boot !== cur.boot) return fromStream || next.boot > cur.boot
+  return next.seq >= cur.seq
 }
 
 export function useCloudflareSetup() {
@@ -13,28 +24,30 @@ export function useCloudflareSetup() {
   const live = useLive()
   const info = useState('cf-info', () => ({ hasToken: false, maskedToken: null as string | null, loaded: false }))
   const job = useState<SetupJob | null>('cf-job', () => null)
+  // Version of `job` (see JobRev): null until the first snapshot / response.
+  const rev = useState<JobRev | null>('cf-job-rev', () => null)
   const inspection = useState<Inspection | null>('cf-inspection', () => null)
   const plan = useState<SetupPlan | null>('cf-plan', () => null)
   const busy = useState('cf-busy', () => '')
   const f = useState('cf-form', () => ({ zoneId: '', subdomain: '', tunnelName: 'llama-web', tunnel: '', dns: '' }))
 
+  /**
+   * The job comes from two places in any order: live snapshots and the HTTP responses (which still
+   * work while the stream is down). Each carries the server's version of the job; the newest wins, so
+   * a response that arrives late (a slow GET from before a reload, after a newer snapshot, before or
+   * after the stream dropped) never turns a newer state back, and a result the stream missed is shown.
+   */
+  const takeJob = (v: JobView, fromStream = false) => {
+    if (!revAtLeast(v.rev, rev.value, fromStream)) return
+    rev.value = v.rev
+    job.value = v.job
+  }
+
   // The run is followed through the live stream: a page opened (or reloaded) while it runs, or another
   // tab, sees every step and the final result, not only the page that pressed the button.
-  watch(() => live.state.value?.cloudflare, (j) => {
-    if (j !== undefined) job.value = j
+  watch(() => live.state.value, (s) => {
+    if (s?.cloudflareRev) takeJob({ job: s.cloudflare ?? null, rev: s.cloudflareRev }, true)
   }, { immediate: true })
-
-  /**
-   * While the live stream is connected (and has delivered a snapshot) it is the only source of the
-   * job: a response that arrives late (a slow GET from before a reload, a POST of another tab) must
-   * not turn a newer state back. When the stream is down (or has not delivered anything yet) its
-   * last snapshot is stale, so the responses are all there is; the snapshot that comes with the
-   * reconnect then replaces whatever they set.
-   */
-  const takeJob = (j: SetupJob | null) => {
-    if (live.state.value && live.connected.value) return
-    job.value = j
-  }
 
   const usable = computed(() => inspection.value?.zones.filter(z => z.usable) ?? [])
   const unusable = computed(() => inspection.value?.zones.filter(z => !z.usable) ?? [])
@@ -55,9 +68,9 @@ export function useCloudflareSetup() {
 
   async function loadInfo() {
     await run('info', async () => {
-      const r = await $fetch<{ hasToken: boolean, maskedToken: string | null, job: SetupJob | null }>('/api/cloudflare')
+      const r = await $fetch<{ hasToken: boolean, maskedToken: string | null } & JobView>('/api/cloudflare')
       info.value = { hasToken: r.hasToken, maskedToken: r.maskedToken, loaded: true }
-      takeJob(r.job)
+      takeJob(r)
     })
   }
 
@@ -107,15 +120,14 @@ export function useCloudflareSetup() {
 
   async function apply() {
     await run('apply', async () => {
-      const r = await $fetch<{ job: SetupJob }>('/api/cloudflare/apply', { method: 'POST', body: { ...body(), fingerprint: plan.value?.fingerprint } })
-      takeJob(r.job)
+      takeJob(await $fetch<JobView>('/api/cloudflare/apply', { method: 'POST', body: { ...body(), fingerprint: plan.value?.fingerprint } }))
       plan.value = null
     })
   }
 
   async function jobAction(name: 'retry' | 'cleanup' | 'dismiss') {
     await run(name, async () => {
-      takeJob((await $fetch<{ job: SetupJob | null }>(`/api/cloudflare/${name}`, { method: 'POST' })).job)
+      takeJob(await $fetch<JobView>(`/api/cloudflare/${name}`, { method: 'POST' }))
     })
   }
 

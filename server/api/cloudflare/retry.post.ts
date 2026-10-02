@@ -5,7 +5,9 @@ import { cloudflareError, savedClient } from '../../service/cloudflare-api'
 export default defineEventHandler(async () => {
   const api = savedClient()
   try {
-    return { job: await getContext().cloudflare.retry(api) }
+    const { cloudflare } = getContext()
+    await cloudflare.retry(api)
+    return cloudflare.view()
   } catch (e) {
     cloudflareError(e)
   }

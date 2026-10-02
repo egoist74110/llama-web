@@ -16,6 +16,13 @@
 
 ---
 
+## 2026-10-02 · 阶段 4 第四轮复审意见处理（docs/reviews/stage-4-codex-r4.md） · Opus 5.5
+- 完成：CR-027～CR-029 全部成立并已修复，CR-025 / CR-018 的「测试不经过生产接线」一并补上。pre-commit：引号加入反引号，声明排除只管不带引号的值，名称后的 TS 类型标注、名称行开串的分行值也拦（027）。Cloudflare 任务加服务端版本号 `{ boot, seq }`（`CloudflareSetup.view()`、快照 `cloudflareRev`、5 个接口都返回 `view()`），前端按版本取新、不再看连接状态（028）。hook 测试一次一跑 + 显式 30 秒预算，hook 加无进程预筛（029）。`server/service/cloudflare-hooks.ts`：端口守卫与成对保存的接线，context 与 `tests/service/` 共用。
+- 验证：标准 `bun test`（不加超时参数，sh 在 PATH 上）两次均 615 通过 / 0 失败；`bun run typecheck` 0；新测试对旧代码的反证：旧 composable 3 条交错用例失败、端口接线改回读缓存后接线测试失败。构建：在临时 worktree 里 `bun run build` 通过，构建产物 + 临时数据目录（自动更新关）冒烟：`/api/cloudflare`、`/api/state`、`/api/stream`、dismiss 均带 rev，首页 200；已停已删。**没运行**：浏览器、真实 Cloudflare、真机。
+- 剩余：同上一条（CR-007 两次写之间被杀、CR-009 解压无时限、CR-010 混合日志待确认、CR-013 历史）。
+- 决定 / 坑：**用户在跑 start.bat 时不要在主目录 `bun run build`**：本次在主目录构建时 sharp 的 .node 被运行中的实例占用，构建先清空了 `.output` 再失败，运行实例的页面资源 500。已在临时 worktree 按运行实例对应的提交（1d5c7a6，靠资源哈希确认）重建并放回，页面恢复；运行实例的 `/api/state` 因缺文件期间首次加载失败被缓存，仍 500（界面不用它），重启实例即恢复。构建验证一律放临时 worktree。worktree 用 junction 共享 node_modules 会让 Nuxt 构建报错，要在 worktree 里 `bun install`。
+- 下一步：没有新的工作包；第五轮复审可选。
+
 ## 2026-10-02 · 阶段 4 第三轮复审意见处理（docs/reviews/stage-4-codex-r3.md） · Sonnet 5.5
 - 完成：CR-023～CR-026 共 4 条逐条核实，**全部成立并已修复**：pre-commit 用暂存文件的上一行判断分行凭据（只改值也能拦住），带引号字面量不要求数字、不带引号的值要求含数字且 `const/let/var` 声明和函数调用不算（023、024）；Cloudflare 任务的端口守卫先读磁盘再比较（025）；live 断线后 HTTP 结果重新生效、重连快照再接管（026）。
 - 验证：`bun test` 571 通过 / 0 失败（39 个文件，sh 在 PATH 上，16 条 hook 测试全部执行）；`bun run typecheck` 退出码 0。**没运行**：build、浏览器、真实 Cloudflare、真机。

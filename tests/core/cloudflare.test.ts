@@ -1,8 +1,4 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { JsonStore } from '../../server/core/store'
 import {
   CfClient, CfError, cleanApiToken, cleanSubdomain, CloudflareSetup, inspect, maskApiToken, mergeIngress, planSetup,
   type SetupInput, type SetupJob,
@@ -501,29 +497,6 @@ describe('apply', () => {
     expect((await s.retry(client(cf))).state).toBe('done')
   })
 
-  test('a port edit on disk that no watcher has delivered yet is seen when the guard reads the store fresh', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'lw-port-'))
-    try {
-      const store = new JsonStore<{ version: number, port: number }>({ dataDir: dir, name: 's.json', version: 1, defaults: () => ({ version: 1, port: 8080 }) })
-      store.load()
-      const cf = new FakeCloudflare()
-      const t = cf.addTunnel({ name: 'llama-web', ingress: [{ service: 'http_status:404' }] })
-      const inp = input({ tunnel: `reuse:${t.id}` })
-      const p = await planSetup(client(cf), inp)
-      const saved: unknown[] = []
-      // The guard's way of reading the port in context.ts: refresh the store first, then the cached value.
-      const s = new CloudflareSetup({ onSaved: (r) => { saved.push(r) }, localPort: () => store.refresh().port })
-      cf.failures.push({ method: 'PUT', path: /configurations$/, status: 500 })
-      expect((await s.apply(client(cf), inp, p.fingerprint)).state).toBe('failed')
-      writeFileSync(store.file, JSON.stringify({ version: 1, port: 8081 })) // hand edit, nobody has read it yet
-      const again = await s.retry(client(cf))
-      expect(again.steps[1]!.error).toEqual({ code: 'changed', detail: 'port-changed' })
-      expect(saved).toEqual([])
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
-  })
-
   test('cleanup keeps the run and the new tunnel when somebody changed the proxy switch of the re-pointed record', async () => {
     const cf = new FakeCloudflare()
     const old = cf.addTunnel({ name: 'old' })
@@ -615,5 +588,34 @@ describe('adding an address to the tunnel llama-web already hosts', () => {
     const p = await planSetup(client(cf), input({ currentTunnelId: 'aaaaaaaa-bbbb-cccc-dddd-999999999999' }))
     expect(p.tunnel).toEqual({ kind: 'create', name: 'llama-web' })
     expect(p.autoChosen).toBe(false)
+  })
+})
+
+describe('view: the job with a version for the page', () => {
+  test('the version grows exactly when the job looks different, and stays per process', async () => {
+    const cf = new FakeCloudflare()
+    const t = cf.addTunnel({ name: 'llama-web', ingress: [{ service: 'http_status:404' }] })
+    const inp = input({ tunnel: `reuse:${t.id}` })
+    const p = await planSetup(client(cf), inp)
+    let clock = 5000
+    const s = new CloudflareSetup({ onSaved: () => {}, now: () => clock++ })
+    const first = s.view()
+    expect(first).toEqual({ job: null, rev: { boot: 5000, seq: 0 } })
+    expect(s.view().rev).toEqual(first.rev) // nothing changed
+    cf.failures.push({ method: 'PUT', path: /configurations$/, status: 500 })
+    await s.apply(client(cf), inp, p.fingerprint)
+    const failed = s.view()
+    expect(failed.job?.state).toBe('failed')
+    expect(failed.rev).toEqual({ boot: 5000, seq: 1 })
+    expect(s.view().rev.seq).toBe(1)
+    await s.retry(client(cf))
+    const done = s.view()
+    expect(done.job?.state).toBe('done')
+    expect(done.rev.seq).toBe(2)
+    // No job again, as in the first view, but a newer version: a page that saw "done" must take it.
+    s.dismiss()
+    expect(s.view()).toEqual({ job: null, rev: { boot: 5000, seq: 3 } })
+    // Another process (a restart) has its own boot: later start, newer.
+    expect(new CloudflareSetup({ onSaved: () => {}, now: () => 9000 }).view().rev.boot).toBe(9000)
   })
 })

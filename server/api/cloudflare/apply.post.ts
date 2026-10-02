@@ -7,7 +7,10 @@ export default defineEventHandler(async (event) => {
   const body = await readBody(event)
   const api = savedClient()
   try {
-    return { job: await getContext().cloudflare.apply(api, setupInput(body), typeof body?.fingerprint === 'string' ? body.fingerprint : '') }
+    const { cloudflare } = getContext()
+    await cloudflare.apply(api, setupInput(body), typeof body?.fingerprint === 'string' ? body.fingerprint : '')
+    // The job as of now with its version (not the run's return value: the page orders by the version).
+    return cloudflare.view()
   } catch (e) {
     cloudflareError(e)
   }

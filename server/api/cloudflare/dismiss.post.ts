@@ -4,8 +4,9 @@ import { cloudflareError } from '../../service/cloudflare-api'
 
 export default defineEventHandler(() => {
   try {
-    getContext().cloudflare.dismiss()
-    return { job: null }
+    const { cloudflare } = getContext()
+    cloudflare.dismiss()
+    return cloudflare.view()
   } catch (e) {
     cloudflareError(e)
   }

@@ -3,4 +3,4 @@
 import { getContext } from '../../service/context'
 import { tokenView } from '../../service/cloudflare-api'
 
-export default defineEventHandler(() => ({ ...tokenView(), job: getContext().cloudflare.status() }))
+export default defineEventHandler(() => ({ ...tokenView(), ...getContext().cloudflare.view() }))
