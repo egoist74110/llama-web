@@ -16,6 +16,15 @@
 
 ---
 
+## 2026-10-02 · 阶段 4 审查意见处理（docs/reviews/stage-4-codex.md） · Sonnet 5.5
+- 完成：13 条逐条对照代码核实，**12 条成立并已修复，1 条需要用户决定（CR-006），0 条不成立**；每条的处理结果写在审查文件里。没有勾选 plan 任务。修复：pre-commit 识别隧道 token / API token 赋值（CR-001）；Cloudflare 放弃时恢复被改指的 DNS（002）；沿用隧道时保留完整远程 config（003）；ingress 合并保持优先级（004）；ingress 写入前校验配置未变、识别丢响应的自身写入（005）；secrets + settings 成对写入失败回滚、成功后才切换托管（007，`core/write-pair.ts`）；cloudflared 准备可取消、关闭 / 换 token 时等待（008）；更新 / 下载 HTTP 时限与关机取消（009，`NetOptions`、`Updater.stop()`）；Unregistered 日志按 connIndex 计数（010）；pid 登记失败不留 child（011）；Cloudflare 任务进入 live 快照（012）；交接里的真实隧道名改为泛化描述（013）。
+- 验证：`bun test` 555 通过 / 0 失败（新增约 25 条，含 sh 下的 pre-commit 测试）；`bun run typecheck` 通过（退出码 0）。**没运行**：`bun run build`、浏览器里的「运行中刷新 / 另一标签页」场景（只有单测）、真实 Cloudflare（002/003/005 只有 FakeCloudflare）、真机。
+- 剩余：**CR-006（需要用户决定）**：创建隧道响应丢失后的孤立隧道——现状是放弃后重新预览，同名隧道作为「沿用」选项出现；可选 A 保持并加提示 / B 认领「任务开始后创建且无连接」的同名隧道 / C 创建前用一次性隧道名。CR-003 真实 API 对缺省字段的语义未核实（现在原样回传，不依赖它）。CR-007：进程恰好在两次写入之间被杀的恢复未做。CR-013：已推送的历史提交里仍有真实隧道名，是否改写历史由用户决定。
+- 决定 / 坑：`mergeIngress` 顺序变了（原位替换 / 插在会遮蔽它的规则之前），旧测试里「新规则在最前」的断言已改。`TunnelManager` 的 teardown 会等 prepare 结束，自定义 prepare 需要响应 `net.signal`。`SetupPlan` 新增 `configHash`，`SetupJob.created` 新增 `dnsRestore`，`StateDoc` 新增 `cloudflare`（均向后兼容）。
+- 下一步：没有新的工作包（开发共 4 个阶段，阶段 4 已全部完成）。等用户决定 CR-006 的处理方式，并决定是否让 Codex 复审。
+
+---
+
 ## 2026-10-02 · 工作包 4-6（接续：阶段 4 更新 / 回退验收） · Opus 5.5
 - 完成：plan 阶段 4「真机试用」打勾，阶段 4 任务全部完成。没有改代码。
 - 验证：`bun run build`、`bun test` 532 通过、`bun run typecheck` 通过。真机（临时数据目录：复制 settings.json（关公网 / 托管，端口 5099，模型端口 7300–7399）、models.json、templates/，不复制 secrets.json；已停已删，GPU 回到基线以下）：用 `installBuild` 真实下载安装旧版 b11140（CUDA 13.4，55 秒）并设为当前 → 启动构建产物，先监听、后台检查到官方最新 b11146 → 自动下载、校验、解压、设为当前（`ready / updated / from b11140`，约 30 秒）→ `POST /api/llamacpp/current {tag:b11140}` 回退（`switched`，settings.json 已写 b11140）→ Qwen3.8-27B 加载 43 秒 ready，对话返回 `ok`；系统进程表里 llama-server 的路径在 b11140 目录，该 exe `--version` 为 build 11140；`/api/llamacpp` 显示 b11140 current + inUse → 卸载、停止。用户真实 data 未改动（仍是 b11146）。
@@ -38,7 +47,7 @@
 - 完成：plan 阶段 4「一键建隧道」。`server/core/cloudflare.ts`：`CfClient`（可注入 fetch，token 只放 Authorization 头）、`inspect`（校验用户 / 账号 token，列 zone，探测 Tunnel / DNS / Zone 读权限，缺哪项指出来；只有 active zone 可用）、`planSetup`（同名隧道 / CNAME 指向的隧道 / 当前托管隧道 → 选择；入口规则合并保留其他主机名；A/AAAA 或多条记录 → blocked；fingerprint）、`CloudflareSetup`（tunnel → ingress → dns → token → save，失败停在该步，重试从失败步继续，放弃只删本次新建的隧道 / DNS）。secrets.json → v3（`cloudflareToken`，迁移）。接口 `/api/cloudflare`、`/token`、`/zones`、`/preview`、`/apply`、`/retry`、`/cleanup`、`/dismiss`。界面 `SettingsCloudflare.vue`（token、建 token / 域名接入的说明、选域名、预览、确认框、步骤结果）。真机后追加：默认沿用正在托管的隧道（由隧道 token 解出 ID，`tunnelIdOf`），换域名 = 给它加一个地址；隧道名移入「高级」。README 公网一节重写（先决条件 / 方式 A 一键 / 方式 B 手动）。
 - 验证：`bun test` 519 通过（新增 cloudflare 29、keys 3、tunnel 1）；`bun run typecheck`、`bun run build` 通过。构建产物 + 临时数据目录 + 假 Cloudflare（HTTP 包一层 fixture，已停已删）在内置浏览器：错 token 拒绝、好 token 列 zone、冲突选择、注入 DNS 失败 → 重试成功、403 失败 → 放弃只删新隧道、A 记录 blocked、手机宽度 + 深色无横向滚动；日志 / 接口无 token。真机（用户自己在界面操作）：第一个域名经隧道带 key 200、无 key 401、吊销 401、`/`、`/api/state` 404；第二个域名 401（可达）。
 - 剩余：阶段 4 验收里**仍未验证**：真实的自动更新下载、真实模型下的回退（放进 4-6）。**没测**：「默认沿用当前隧道」在真实账号上的执行（只有单测 + 真实账号的只读预览）。
-- 决定 / 坑：用户公司网络打不开第一个域名（不是程序问题；DSH 在别的机器上，本机测不到）。用户第二次建隧道时新建了隧道 llama-web 并替换了托管 token（多半是在修复生效前跑的），所以**第一个域名现在 530**（CNAME 仍指向无连接的旧隧道 llm）；用新界面对该域名再跑一次即可改指（会改 DNS，先问用户），或在后台删掉旧隧道 / 记录。Cloudflare 不提供免费域名、API 不能代注册。测试用 `LLAMA_WEB_CLOUDFLARE_API` 指向假 Cloudflare。界面目前四张公网卡片并列，用户认为太复杂 → 4-6。
+- 决定 / 坑：用户公司网络打不开第一个域名（不是程序问题；目标服务在别的机器上，本机测不到）。用户第二次建隧道时新建了隧道 llama-web 并替换了托管 token（多半是在修复生效前跑的），所以**第一个域名现在 530**（CNAME 仍指向无连接的旧隧道）；用新界面对该域名再跑一次即可改指（会改 DNS，先问用户），或在后台删掉旧隧道 / 记录。Cloudflare 不提供免费域名、API 不能代注册。测试用 `LLAMA_WEB_CLOUDFLARE_API` 指向假 Cloudflare。界面目前四张公网卡片并列，用户认为太复杂 → 4-6。
 - 下一步：工作包 4-6「公网模块合并 + 引导 + 阶段 4 验收」（Opus 5.5，见 claude-guide）；阶段关口 4 顺延到它之后。
 
 ---
@@ -48,7 +57,7 @@
 - 验证：`bun test` 全部通过（新增 tunnel 21 条含真实子进程、keys / settings / residue 若干）；`bun run typecheck`、`bun run build` 通过。真机（临时数据目录，端口 5097 / 18090，已停已删，GPU 回到基线）：已装 cloudflared 2026.5.0 被复制并运行；伪造 token 连不上时显示「正在连接」+ 最近报错；用户自己的 token：状态已连通（4 条连接）；经隧道无 key / 错 key / 吊销后的 key → 401，带 key 的 /v1/models 200，/api/state、/api/keys、/settings、/upstream、/ → 404；带 key 流式对话触发 Qwen3.8-27B 加载（41 秒）并出流；请求记录 source=public + key 名；token / key 未出现在日志、事件、server 输出；真实 settings.json 副本迁移到 v2 且生成备份；`git add -f data/x` 被 pre-commit 拒绝。
 - 剩余：阶段 4 验收里**未验证**两项：官方出新版时的自动下载安装（当前官方最新仍是 b11146，没有可下载的）、真实模型下的版本回退（只有一个版本；回退逻辑在 4-2 用假目录验证过）。**没测**：cloudflared 下载路径的真实网络（只有假 fetch 的单测；本机已装）；Windows 服务形式的 cloudflared 与本隧道并存；深色模式 / 手机宽度下的新卡片；`nuxt dev` 下（只会显示「开发模式没有公网入口」）。
 - 决定 / 坑：与 4-3 记录的差异——用 `TUNNEL_TOKEN` 环境变量代替 `--token`（不进进程列表）；已装的 cloudflared 复制到 `data/runtime/cloudflared/` 再运行，这样残留清理只杀 runtime 下进程的规则同样覆盖隧道。真实 cloudflared 遇到不存在的隧道 token 不会退出而是一直内部重试，所以界面显示「正在连接」+ 最近报错，而不是错误卡片。`dnsCommand` / `routeDnsCommand` / `bad-tunnel` 已删。Windows 上硬杀 llama-web 时 cloudflared 随管道关闭自己退出（观察到，不依赖它）。
-- 下一步：新增工作包 4-5「一键建隧道」（Opus 5.5，见 claude-guide）；阶段关口 4 顺延到它之后。真机试用发现：用户真实 data 里存的是 japan-home 隧道的 token（已清空并关闭托管开关），llm 隧道（域名 CNAME 指向它）当前无连接且入口规则仍指向测试端口 18090，4-5 里一并处理。
+- 下一步：新增工作包 4-5「一键建隧道」（Opus 5.5，见 claude-guide）；阶段关口 4 顺延到它之后。真机试用发现：用户真实 data 里存的是另一条隧道的 token（已清空并关闭托管开关），域名 CNAME 指向的那条旧隧道当前无连接且入口规则仍指向测试端口 18090，4-5 里一并处理。
 
 ---
 

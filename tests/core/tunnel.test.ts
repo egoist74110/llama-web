@@ -347,9 +347,10 @@ describe('TunnelManager', () => {
     const { m, spawns } = makeManager(() => 'connect', { prepare: async () => { await gate; return { exe: process.execPath, source: 'system' } } })
     m.apply(baseCfg())
     await until(() => m.status().status.state === 'preparing')
+    // Turning off waits for the preparation: let it finish a moment later.
+    setTimeout(() => release(), 50)
     m.apply(baseCfg({ tunnelEnabled: false }))
     await until(() => m.status().status.state === 'off')
-    release()
     await new Promise(r => setTimeout(r, 200))
     expect(spawns()).toBe(0)
     expect(m.status().status.state).toBe('off')
@@ -371,6 +372,91 @@ describe('TunnelManager', () => {
     expect(JSON.stringify(st)).not.toContain(TOKEN)
     await until(() => m.status().status.state === 'connected')
     expect(m.status().cloudflared?.source).toBe('downloaded')
+    await m.shutdown()
+  })
+
+  test('connection count follows connIndex: an Unregistered line is not a new connection', async () => {
+    const { m, statuses } = makeManager(() => 'flap')
+    m.apply(baseCfg())
+    await until(() => { const s = m.status().status; return s.state === 'connected' && s.connections === 1 && statuses.some(x => x.state === 'starting') })
+    const seen = statuses.flatMap(s => (s.state === 'connected' ? [s.connections] : s.state === 'starting' ? ['starting'] : []))
+    expect(seen).toEqual(['starting', 1, 2, 1, 'starting', 1])
+    await m.shutdown()
+  })
+
+  test('changing the token while cloudflared is downloading cancels and waits for the first preparation', async () => {
+    let active = 0
+    let maxActive = 0
+    let started = 0
+    const aborted: boolean[] = []
+    const prepare = async (o: { net?: { signal?: AbortSignal } }) => {
+      started++
+      active++
+      maxActive = Math.max(maxActive, active)
+      try {
+        if (started === 1) {
+          // The first one hangs until it is cancelled, then needs a moment to clean up.
+          await new Promise<void>((_res, rej) => o.net!.signal!.addEventListener('abort', () => rej(new Error('stopped'))))
+        }
+        return { exe: process.execPath, source: 'system' as const }
+      } finally {
+        if (started === 1) await new Promise(r => setTimeout(r, 60))
+        aborted.push(!!o.net?.signal?.aborted)
+        active--
+      }
+    }
+    const { m } = makeManager(() => 'connect', { prepare: prepare as never })
+    m.apply(baseCfg())
+    await until(() => started === 1)
+    const other = Buffer.from(JSON.stringify({ a: 'a', t: 't', s: 'another-secret-value' })).toString('base64')
+    m.apply(baseCfg({ token: other }))
+    await until(() => m.status().status.state === 'connected')
+    expect(started).toBe(2)
+    expect(maxActive).toBe(1)
+    expect(aborted).toEqual([true, false])
+    await m.shutdown()
+  })
+
+  test('shutdown waits for a preparation in progress', async () => {
+    let finished = false
+    const prepare = async (o: { net?: { signal?: AbortSignal } }) => {
+      await new Promise<void>((_res, rej) => o.net!.signal!.addEventListener('abort', () => rej(new Error('stopped'))))
+      return { exe: process.execPath, source: 'system' as const }
+    }
+    const wrapped = async (o: never) => { try { return await prepare(o) } finally { await new Promise(r => setTimeout(r, 50)); finished = true } }
+    const { m } = makeManager(() => 'connect', { prepare: wrapped as never })
+    m.apply(baseCfg())
+    await until(() => m.status().status.state === 'preparing')
+    await m.shutdown()
+    expect(finished).toBe(true)
+  })
+
+  test('a pid that cannot be recorded: the process is stopped, nothing stale is kept, a retry works', async () => {
+    class Flaky extends PidRegistry {
+      broken = true
+      override add(r: Parameters<PidRegistry['add']>[0]) {
+        if (this.broken) throw new Error('disk full')
+        super.add(r)
+      }
+    }
+    const registry = new Flaky(join(dir, 'run', 'pids.json'))
+    const pids: number[] = []
+    const { spawn } = await import('node:child_process')
+    const { m } = makeManager(() => 'connect', {
+      registry,
+      retryDelaysMs: [60_000],
+      spawn: ((...a: Parameters<typeof spawn>) => { const c = spawn(...a); if (c.pid) pids.push(c.pid); return c }) as never,
+    })
+    m.apply(baseCfg())
+    const st = await until(() => errorOf(m))
+    expect(st).toMatchObject({ code: 'spawn-failed' })
+    expect(st.detail).toContain('Cannot record pid')
+    await until(() => !isAlive(pids[0]!))
+    registry.broken = false
+    m.retry()
+    await until(() => m.status().status.state === 'connected')
+    expect(pids).toHaveLength(2)
+    expect(registry.list()).toHaveLength(1)
     await m.shutdown()
   })
 

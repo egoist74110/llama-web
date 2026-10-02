@@ -4,6 +4,7 @@ import type { ModelsDoc } from './config'
 import { diagnose, type FailureDoc } from './errors'
 import type { GpuDoc } from './gpu'
 import { missingFiles, type ModelFile } from './models-admin'
+import type { SetupJob } from './cloudflare'
 import type { RuntimeStatus } from './llamacpp'
 import type { VersionView } from './updater'
 import type { RequestRecord } from './request-log'
@@ -53,6 +54,8 @@ export interface StateDoc {
   }
   /** Cloudflare tunnel hosted by llama-web: state and the cloudflared in use. */
   tunnel: TunnelInfo
+  /** The one-click tunnel setup run (non-secret view), so every open page follows it; null when there is none. */
+  cloudflare: SetupJob | null
   /** Nothing configured yet and the setup wizard has not been dismissed. */
   firstRun: boolean
 }
@@ -104,7 +107,7 @@ export type LiveMessage =
   | { type: 'log', lines: LogLine[] }
 
 export interface LiveHubOptions {
-  snapshot(): Omit<StateDoc, 'now' | 'firstRun'> & { scheduler: SchedulerSnapshot, firstRun?: boolean }
+  snapshot(): Omit<StateDoc, 'now' | 'firstRun' | 'cloudflare'> & { scheduler: SchedulerSnapshot, firstRun?: boolean, cloudflare?: SetupJob | null }
   /** How many recent activity events to keep. */
   historySize?: number
   now?: () => number
@@ -251,7 +254,7 @@ export class LiveHub {
   }
 
   snapshot(): StateDoc {
-    const { scheduler, models, queue, llamacpp, tunnel, firstRun } = this.opts.snapshot()
+    const { scheduler, models, queue, llamacpp, tunnel, cloudflare, firstRun } = this.opts.snapshot()
     return {
       now: this.now(),
       models: models.map(m => ({
@@ -264,7 +267,7 @@ export class LiveHub {
             progress: s.state === 'loading' ? (this.progress.get(instKey(m.id, s.profile)) ?? null) : null,
           })),
       })),
-      queue, llamacpp, tunnel, firstRun: firstRun === true,
+      queue, llamacpp, tunnel, cloudflare: cloudflare ?? null, firstRun: firstRun === true,
     }
   }
 

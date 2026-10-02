@@ -41,14 +41,43 @@ describe('token and helpers', () => {
       { hostname: 'llm.example.com', service: 'http://127.0.0.1:18090', originRequest: { noTLSVerify: true } },
       { service: 'http_status:404' },
     ], 'llm.example.com', 'http://127.0.0.1:8080')
+    // The rule is replaced where it is.
     expect(m.rules).toEqual([
-      { hostname: 'llm.example.com', service: 'http://127.0.0.1:8080', originRequest: { noTLSVerify: true } },
       { hostname: 'other.example.com', service: 'http://127.0.0.1:3000' },
+      { hostname: 'llm.example.com', service: 'http://127.0.0.1:8080', originRequest: { noTLSVerify: true } },
       { service: 'http_status:404' },
     ])
     expect(m.change).toEqual({ hostname: 'llm.example.com', from: 'http://127.0.0.1:18090', to: 'http://127.0.0.1:8080' })
     expect(m.others).toEqual(['other.example.com'])
     expect(mergeIngress(null, 'a.example.com', 's').rules).toEqual([{ hostname: 'a.example.com', service: 's' }, { service: 'http_status:404' }])
+  })
+
+  test('a new rule never shadows a rule that matched before (path rules, wildcards, catch-all)', () => {
+    const host = 'llm.example.com'
+    // The hostname's own path rule keeps priority; the new rule comes right after it.
+    const withPath = mergeIngress([
+      { hostname: host, path: '/admin/.*', service: 'http://127.0.0.1:3000' },
+      { service: 'http_status:404' },
+    ], host, 's')
+    expect(withPath.rules.map(r => `${r.hostname ?? '*'}${r.path ?? ''}`)).toEqual([`${host}/admin/.*`, host, '*'])
+    expect(withPath.others).toEqual([`${host}/admin/.*`])
+    // A wildcard that already catches the hostname stays behind the new, more specific rule...
+    const wild = mergeIngress([
+      { hostname: 'x.example.com', service: 'a' },
+      { hostname: '*.example.com', service: 'b' },
+      { service: 'http_status:404' },
+    ], host, 's')
+    expect(wild.rules.map(r => r.hostname ?? '*')).toEqual(['x.example.com', host, '*.example.com', '*'])
+    // ...but this hostname's path rule sitting behind that wildcard is not shadowed by the new rule.
+    const late = mergeIngress([
+      { hostname: '*.example.com', service: 'b' },
+      { hostname: host, path: '/p', service: 'c' },
+      { service: 'http_status:404' },
+    ], host, 's')
+    expect(late.rules.map(r => `${r.hostname ?? '*'}${r.path ?? ''}`)).toEqual(['*.example.com', `${host}/p`, host, '*'])
+    // A different wildcard does not matter; the new rule goes in front of the catch-all.
+    const other = mergeIngress([{ hostname: '*.other.example', service: 'b' }, { service: 'http_status:404' }], host, 's')
+    expect(other.rules.map(r => r.hostname ?? '*')).toEqual(['*.other.example', host, '*'])
   })
 })
 
@@ -305,6 +334,104 @@ describe('apply', () => {
     expect(cf.writes().filter(w => w.startsWith('DELETE'))).toEqual([])
   })
 
+  test('cleanup puts a re-pointed existing record back before deleting the new tunnel', async () => {
+    const cf = new FakeCloudflare()
+    const old = cf.addTunnel({ name: 'old' })
+    const rec = cf.addRecord({ type: 'CNAME', name: 'llm.example.com', content: `${old.id}.cfargotunnel.com`, proxied: false })
+    const { s } = setup(cf)
+    const inp = input({ tunnel: 'create', dns: 'repoint' })
+    const p = await planSetup(client(cf), inp)
+    cf.failures.push({ method: 'GET', path: /\/token$/, status: 500, sticky: true })
+    cf.tokenInCreate = false
+    const job = await s.apply(client(cf), inp, p.fingerprint)
+    expect(stepStates(job)).toBe('tunnel:done ingress:done dns:done token:failed save:pending')
+    expect(job.created.dnsRestore).toEqual({ id: rec.id, content: `${old.id}.cfargotunnel.com`, proxied: false })
+    expect(await s.cleanup(client(cf))).toBeNull()
+    expect(cf.tunnels.find(t => t.name === 'llama-web')!.deleted_at).not.toBeNull()
+    expect(cf.records).toHaveLength(1)
+    expect(cf.records[0]).toMatchObject({ id: rec.id, content: `${old.id}.cfargotunnel.com`, proxied: false })
+    expect(old.deleted_at).toBeNull()
+  })
+
+  test('cleanup does not revert a record somebody else changed after the run', async () => {
+    const cf = new FakeCloudflare()
+    const old = cf.addTunnel({ name: 'old' })
+    const rec = cf.addRecord({ type: 'CNAME', name: 'llm.example.com', content: `${old.id}.cfargotunnel.com`, proxied: true })
+    const { s } = setup(cf)
+    const inp = input({ tunnel: 'create', dns: 'repoint' })
+    const p = await planSetup(client(cf), inp)
+    cf.failures.push({ method: 'GET', path: /\/token$/, status: 500, sticky: true })
+    cf.tokenInCreate = false
+    await s.apply(client(cf), inp, p.fingerprint)
+    rec.content = 'elsewhere.example.net'
+    await s.cleanup(client(cf))
+    expect(cf.records[0]!.content).toBe('elsewhere.example.net')
+  })
+
+  test('reusing a tunnel sends back the whole remote configuration, not just the ingress', async () => {
+    const cf = new FakeCloudflare()
+    const t = cf.addTunnel({
+      name: 'llama-web',
+      ingress: [{ hostname: 'other.example.com', service: 'http://127.0.0.1:3000' }, { service: 'http_status:404' }],
+      extraConfig: { originRequest: { noTLSVerify: true, connectTimeout: 5 }, 'warp-routing': { enabled: false } },
+    })
+    const inp = input({ tunnel: `reuse:${t.id}` })
+    const p = await planSetup(client(cf), inp)
+    const { s } = setup(cf)
+    expect((await s.apply(client(cf), inp, p.fingerprint)).state).toBe('done')
+    expect(t.extraConfig).toEqual({ originRequest: { noTLSVerify: true, connectTimeout: 5 }, 'warp-routing': { enabled: false } })
+    expect(t.ingress!.map(r => r.hostname ?? '*')).toEqual(['other.example.com', 'llm.example.com', '*'])
+  })
+
+  test('a change of the tunnel-wide configuration after the preview is refused', async () => {
+    const cf = new FakeCloudflare()
+    const t = cf.addTunnel({ name: 'llama-web', ingress: [{ service: 'http_status:404' }], extraConfig: { originRequest: { connectTimeout: 5 } } })
+    const inp = input({ tunnel: `reuse:${t.id}` })
+    const p = await planSetup(client(cf), inp)
+    t.extraConfig = { originRequest: { connectTimeout: 60 } }
+    const { s } = setup(cf)
+    expect(await codeOf(s.apply(client(cf), inp, p.fingerprint))).toBe('changed')
+    expect(cf.writes()).toEqual([])
+  })
+
+  test('retry of the ingress step does not overwrite what changed after the preview', async () => {
+    const cf = new FakeCloudflare()
+    const t = cf.addTunnel({ name: 'llama-web', ingress: [{ hostname: 'llm.example.com', service: 'http://127.0.0.1:18090' }, { service: 'http_status:404' }] })
+    const inp = input({ tunnel: `reuse:${t.id}` })
+    const p = await planSetup(client(cf), inp)
+    cf.failures.push({ method: 'PUT', path: /configurations$/, status: 500 })
+    const { s, saved } = setup(cf)
+    const job = await s.apply(client(cf), inp, p.fingerprint)
+    expect(stepStates(job)).toBe('tunnel:skipped ingress:failed dns:pending token:pending save:pending')
+    // Somebody edits the same hostname in the dashboard before the user presses retry.
+    t.ingress = [{ hostname: 'llm.example.com', service: 'http://127.0.0.1:9090' }, { service: 'http_status:404' }]
+    const again = await s.retry(client(cf))
+    expect(again.state).toBe('failed')
+    expect(again.steps[1]!.error).toEqual({ code: 'changed', detail: 'ingress-changed' })
+    expect(t.ingress[0]!.service).toBe('http://127.0.0.1:9090')
+    expect(saved).toEqual([])
+  })
+
+  test('retry after a write whose answer was lost recognises its own result', async () => {
+    const cf = new FakeCloudflare()
+    const t = cf.addTunnel({ name: 'llama-web', ingress: [{ service: 'http_status:404' }] })
+    const inp = input({ tunnel: `reuse:${t.id}` })
+    const p = await planSetup(client(cf), inp)
+    const lost: typeof cf.fetch = async (url, init) => {
+      const res = await cf.fetch(url, init)
+      if ((init?.method ?? 'GET') === 'PUT' && cf.failures.length === 0 && !lostOnce.done) { lostOnce.done = true; throw new TypeError('fetch failed') }
+      return res
+    }
+    const lostOnce = { done: false }
+    const { s } = setup(cf)
+    const job = await s.apply(new CfClient(GOOD, lost, BASE), inp, p.fingerprint)
+    expect(job.steps[1]!.state).toBe('failed')
+    expect(job.steps[1]!.error!.code).toBe('network')
+    const again = await s.retry(client(cf))
+    expect(again.state).toBe('done')
+    expect(again.steps[1]!.state).toBe('skipped')
+  })
+
   test('dismiss / retry / cleanup without a failed run', async () => {
     const cf = new FakeCloudflare()
     const { s } = setup(cf)
@@ -344,8 +471,8 @@ describe('adding an address to the tunnel llama-web already hosts', () => {
     const job = await s.apply(client(cf), inp, p.fingerprint)
     expect(stepStates(job)).toBe('tunnel:skipped ingress:done dns:done token:done save:done')
     expect(cur.ingress).toEqual([
-      { hostname: 'llm.second.example', service: 'http://127.0.0.1:8080' },
       { hostname: 'llm.example.com', service: 'http://127.0.0.1:8080' },
+      { hostname: 'llm.second.example', service: 'http://127.0.0.1:8080' },
       { service: 'http_status:404' },
     ])
     expect(cf.records.map(r => r.name).sort()).toEqual(['llm.example.com', 'llm.second.example'])

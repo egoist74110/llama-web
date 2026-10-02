@@ -702,6 +702,7 @@ export default {
     cleanup: '放弃并删除这次新建的内容',
     cleanupHint: '只删除这次新建的{what}；复用的隧道和原有记录不会动。',
     cleanupWhat: { tunnel: '隧道 {name}', dns: 'DNS 记录' },
+    cleanupRestore: '被改指的 DNS 记录会先恢复到原来的指向。',
     cleanupNothing: '这次没有新建任何东西，放弃不会删除内容。',
     errors: {
       'no-token': '还没有保存 Cloudflare API token。',

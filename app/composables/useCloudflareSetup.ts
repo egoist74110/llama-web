@@ -10,12 +10,19 @@ export function messageOf(e: unknown): string {
 
 export function useCloudflareSetup() {
   const toast = useToast()
+  const live = useLive()
   const info = useState('cf-info', () => ({ hasToken: false, maskedToken: null as string | null, loaded: false }))
   const job = useState<SetupJob | null>('cf-job', () => null)
   const inspection = useState<Inspection | null>('cf-inspection', () => null)
   const plan = useState<SetupPlan | null>('cf-plan', () => null)
   const busy = useState('cf-busy', () => '')
   const f = useState('cf-form', () => ({ zoneId: '', subdomain: '', tunnelName: 'llama-web', tunnel: '', dns: '' }))
+
+  // The run is followed through the live stream: a page opened (or reloaded) while it runs, or another
+  // tab, sees every step and the final result, not only the page that pressed the button.
+  watch(() => live.state.value?.cloudflare, (j) => {
+    if (j !== undefined) job.value = j
+  }, { immediate: true })
 
   const usable = computed(() => inspection.value?.zones.filter(z => z.usable) ?? [])
   const unusable = computed(() => inspection.value?.zones.filter(z => !z.usable) ?? [])

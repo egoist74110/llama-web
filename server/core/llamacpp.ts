@@ -57,28 +57,102 @@ export type FetchFn = (url: string, init?: RequestInit) => Promise<Response>
 
 const HEADERS = { 'User-Agent': 'llama-web', Accept: 'application/vnd.github+json' }
 
-export async function getOk(fetchFn: FetchFn, url: string): Promise<Response> {
+/**
+ * Limits for the update / download HTTP calls. `signal` cancels everything (shutdown). `timeoutMs`
+ * bounds a whole small request (answer and body); `stallMs` bounds the wait for the answer of a
+ * download and then the silence between two chunks of its body (a big file may take as long as it needs).
+ */
+export interface NetOptions {
+  signal?: AbortSignal
+  timeoutMs?: number
+  stallMs?: number
+}
+
+const DEFAULT_TIMEOUT_MS = 30_000
+const DEFAULT_STALL_MS = 30_000
+
+/** Settles like `p`, but rejects as soon as `signal` aborts (also when `p` itself ignores the signal). */
+function abortable<T>(p: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    if (signal.aborted) return reject(signal.reason)
+    const onAbort = () => reject(signal.reason)
+    signal.addEventListener('abort', onAbort, { once: true })
+    p.then(
+      (v) => { signal.removeEventListener('abort', onAbort); resolve(v) },
+      (e) => { signal.removeEventListener('abort', onAbort); reject(e) },
+    )
+  })
+}
+
+/** Controller that aborts with the outer signal or after `ms` of `arm`ed time. Own timers: Bun's AbortSignal.timeout does not keep tests honest. */
+function guard(outer: AbortSignal | undefined, ms: number) {
+  const ac = new AbortController()
+  const onOuter = () => ac.abort(outer!.reason ?? new Error('aborted'))
+  if (outer?.aborted) onOuter()
+  else outer?.addEventListener('abort', onOuter, { once: true })
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const arm = (ms2 = ms) => {
+    clearTimeout(timer)
+    timer = setTimeout(() => ac.abort(new Error('timeout')), ms2)
+  }
+  arm()
+  return {
+    signal: ac.signal,
+    arm,
+    done() {
+      clearTimeout(timer)
+      outer?.removeEventListener('abort', onOuter)
+    },
+  }
+}
+
+async function fetchChecked(fetchFn: FetchFn, url: string, signal: AbortSignal): Promise<Response> {
   let res: Response
   try {
-    res = await fetchFn(url, { headers: HEADERS })
+    res = await abortable(fetchFn(url, { headers: HEADERS, signal }), signal)
   } catch (e) {
-    throw new RuntimeError('network', `Cannot reach ${new URL(url).host}`, (e as Error).message)
+    throw new RuntimeError('network', `Cannot reach ${new URL(url).host}`, (e as Error)?.message ?? String(e))
   }
   if (!res.ok) throw new RuntimeError('network', `${new URL(url).host} answered ${res.status}`, url)
   return res
+}
+
+/** GET with a limit on the wait for the answer; the body is the caller's (see `download`). */
+export async function getOk(fetchFn: FetchFn, url: string, net: NetOptions = {}): Promise<Response> {
+  const g = guard(net.signal, net.stallMs ?? net.timeoutMs ?? DEFAULT_TIMEOUT_MS)
+  try {
+    return await fetchChecked(fetchFn, url, g.signal)
+  } finally {
+    g.done()
+  }
+}
+
+/** GET and read the whole body as JSON / text within `timeoutMs`. */
+export async function getBody(fetchFn: FetchFn, url: string, kind: 'json' | 'text', net: NetOptions = {}): Promise<unknown> {
+  const g = guard(net.signal, net.timeoutMs ?? DEFAULT_TIMEOUT_MS)
+  try {
+    const res = await fetchChecked(fetchFn, url, g.signal)
+    try {
+      return await abortable(kind === 'json' ? res.json() : res.text(), g.signal)
+    } catch (e) {
+      throw new RuntimeError('network', `Cannot read ${new URL(url).host}`, (e as Error)?.message ?? String(e))
+    }
+  } finally {
+    g.done()
+  }
 }
 
 /**
  * The official "latest" release only carries a pointer (nightly-tag.txt) to the newest binary
  * build; resolve it, then pick that build's CUDA assets.
  */
-export async function resolveLatest(fetchFn: FetchFn, cudaRuntime: string, platform = process.platform): Promise<LatestBuild> {
-  const stable = await (await getOk(fetchFn, `https://api.github.com/repos/${REPO}/releases/latest`)).json() as { assets?: ReleaseAsset[] }
+export async function resolveLatest(fetchFn: FetchFn, cudaRuntime: string, platform = process.platform, net: NetOptions = {}): Promise<LatestBuild> {
+  const stable = await getBody(fetchFn, `https://api.github.com/repos/${REPO}/releases/latest`, 'json', net) as { assets?: ReleaseAsset[] }
   const pointer = stable.assets?.find(a => a.name === 'nightly-tag.txt')
   if (!pointer) throw new RuntimeError('no-nightly-tag', 'nightly-tag.txt not found in the latest release')
-  const tag = (await (await getOk(fetchFn, pointer.browser_download_url)).text()).trim()
+  const tag = String(await getBody(fetchFn, pointer.browser_download_url, 'text', net)).trim()
   if (!TAG_RE.test(tag)) throw new RuntimeError('bad-tag', 'Unexpected nightly tag', tag)
-  const rel = await (await getOk(fetchFn, `https://api.github.com/repos/${REPO}/releases/tags/${tag}`)).json() as { assets?: ReleaseAsset[] }
+  const rel = await getBody(fetchFn, `https://api.github.com/repos/${REPO}/releases/tags/${tag}`, 'json', net) as { assets?: ReleaseAsset[] }
   const os = platform === 'win32' ? 'win' : 'linux'
   const assets = rel.assets ?? []
   const pair = (cuda: string) => ({
@@ -117,15 +191,25 @@ async function sha256File(file: string): Promise<string> {
   return h.digest('hex')
 }
 
-export async function download(fetchFn: FetchFn, asset: ReleaseAsset, file: string): Promise<void> {
+/** Download one asset to `file` and check its SHA-256. A stalled connection or a shutdown ends it as `network`. */
+export async function download(fetchFn: FetchFn, asset: ReleaseAsset, file: string, net: NetOptions = {}): Promise<void> {
   const expected = /^sha256:([0-9a-f]{64})$/i.exec(asset.digest ?? '')?.[1]?.toLowerCase()
   if (!expected) throw new RuntimeError('no-digest', 'Release asset has no SHA-256 digest', asset.name)
-  const res = await getOk(fetchFn, asset.browser_download_url)
-  if (!res.body) throw new RuntimeError('network', 'Empty response body', asset.name)
+  const stall = net.stallMs ?? DEFAULT_STALL_MS
+  const g = guard(net.signal, stall)
   try {
-    await pipeline(Readable.fromWeb(res.body as never), createWriteStream(file))
-  } catch (e) {
-    throw new RuntimeError('network', `Download interrupted: ${asset.name}`, (e as Error).message)
+    const res = await fetchChecked(fetchFn, asset.browser_download_url, g.signal)
+    if (!res.body) throw new RuntimeError('network', 'Empty response body', asset.name)
+    try {
+      const src = Readable.fromWeb(res.body as never)
+      g.arm()
+      src.on('data', () => g.arm())
+      await pipeline(src, createWriteStream(file), { signal: g.signal })
+    } catch (e) {
+      throw new RuntimeError('network', `Download interrupted: ${asset.name}`, (e as Error).message)
+    }
+  } finally {
+    g.done()
   }
   const actual = await sha256File(file)
   if (actual !== expected) throw new RuntimeError('digest-mismatch', `SHA-256 mismatch: ${asset.name}`)
@@ -152,6 +236,8 @@ export interface InstallOptions {
   fetch?: FetchFn
   extract?: (zip: string, dest: string) => Promise<void>
   platform?: NodeJS.Platform
+  /** Time limits and the shutdown signal of the HTTP calls. */
+  net?: NetOptions
   onStep?: (step: 'resolve' | 'download' | 'extract', detail: string) => void
 }
 
@@ -197,7 +283,7 @@ export async function installBuild(build: LatestBuild, opts: InstallOptions): Pr
     for (const asset of [build.bin, build.cudart]) {
       const zip = join(work, 'dl', asset.name)
       opts.onStep?.('download', asset.name)
-      await download(fetchFn, asset, zip)
+      await download(fetchFn, asset, zip, opts.net)
       opts.onStep?.('extract', asset.name)
       await extract(zip, extracted)
     }
@@ -215,7 +301,7 @@ export async function installBuild(build: LatestBuild, opts: InstallOptions): Pr
 export async function installLatest(opts: InstallOptions): Promise<string> {
   clearLeftovers(opts.dataDir)
   opts.onStep?.('resolve', '')
-  const latest = await resolveLatest(opts.fetch ?? fetch, opts.cudaRuntime, opts.platform ?? process.platform)
+  const latest = await resolveLatest(opts.fetch ?? fetch, opts.cudaRuntime, opts.platform ?? process.platform, opts.net)
   return installBuild(latest, opts)
 }
 

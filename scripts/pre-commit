@@ -15,7 +15,8 @@ if [ -n "$bad_paths" ]; then
   fail=1
 fi
 
-# 2. Scan added lines for key-like strings: sk-..., long hex runs, Bearer tokens.
+# 2. Scan added lines for key-like strings: sk-..., long hex runs, Bearer tokens, tunnel tokens
+#    (base64 starting eyJ), Cloudflare API token assignments and --token / TUNNEL_TOKEN values.
 file=""
 hits=$(git -c core.quotepath=off diff --cached -U0 --no-color --diff-filter=ACMR |
   while IFS= read -r line; do
@@ -35,6 +36,15 @@ hits=$(git -c core.quotepath=off diff --cached -U0 --no-color --diff-filter=ACMR
       reason="sk- style key"
     elif printf '%s\n' "$body" | grep -Eiq 'bearer[[:space:]]+[A-Za-z0-9._~+/=-]{20,}'; then
       reason="Bearer token"
+    elif printf '%s
+' "$body" | grep -Eq 'eyJ[A-Za-z0-9+/_=-]{16,}'; then
+      reason="tunnel token (base64) or JWT"
+    elif printf '%s
+' "$body" | grep -Eiq '(cloudflare[_-]?(api[_-]?)?token|cf[_-]?api[_-]?token|api[_-]?token|tunnel[_-]?token)[^A-Za-z0-9]{1,6}[A-Za-z0-9_.-]{30,}'; then
+      reason="Cloudflare / tunnel token assignment"
+    elif printf '%s
+' "$body" | grep -Eiq '(--token[= ]|TUNNEL_TOKEN=)[[:space:]]*[A-Za-z0-9+/_=-]{20,}'; then
+      reason="tunnel token on a command line"
     elif [ "$hexcheck" = 1 ] && printf '%s\n' "$body" | grep -Eq '(^|[^A-Za-z0-9])[0-9a-fA-F]{32,}($|[^A-Za-z0-9])'; then
       reason="long hex string"
     fi

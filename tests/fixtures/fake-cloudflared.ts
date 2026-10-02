@@ -6,6 +6,7 @@
 //   crash     prints an error and exits with 2
 //   child     like connect, plus a long-lived grandchild (`child=<pid>`)
 //   quiet     prints one ERR line and never connects
+//   flap      two connections, both unregistered, then one registered again (all on stdout, in order)
 //   config    connects, then prints the remotely managed configuration (like the real one)
 const mode = process.argv[2] ?? 'connect'
 const token = process.env.TUNNEL_TOKEN ?? ''
@@ -45,5 +46,12 @@ if (mode === 'config') {
   }
   console.error(`2026-10-01T00:00:01Z INF Updated to new configuration config=${JSON.stringify(JSON.stringify(cfg))} version=2`)
 } else if (mode === 'quiet') console.error('2026-10-01T00:00:00Z ERR Unable to establish connection with Cloudflare edge')
-else connect()
+else if (mode === 'flap') {
+  const l = (m: string) => console.log(`2026-10-01T00:00:00Z INF ${m}`)
+  l('Registered tunnel connection connIndex=0 location=xxx01')
+  l('Registered tunnel connection connIndex=1 location=xxx02')
+  l('Unregistered tunnel connection connIndex=0')
+  l('Unregistered tunnel connection connIndex=1')
+  l('Registered tunnel connection connIndex=0 location=xxx01')
+} else connect()
 setInterval(() => {}, 1000)

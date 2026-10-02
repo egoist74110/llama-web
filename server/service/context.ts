@@ -25,6 +25,7 @@ import { JsonStore, resolveDataDir, type VersionedDoc } from '../core/store'
 import { TunnelManager, type TunnelInfo } from '../core/tunnel'
 import { CloudflareSetup } from '../core/cloudflare'
 import { Updater } from '../core/updater'
+import { writePair } from '../core/write-pair'
 
 export interface AppContext {
   dataDir: string
@@ -149,10 +150,12 @@ function createContext(): AppContext {
   })
   const changed = () => live.notify()
   // Settings edits (page or by hand) also start / stop / move the public listener.
-  const settingsRef = openStore(settingsStore, defaultSettings, () => { changed(); applyPublic() })
+  // `hold` is raised while a pair of writes is in flight (see onSaved of the Cloudflare setup): nothing reacts to half of it.
+  let hold = 0
+  const settingsRef = openStore(settingsStore, defaultSettings, () => { changed(); if (!hold) applyPublic() })
   const modelsRef = openStore(modelsStore, defaultModels, changed)
   // An unreadable secrets.json falls back to "no keys": every public request is refused. A new tunnel token restarts the tunnel.
-  const secretsRef = openStore(secretsStore, defaultSecrets, () => applyTunnel())
+  const secretsRef = openStore(secretsStore, defaultSecrets, () => { if (!hold) applyTunnel() })
   const getSettings = settingsRef.get
   const getModels = modelsRef.get
   const logs = new LogStore({ dir: join(dataDir, 'logs'), retention: () => getSettings().logs })
@@ -201,6 +204,7 @@ function createContext(): AppContext {
       queue: scheduler.snapshot().queue.map(q => ({ modelId: q.modelId, profile: q.profile, started: q.started, waiting: q.waiting })),
       llamacpp: { current: getSettings().llamacpp.current, runtime: updater.getStatus(), versions: updater.versions(), rollback: updater.rollbackTarget() },
       tunnel: tunnel.status(),
+      cloudflare: cloudflare.status(),
       firstRun: isFirstRun(getSettings(), getModels()),
     }),
   })
@@ -286,11 +290,23 @@ function createContext(): AppContext {
   // On success: save the tunnel token, then switch the public entry and hosting on and show the
   // hostname as the client address. The token itself is never logged.
   const cloudflare = new CloudflareSetup({
+    // Both files or neither: the hosted tunnel is only switched after both writes went through.
     onSaved: ({ tunnelToken, hostname }) => {
-      secretsRef.update((draft) => { draft.tunnelToken = tunnelToken })
-      settingsRef.update((draft) => { draft.public = { ...draft.public, enabled: true, tunnelEnabled: true, domain: hostname } })
+      const previous = secretsRef.get().tunnelToken
+      hold++
+      try {
+        writePair(
+          () => secretsRef.update((draft) => { draft.tunnelToken = tunnelToken }),
+          () => settingsRef.update((draft) => { draft.public = { ...draft.public, enabled: true, tunnelEnabled: true, domain: hostname } }),
+          () => secretsRef.update((draft) => { draft.tunnelToken = previous }),
+        )
+      } finally {
+        hold--
+      }
+      applyPublic()
     },
     onChange: (job) => {
+      live.notify()
       if (job?.state === 'done') log(`cloudflare: set up ${job.hostname}`)
       else if (job?.state === 'failed') {
         const f = job.steps.find(s => s.state === 'failed')
@@ -330,6 +346,7 @@ function createContext(): AppContext {
       closing ??= (async () => {
         publicEntry.close()
         await tunnel.shutdown()
+        await updater.stop()
         settingsStore.close()
         modelsStore.close()
         secretsStore.close()

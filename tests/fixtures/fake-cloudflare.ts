@@ -11,6 +11,8 @@ export interface FakeTunnel {
   connections: unknown[]
   deleted_at: string | null
   ingress: Record<string, unknown>[] | null
+  /** Configuration fields beside `ingress` (tunnel-wide `originRequest`, ...). */
+  extraConfig?: Record<string, unknown>
   token: string
 }
 
@@ -154,9 +156,12 @@ export class FakeCloudflare {
         }
       }
       if (sub === 'configurations') {
-        if (method === 'GET') return ok({ tunnel_id: t.id, config: t.ingress ? { ingress: t.ingress } : null })
+        if (method === 'GET') return ok({ tunnel_id: t.id, config: t.ingress ? { ...t.extraConfig, ingress: t.ingress } : null })
         if (method === 'PUT') {
-          t.ingress = body.config.ingress
+          const { ingress, ...rest } = body.config
+          t.ingress = ingress
+          // Like the real API, a PUT replaces the whole configuration: what is not sent is gone.
+          t.extraConfig = rest
           t.config_src = 'cloudflare'
           return ok({ tunnel_id: t.id, config: body.config })
         }

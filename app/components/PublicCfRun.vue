@@ -72,7 +72,9 @@ const cleanupText = computed(() => {
   const c = job.value?.created
   if (!c) return ''
   const what = [c.tunnel ? fmt(s.cleanupWhat.tunnel, { name: c.tunnel.name }) : '', c.dnsRecordId ? s.cleanupWhat.dns : ''].filter(Boolean)
-  return what.length ? fmt(s.cleanupHint, { what: what.join('、') }) : s.cleanupNothing
+  const restore = c.dnsRestore ? s.cleanupRestore : ''
+  if (!what.length && !restore) return s.cleanupNothing
+  return [what.length ? fmt(s.cleanupHint, { what: what.join('、') }) : '', restore].filter(Boolean).join('')
 })
 const stepColor = (state: string) => (state === 'done' ? 'text-success' : state === 'failed' ? 'text-error' : 'text-muted')
 const stepIcon = (state: string) => ({ done: 'i-lucide-check', skipped: 'i-lucide-minus', failed: 'i-lucide-x', running: 'i-lucide-loader', pending: 'i-lucide-circle' } as Record<string, string>)[state]

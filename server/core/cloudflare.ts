@@ -312,7 +312,11 @@ export interface SetupPlan {
   ready: boolean
   /** Hash of the observed state and the decisions; apply refuses when it no longer matches. */
   fingerprint: string
+  /** Hash of the reused tunnel's remote configuration as previewed; the ingress step refuses when it changed. */
+  configHash: string
 }
+
+const hashOf = (v: unknown) => createHash('sha256').update(JSON.stringify(v ?? null)).digest('hex').slice(0, 16)
 
 const LABEL = /^(?!-)[a-z0-9-]{1,63}(?<!-)$/
 const TUNNEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/
@@ -349,20 +353,47 @@ const viewTunnel = (t: RawTunnel): TunnelView => ({
   localConfig: t.config_src === 'local' || t.remote_config === false,
 })
 
-/** Insert / replace the rule for `hostname` (no path), keep the others, keep or add the catch-all last. */
+/**
+ * Replace the rule for `hostname` (no path) where it is, or insert a new one so that nothing that
+ * matched before is shadowed: ingress rules match from the top, so the new rule goes after this
+ * hostname's own path rules and in front of the first rule that would also catch the hostname
+ * (a matching wildcard, a path-only rule or the catch-all). A catch-all is kept / added last.
+ * `others` lists what else is routed: other hostnames and this hostname's path rules (`host/path`).
+ */
 export function mergeIngress(rules: IngressRule[] | null | undefined, hostname: string, service: string): { rules: IngressRule[], change: IngressChange, others: string[] } {
-  const list = Array.isArray(rules) ? rules : []
+  const list = Array.isArray(rules) ? [...rules] : []
   const isCatchAll = (r: IngressRule) => !r.hostname && !r.path
-  const ours = list.find(r => r.hostname?.toLowerCase() === hostname && !r.path)
-  const rest = list.filter(r => r !== ours && !isCatchAll(r))
-  const catchAll = list.find(isCatchAll) ?? { service: 'http_status:404' }
+  const same = (r: IngressRule) => r.hostname?.toLowerCase() === hostname
+  const wildcardCatches = (r: IngressRule) => {
+    const h = r.hostname?.toLowerCase()
+    return !!h && h.startsWith('*.') && hostname.endsWith(h.slice(1)) && hostname.length > h.length - 1
+  }
+  const at = list.findIndex(r => same(r) && !r.path)
+  const ours = at >= 0 ? list[at]! : null
   const rule: IngressRule = { ...(ours ?? {}), hostname, service }
+  if (at >= 0) {
+    list[at] = rule
+  } else {
+    let pos = list.findIndex(r => !r.hostname || wildcardCatches(r))
+    if (pos < 0) pos = list.length
+    for (let i = list.length - 1; i >= pos; i--) {
+      if (same(list[i]!)) { pos = i + 1; break }
+    }
+    list.splice(pos, 0, rule)
+  }
+  if (!list.some(isCatchAll)) list.push({ service: 'http_status:404' })
+  const others = list
+    .filter(r => r !== rule && !isCatchAll(r))
+    .map(r => (same(r) ? `${hostname}${r.path ?? ''}` : (r.hostname ?? '*')))
   return {
-    rules: [rule, ...rest, catchAll],
+    rules: list,
     change: { hostname, from: ours?.service ?? null, to: service },
-    others: [...new Set(rest.map(r => r.hostname ?? '*').filter(h => h !== hostname))],
+    others: [...new Set(others)],
   }
 }
+
+/** The tunnel's remote configuration as Cloudflare returns it: everything beside `ingress` is kept as is. */
+export type RemoteConfig = { ingress?: IngressRule[], [k: string]: unknown }
 
 /** Everything the plan was computed from, plus the inputs. */
 interface Observed {
@@ -373,7 +404,7 @@ interface Observed {
   dnsTargets: RawTunnel[]
   /** The tunnel llama-web hosts now, when it exists in this account. */
   current: RawTunnel | null
-  config: IngressRule[] | null
+  config: RemoteConfig | null
 }
 
 async function getTunnel(api: CfClient, accountId: string, id: string): Promise<RawTunnel | null> {
@@ -386,10 +417,10 @@ async function getTunnel(api: CfClient, accountId: string, id: string): Promise<
   }
 }
 
-async function getIngress(api: CfClient, accountId: string, tunnelId: string): Promise<IngressRule[] | null> {
+async function getConfig(api: CfClient, accountId: string, tunnelId: string): Promise<RemoteConfig | null> {
   try {
-    const r = await api.get<{ config?: { ingress?: IngressRule[] } | null }>(`/accounts/${accountId}/cfd_tunnel/${tunnelId}/configurations`, 'tunnel')
-    return r?.config?.ingress ?? null
+    const r = await api.get<{ config?: RemoteConfig | null }>(`/accounts/${accountId}/cfd_tunnel/${tunnelId}/configurations`, 'tunnel')
+    return r?.config ?? null
   } catch (e) {
     if (e instanceof CfError && e.code === 'not-found') return null
     throw e
@@ -429,7 +460,7 @@ async function observe(api: CfClient, input: SetupInput): Promise<Observed> {
   // Ingress of the tunnel that will be used (when it is already decided and existing).
   const chosen = input.tunnel?.startsWith('reuse:') ? input.tunnel.slice(6) : !input.tunnel && current ? current.id : null
   const known = [sameName, ...dnsTargets, current].find(t => t && t.id === chosen) ?? null
-  const config = known ? await getIngress(api, accountId, known.id) : null
+  const config = known ? await getConfig(api, accountId, known.id) : null
   return { zone: { id: z.id, name: z.name, accountId, accountName: z.account?.name ?? '' }, hostname, records, sameName, dnsTargets, current, config }
 }
 
@@ -475,7 +506,7 @@ function buildPlan(o: Observed, input: SetupInput): SetupPlan {
   let ingress: SetupPlan['ingress'] = null
   let dns: DnsAction | null = null
   if (tunnel) {
-    const m = mergeIngress(tunnel.kind === 'reuse' ? o.config : null, o.hostname, service)
+    const m = mergeIngress(tunnel.kind === 'reuse' ? o.config?.ingress : null, o.hostname, service)
     ingress = { change: m.change, others: m.others }
     // The current tunnel's connectors and other addresses are llama-web's own.
     if (tunnel.kind === 'reuse' && !tunnel.current) {
@@ -514,7 +545,7 @@ function buildPlan(o: Observed, input: SetupInput): SetupPlan {
     hostname: o.hostname,
     zone: { id: o.zone.id, name: o.zone.name },
     account: { id: o.zone.accountId, name: o.zone.accountName },
-    service, tunnelName: name, tunnelChoices: choices, tunnel, autoChosen, ingress, dnsRecords: o.records, dns, needs, warnings, ready, fingerprint,
+    service, tunnelName: name, tunnelChoices: choices, tunnel, autoChosen, ingress, dnsRecords: o.records, dns, needs, warnings, ready, fingerprint, configHash: hashOf(o.config),
   }
 }
 
@@ -543,7 +574,12 @@ export interface SetupJob {
   zoneName: string
   steps: StepView[]
   /** What this run created; an abandoned run can delete exactly these. */
-  created: { tunnel: { id: string, name: string } | null, dnsRecordId: string | null }
+  created: {
+    tunnel: { id: string, name: string } | null
+    dnsRecordId: string | null
+    /** An existing record this run re-pointed: how it looked before (cleanup puts it back). */
+    dnsRestore: { id: string, content: string, proxied: boolean } | null
+  }
   tunnelId: string | null
   startedAt: number
   finishedAt: number | null
@@ -593,7 +629,7 @@ export class CloudflareSetup {
       this.job = {
         state: 'running', hostname: plan.hostname, zoneName: plan.zone.name,
         steps: STEPS.map(id => ({ id, state: 'pending', note: '', error: null })),
-        created: { tunnel: null, dnsRecordId: null },
+        created: { tunnel: null, dnsRecordId: null, dnsRestore: null },
         tunnelId: plan.tunnel?.kind === 'reuse' ? plan.tunnel.tunnel.id : null,
         startedAt: now, finishedAt: null,
       }
@@ -618,6 +654,18 @@ export class CloudflareSetup {
     try {
       const { created } = this.job
       const plan = this.plan!
+      // An existing record this run pointed at the new tunnel goes back first (the new tunnel is deleted below).
+      // A record someone else changed since is not ours to revert.
+      if (created.dnsRestore) {
+        const r = created.dnsRestore
+        const target = this.job.tunnelId ? cnameTarget(this.job.tunnelId) : null
+        const now = (await api.list<{ id: string, content: string }>(`/zones/${plan.zone.id}/dns_records?name=${encodeURIComponent(plan.hostname)}`, 'dns', 2))
+          .find(x => x.id === r.id)
+        if (now && target && now.content.toLowerCase().replace(/\.$/, '') === target) {
+          await api.call('PATCH', `/zones/${plan.zone.id}/dns_records/${r.id}`, { content: r.content, proxied: r.proxied }, 'dns')
+        }
+        created.dnsRestore = null
+      }
       if (created.dnsRecordId) {
         try {
           await api.call('DELETE', `/zones/${plan.zone.id}/dns_records/${created.dnsRecordId}`, undefined, 'dns')
@@ -709,9 +757,18 @@ export class CloudflareSetup {
         return { note: plan.tunnelName }
       }
       case 'ingress': {
-        const current = plan.tunnel!.kind === 'reuse' ? await getIngress(api, acc, job.tunnelId!) : null
-        const m = mergeIngress(current, plan.hostname, plan.service)
-        await api.call('PUT', `/accounts/${acc}/cfd_tunnel/${job.tunnelId}/configurations`, { config: { ingress: m.rules } }, 'tunnel')
+        const reuse = plan.tunnel!.kind === 'reuse'
+        const remote = reuse ? await getConfig(api, acc, job.tunnelId!) : null
+        const m = mergeIngress(remote?.ingress, plan.hostname, plan.service)
+        const url = `/accounts/${acc}/cfd_tunnel/${job.tunnelId}/configurations`
+        if (reuse) {
+          // Only what the user confirmed may be overwritten: a changed configuration needs a new preview.
+          // A configuration that already equals our result is an earlier write whose answer was lost.
+          if (JSON.stringify(m.rules) === JSON.stringify(remote?.ingress)) return { note: `${plan.hostname} → ${plan.service}`, skipped: true }
+          if (hashOf(remote) !== plan.configHash) throw new CfError('changed', 'ingress-changed')
+        }
+        // Everything beside `ingress` (tunnel-wide originRequest, ...) is sent back unchanged.
+        await api.call('PUT', url, { config: { ...(remote ?? {}), ingress: m.rules } }, 'tunnel')
         return { note: `${plan.hostname} → ${plan.service}` }
       }
       case 'dns': {
@@ -731,6 +788,8 @@ export class CloudflareSetup {
         if (planned.kind === 'keep' || planned.kind === 'update') {
           const rec = records.find(r => r.id === planned.record.id)
           if (!rec || records.length !== 1 || rec.content !== planned.record.content) throw new CfError('changed', 'dns-changed')
+          // Remembered so an abandoned run can point the record back.
+          job.created.dnsRestore ??= { id: rec.id, content: rec.content, proxied: planned.record.proxied }
           await api.call('PATCH', `/zones/${plan.zone.id}/dns_records/${rec.id}`, { content: target, proxied: true }, 'dns')
           return { note: `CNAME → ${target}` }
         }

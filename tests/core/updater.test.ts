@@ -212,3 +212,59 @@ test.skipIf(process.platform !== 'win32')('a directory held open by an unknown p
     await new Promise(r => child.once('exit', r))
   }
 }, 30_000)
+
+// ---------------------------------------------------------------------------------------
+// Network stalls and shutdown (CR-009)
+
+const hang = () => new Promise<Response>(() => {})
+/** A body that sends one chunk and then never ends. */
+const stuckBody = () => new Response(new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode('partial')) } }))
+
+function stalled(o: { current?: string, fetch: typeof fetch, net?: { timeoutMs?: number, stallMs?: number } }) {
+  const s = setup({ current: o.current })
+  const u = new Updater({
+    dataDir: data, platform: 'win32', fetch: o.fetch as never, extract: fakeExtract(), net: o.net,
+    llamacpp: () => ({ cudaRuntime: '13.3', current: s.cfg.current, keepVersions: 2, autoUpdate: true }),
+    setCurrent: (t) => { s.cfg.current = t },
+    usedExes: () => [],
+  })
+  return { u, cfg: s.cfg }
+}
+
+test('a release request that never answers ends as a network error and keeps the installed version', async () => {
+  install('b200')
+  const { u, cfg } = stalled({ current: 'b200', fetch: hang as never, net: { timeoutMs: 60 } })
+  const r = await u.run()
+  expect(r).toMatchObject({ state: 'error', code: 'network', using: 'b200' })
+  expect(cfg.current).toBe('b200')
+})
+
+test('a response body that stalls half way is a network error (JSON bodies are bounded too)', async () => {
+  install('b200')
+  const { u } = stalled({ current: 'b200', fetch: (async () => new Response(new ReadableStream({ start() {} }), { headers: { 'content-type': 'application/json' } })) as never, net: { timeoutMs: 60 } })
+  expect(await u.run()).toMatchObject({ state: 'error', code: 'network', using: 'b200' })
+})
+
+test('a download that stops sending data is abandoned: no half version, no leftovers', async () => {
+  install('b200')
+  const gh = fakeGithub({ tag: 'b300' })
+  const { u, cfg } = stalled({
+    current: 'b200', net: { timeoutMs: 2000, stallMs: 80 },
+    fetch: (async (url: string) => (url.startsWith('https://dl.test/') && url.endsWith('.zip') ? stuckBody() : gh.fetchFn(url))) as never,
+  })
+  const r = await u.run()
+  expect(r).toMatchObject({ state: 'error', code: 'network', using: 'b200' })
+  expect(cfg.current).toBe('b200')
+  expect(entries()).toEqual(['b200'])
+})
+
+test('stop() cancels a running check and waits for it', async () => {
+  install('b200')
+  const { u } = stalled({ current: 'b200', fetch: hang as never, net: { timeoutMs: 60_000 } })
+  const running = u.run()
+  await new Promise(r => setTimeout(r, 30))
+  const t0 = Date.now()
+  await u.stop()
+  expect(Date.now() - t0).toBeLessThan(2000)
+  expect(await running).toMatchObject({ state: 'error', code: 'network' })
+})

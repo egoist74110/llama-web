@@ -9,7 +9,7 @@ import { join, posix, win32 } from 'node:path'
 import { isInsideDir } from './residue'
 import {
   clearLeftovers, installBuild, listInstalled, resolveLatest, RuntimeError, versionsDir,
-  type InstallOptions, type RuntimeStatus,
+  type InstallOptions, type NetOptions, type RuntimeStatus,
 } from './llamacpp'
 
 const TAG_RE = /^b\d+$/
@@ -39,6 +39,8 @@ export class UpdateError extends Error {
 }
 
 export interface UpdaterOptions extends Pick<InstallOptions, 'fetch' | 'extract' | 'platform'> {
+  /** HTTP time limits (tests); the shutdown signal is added by the updater. */
+  net?: Omit<NetOptions, 'signal'>
   dataDir: string
   /** settings.llamacpp, read fresh each time. */
   llamacpp(): { cudaRuntime: string, current: string, keepVersions: number, autoUpdate: boolean }
@@ -79,6 +81,7 @@ export class Updater {
   private status: RuntimeStatus = { state: 'idle' }
   private installed: string[] = []
   private running: Promise<RuntimeStatus> | null = null
+  private abort = new AbortController()
 
   constructor(private readonly opts: UpdaterOptions) {
     this.installed = listInstalled(opts.dataDir, opts.platform)
@@ -170,6 +173,12 @@ export class Updater {
     return this.running
   }
 
+  /** Shutdown: cancel the network work of a running check and wait until it has cleaned up. */
+  async stop(): Promise<void> {
+    this.abort.abort(new Error('shutdown'))
+    await this.running?.catch(() => {})
+  }
+
   private async check(): Promise<RuntimeStatus> {
     const { dataDir, platform } = this.opts
     clearLeftovers(dataDir)
@@ -190,7 +199,8 @@ export class Updater {
     try {
       this.set({ state: 'working', step: 'resolve', detail: '' })
       const fetchFn = this.opts.fetch ?? fetch
-      const latest = await resolveLatest(fetchFn, cfg.cudaRuntime, platform)
+      const net: NetOptions = { ...this.opts.net, signal: this.abort.signal }
+      const latest = await resolveLatest(fetchFn, cfg.cudaRuntime, platform, net)
       if (this.refresh().includes(latest.tag)) {
         // Already installed. A version picked by hand (rollback) stays current.
         const now = this.opts.llamacpp().current
@@ -198,7 +208,7 @@ export class Updater {
         return this.set({ state: 'ready', tag: now, note: now === latest.tag ? 'latest' : 'pinned', latest: latest.tag })
       }
       await installBuild(latest, {
-        dataDir, cudaRuntime: cfg.cudaRuntime, fetch: this.opts.fetch, extract: this.opts.extract, platform,
+        dataDir, cudaRuntime: cfg.cudaRuntime, fetch: this.opts.fetch, extract: this.opts.extract, platform, net,
         onStep: (step, detail) => this.set({ state: 'working', step, detail, tag: latest.tag }),
       })
       const installedNow = this.refresh()

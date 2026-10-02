@@ -10,7 +10,7 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
 import { chmodSync, copyFileSync, existsSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs'
 import { dirname, join, posix, win32 } from 'node:path'
-import { download, getOk, RuntimeError, type FetchFn, type ReleaseAsset } from './llamacpp'
+import { download, getBody, RuntimeError, type FetchFn, type NetOptions, type ReleaseAsset } from './llamacpp'
 import type { PublicStatus } from './public-entry'
 import { killTree, type PidRegistry } from './runner'
 
@@ -130,10 +130,10 @@ export function releaseAssetName(platform: NodeJS.Platform = process.platform): 
 }
 
 /** The official latest release's asset for this machine (with the SHA-256 GitHub publishes for it). */
-export async function resolveCloudflared(fetchFn: FetchFn, platform: NodeJS.Platform = process.platform): Promise<ReleaseAsset> {
+export async function resolveCloudflared(fetchFn: FetchFn, platform: NodeJS.Platform = process.platform, net: NetOptions = {}): Promise<ReleaseAsset> {
   const name = releaseAssetName(platform)
   if (!name) throw new RuntimeError('asset-missing', 'No cloudflared build for this platform', `${platform}/${process.arch}`)
-  const rel = await (await getOk(fetchFn, `https://api.github.com/repos/${REPO}/releases/latest`)).json() as { assets?: ReleaseAsset[] }
+  const rel = await getBody(fetchFn, `https://api.github.com/repos/${REPO}/releases/latest`, 'json', net) as { assets?: ReleaseAsset[] }
   const asset = rel.assets?.find(a => a.name === name)
   if (!asset) throw new RuntimeError('asset-missing', 'Release asset not found', name)
   return asset
@@ -145,8 +145,12 @@ export interface PrepareOptions {
   platform?: NodeJS.Platform
   fetch?: FetchFn
   exists?: (file: string) => boolean
+  /** Time limits and the cancel signal of the download. */
+  net?: NetOptions
   onStep?(step: 'find' | 'download', detail: string): void
 }
+
+let workSeq = 0
 
 export interface PreparedCloudflared {
   /** Always under data/runtime/cloudflared/. */
@@ -191,12 +195,13 @@ export async function prepareCloudflared(opts: PrepareOptions): Promise<Prepared
   if (sizeAndTime(dest)) return { exe: dest, source: 'downloaded' }
 
   const fetchFn = opts.fetch ?? fetch
-  const work = `${dest}.${process.pid}.dl`
+  // Unique per call: two overlapping preparations never share (or delete) each other's file.
+  const work = `${dest}.${process.pid}.${++workSeq}.dl`
   try {
     opts.onStep?.('download', '')
-    const asset = await resolveCloudflared(fetchFn, platform)
+    const asset = await resolveCloudflared(fetchFn, platform, opts.net)
     mkdirSync(dirname(dest), { recursive: true })
-    await download(fetchFn, asset, work)
+    await download(fetchFn, asset, work, opts.net)
     if (platform !== 'win32') chmodSync(work, 0o755)
     renameSync(work, dest)
     return { exe: dest, source: 'downloaded' }
@@ -322,6 +327,11 @@ export class TunnelManager {
   private info: TunnelInfo = { status: { state: 'off', reason: 'disabled' }, cloudflared: null, hostnames: null }
   private lastKey = ''
   private hostsToken: string | null = null
+  /** The running preparation (find / download cloudflared) and the way to cancel it. */
+  private preparing: Promise<unknown> | null = null
+  private prepareAbort: AbortController | null = null
+  /** A process we killed because it could not be recorded: the next start waits for it. */
+  private killing: Promise<unknown> = Promise.resolve()
 
   constructor(private readonly opts: TunnelManagerOptions) {}
 
@@ -391,6 +401,10 @@ export class TunnelManager {
     this.gen++
     if (this.retryTimer) clearTimeout(this.retryTimer)
     this.retryTimer = null
+    // Cancel a download in progress and wait until it has cleaned up: a later start must not overlap it.
+    this.prepareAbort?.abort(new Error('stopped'))
+    await this.preparing?.catch(() => {})
+    await this.killing
     const child = this.child
     if (child) {
       if (child.pid) await killTree(child.pid)
@@ -416,13 +430,24 @@ export class TunnelManager {
     const stale = () => gen !== this.gen || this.closed
     try {
       await this.opts.ready
+      await this.killing
       if (stale()) return
       this.set({ state: 'preparing', step: 'find' })
       const prepare = this.opts.prepare ?? prepareCloudflared
-      const prepared = await prepare({
+      const abort = new AbortController()
+      this.prepareAbort = abort
+      const task = prepare({
         dataDir: this.opts.dataDir, env: this.opts.env, platform: this.opts.platform, fetch: this.opts.fetch,
+        net: { signal: abort.signal },
         onStep: step => { if (!stale()) this.set({ state: 'preparing', step }) },
       })
+      this.preparing = task
+      let prepared: PreparedCloudflared
+      try {
+        prepared = await task
+      } finally {
+        if (this.preparing === task) { this.preparing = null; this.prepareAbort = null }
+      }
       if (stale()) return
       const version = await (this.opts.version ?? cloudflaredVersion)(prepared.exe)
       if (stale()) return
@@ -456,19 +481,23 @@ export class TunnelManager {
     // Emitted when the executable cannot be started (no pid, no 'exit' follows).
     child.on('error', (e) => { if (!child.pid) { spawnFailed = true; this.fail(gen, 'spawn-failed', redact(e.message, token), []) } })
     if (!child.pid) return
+    const pid = child.pid
+    // A process that cannot be recorded would be invisible to the residue cleanup: do not keep it.
+    // It is not kept as `this.child` either, so a retry (manual or automatic) starts clean.
+    try {
+      this.opts.registry?.add({ pid, exe, port, tag: 'tunnel', startedAt: new Date().toISOString() })
+    } catch (e) {
+      this.killing = killTree(pid).catch(() => {})
+      this.fail(gen, 'spawn-failed', redact(`Cannot record pid: ${(e as Error).message}`, token), [])
+      return
+    }
     this.child = child
     this.lines = []
     this.set({ state: 'starting', lastError: null })
 
-    const pid = child.pid
-    try {
-      this.opts.registry?.add({ pid, exe, port, tag: 'tunnel', startedAt: new Date().toISOString() })
-    } catch (e) {
-      this.fail(gen, 'spawn-failed', redact(`Cannot record pid: ${(e as Error).message}`, token), [])
-      void killTree(pid)
-      return
-    }
-
+    // Registered connections by connIndex (a repeated line for one index counts once).
+    const registered = new Set<string>()
+    let anon = 0
     let connections = 0
     let connectedAt = 0
     let badToken = false
@@ -487,13 +516,17 @@ export class TunnelManager {
         this.info = { ...this.info, hostnames: hosts }
         this.set(this.info.status)
       }
-      if (/Registered tunnel connection/i.test(line)) {
-        connections++
+      const index = /\bconnIndex=(\d+)/.exec(line)?.[1]
+      // "Unregistered tunnel connection" contains "registered tunnel connection": it is tested first, on word boundaries.
+      if (/\bUnregistered tunnel connection\b/i.test(line)) {
+        registered.delete(index ?? [...registered][0] ?? '')
+        connections = registered.size
+        if (connections === 0) { connectedAt = 0; this.set({ state: 'starting', lastError }) } else this.set({ state: 'connected', connections })
+      } else if (/\bRegistered tunnel connection\b/i.test(line)) {
+        registered.add(index ?? `anon${++anon}`)
+        connections = registered.size
         if (!connectedAt) connectedAt = now()
         this.set({ state: 'connected', connections })
-      } else if (/Unregistered tunnel connection/i.test(line)) {
-        connections = Math.max(0, connections - 1)
-        if (connections === 0) { connectedAt = 0; this.set({ state: 'starting', lastError }) } else this.set({ state: 'connected', connections })
       } else if (/\bERR\b/.test(line)) {
         const msg = line.replace(/^\S+\s+ERR\s+/, '')
         lastError = msg.length > 300 ? `${msg.slice(0, 300)}…` : msg

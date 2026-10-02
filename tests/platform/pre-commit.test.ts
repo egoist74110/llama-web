@@ -87,6 +87,61 @@ describe.skipIf(!available)('scripts/pre-commit', () => {
     expect(hook().code).toBe(1)
   })
 
+  test('rejects a tunnel token (bare, or inside the pasted install command) without printing it', () => {
+    // Built at run time: this file must not contain a token-shaped literal itself.
+    const token = Buffer.from(JSON.stringify({ a: 'acct0123456789', t: '11111111-2222-3333-4444-555555555555', s: 'secretvalue1234567890' })).toString('base64')
+    for (const [path, body] of [
+      ['README.md', `${token}
+`],
+      ['docs/notes.md', `run: cloudflared.exe service install ${token}
+`],
+      ['src/t.ts', `const t = "${token}"
+`],
+    ] as const) {
+      reset()
+      stage(path, body)
+      const r = hook()
+      expect(r.code).toBe(1)
+      expect(r.err).toContain(path)
+      expect(r.err).not.toContain(token)
+    }
+  })
+
+  test('rejects a Cloudflare API token assigned to a token-like name, and --token / TUNNEL_TOKEN values', () => {
+    const api = 'Ab1_'.repeat(10)
+    const cases = [
+      `cloudflareToken: '${api}'`,
+      `const CLOUDFLARE_API_TOKEN = "${api}"`,
+      `CF_API_TOKEN=${api}`,
+      `"apiToken": "${api}"`,
+      `tunnelToken = '${api}'`,
+      `cloudflared tunnel run --token ${api}`,
+      `TUNNEL_TOKEN=${api}`,
+    ]
+    for (const [i, line] of cases.entries()) {
+      reset()
+      stage(`src/c${i}.ts`, `${line}
+`)
+      const r = hook()
+      expect({ line: line.replace(api, '<value>'), code: r.code }).toEqual({ line: line.replace(api, '<value>'), code: 1 })
+      expect(r.err).not.toContain(api)
+    }
+  })
+
+  test('ordinary token handling code and docs are not flagged', () => {
+    reset()
+    stage('src/ok.ts', [
+      'const tunnelToken = extractToken(raw.trim())',
+      'draft.cloudflareToken = token',
+      'cloudflareToken: string | null',
+      '// the API token is only sent in the Authorization header',
+      'export const API_TOKEN = /^[A-Za-z0-9_.-]{30,200}$/',
+      'TUNNEL_TOKEN=[token]',
+      '',
+    ].join('\n'))
+    expect(hook().code).toBe(0)
+  })
+
   test('does not flag short ids or words containing sk-', () => {
     reset()
     stage('src/e.ts', "const a = 'deadbeef'\nconst b = 'task-management-board-name-long'\n")
