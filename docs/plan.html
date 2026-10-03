@@ -490,7 +490,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 
 <section id="s5" class="stage">
   <div class="stage-head"><h2>阶段 5 · 兼容基础与 Windows 桌面首发</h2><div class="stage-meta"><span class="count"></span><div class="bar"><i></i></div></div></div>
-  <div class="stage-goal">用户要求（2026-10-02）：<b>先做兼容，再做出 Windows 套壳；Windows 套壳完成后停下来，不自动往下做。</b>5-1 兼容基础已完成 Windows 回归；5-2 本地包经用户试用确认（用户未在干净机 / 无 NVIDIA 上试用，5-2 第二项因此不打勾，发布说明如实标注）；5-3 草稿 prerelease v0.1.0-beta.1 已生成并从下载包验收，等待用户确认后发布。Mac 套壳和发包后续另行启动。</div>
+  <div class="stage-goal">用户要求（2026-10-02）：<b>先做兼容，再做出 Windows 套壳；Windows 套壳完成后停下来，不自动往下做。</b>5-1 兼容基础已完成 Windows 回归；5-2 本地包经用户试用确认（用户未在干净机 / 无 NVIDIA 上试用，5-2 第二项因此不打勾，发布说明如实标注）；5-3：v0.1.0-beta.1 经下载包验收后，于 2026-10-03 经用户确认发布为 prerelease。阶段 5 关口：停下等用户试用。Mac 套壳和发包后续另行启动。</div>
   <div class="note">5-1 / 5-2 / 5-3 必须分会话执行；5-2 交付本地测试包后必须等待用户试用确认，再进入 5-3。兼容基础完成不等于已完成 macOS 真机验证，也不授权直接发布 Release。</div>
 
   <h3>兼容基础与桌面发包边界</h3>
@@ -558,7 +558,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
   <h3>5-3 · 首个 Windows GitHub Release（5-2 试用确认后）</h3>
   <ul class="tasks">
     <li class="task" data-done="true"><span class="t">应用内更新（用户 2026-10-02 要求，关键决定 29）：设置页「关于与更新」显示版本号、手动检查与自动检查开关；新版提示条 + 更新说明对话框（纯文本渲染 Release 正文）、跳过此版本；桌面版应用内下载，GitHub 资产摘要与 SHA256SUMS 双重校验，壳停止服务后复核 SHA-256 与路径 / 文件名，被动安装并自动重开，数据保留；源码版只链接发布页。安装包不显示语言选择（被动更新会被它阻塞）</span><span class="when">2026-10-03</span></li>
-    <li class="task" data-done="false"><span class="t">建立 Windows tag 构建与草稿 Release 流程：建议首版 v0.1.0-beta.1（SemVer，正式名称发布前确认），固定 Bun / Rust / 依赖版本并用冻结 lockfile；Windows runner 本机安装依赖、测试、typecheck、构建、打 NSIS 包，按文件 allowlist 检查归档不含 data / secrets / .env / 调试日志 / 源码 node_modules。产物含安装包、SHA256SUMS、版本清单与第三方许可，签名凭据只放 CI Secrets；从实际下载包重新安装验收后才将草稿发布为 prerelease。发布说明只声明已验收的 Windows 目标，清楚标出在线首次下载、CPU / GPU 要求、签名状态、已知问题与应用手动升级方式</span><span class="when"></span></li>
+    <li class="task" data-done="true"><span class="t">建立 Windows tag 构建与草稿 Release 流程：建议首版 v0.1.0-beta.1（SemVer，正式名称发布前确认），固定 Bun / Rust / 依赖版本并用冻结 lockfile；Windows runner 本机安装依赖、测试、typecheck、构建、打 NSIS 包，按文件 allowlist 检查归档不含 data / secrets / .env / 调试日志 / 源码 node_modules。产物含安装包、SHA256SUMS、版本清单与第三方许可，签名凭据只放 CI Secrets；从实际下载包重新安装验收后才将草稿发布为 prerelease。发布说明只声明已验收的 Windows 目标，清楚标出在线首次下载、CPU / GPU 要求、签名状态、已知问题与应用手动升级方式</span><span class="when">2026-10-03</span></li>
   </ul>
   <p><b>发布前确定（2026-10-02 用户确认）：</b>版本 0.1.0-beta.1，项目许可 MIT，安装包未签名（无证书，发布说明写明 SmartScreen 提示）。阶段 4 遗留：CR-007、CR-010 写入发布说明「已知问题」，CR-013 历史仍待用户决定，未改写历史。原计划：项目许可证需由维护者确认；Windows 代码签名证书是否提供另行决定，未签名测试包如实说明 SmartScreen 提示。安装包自带 WebView2 检查 / bootstrapper，缺少运行时可能需要联网；不宣称完整离线首装。阶段 4 的 CR-007（成对文件写入之间进程被杀）、CR-010（真实连接日志混合格式）继续评估并记录结果，CR-013 的已推送历史清理须用户决定，不自行重写历史；CR-009 的解压生命周期在 5-1 补齐。</p>
 
@@ -628,6 +628,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
   <h2>变更记录</h2>
   <table>
     <tr><th>日期</th><th>内容</th></tr>
+    <tr><td>2026-10-03</td><td>用户确认后发布 v0.1.0-beta.1（prerelease，tag 指向 dba2238）。匿名从公开 Release 下载的安装包与草稿逐字节一致、SHA256SUMS 校验通过；公开 Releases API 上应用自身的选择逻辑：0.1.0-beta.0 会收到 beta.1（安装包带摘要、SHA256SUMS 齐全），beta.1 无更新，正式版用户不收到预发布。仓库已是公开状态，无需更改</td></tr>
     <tr><td>2026-10-03</td><td>工作包 5-3：用户确认版本 0.1.0-beta.1、MIT、未签名，并要求现代化应用更新（新增关键决定 29，「应用自动更新」坑位缩小为后台静默 / 签名增量更新）。实现应用内检查 / 提示 / 更新说明 / 跳过 / 下载双重校验 / 壳复核后被动安装；手动触发的 Windows 草稿 Release workflow、包内容 allowlist 检查、发布说明。被动更新曾被 NSIS 语言选择框阻塞，已关闭该选择框。草稿已生成并从下载包验收，等待用户确认发布</td></tr>
     <tr><td>2026-10-02</td><td>5-2 第三次接续：用 WebView2 调试端口与窗口消息在安装版完成窗口 / GUI 验收（页面、深浅色、SSE、长流式、原生命令隔离、端口冲突重试 / 退出、导入对话框、从备份恢复）、真实下载 / 解压 / GPU 加载中关窗、0.0.0 → 0.0.1 升级 / 中断安装回装、断网与深数据目录。修复：端口冲突经私有管道报告原因码并显示中文原因；运行缓存移到应用本地短目录 rc（深数据目录 sharp DLL 路径超限）；首次下载失败提示重新打开会重试；测试包版本 0.0.1。653 项 Bun 测试、类型检查、5 项 Rust 测试通过。第一项打勾；第二项缺干净 Windows / 无 NVIDIA 验证不打勾。清理上两轮残留。未进入 Release 或 Mac。</td></tr>
     <tr><td>2026-10-02</td><td>5-2 接续：导入新增 v2 阶段标记、完整备份摘要、重复恢复及中文恢复入口；跨系统模型路径与链接拒绝。Bun 1.3.14 读取禁止写入的源代码报 EPERM，壳原子复制到短运行缓存并核对完整摘要，保持安装资源只读；未换技术栈或改调度 / 配置结构。652 项 Bun 测试、类型检查、4 项 Rust 测试、NSIS 构建及安装 / 真实 GPU 切换回退 / CPU 验证通过；窗口 / 干净机等仍待验，清理有拒绝 / EACCES 残留，5-2 两项不打勾。未进入 Release 或 Mac。</td></tr>
