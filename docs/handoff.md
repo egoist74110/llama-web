@@ -1,5 +1,15 @@
 # 交接记录
 
+## 2026-10-03 · API 模型列表修正 · Codex
+- 完成：按用户确认修改决定 7 与请求路由规则。`GET /v1/models` 隐藏内置 `名字:默认`，保留基础名与用户自建方案；基础名仍使用当前方案，旧的显式默认方案调用及模型详情查询仍有效。`DEFAULT_PROFILE` 统一放在 config，models-admin 保留导出。
+- 验证：先跑回归测试复现重复条目（4 fail）；修复后专项测试 6 pass。首次全量测试发现模型详情接口依赖发现列表（830 pass / 1 fail / 51 skip），改为按实际路由校验；最终 `bun test` 831 pass / 0 fail / 51 skip，`bun run typecheck` 通过，`git diff --check` 通过。真实开发服务 `GET /v1/models` 返回 200，只有三个基础名；新增方案的列表变化用隔离假数据经 HTTP 验证，无模型加载。
+- 运行状态：开发热更新触发数据目录锁错误，已重启开发服务并恢复 3000 端口；重启后的开发服务保留运行，模型下次请求时加载。未修改实际模型配置。HMR 数据锁问题未在本轮扩展修复。
+- 没测：安装版 / 构建产物未重建、未验证；51 项跳过保持现有平台测试条件。
+- 剩余：本次修正无。工作区另有 `docs/reviews/stage-8-codex.md`，本轮未修改或提交。
+- 下一步：阶段 8 的原审查流程，之后 8-4（Sonnet 5.5）；本轮不进入后续工作包。
+
+---
+
 ## 2026-10-03 · 工作包 8-3 · Opus 5.5
 - 完成：plan 8-3 四项打勾。`server/core/devices.ts`（解析 `--list-devices`、按可执行文件缓存 60 秒的 `DeviceProbe`、失败回落 nvidia-smi 序号、`deviceMissing`、`describeDevices`）；`GET /api/devices`（`?runtime=` `?refresh=1`；Mac 返回 `{ applicable: false }`）、`POST /api/models/:id/device`；`device` 字段在方案 / 模型 / 全局默认（`defaults.device` / `defaultsCpu.device`，按最终运行库类型取）三层，`auto` 是显式自动；`planLaunch` / `previewLaunch` 带 `device`；启动前对照设备列表，缺失抛 `device-missing`（不起进程、不换设备），进程里的 `invalid device:` 也识别成同一类；CPU 三个参数键 `threads` / `numa` / `cpuMask`（保存时校验）；额外参数警告 `extra-overrides-device`、`extra-multi-device`。中文文案在 `i18n/zh-CN.ts`。
 - 验证：`bun test` 全部通过（新增 `devices.test.ts`、`device-launch.test.ts`）；`bun run typecheck` 通过。真机（用户同意；RTX 5090，b11146，Qwen3.8-27B Q4 17 GB，临时数据目录）：`--list-devices` 0.23 秒、stdout 为 `CUDA0: 名称 (总 MiB, 空闲 MiB free)`；`--device CUDA7` / `CUDA0,CUDA1` 退出码 1、`invalid device: …`；`--device CUDA0 --split-mode none` 显存 +17.3 GB；`--device none` 显存不变（连 `-ngl 999` 也不占），6 秒就绪；`-t 8 --numa distribute --cpu-mask ff` 正常，`--numa bogus` / `--cpu-mask zz` 退出码 1。再用真实 context 走了一遍：CUDA7 → 4 毫秒内 `device-missing`、没有进程；CUDA0 → 启动、显存 4.8 → 22.5 GB、停止后回落到 4.7 GB、无 llama-server 残留；全程用 junction 指向真实运行库，已用 `rmdir` 移除，真实目录完好。

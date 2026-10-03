@@ -496,7 +496,7 @@ export function createProxy(deps: ProxyDeps) {
     if (req.method === 'GET' && (path === '/v1/models' || path === '/v1/models/')) return modelsList()
     if (req.method === 'GET' && path.startsWith('/v1/models/')) {
       const name = decodeURIComponent(path.slice('/v1/models/'.length))
-      if (!listModelNames(deps.getModels()).includes(name)) {
+      if (!resolveTarget(deps.getModels(), name).ok) {
         return errorResponse(404, 'model_not_found', fmt(t.api.modelNotFound, { name }))
       }
       return Response.json({ id: name, object: 'model', created: Math.floor(Date.now() / 1000), owned_by: 'llama-web' })

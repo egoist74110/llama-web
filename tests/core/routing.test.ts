@@ -62,11 +62,31 @@ describe('resolveTarget', () => {
   })
 })
 
-test('listModelNames: base names first, then name:profile', () => {
+test('listModelNames: base names first, then custom profiles', () => {
   expect(listModelNames(doc)).toEqual([
     'Qwen3-27B', 'llama3:8b', 'llama3',
-    'Qwen3-27B:默认', 'Qwen3-27B:RP', 'llama3:8b:main', 'llama3:8b:long', 'llama3:other',
+    'Qwen3-27B:RP', 'llama3:8b:main', 'llama3:8b:long', 'llama3:other',
   ])
+})
+
+test('listModelNames: three models with only the built-in profile yield three names', () => {
+  const defaults: ModelsDoc = { version: 1, models: [
+    model('a', 'Alpha', ['默认']),
+    model('b', 'Beta', ['默认']),
+    model('c', 'Gamma', ['默认']),
+  ] }
+  expect(listModelNames(defaults)).toEqual(['Alpha', 'Beta', 'Gamma'])
+})
+
+test('listModelNames: custom profiles remain visible when active and when default is removed', () => {
+  const custom: ModelsDoc = { version: 1, models: [
+    model('a', 'Alpha', ['默认', '创作'], '创作'),
+    model('b', 'Beta', ['default']),
+    model('c', 'Gamma:默认', ['默认']),
+  ] }
+  expect(listModelNames(custom)).toEqual(['Alpha', 'Beta', 'Gamma:默认', 'Alpha:创作', 'Beta:default'])
+  expect(resolveTarget(custom, 'Alpha')).toMatchObject({ ok: true, target: { modelId: 'a', profile: '创作' } })
+  expect(resolveTarget(custom, 'Alpha:默认')).toMatchObject({ ok: true, target: { modelId: 'a', profile: '默认' } })
 })
 
 test('hasImages', () => {

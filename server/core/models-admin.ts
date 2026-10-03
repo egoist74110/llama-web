@@ -3,13 +3,13 @@
 import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { ArgsSyntaxError, normalizeDevice, PARAM_DEFS, paramValueOk, splitArgs, type ParamOverrides, type ParamValue } from './args'
-import type { ModelConfig, ModelsDoc, Profile } from './config'
+import { DEFAULT_PROFILE, type ModelConfig, type ModelsDoc, type Profile } from './config'
 import { aliasOf } from './importer'
 import { parseRuntimeRef } from './runtimes'
 import { resolveFileRef, type ScanEntry } from './scanner'
 import type { FileRef, ModelDir } from './types'
 
-export const DEFAULT_PROFILE = '默认'
+export { DEFAULT_PROFILE } from './config'
 
 export type ModelFile = 'model' | 'mmproj' | 'draft'
 

@@ -1,6 +1,6 @@
 // Request routing (plan「核心行为规则 · 请求路由」): resolve the `model` field of a request to a
 // target (model + profile), list client-visible model names, and detect images in a body.
-import type { ModelConfig, ModelsDoc, Profile } from './config'
+import { DEFAULT_PROFILE, type ModelConfig, type ModelsDoc, type Profile } from './config'
 import type { ModelSnapshot, Target } from './scheduler'
 
 export type RouteError =
@@ -51,14 +51,17 @@ export function resolveTarget(doc: ModelsDoc, field: unknown, running: ModelSnap
 }
 
 /**
- * Names served by GET /v1/models: every base name, then every `name:profile`. A combined
+ * Names served by GET /v1/models: every base name, then each custom `name:profile`.
+ * The built-in default profile stays callable but is omitted from discovery. A combined
  * name equal to an earlier one (a model literally named `x:y`) is left out, since
  * resolveTarget would route it to that earlier model.
  */
 export function listModelNames(doc: ModelsDoc): string[] {
   const out = new Set<string>()
   for (const m of doc.models) out.add(m.name)
-  for (const m of doc.models) for (const p of Object.keys(m.profiles)) out.add(`${m.name}:${p}`)
+  for (const m of doc.models) for (const p of Object.keys(m.profiles)) {
+    if (p !== DEFAULT_PROFILE) out.add(`${m.name}:${p}`)
+  }
   return [...out]
 }
 

@@ -102,7 +102,7 @@ afterEach(async () => {
   for (const c of cleanups.splice(0)) await c()
 })
 
-function setup(opts: { autoReady?: boolean, chunks?: number, gapMs?: number, heartbeatMs?: number, maxBodyBytes?: number, drainTimeoutMs?: number, finalEventTimeoutMs?: number, holdHeaders?: boolean, speed?: SpeedMeter } = {}) {
+function setup(opts: { models?: ModelsDoc, autoReady?: boolean, chunks?: number, gapMs?: number, heartbeatMs?: number, maxBodyBytes?: number, drainTimeoutMs?: number, finalEventTimeoutMs?: number, holdHeaders?: boolean, speed?: SpeedMeter } = {}) {
   const ups: Upstream[] = []
   const events: ProxyEvent[] = []
   const records: RequestRecord[] = []
@@ -118,7 +118,7 @@ function setup(opts: { autoReady?: boolean, chunks?: number, gapMs?: number, hea
   })
   const proxy = createProxy({
     scheduler: sched,
-    getModels: () => MODELS,
+    getModels: () => opts.models ?? MODELS,
     getSettings: () => settings,
     heartbeatMs: opts.heartbeatMs ?? 30,
     maxBodyBytes: opts.maxBodyBytes,
@@ -172,6 +172,27 @@ const until = async (cond: () => boolean, ms = 3000) => {
 }
 
 describe('/v1/models', () => {
+  test('hides built-in default aliases and exposes user-created profiles without loading a model', async () => {
+    const models = structuredClone(MODELS)
+    for (const m of models.models) {
+      m.activeProfile = '默认'
+      m.profiles = { 默认: { overrides: {}, extraArgs: '' } }
+    }
+    const { base, ups } = setup({ models })
+    const ids = async () => {
+      const res = await fetch(`${base}/v1/models`)
+      expect(res.status).toBe(200)
+      const json = await res.json() as { data: Array<{ id: string }> }
+      return json.data.map(d => d.id)
+    }
+    expect(await ids()).toEqual(['Alpha', 'Beta'])
+    models.models[0]!.profiles['创作'] = { overrides: {}, extraArgs: '' }
+    models.models[0]!.activeProfile = '创作'
+    expect(await ids()).toEqual(['Alpha', 'Beta', 'Alpha:创作'])
+    expect((await fetch(`${base}/v1/models/Alpha:默认`)).status).toBe(200)
+    expect(ups).toHaveLength(0)
+  })
+
   test('lists base names and name:profile', async () => {
     const { base } = setup()
     const res = await fetch(`${base}/v1/models`)

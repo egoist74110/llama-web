@@ -4,6 +4,9 @@ import { DEFAULT_LAUNCH_DEFAULTS, normalizeDevice, type LaunchDefaults, type Par
 import type { FileRef, ModelDir } from './types'
 import type { Acceleration, PlatformInfo } from './platform'
 
+/** Name of the built-in profile created when a model is enabled or imported. */
+export const DEFAULT_PROFILE = '默认'
+
 export interface ImagePreprocess {
   enabled: boolean
   /** Longest edge after resizing, in pixels. */

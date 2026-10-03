@@ -229,7 +229,7 @@ li.task .when{color:var(--ok);font-size:12px;white-space:nowrap}
     <tr><td>5</td><td>扫描到的模型</td><td>白名单：扫描只负责发现，手动「启用」；mmproj / mtp 只作为候选，默认不选，由人决定。<b>例外</b>：导入旧 swap-config 时沿用旧生成器规则，按目录自动配对 mmproj（同目录，优先 BF16/F16/F32），导入预览显示所选文件；只适用于导入，手动启用仍默认不选</td></tr>
     <tr><td>6</td><td>参数编辑</td><td>常用项中文表单（可继承全局）+ 额外参数文本框 + 实时完整命令预览 + 重复参数警告</td></tr>
     <tr><td>6b</td><td>变体</td><td>一个模型下多个「配置方案」，界面切换当前方案，切换即重启</td></tr>
-    <tr><td>7</td><td>客户端选方案</td><td><code>模型名</code> = 当前方案；<code>模型名:方案名</code> 可直接调用；请求未运行的模型 → 自动切换（公网请求也可以触发）</td></tr>
+    <tr><td>7</td><td>客户端选方案</td><td><code>模型名</code> = 当前方案；<code>模型名:方案名</code> 可直接调用；<code>GET /v1/models</code> 只列基础名与用户自建方案，隐藏内置的 <code>模型名:默认</code>（已有客户端仍可直接调用）。请求未运行的模型 → 自动切换（公网请求也可以触发）</td></tr>
     <tr><td>8</td><td>切换时旧请求还在跑</td><td>排队等旧请求结束，期间旧模型不再接新请求；超时强制中断；加载期间对流式请求发 SSE 心跳</td></tr>
     <tr><td>9</td><td>在线上限 X</td><td>配置项存在，界面只读，固定 1；满了卸载最久未用的；常驻 / 空闲卸载 / 显存判断留坑。<b>阶段 9（规划）放开：见决定 41–43，用户 2026-10-03 要求</b></td></tr>
     <tr><td>10</td><td>日志</td><td>「模型输出 / 事件 / 请求」三个标签；模型输出按次存文件，其他按天存；实时 t/s，不做历史平均</td></tr>
@@ -291,7 +291,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
     <li>否则进入切换队列：当前模型进入 draining → unloading → 目标 loading → ready，然后转发。多个等待同一目标的请求共享同一次加载。</li>
     <li>等待期间，如果是流式请求，每 15 秒发送一次 SSE 注释行 <code>: loading 63%</code> 保持连接。</li>
     <li>目标模型没有配置 mmproj，但请求里有图片 → 直接返回 400 和中文说明，不去加载模型。</li>
-    <li><code>GET /v1/models</code> 由 llama-web 自己返回：已启用模型的基础名 + 每个 <code>名字:方案</code>。</li>
+    <li><code>GET /v1/models</code> 由 llama-web 自己返回：已启用模型的基础名 + 用户自建方案的 <code>名字:方案</code>；内置「默认」方案不单独列出，即使修改了其参数也不列出。不带方案名仍使用当前方案，已有的 <code>名字:默认</code> 调用继续有效。</li>
   </ol>
   <h3>参数合并</h3>
   <p>最终参数 = 全局默认 ← 模型设置 ← 当前方案的覆盖 ← 方案的「额外参数」。表单项每一项都有「继承 / 自定义」两种状态。额外参数里出现了表单已经管理的参数（例如 <code>-c</code>、<code>--jinja</code>）时给出警告，以额外参数为准。<code>--host</code> / <code>--port</code> 由 llama-web 分配，不允许用户覆盖。</p>
@@ -418,6 +418,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
     <li class="task" data-done="true"><span class="t">启动时残留清理：按 pids.json 结束上次遗留、且可执行文件位于 <code>data/runtime</code> 下的 llama-server</span><span class="when">2026-09-30</span></li>
     <li class="task" data-done="true"><span class="t">scheduler.ts：状态机、切换队列、draining 超时、多个请求共享同一次加载、崩溃后最多自动重载一次、在线上限 X（固定 1，LRU）</span><span class="when">2026-09-30</span></li>
     <li class="task" data-done="true"><span class="t"><code>/v1/*</code> 转发：按 <code>model</code> 与 <code>名字:方案</code> 路由；流式直通；加载期间 SSE 心跳；<code>/v1/models</code> 自己返回</span><span class="when">2026-09-30</span></li>
+    <li class="task" data-done="true"><span class="t">API 模型列表隐藏内置「默认」方案，只额外显示用户自建方案；保留显式方案调用兼容性</span><span class="when">2026-10-03</span></li>
     <li class="task" data-done="true"><span class="t">预处理链 + 图片压缩步骤（按模型可覆盖）；无 mmproj 时收到图片返回中文 400；请求体上限</span><span class="when">2026-09-30</span></li>
     <li class="task" data-done="true"><span class="t"><code>/upstream/:model/*</code> 直通</span><span class="when">2026-09-30</span></li>
     <li class="task" data-done="true"><span class="t">从旧 <code>swap-config.json</code> 导入：模型、参数、额外参数、聊天模板文件（复制到 data/templates），不导入 API key</span><span class="when">2026-09-30</span></li>
@@ -860,6 +861,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 <section id="changelog">
   <h2>变更记录</h2>
   <table>
+    <tr><td>2026-10-03</td><td>用户纠正 API 模型发现规则（决定 7）：隐藏内置的 <code>名字:默认</code>，只有用户自建方案额外列出 <code>名字:方案</code>；三个只有默认方案的模型现在只返回三个基础名。已有显式方案调用及基础名使用当前方案的行为不变。</td></tr>
     <tr><td>2026-10-03</td><td>工作包 8-3：设备选择（<code>devices.ts</code>、<code>GET /api/devices</code>、<code>POST /api/models/:id/device</code>、方案 / 模型 / 全局 <code>device</code>）。真实 llama-server 核对后写死的参数：单 GPU = <code>--device &lt;id&gt; --split-mode none</code>（不传 <code>--main-gpu</code>：它是 <code>--device</code> 过滤后的序号，默认 0 即所选卡）；CPU = <code>--device none</code> 加 <code>-ngl 0</code>（<code>--device none</code> 单独就不占显存，实测）。新增三个 CPU 参数键 <code>threads</code> / <code>numa</code> / <code>cpuMask</code>；<code>--list-devices</code> 的 stdout 格式与未知设备的错误文字已实测。无配置迁移：字段缺省 = 继承</td></tr>
     <tr><td>2026-10-03</td><td>工作包 8-1：运行库登记（<code>runtimes.json</code>，只存 id / 平台 / 加速类型 / 版本号，可执行文件路径永远由 id 推出）、三种添加来源（先暂存预览、确认才登记）、删除保护、模型 / 方案 <code>runtime</code> 引用与兜底。实现中定下：<code>--version</code> 在预览阶段运行（界面要在调用预览前先弹「这会运行你选的程序」）；同一时刻只暂存一个预览、30 分钟过期；GitHub 资产只认 <code>https://github.com/</code>；Mac 要求同架构（不走 Rosetta）。接口见「接口」表。没有改界面（8-5）</td></tr>
     <tr><td>2026-10-03</td><td>新增阶段 9「多模型并行与显存保护」（仅规划）和关键决定 41–44：用户要求放开单开限制（升级后默认仍为 1）、多开前做显存检测并提示风险、保存模型设置时按权重 / KV / 计算缓冲 / mmproj / 草稿 / 系统内存等多方面检查、外部请求触发的多开放不下时要拦住（503）。决定 9 标注由阶段 9 放开；这会改核心行为规则，9-3 开始前须用户确认规则文字。阶段 9 依赖阶段 8 的设备选择</td></tr>
