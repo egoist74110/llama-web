@@ -16,6 +16,14 @@
 
 ---
 
+## 2026-10-03 · 发布 v0.1.0-beta.2 · Sonnet 5.5
+- 完成：应用户要求发布 v0.1.0-beta.2（prerelease，tag → 273945a）。版本号我定的（用户没指定）：package.json、Cargo.toml、Cargo.lock 各改一行，写了 `docs/release-notes/v0.1.0-beta.2.md`，手动触发草稿 workflow，CI 全部步骤通过。
+- 验证：从草稿下载安装包，SHA256 与 SHA256SUMS 一致，`bun desktop/check-package.ts` 通过（338 个文件），确认后 `gh release edit --draft=false`。没有安装运行安装包，没测 beta.1 → beta.2 的应用内升级，没有在干净机 / 无 NVIDIA 机器上试用；发布说明里已写明。
+- 剩余：安装版里的新界面逐页试用、应用内升级实测（可借这次真实的两个公开版本做）。
+- 下一步：无。
+
+---
+
 ## 2026-10-03 · 工作包 6-2 · Sonnet 5.5
 - 完成：plan 6-2 三项打勾。模型页：已启用改为列表行（`ModelCard`，状态胶囊 `StatusPill`、量化 / 视觉 / 草稿标签、方案下拉、编辑图标、启动 / 停止 / 重试，加载进度条和失败卡在行内）、扫描发现改卡片网格（`DiscoverPanel`）、新增筛选框与分段切换；编辑抽屉改文件 / 配置方案 / 参数三栏（`ModelEditor`，逻辑不变，所有 ProfileForm 仍保持挂载，命令预览与重复参数警告还在参数栏里）。日志页：一行工具栏，模型输出终端风格（按行文本判断 err / warn / eval 着色），事件时间线，请求表格。设置页：左侧分区目录（滚动跟随高亮）+ 分区卡片，llama.cpp 版本改单选行。`AppCard` / `PageHeader` 改成新样式（向导和设置、导入、公网向导都用它们），公网向导里的小方框圆角统一 10px。删除 `StateDot` / `StateBadge`。文案新增在 `i18n/zh-CN.ts`（models.filter、models.edit.tabs / paramsFor、logs.view、settings.toc）。
 - 与交互稿差异（数据里没有或会新增功能的没做，已写进变更记录）：模型行没有大小 / 上下文标签（实时数据没有；量化取文件名）；日志页没有「下载」按钮（没有接口，没新增）；日志的「时间范围」仍是原来的「实时 / 文件」选择。
