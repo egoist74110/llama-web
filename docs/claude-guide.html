@@ -588,14 +588,26 @@ ol.steps li{margin:4px 0}
     <div class="pkg-head"><b>8-6 模型页添加目录与 Mac 收尾</b><span class="m sonnet">Sonnet 5.5</span></div>
     <ul class="scope">
       <li>范围以 plan「8-6」两项和「Mac 专项」为准：模型页「添加目录」、osascript 选目录、扫描跳过 <code>._*</code>、文案审计、macOS CI。Mac 套壳 / 发包不在范围，须用户另行要求。</li>
-      <li>做完是阶段关口：停下等用户试用，真实 GPU 验证前先告诉用户，不自动发版。</li>
+      <li>做完后下一个是 8-7（多 GPU），不是阶段关口。</li>
     </ul>
     <div class="prompt"><button type="button">复制</button><pre>执行工作包 8-6：模型页添加目录与 Mac 收尾。
 按 AGENTS.md 的规则开始：读 docs/claude-guide.html 中 8-6 卡片与会话规则、docs/handoff.md 最新交接、docs/plan.html 阶段 8 和关键决定 34–40。
-做完按会话收尾流程结束，然后停下等我试用。</pre></div>
+做完按会话收尾流程结束，并告诉我下一个工作包。</pre></div>
   </div>
 
-  <div class="gatebox"><span class="m gate">阶段关口 8</span> 8-6 完成后停下，用户试用并确认（含 Mac 真机，如有）。不自动发版。</div>
+  <div class="pkg" id="p8-7">
+    <div class="pkg-head"><b>8-7 多 GPU：设备组与切分</b><span class="m opus">Opus 5.5</span></div>
+    <ul class="scope">
+      <li>范围以 plan「8-7」四项和关键决定 45 为准；先读 <code>docs/research/multi-gpu.md</code>。依赖 8-3（设备列表与单设备参数）已完成，在 8-6 之后执行。</li>
+      <li>默认单卡（显存最大的一张），多选必须由用户在全局 / 模型 / 方案里打开开关才显示；至少选一张；<code>tensor</code> / <code>row</code> 标实验性并先验证；本机只有一张卡，多卡只能假进程测试，如实写进交接。占 GPU 的核对开始前先告诉用户。</li>
+      <li>做完是阶段关口：停下等用户试用，不自动发版。</li>
+    </ul>
+    <div class="prompt"><button type="button">复制</button><pre>执行工作包 8-7：多 GPU（设备组与切分）。
+按 AGENTS.md 的规则开始：读 docs/claude-guide.html 中 8-7 卡片与会话规则、docs/handoff.md 最新交接、docs/plan.html 阶段 8 和关键决定 34–40、45，以及 docs/research/multi-gpu.md。
+实测前先告诉我。做完按会话收尾流程结束，然后停下等我试用。</pre></div>
+  </div>
+
+  <div class="gatebox"><span class="m gate">阶段关口 8</span> 8-7 完成后停下，用户试用并确认（含 Mac 真机，如有）。不自动发版。</div>
 </section>
 
 <!-- ============================ 阶段 9 ============================ -->
