@@ -16,6 +16,11 @@ const port = ref('')
 watch(() => pub.value?.port, (v) => { port.value = String(v ?? '') }, { immediate: true })
 const badPort = computed(() => !/^\d+$/.test(port.value.trim()) || Number(port.value) < 1024 || Number(port.value) > 65535)
 const savePort = () => save('public-port', { public: { port: Number(port.value) } })
+const quick = computed(() => pub.value?.tunnelMode === 'quick')
+const modeItems = [{ label: o.modeOwn, value: 'token' }, { label: o.modeQuick, value: 'quick' }]
+const protocolItems = [{ label: o.protocolHttp2, value: 'http2' }, { label: o.protocolQuic, value: 'quic' }]
+const setMode = (v: string) => { if (v !== pub.value?.tunnelMode) void save('public-mode', { public: { tunnelMode: v } }, { quiet: true }).then(ok => ok && toast.add({ title: o.modeSaved, color: 'success', icon: 'i-lucide-check' })) }
+const setProtocol = (v: string) => { if (v !== pub.value?.tunnelProtocol) void save('public-protocol', { public: { tunnelProtocol: v } }, { quiet: true }) }
 const toggle = (v: boolean) => save('public-tunnel', { public: { tunnelEnabled: v } }, { quiet: true })
 
 const token = ref('')
@@ -75,7 +80,31 @@ const setPort = (v: string | number | undefined) => { port.value = v == null ? '
       <USwitch :model-value="pub?.tunnelEnabled ?? false" :disabled="saving === 'public-tunnel'" :aria-label="o.tunnelSwitch" @update:model-value="toggle" />
     </div>
 
-    <div class="space-y-2 py-3">
+    <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3">
+      <div class="min-w-0 flex-1 basis-56">
+        <p class="text-sm text-default">
+          {{ o.modeSwitch }}
+        </p>
+        <p class="text-xs text-muted">
+          {{ o.modeSwitchHint }}
+        </p>
+      </div>
+      <USelect :model-value="pub?.tunnelMode" :items="modeItems" size="sm" class="w-40" :disabled="saving === 'public-mode'" :aria-label="o.modeSwitch" @update:model-value="setMode" />
+    </div>
+
+    <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3">
+      <div class="min-w-0 flex-1 basis-56">
+        <p class="text-sm text-default">
+          {{ o.protocol }}
+        </p>
+        <p class="text-xs text-muted">
+          {{ o.protocolHint }}
+        </p>
+      </div>
+      <USelect :model-value="pub?.tunnelProtocol" :items="protocolItems" size="sm" class="w-full sm:w-80" :disabled="saving === 'public-protocol'" :aria-label="o.protocol" @update:model-value="setProtocol" />
+    </div>
+
+    <div v-if="!quick" class="space-y-2 py-3">
       <div>
         <p class="text-sm text-default">
           {{ s.token }}

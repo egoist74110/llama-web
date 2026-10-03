@@ -13,7 +13,7 @@ function setup(extra: Partial<LiveHubOptions> = {}) {
     ...extra,
     snapshot: () => ({
       scheduler: sched,
-      models: [{ id: 'm1', name: 'Model One', activeProfile: 'default', profiles: ['default'], hasMmproj: false, files: { model: 'main/m.gguf', mmproj: null, draft: null }, missing: [], instances: [] }],
+      models: [{ id: 'm1', name: 'Model One', activeProfile: 'default', profiles: ['default'], hasMmproj: false, needsSetup: false, files: { model: 'main/m.gguf', mmproj: null, draft: null }, missing: [], instances: [] }],
       queue: sched.queue.map(q => ({ modelId: q.modelId, profile: q.profile, started: q.started, waiting: q.waiting })),
       llamacpp: { current: 'b1', runtime: { state: 'ready', tag: 'b1' }, versions: [], rollback: null },
     }),

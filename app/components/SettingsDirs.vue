@@ -4,6 +4,7 @@ import t from '~~/i18n/zh-CN'
 
 const s = t.settings.dirs
 const { doc, saving, save } = useSettings()
+const { picking, pick } = usePickFolder()
 
 interface Row { key: number, id?: string, path: string, enabled: boolean, depth: string }
 let seq = 0
@@ -30,6 +31,11 @@ function add() {
   rows.value.push({ key: seq++, path: '', enabled: true, depth: '3' })
 }
 
+async function choose(r: Row) {
+  const picked = await pick()
+  if (picked) r.path = picked
+}
+
 async function submit() {
   await save('dirs', {
     modelDirs: rows.value.map(r => ({ id: r.id, path: r.path, enabled: r.enabled, maxDepth: Number(r.depth) })),
@@ -46,6 +52,7 @@ async function submit() {
       <li v-for="(r, i) in rows" :key="r.key" class="space-y-2 py-3 first:pt-0">
         <div class="flex flex-wrap items-center gap-2">
           <UInput v-model="r.path" class="min-w-64 flex-1 font-mono" :placeholder="s.pathPlaceholder" :aria-label="s.path" :color="r.path.trim() ? undefined : 'error'" />
+          <UButton color="neutral" variant="outline" size="sm" icon="i-lucide-folder-open" :loading="picking" :aria-label="s.pick" :title="s.pick" @click="choose(r)" />
           <label class="flex items-center gap-1.5 text-xs text-muted">
             {{ s.depth }}
             <UInput :model-value="r.depth" type="number" size="sm" class="w-20" :color="badDepth(r) ? 'error' : undefined" :aria-label="s.depth" @update:model-value="(v: string | number | undefined) => { r.depth = v == null ? '' : String(v) }" />

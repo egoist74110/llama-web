@@ -40,6 +40,8 @@ export interface StateDoc {
     activeProfile: string
     profiles: string[]
     hasMmproj: boolean
+    /** Enabled from a scan and the first-start questions are still open. */
+    needsSetup: boolean
     /** Configured files as `dir/relative/path` (mmproj / draft are null when not set). */
     files: { model: string, mmproj: string | null, draft: string | null }
     /** Configured files that no longer exist on disk. */
@@ -329,7 +331,7 @@ export function describeModels(
 ): StateDoc['models'] {
   return doc.models.map(m => ({
     id: m.id, name: m.name, activeProfile: m.activeProfile,
-    profiles: Object.keys(m.profiles), hasMmproj: !!m.mmproj,
+    profiles: Object.keys(m.profiles), hasMmproj: !!m.mmproj, needsSetup: m.confirmed === false,
     files: { model: refText(m.file)!, mmproj: refText(m.mmproj), draft: refText(m.draft) },
     missing: check ? missingFiles(m, check.dirs, check.exists) : [],
     instances: [],

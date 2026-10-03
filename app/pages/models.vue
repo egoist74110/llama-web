@@ -2,7 +2,8 @@
 import t from '~~/i18n/zh-CN'
 
 const { state } = useLive()
-const tab = ref<'enabled' | 'discover'>('enabled')
+const route = useRoute()
+const tab = ref<'enabled' | 'discover'>(route.query.tab === 'discover' ? 'discover' : 'enabled')
 const tabs = [
   { value: 'enabled' as const, label: t.models.tabs.enabled },
   { value: 'discover' as const, label: t.models.tabs.discover },

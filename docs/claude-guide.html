@@ -98,6 +98,8 @@ ol.steps li{margin:4px 0}
   <a href="#st5">阶段 5 · 兼容与 Windows 桌面版</a>
   <a href="#st6">阶段 6 · 界面重设计</a>
   <a href="#st7">阶段 7 · 免域名临时隧道</a>
+  <a href="#st8">阶段 8 · 运行库、设备与用量</a>
+  <a href="#st9">阶段 9 · 多模型并行与显存保护</a>
   <div class="grp">其他提示词</div>
   <a href="#cont">接续未完成的工作包</a>
   <a href="#review">阶段审查（Codex）</a>
@@ -515,6 +517,142 @@ ol.steps li{margin:4px 0}
   </div>
 
   <div class="gatebox"><span class="m gate">阶段关口 7</span> 7-2 完成后停下，用户试用并确认。不自动发版。</div>
+</section>
+
+<!-- ============================ 阶段 8 ============================ -->
+<section id="st8">
+  <h2>阶段 8 · 运行库、设备与用量</h2>
+  <p class="lead">用户 2026-10-03 要求（关键决定 34–40）：手动添加 / 删除 llama.cpp 版本并按模型选择、全局 GPU / CPU 两份默认与本机检测、设备选择、30 天用量日志、模型页添加目录、Mac 单独处理且尽量做全（Mac 上不出现任何 GPU 相关内容，不允许切到 Windows 版本）。开始 8-1 前先问用户：是否进入阶段 8、阶段 7 的关口状态（plan 阶段 8 开头的问题用户已全部确认）、工作区里未提交的首次使用引导改动怎么处理。</p>
+
+  <div class="pkg" id="p8-1">
+    <div class="pkg-head"><b>8-1 运行库登记、添加、删除与按模型选择</b><span class="m opus">Opus 5.5</span></div>
+    <ul class="scope">
+      <li>范围以 plan 阶段 8「8-1」五项为准：<code>runtimes.json</code> 登记与平台隔离、三种添加来源、删除保护（最新官方版不可删）、模型 / 配置方案的 <code>runtime</code> 引用与缺失兜底。</li>
+      <li>外部二进制与压缩包是信任边界：路径与链接检查、文件头核对、先预览后确认；残留清理仍只处理 <code>data/runtime/</code> 下的进程。不做界面（8-5）、不做设备与检测。</li>
+    </ul>
+    <div class="prompt"><button type="button">复制</button><pre>执行工作包 8-1：运行库登记、添加、删除与按模型选择。
+按 AGENTS.md 的规则开始：读 docs/claude-guide.html 中 8-1 卡片与会话规则、docs/handoff.md 最新交接、docs/plan.html 阶段 8 和关键决定 34–40。
+先确认阶段 8 开头的待确认问题已有答案，再实现并补测试。做完按会话收尾流程结束。</pre></div>
+  </div>
+
+  <div class="pkg" id="p8-2">
+    <div class="pkg-head"><b>8-2 本机检测与全局 GPU / CPU 默认</b><span class="m opus">Opus 5.5</span></div>
+    <ul class="scope">
+      <li>范围以 plan「8-2」四项为准。驱动 / CUDA / 算力对照表先查官方文档再写，不凭记忆；检测只读、带超时、不占 GPU。</li>
+      <li>Mac 检测结构里不能有 GPU 字段；settings v6 迁移只补缺省，旧配置行为不变。</li>
+    </ul>
+    <div class="prompt"><button type="button">复制</button><pre>执行工作包 8-2：本机检测与全局 GPU / CPU 默认。
+按 AGENTS.md 的规则开始：读 docs/claude-guide.html 中 8-2 卡片与会话规则、docs/handoff.md 最新交接、docs/plan.html 阶段 8 和关键决定 34–40。
+实现检测模块、CUDA 运行库自动选取、settings v6 与按运行库类型取默认参数，补测试。做完按会话收尾流程结束。</pre></div>
+  </div>
+
+  <div class="pkg" id="p8-3">
+    <div class="pkg-head"><b>8-3 设备选择</b><span class="m opus">Opus 5.5</span></div>
+    <ul class="scope">
+      <li>范围以 plan「8-3」四项为准。先在真实 llama-server 上核对 <code>--list-devices</code> / <code>--device</code> / <code>--split-mode</code> 等实际行为再写代码；占 GPU 的核对开始前先告诉用户。</li>
+      <li>一个模型只跑在一个设备上；不得覆盖 <code>--host</code> / <code>--port</code>；Mac 一律不适用。多路 CPU 无法真机验证，如实写进交接。</li>
+    </ul>
+    <div class="prompt"><button type="button">复制</button><pre>执行工作包 8-3：设备选择。
+按 AGENTS.md 的规则开始：读 docs/claude-guide.html 中 8-3 卡片与会话规则、docs/handoff.md 最新交接、docs/plan.html 阶段 8 和关键决定 34–40。
+实测前先告诉我。做完按会话收尾流程结束。</pre></div>
+  </div>
+
+  <div class="pkg" id="p8-review">
+    <div class="pkg-head"><b>8-1 至 8-3 审查</b><span class="m other">gpt-6.1sol</span></div>
+    <ul class="scope">
+      <li>重点：外部二进制 / 压缩包信任边界、删除保护与兜底的状态一致性、平台隔离是否可绕过、迁移、参数拼装。用「阶段审查」提示词，范围限定在 8-1 至 8-3；意见按「处理审查意见」处理。</li>
+    </ul>
+  </div>
+
+  <div class="pkg" id="p8-4">
+    <div class="pkg-head"><b>8-4 用量日志</b><span class="m sonnet">Sonnet 5.5</span></div>
+    <ul class="scope">
+      <li>范围以 plan「8-4」三项为准：聚合存储、30 天自动清理、日志页「用量」标签。不存对话内容与参数；与现有请求日志分开。</li>
+    </ul>
+    <div class="prompt"><button type="button">复制</button><pre>执行工作包 8-4：用量日志。
+按 AGENTS.md 的规则开始：读 docs/claude-guide.html 中 8-4 卡片与会话规则、docs/handoff.md 最新交接、docs/plan.html 阶段 8 和关键决定 34–40。
+实现用量存储、清理、接口与日志页「用量」标签，文案放 i18n，补测试。做完按会话收尾流程结束。</pre></div>
+  </div>
+
+  <div class="pkg" id="p8-5">
+    <div class="pkg-head"><b>8-5 运行库、设备与检测界面</b><span class="m sonnet">Sonnet 5.5</span></div>
+    <ul class="scope">
+      <li>范围以 plan「8-5」三项为准。Mac 上 GPU / 加速类型 / 设备 / 本机 GPU 部分一律不渲染；版本列表只显示本机平台的版本；最新官方版的删除按钮禁用并说明。</li>
+    </ul>
+    <div class="prompt"><button type="button">复制</button><pre>执行工作包 8-5：运行库、设备与检测界面。
+按 AGENTS.md 的规则开始：读 docs/claude-guide.html 中 8-5 卡片与会话规则、docs/handoff.md 最新交接、docs/plan.html 阶段 8 和关键决定 34–40。
+实现设置页与编辑抽屉的界面，文案放 i18n；浅 / 深色、窄屏都看一遍，Mac 路径用模拟平台检查。做完按会话收尾流程结束。</pre></div>
+  </div>
+
+  <div class="pkg" id="p8-6">
+    <div class="pkg-head"><b>8-6 模型页添加目录与 Mac 收尾</b><span class="m sonnet">Sonnet 5.5</span></div>
+    <ul class="scope">
+      <li>范围以 plan「8-6」两项和「Mac 专项」为准：模型页「添加目录」、osascript 选目录、扫描跳过 <code>._*</code>、文案审计、macOS CI。Mac 套壳 / 发包不在范围，须用户另行要求。</li>
+      <li>做完是阶段关口：停下等用户试用，真实 GPU 验证前先告诉用户，不自动发版。</li>
+    </ul>
+    <div class="prompt"><button type="button">复制</button><pre>执行工作包 8-6：模型页添加目录与 Mac 收尾。
+按 AGENTS.md 的规则开始：读 docs/claude-guide.html 中 8-6 卡片与会话规则、docs/handoff.md 最新交接、docs/plan.html 阶段 8 和关键决定 34–40。
+做完按会话收尾流程结束，然后停下等我试用。</pre></div>
+  </div>
+
+  <div class="gatebox"><span class="m gate">阶段关口 8</span> 8-6 完成后停下，用户试用并确认（含 Mac 真机，如有）。不自动发版。</div>
+</section>
+
+<!-- ============================ 阶段 9 ============================ -->
+<section id="st9">
+  <h2>阶段 9 · 多模型并行与显存保护</h2>
+  <p class="lead">用户 2026-10-03 要求（关键决定 41–44）：放开单开限制，多开前显存检测并提示风险，保存模型设置时多方面检查，外部请求触发的多开放不下时也要拦住。依赖阶段 8（设备选择）完成；会改核心行为规则，9-3 前先让用户确认规则文字。</p>
+
+  <div class="pkg" id="p9-1">
+    <div class="pkg-head"><b>9-1 显存 / 内存预估核心</b><span class="m opus">Opus 5.5</span></div>
+    <ul class="scope">
+      <li>范围以 plan「9-1」四项为准：先在真实 llama-server 上核对 <code>--fit</code>、<code>--parallel</code>、缓存类型字节数，再写预估纯函数，用三个不同架构的真实模型对比实测并记录误差。占 GPU 的核对开始前先告诉用户。</li>
+      <li>Mac / CPU 用可用内存口径，返回结构里没有 GPU 字样。</li>
+    </ul>
+    <div class="prompt"><button type="button">复制</button><pre>执行工作包 9-1：显存 / 内存预估核心。
+按 AGENTS.md 的规则开始：读 docs/claude-guide.html 中  9-1  卡片与会话规则、docs/handoff.md 最新交接、docs/plan.html 阶段 9 和关键决定 41–44。
+实测前先告诉我。做完按会话收尾流程结束。</pre></div>
+  </div>
+
+  <div class="pkg" id="p9-2">
+    <div class="pkg-head"><b>9-2 保存时检查与参数合理性</b><span class="m sonnet">Sonnet 5.5</span></div>
+    <ul class="scope">
+      <li>范围以 plan「9-2」三项为准：检查接口、合理性规则（每条正反各一测）、按最终选中运行库 / 设备计算。只有证实必然启动失败的组合才拒绝保存。</li>
+    </ul>
+    <div class="prompt"><button type="button">复制</button><pre>执行工作包 9-2：保存时检查与参数合理性。
+按 AGENTS.md 的规则开始：读 docs/claude-guide.html 中  9-2  卡片与会话规则、docs/handoff.md 最新交接、docs/plan.html 阶段 9 和关键决定 41–44。
+做完按会话收尾流程结束。</pre></div>
+  </div>
+
+  <div class="pkg" id="p9-3">
+    <div class="pkg-head"><b>9-3 调度支持多开</b><span class="m opus">Opus 5.5</span></div>
+    <ul class="scope">
+      <li>开始前把决定 41 / 42 的规则文字给用户确认，再同步「核心行为规则」和决定 9。范围以 plan「9-3」五项为准。</li>
+      <li>请求触发（含公网）放不下按用户在设置里选的策略处理（卸载上一个 / 服务端报错），选「报错」时不得绕过；多开开关默认关时行为与旧版一致。</li>
+    </ul>
+    <div class="prompt"><button type="button">复制</button><pre>执行工作包 9-3：调度支持多开。
+按 AGENTS.md 的规则开始：读 docs/claude-guide.html 中  9-3  卡片与会话规则、docs/handoff.md 最新交接、docs/plan.html 阶段 9 和关键决定 41–44。
+先把规则文字给我确认，再实现并补测试。做完按会话收尾流程结束。</pre></div>
+  </div>
+
+  <div class="pkg" id="p9-review">
+    <div class="pkg-head"><b>9-1 至 9-3 审查</b><span class="m other">gpt-6.1sol</span></div>
+    <ul class="scope">
+      <li>重点：多进程生命周期与残留清理、并发加载 / 卸载竞态、公网请求能否绕过显存拦截、预估偏低时的失败路径、路由规则。用「阶段审查」提示词；意见按「处理审查意见」处理。</li>
+    </ul>
+  </div>
+
+  <div class="pkg" id="p9-4">
+    <div class="pkg-head"><b>9-4 界面</b><span class="m sonnet">Sonnet 5.5</span></div>
+    <ul class="scope">
+      <li>范围以 plan「9-4」三项为准。Mac / 纯 CPU 显示「内存预估」，Mac 上不出现 GPU / 显存字样。做完是阶段关口：停下等用户试用，真机验证前先告诉用户，不自动发版。</li>
+    </ul>
+    <div class="prompt"><button type="button">复制</button><pre>执行工作包 9-4：多模型与显存保护界面。
+按 AGENTS.md 的规则开始：读 docs/claude-guide.html 中  9-4  卡片与会话规则、docs/handoff.md 最新交接、docs/plan.html 阶段 9 和关键决定 41–44。
+文案放 i18n，浅 / 深色与窄屏都看一遍。做完按会话收尾流程结束，然后停下等我试用。</pre></div>
+  </div>
+
+  <div class="gatebox"><span class="m gate">阶段关口 9</span> 9-4 完成后停下，用户试用并确认。不自动发版。</div>
 </section>
 
 <!-- ============================ 其他提示词 ============================ -->

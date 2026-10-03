@@ -47,8 +47,11 @@ const tunnelPill = computed(() => {
   const cls = s === 'connected' ? 'lw-st-ready' : s === 'error' ? 'lw-st-failed' : s === 'off' ? 'lw-st-stopped' : 'lw-st-loading'
   return { cls, label: tl.tunnel[s] }
 })
+// Same rule as publicAddresses(): a quick tunnel only has the address cloudflared printed.
+const publicQuick = computed(() => state.value?.tunnel.mode === 'quick')
 const publicUrl = computed(() => {
-  const host = state.value?.tunnel.hostnames?.[0]
+  const info = state.value?.tunnel
+  const host = publicQuick.value ? info?.quickHost : info?.hostnames?.[0]
   return host ? `https://${host}/v1` : ''
 })
 
@@ -136,9 +139,10 @@ const tokens = (n: number | null) => (n === null ? '–' : n.toLocaleString('zh-
         <section class="lw-card flex flex-col gap-2.5 px-[18px] py-4">
           <div class="text-xs text-dimmed">{{ tl.publicAccess }}</div>
           <div><span class="lw-st" :class="tunnelPill.cls">{{ tunnelPill.label }}</span></div>
+          <div v-if="publicQuick" class="text-xs text-dimmed">{{ tl.quickMode }}</div>
           <div v-if="publicUrl" class="truncate font-mono text-xs text-muted" :title="publicUrl">{{ publicUrl }}</div>
           <NuxtLink v-else-if="tunnel?.state === 'off'" to="/settings" class="text-xs text-muted hover:text-default">{{ tl.setup }}</NuxtLink>
-          <div v-else class="text-xs text-dimmed">{{ tl.noHost }}</div>
+          <div v-else class="text-xs text-dimmed">{{ publicQuick ? tl.noHostQuick : tl.noHost }}</div>
         </section>
       </div>
 

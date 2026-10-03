@@ -17,7 +17,7 @@ watch(() => state.value?.tunnel.status.state, (now, before) => { if (before && n
 
 async function start(mode: 'setup' | 'add') {
   if (!cf.info.value.loaded) await cf.loadInfo()
-  const path: PublicWizard['path'] = cf.info.value.hasToken ? 'api' : pub.value?.tunnel.hasToken ? 'manual' : 'api'
+  const path: PublicWizard['path'] = mode === 'setup' && pub.value?.tunnelMode === 'quick' ? 'quick' : cf.info.value.hasToken ? 'api' : pub.value?.tunnel.hasToken ? 'manual' : 'api'
   const wizard: PublicWizard = { step: mode === 'setup' ? 'port' : 'path', mode, path, zoneId: '', subdomain: '', domain: '' }
   cf.plan.value = null
   await save('public-wizard', { public: { wizard } }, { quiet: true })

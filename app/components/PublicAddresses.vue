@@ -1,8 +1,10 @@
 <script setup lang="ts">
-// Client addresses (the saved domain plus every host name the tunnel routes to this entry) and
+// Client addresses (own tunnel: the saved domain plus every host name the tunnel routes to this
+// entry; quick tunnel: the address cloudflared printed) and
 // the self-check: the server requests each address without a key and expects 401.
 import t from '~~/i18n/zh-CN'
 import type { CheckResult } from '~~/server/core/public-check'
+import { publicAddresses } from '~~/server/core/public-addresses'
 
 const props = defineProps<{ autoCheck?: boolean }>()
 const p = t.publicAccess
@@ -11,10 +13,8 @@ const { doc } = useSettings()
 const { state } = useLive()
 const toast = useToast()
 
-const addresses = computed(() => {
-  const all = [doc.value?.public.domain ?? '', ...(state.value?.tunnel.hostnames ?? [])].map(h => h.trim().toLowerCase()).filter(Boolean)
-  return [...new Set(all)]
-})
+const quick = computed(() => doc.value?.public.tunnelMode === 'quick')
+const addresses = computed(() => (doc.value ? publicAddresses(doc.value.public, state.value?.tunnel ?? { hostnames: null, quickHost: null }) : []))
 const results = ref<Record<string, CheckResult>>({})
 const checking = ref(false)
 
@@ -54,7 +54,7 @@ watch(connected, (v) => { if (v && props.autoCheck) void check() }, { immediate:
 <template>
   <div class="space-y-2">
     <p v-if="!addresses.length" class="text-sm text-muted">
-      {{ p.overview.noAddress }}
+      {{ quick ? p.overview.noAddressQuick : p.overview.noAddress }}
     </p>
     <ul v-else class="space-y-2">
       <li v-for="h in addresses" :key="h" class="space-y-0.5">

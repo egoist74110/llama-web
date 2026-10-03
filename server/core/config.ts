@@ -91,6 +91,11 @@ export interface ModelConfig {
   draft: FileRef | null
   activeProfile: string
   profiles: Record<string, Profile>
+  /**
+   * False = enabled from a scan and the first-start questions (thinking / vision / MTP) have not
+   * been answered yet. Missing = an existing or imported model: never asked.
+   */
+  confirmed?: boolean
   /** Placeholder, not used yet. */
   reserved?: { pinned: boolean, idleUnloadMin: number }
 }

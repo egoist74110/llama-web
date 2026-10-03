@@ -1,9 +1,10 @@
 <script setup lang="ts">
 // The public access guide (4-6). Steps are filled with defaults where possible and confirmed one
 // by one; what a step confirms is saved at once, and the current step is saved on the server
-// (settings.public.wizard), so the guide continues where it was left. Two branches: Cloudflare
-// API token (one click, the 4-5 flow) or the dashboard guide + pasted tunnel token. Both end in
-// "connect": entry + hosting on, wait for the tunnel, show the address and key.
+// (settings.public.wizard), so the guide continues where it was left. Three branches: Cloudflare
+// API token (one click, the 4-5 flow), the dashboard guide + pasted tunnel token, or a quick
+// tunnel (no domain, decision 31: straight on to "connect"). All end in "connect": entry +
+// hosting on, wait for the tunnel, show the address and key.
 import t from '~~/i18n/zh-CN'
 import type { PublicWizard, WizardStep } from '~~/server/core/config'
 import type { KeyView } from '~~/server/core/keys'
@@ -18,7 +19,7 @@ const w = reactive<PublicWizard>({ ...doc.value!.public.wizard! })
 // Server-side progress changed (another tab, or this guide restarted from the overview).
 watch(() => doc.value?.public.wizard, (v) => { if (v && v.step !== w.step) Object.assign(w, v) })
 
-const branch = (path: PublicWizard['path']): WizardStep[] => (path === 'manual' ? ['guide', 'paste'] : ['cf-token', 'cf-zone', 'cf-run'])
+const branch = (path: PublicWizard['path']): WizardStep[] => (path === 'quick' ? [] : path === 'manual' ? ['guide', 'paste'] : ['cf-token', 'cf-zone', 'cf-run'])
 const steps = computed<WizardStep[]>(() => [...(w.mode === 'setup' ? ['port', 'key'] as WizardStep[] : []), 'path', ...branch(w.path), 'connect'])
 const index = computed(() => Math.max(0, steps.value.indexOf(w.step)))
 
@@ -85,7 +86,10 @@ async function copyKey() {
 }
 
 // ---- path
-const choosePath = (path: 'api' | 'manual') => { w.path = path }
+// A quick tunnel has no address to add to: only the first setup offers it.
+const pathOptions = computed(() => (w.mode === 'setup' ? ['api', 'manual', 'quick'] as const : ['api', 'manual'] as const))
+const choosePath = (path: 'api' | 'manual' | 'quick') => { w.path = path }
+const quick = computed(() => w.path === 'quick')
 
 // ---- Cloudflare API token
 const cfReplace = ref(false)
@@ -124,7 +128,7 @@ async function nextZone() {
 }
 const toManual = () => { w.path = 'manual'; void go('guide') }
 // A connect step that could not switch things on (e.g. the port is taken) can be retried.
-const switchedOn = computed(() => pub.value.enabled && pub.value.tunnelEnabled)
+const switchedOn = computed(() => pub.value.enabled && pub.value.tunnelEnabled && pub.value.tunnelMode === (quick.value ? 'quick' : 'token'))
 
 // ---- run
 async function runDone() {
@@ -159,8 +163,9 @@ async function nextPaste() {
 async function enterConnect() {
   // Another save (the one that brought us here) may still be finishing.
   for (let i = 0; i < 50 && saving.value; i++) await new Promise(r => setTimeout(r, 100))
-  if (pub.value.enabled && pub.value.tunnelEnabled) return
-  await persist({ enabled: true, tunnelEnabled: true })
+  const tunnelMode = quick.value ? 'quick' : 'token'
+  if (pub.value.enabled && pub.value.tunnelEnabled && pub.value.tunnelMode === tunnelMode) return
+  await persist({ enabled: true, tunnelEnabled: true, tunnelMode })
 }
 const finish = () => save('public-wizard', { public: { wizard: null } }, { quiet: true })
 
@@ -273,9 +278,9 @@ const ingress = computed(() => `127.0.0.1:${pub.value.port}`)
       <p class="text-sm text-default">
         {{ p.path.body }}
       </p>
-      <div class="grid gap-2 sm:grid-cols-2">
+      <div class="grid gap-2" :class="pathOptions.length > 2 ? 'sm:grid-cols-3' : 'sm:grid-cols-2'">
         <button
-          v-for="opt in (['api', 'manual'] as const)" :key="opt" type="button"
+          v-for="opt in pathOptions" :key="opt" type="button"
           class="rounded-[10px] border p-3 text-left transition-colors"
           :class="w.path === opt ? 'border-primary bg-primary/5' : 'border-default hover:bg-elevated'"
           :aria-pressed="w.path === opt" @click="choosePath(opt)"
@@ -452,6 +457,16 @@ const ingress = computed(() => `127.0.0.1:${pub.value.port}`)
 
     <!-- 7 connect -->
     <div v-else-if="w.step === 'connect'" class="space-y-4">
+      <div v-if="quick" class="space-y-1 rounded-[10px] border border-warning/40 bg-warning/10 p-3 text-xs text-default">
+        <p class="font-medium text-warning">
+          {{ p.quickLimits.title }}
+        </p>
+        <ul class="list-disc space-y-0.5 pl-4">
+          <li v-for="(item, i) in p.quickLimits.items" :key="i">
+            {{ item }}
+          </li>
+        </ul>
+      </div>
       <PublicStatus />
       <UButton v-if="!switchedOn" size="sm" icon="i-lucide-power" :disabled="working" @click="enterConnect">
         {{ p.connect.switchOn }}

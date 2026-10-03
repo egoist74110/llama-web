@@ -16,6 +16,39 @@
 
 ---
 
+## 2026-10-03 · 工作包 7-2 · Sonnet 5.5
+- 完成：plan 7-2 三项打勾。向导「选择方式」新增第三项「没有域名，用临时地址」（只在首次设置里出现；选它后步骤是 端口 → key → 选择方式 → 连接，连接时写入 `tunnelMode: 'quick'`，其他方式写回 token；连接页明说临时地址的限制）。总览显示隧道方式；「高级」里可在「自有域名 / 临时地址」切换、选隧道协议（HTTP/2 推荐 / QUIC 备用）；临时模式隐藏「再加一个地址」和隧道 token；状态文案不提 token。地址列表（`PublicAddresses.vue`、总览公网小卡）和服务端用同一规则：`publicAddresses` 拆到 `server/core/public-addresses.ts`（`public-check.ts` 仍重导出，测试不用改）。README 新增「方式 C」，README / `docs/windows-desktop.md` 写明卸载清理。文案全在 `i18n/zh-CN.ts`。
+- 验证：`bun test` 703 pass / 0 fail；`vue-tsc -b --noEmit` 无输出（`bun run typecheck` 在本机被 GameGuard 弄崩，沿用 7-1 的做法）。源码版（`nuxt dev`，临时数据）在浏览器面板走了向导：选第三项 → 4 步 → 连接，`settings.public.tunnelMode` 变 quick、限制说明显示、完成后总览「高级」有方式 / 协议、无 token 区、无「再加一个地址」。真机冒烟（用户同意；独立目录构建、临时数据、没碰仓库 `.output` / `data/` / `~/.cloudflared`，已清理）：本机已装 cloudflared 被复制到 `runtime/cloudflared/win32-x64/`，临时隧道连通；经 `*.trycloudflare.com` → llama-web 公网入口（:18080）→ 假 llama-server：无 key 401、错 key 401、带 key 访问 `/api/settings` 和 `/` 都 404、`/v1/models` 200、非流式 200、流式 31 个事件分 31 次读到（首条 34 ms）；自检返回 401（ok）。关闭托管后 cloudflared 退出、`pids.json` 只剩模型进程；切 QUIC 重启后地址换了新的；关闭公网访问后无 cloudflared；强杀 llama-web 后无 cloudflared / llama-server 残留；数据目录里 cloudflared 相关只有 `quick-tunnel.yml` 和 exe。
+- 没测：从零下载 cloudflared（本机有已装的，只走了「复制」；下载路径只有单元测试）；用真实 llama-server（用户同意的是真实，我改用假的以免占 GPU，直连真实 llama-server 的流式 7-1 已测）；桌面安装包里的新界面；窄屏 / 深色下新向导选项的样式；总览公网小卡在临时模式下的实际显示（只看了代码）；某次开关后 8 秒内没见到 cloudflared 进程，之后重复十几次都在 3–4 秒内起来，没复现。
+- 决定 / 坑：临时模式的向导选项只在首次设置里给（「再加一个地址」对临时隧道没有意义）。工作区里原有的未提交改动（首次使用引导、阶段 8 规划文档）一并进了这次提交，因为 `i18n/zh-CN.ts`、plan、handoff 是同一批文件无法拆开。Windows 下 curl 刚连通的 trycloudflare 地址可能解析不到，等几秒（DNS 传播）；自检接口是服务端请求，更稳。
+- 剩余：无（7-2 范围内）。
+- 下一步：阶段关口 7，等用户试用确认：开启公网访问 → 选「没有域名，用临时地址」→ 拿到地址后用客户端带 key 试聊天（含流式）→ 「高级」切模式 / 协议。确认后才进入阶段 8（先问阶段 8 开头的待确认问题）。
+
+---
+
+## 2026-10-03 · 阶段 8 规划（运行库、设备与用量） · Sonnet 5.5
+- 完成：用户一次性提出一批需求，已写成 plan 阶段 8（8-1 至 8-6 + 审查 + Mac 专项）、关键决定 34–40、接口 / 坑位 / 变更记录，以及指南阶段 8 卡片。内容：手动添加 / 删除 llama.cpp 版本（目录 / 压缩包 / GitHub 地址）、按模型和配置方案选版本、全局默认 GPU / CPU 两份 + 本机检测、单设备选择、30 天用量日志、模型页添加目录、Mac 单独处理。
+- 验证：只改了文档（plan.html、claude-guide.html、handoff.md），没改代码，没跑 `bun test` / typecheck；plan.html 在浏览器面板里打开过但没逐段看渲染。
+- 用户的硬性要求：最新官方版不可删；启动时版本缺失用同通道最新官方版兜底（不改保存的配置）；Mac 与 Windows 版本互相隔离，Mac 上界面不出现任何 GPU 相关内容；尽量把 Mac 做全。
+- 待用户确认（plan 阶段 8 开头）：「git 地址」按 Release 下载理解；目录添加复制进 data/runtime；用量日志做汇总；「多 CPU」含义；是否纳入 AMD / Intel；Mac 套壳 / 启动脚本是否另开包。
+- 坑：阶段 7 的 7-2 和关口未完成；工作区仍有首次使用引导的未提交改动（上一条交接），本次没碰。现有 UI 里有 Mac 的 GPU 提示文案（`macHint`、`runtimeHint`），与新要求冲突，8-6 要清掉。关键决定 14「只用官方最新版」已放宽。
+- 追加（同一会话）：用户要求放开单开限制、多开前做显存检测、保存设置时多方面检查、外部请求触发的多开放不下也要拦住 → 写成阶段 9（关键决定 41–44，9-1 至 9-4 + 审查，依赖 8-3 的设备选择）。会改核心行为规则（决定 9），9-3 前须用户确认规则文字；升级后上限默认仍为 1。待确认：请求触发时是否允许卸载空闲模型腾地方。
+- 用户后续确认：多 CPU = 多路 CPU（很少见，按检测结果来）；暂不考虑 AMD / Intel；多开由设置开关控制（默认关），请求放不下时用户二选一「卸载上一个 / 服务端报错」；Mac 套壳另开工作包。随后用户确认：git 地址按 Release 下载、目录复制进 data/runtime、用量日志做汇总、Mac 启动脚本 start.command 放进 8-6。待办只剩阶段 7 关口与工作区未提交改动的处理。
+- 剩余：8-1 起都没开始。
+- 下一步：先问用户是否进入阶段 8 并确认上面的问题，然后 8-1（Opus 5.5，指南 #p8-1）。
+
+---
+
+## 2026-10-03 · 首次使用引导（用户追加，非编号工作包） · Sonnet 5.5
+- 完成：审查首次使用全流程，发现三处缺口并补上（plan 关键决定 33，阶段 7 下新增一节两项，已打勾）：① 旧向导只有一个路径输入框，且混着作者自用的 llama-swap 导入；② 从扫描启用模型后 mmproj / MTP 永远是 null，用户得自己进编辑抽屉；③ 第一次点启动没有任何确认。现在：向导三步说明 + 多目录 +「选择文件夹…」（`server/core/folder-picker.ts`，PowerShell `FolderBrowserDialog`，`POST /api/fs/pick-folder` 只认 localhost / 127.x / [::1] 的 Host）+ 粘贴路径；`ModelConfig.confirmed`（planEnable 写 false，缺省 = 已确认）→ `needsSetup` → `ModelCard` 启动前弹 `FirstStartDialog`（思考开/关、视觉、MTP + 倍数，同目录候选文件），`POST /api/models/:id/setup` 调 `applyFirstSetup` 写进当前方案并启动。
+- 验证：`bun test` 700 pass / 0 fail（新增 `tests/core/first-setup.test.ts`）；`nuxt prepare` 后 `vue-tsc -b --noEmit` 无错误。源码版（`nuxt dev`，临时数据目录 + 假 llama-server + 假 gguf：模型 / mmproj / MTP 各一个）在浏览器面板走了一遍：自动进向导 → 粘贴路径添加并扫描（找到 1 个）→ 完成进入扫描发现 → 启用 → 启动弹框（视觉、MTP 已选上，倍数 3）→ 确认后 models.json 里 mmproj / draft / `reasoning on, reasoningBudget -1` / `--spec-type draft-mtp --spec-draft-n-max 3` 都对，模型进入运行中；`/api/fs/pick-folder` 带非本机 Host 返回 403。临时进程和 `.cache/8-1` 已清理。
+- 没测：「选择文件夹…」的原生窗口（真实弹出、取消、中文路径）没点过；浅 / 深色、窄屏下的向导和确认框没看；桌面安装包没重新构建；思考「关」和 MTP 对真实 llama-server 的实际效果没验证（只验证了写入的参数）；深色和 mmproj 多候选时的下拉没看。
+- 决定 / 坑：拖拽目录不做（浏览器拿不到完整路径，用户选了「只做选择按钮 + 粘贴」）。思考「开」写 `--reasoning-budget -1`（llama.cpp 里 -1 才是不限，0 是关闭，和用户口述的「0 不限制」不一致，已在决定 33 注明）。是否自带 MTP 没法从 GGUF 判断，所以没有同目录 MTP 文件时开关照样可开，由用户决定。工作区里 `server/core/tunnel.ts`、`tests/core/tunnel.test.ts`、`docs/reviews/stage-7-codex.md` 的改动不是这次做的（会话开始时工作区是干净的，审查会话产生），没碰，也没有提交本次改动。
+- 剩余：无（上面「没测」的项请试用时看）。
+- 下一步：7-1 审查的意见处理，然后 7-2。
+
+---
+
 ## 2026-10-03 · 阶段 7 审查意见处理 · Opus 5.5
 - 完成：`docs/reviews/stage-7-codex.md` 三条都已标注。S7-001 已修复：新增 `cloudflaredEnv()`，两种模式都去掉继承的全部 `TUNNEL_*`（大小写不敏感），token 模式只写回保存的 token。S7-002 已修复：`quickTunnelHost` 只按日志前缀级别和 `error=` 字段判断错误行，地址里的 error / err / wrn 单词不再误判。S7-003：计划文字澄清（只有临时模式换端口重启，token 模式行为不变），并修复 token 模式换端口后 hostnames 仍按旧端口筛选的问题（记住最近一次配置行，按新端口重新筛选）。
 - 验证：`bun test` 703 pass / 0 fail；`bun run typecheck` 退出 0。两项都在包含另一会话未提交改动（首次启动 / 目录选择相关）的工作区里跑的；这些改动没提交、没碰。没有真实隧道验证。

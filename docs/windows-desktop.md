@@ -19,7 +19,7 @@ bun run desktop:build
 - ready / shutdown 仅使用继承的 stdin / stdout 管道，消息携带本次 UUID、协议版本和子进程 PID。HTTP 没有退出接口；现有页面没有 Tauri 原生权限。启动页独享状态、重试、退出和显式目录导入权限。
 - 主窗口仅允许本次 `http://127.0.0.1:<port>` 来源；HTTP / HTTPS 外链交系统浏览器，其余导航拒绝。单实例插件聚焦已有窗口。
 - 关闭窗口发送私有 shutdown，复用现有服务清理，15 秒后用 Windows Job Object 结束本次托管树。壳被强杀时 Job handle 关闭；管道 EOF 也请求服务退出。服务 ready 等待上限 45 秒，不等待 llama.cpp 下载。
-- 默认数据目录由 Tauri `app_local_data_dir()` 获取，使用稳定 identifier `io.github.llama-web.desktop` 下的 `data`；可用绝对路径 `LLAMA_WEB_DATA` 覆盖。安装资源和用户数据分离；默认卸载保留数据。NSIS 自带的「删除应用数据」选项会删除默认 identifier 下的用户数据，保留数据时不要勾选。
+- 默认数据目录由 Tauri `app_local_data_dir()` 获取，使用稳定 identifier `io.github.llama-web.desktop` 下的 `data`；可用绝对路径 `LLAMA_WEB_DATA` 覆盖。安装资源和用户数据分离；默认卸载保留数据。公网访问用到的 cloudflared（含免域名临时隧道用的空配置 `quick-tunnel.yml`）都在数据目录的 `runtime/cloudflared/` 下，临时隧道不写 token、证书；要彻底清理时删除数据目录即可，进程随关闭公网访问 / 退出一起结束。NSIS 自带的「删除应用数据」选项会删除默认 identifier 下的用户数据，保留数据时不要勾选。
 - Bun 1.3.14 在 Windows 下直接执行禁止写入的 `.mjs` 报 `EPERM reading`（普通文件读取成功）。壳将 Nuxt 产物和导入助手以字节流复制到运行缓存 `<应用本地数据目录>\rc\<摘要前24位>`（即 `app_local_data_dir()` 下的 `rc`，与 `LLAMA_WEB_DATA` 无关），完整副本原子发布后启动；目录内保存完整摘要，防止短名碰撞认领错误副本。Bun 本身仍从安装资源启动。0.0.0 包把缓存放在 `data/run/desktop`，自定义数据目录很深（约 200 字符）时 sharp 的 DLL 超过 Windows `LoadLibrary` 的路径上限，服务无法启动；0.0.1 起改为上述固定短目录。缓存跨启动保留，旧包缓存保留以便回退（旧包仍用 `data/run/desktop`），导入不复制 `run`。未发布的 `.tmp-<UUID>` 在单实例壳下次启动时检查并清理。
 - 新数据目录先显示「开始使用 / 从旧 data 目录复制」。目录由用户显式选择；源与目标都持有 5-1 的互斥锁，拒绝覆盖已有数据、目录嵌套和符号链接。先将允许的文件复制到 `import-backups/<id>`，再发布到目标；不复制 `run` 下的 PID 和锁。源码原有配置内容保持不变。
 - 复制发布期间被硬杀会留下 `run/import.pending.json`；壳显示「从备份恢复」并阻止部分数据启动。v2 标记区分备份 / 发布阶段，完整备份带 SHA256 内容摘要；恢复前检查摘要、配置、链接与系统路径，保留部分目标数据到相邻的恢复备份，再重新发布。备份尚未完成且尚未发布时可返回首次选择页，残缺备份保留。v1 标记兼容恢复，但旧备份没有摘要。恢复再次中断仍可重试，标记只在完整发布后清除。选择目录和「从备份恢复」按钮已在安装版窗口中验证（见第三次接续）。

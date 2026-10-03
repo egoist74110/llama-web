@@ -9,7 +9,7 @@ function doc(models: Array<{ id: string, instances: StateInstance[] }>): StateDo
   return {
     now: 0,
     models: models.map(m => ({
-      id: m.id, name: m.id, activeProfile: 'default', profiles: ['default'], hasMmproj: false,
+      id: m.id, name: m.id, activeProfile: 'default', profiles: ['default'], hasMmproj: false, needsSetup: false,
       files: { model: `d/${m.id}.gguf`, mmproj: null, draft: null }, missing: [], instances: m.instances,
     })),
     queue: [],

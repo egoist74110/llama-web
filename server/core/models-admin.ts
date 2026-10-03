@@ -23,7 +23,7 @@ export class EnableError extends Error {
 
 export type ProfileErrorCode =
   | 'model-not-found' | 'profile-not-found' | 'profile-exists' | 'name-invalid' | 'last-profile'
-  | 'bad-overrides' | 'bad-extra-args' | 'template-not-found' | 'in-use'
+  | 'bad-overrides' | 'bad-extra-args' | 'template-not-found' | 'in-use' | 'bad-setup'
 
 export class ProfileError extends Error {
   constructor(public code: ProfileErrorCode, message: string = code, public detail?: string) {
@@ -77,6 +77,7 @@ export function planEnable(entry: ScanEntry | undefined, doc: ModelsDoc): ModelC
     file: { ...entry.ref }, mmproj: null, draft: null,
     activeProfile: DEFAULT_PROFILE,
     profiles: { [DEFAULT_PROFILE]: { overrides: {}, extraArgs: '' } },
+    confirmed: false,
   }
 }
 
@@ -151,6 +152,64 @@ export function applyFiles(doc: ModelsDoc, modelId: string, patch: FilesPatch, e
     next[key] = { dirId: entry.ref.dirId, rel: entry.ref.rel }
   }
   Object.assign(model, next)
+  return model
+}
+
+// ---- First start: thinking / vision / MTP ----------------------------------------------------
+
+/** Recommended number of tokens the MTP draft proposes per step. */
+export const MTP_DEFAULT_N = 3
+export const MTP_MAX_N = 16
+
+export interface FirstSetup {
+  /** Let the model think before answering (`--reasoning on`, no length limit) or not (`off`). */
+  thinking: boolean
+  /** Vision projector file (must be a scanned mmproj); null = no vision. */
+  mmproj: FileRef | null
+  mtp: boolean
+  /** Separate MTP file (scanned draft), for models that do not carry MTP themselves; null = none. */
+  draft: FileRef | null
+  /** Tokens proposed per step (`--spec-draft-n-max`). */
+  mtpN: number
+}
+
+const MTP_FLAGS = new Set(['--spec-type', '--spec-draft-n-max'])
+
+/** Drop `--spec-type` / `--spec-draft-n-max` (with their values) from an extra-args text; other text is kept. */
+export function stripMtpArgs(extra: string): string {
+  let tokens: string[]
+  try {
+    tokens = splitArgs(extra)
+  } catch {
+    return extra // unterminated quote: leave the user's text alone (saving it fails elsewhere)
+  }
+  const out: string[] = []
+  for (let i = 0; i < tokens.length; i++) {
+    const tok = tokens[i]!
+    const flag = tok.includes('=') && tok.startsWith('--') ? tok.slice(0, tok.indexOf('=')) : tok
+    if (!MTP_FLAGS.has(flag)) { out.push(tok); continue }
+    if (flag === tok && tokens[i + 1] !== undefined && !tokens[i + 1]!.startsWith('-')) i++
+  }
+  return out.map(a => (/[\s"']/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a)).join(' ')
+}
+
+/**
+ * Apply the answers of the first-start dialog to the current profile and the model's files, and
+ * mark the model confirmed. Files are checked against the scan like any other file edit; nothing
+ * changes when one is refused.
+ */
+export function applyFirstSetup(doc: ModelsDoc, modelId: string, input: FirstSetup, entries: ScanEntry[]): ModelConfig {
+  if (!Number.isInteger(input.mtpN) || input.mtpN < 1 || input.mtpN > MTP_MAX_N) throw new ProfileError('bad-setup')
+  const model = findModel(doc, modelId)
+  const profile = model.profiles[model.activeProfile]
+  if (!profile) throw new ProfileError('profile-not-found')
+  const files: FilesPatch = { mmproj: input.mmproj, draft: input.mtp ? input.draft : null }
+  applyFiles(doc, modelId, files, entries)
+
+  profile.overrides = { ...profile.overrides, reasoning: input.thinking ? 'on' : 'off', ...(input.thinking ? { reasoningBudget: -1 } : {}) }
+  const rest = stripMtpArgs(profile.extraArgs)
+  profile.extraArgs = input.mtp ? [rest, `--spec-type draft-mtp --spec-draft-n-max ${input.mtpN}`].filter(Boolean).join(' ') : rest
+  model.confirmed = true
   return model
 }
 

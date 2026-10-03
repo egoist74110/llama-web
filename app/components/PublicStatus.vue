@@ -32,7 +32,7 @@ const tunnel = computed(() => {
   switch (st.state) {
     case 'off': return { text: (s.off as Record<string, string>)[st.reason] ?? st.reason, color: 'text-muted', icon: 'i-lucide-circle' }
     case 'preparing': return { text: s.preparing[st.step], color: 'text-muted', icon: 'i-lucide-loader', spin: true }
-    case 'starting': return { text: st.lastError ? fmt(s.startingError, { error: st.lastError }) : s.starting, color: 'text-muted', icon: 'i-lucide-loader', spin: true }
+    case 'starting': return { text: st.lastError ? fmt(info.value?.mode === 'quick' ? s.startingErrorQuick : s.startingError, { error: st.lastError }) : s.starting, color: 'text-muted', icon: 'i-lucide-loader', spin: true }
     case 'connected': return { text: fmt(s.connected, { n: st.connections }), color: 'text-success', icon: 'i-lucide-check' }
     case 'error': return { text: fmt(s.error, { reason: tunnelErrorText(st.code, st.detail) }), color: 'text-error', icon: 'i-lucide-x' }
   }

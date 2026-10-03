@@ -107,6 +107,8 @@ li.task .when{color:var(--ok);font-size:12px;white-space:nowrap}
   <a href="#s5">阶段 5 · 兼容与 Windows 桌面版</a>
   <a href="#s6">阶段 6 · 界面重设计</a>
   <a href="#s7">阶段 7 · 免域名临时隧道</a>
+  <a href="#s8">阶段 8 · 运行库、设备与用量</a>
+  <a href="#s9">阶段 9 · 多模型并行与显存保护</a>
   <a href="#verify">验收方式</a>
   <a href="#slots">坑位（暂不实现）</a>
   <a href="#risks">风险与待验证</a>
@@ -229,7 +231,7 @@ li.task .when{color:var(--ok);font-size:12px;white-space:nowrap}
     <tr><td>6b</td><td>变体</td><td>一个模型下多个「配置方案」，界面切换当前方案，切换即重启</td></tr>
     <tr><td>7</td><td>客户端选方案</td><td><code>模型名</code> = 当前方案；<code>模型名:方案名</code> 可直接调用；请求未运行的模型 → 自动切换（公网请求也可以触发）</td></tr>
     <tr><td>8</td><td>切换时旧请求还在跑</td><td>排队等旧请求结束，期间旧模型不再接新请求；超时强制中断；加载期间对流式请求发 SSE 心跳</td></tr>
-    <tr><td>9</td><td>在线上限 X</td><td>配置项存在，界面只读，固定 1；满了卸载最久未用的；常驻 / 空闲卸载 / 显存判断留坑</td></tr>
+    <tr><td>9</td><td>在线上限 X</td><td>配置项存在，界面只读，固定 1；满了卸载最久未用的；常驻 / 空闲卸载 / 显存判断留坑。<b>阶段 9（规划）放开：见决定 41–43，用户 2026-10-03 要求</b></td></tr>
     <tr><td>10</td><td>日志</td><td>「模型输出 / 事件 / 请求」三个标签；模型输出按次存文件，其他按天存；实时 t/s，不做历史平均</td></tr>
     <tr><td>11</td><td>图片预处理</td><td>做成预处理步骤链，第一版只有图片压缩，参数按模型可覆盖；模型没配 mmproj 时收到图片 → 中文报错</td></tr>
     <tr><td>11b</td><td>reasoning-debug 日志</td><td>并入请求记录的「参数摘要」</td></tr>
@@ -256,6 +258,18 @@ li.task .when{color:var(--ok);font-size:12px;white-space:nowrap}
     <tr><td>30</td><td>界面重设计（阶段 6）</td><td>用户 2026-10-03 确认交互稿 <code>docs/design/ui-v2-prototype.dc.html</code>。取消顶栏，只留左侧栏：导航 + 底部「正在服务」小卡（模型、实时 t/s）+ 连接状态 / llama.cpp 版本 / 深浅色三段切换。<b>桌面宽度下侧栏固定不滚动，只有右侧内容区滚动，整页不滚动</b>；窄屏侧栏叠在上方、整页滚动。总览改仪表盘（当前模型大卡 + 速度曲线、显存 / 请求 / llama.cpp / 公网四个小卡、最近事件 + 最近请求，标题旁显示本机 API 地址可复制）；模型页改列表行，加载进度和失败原因在行内；编辑改右侧抽屉（文件 / 配置方案 / 参数）；日志改终端风格；设置页加分区目录。字体 Geist / Geist Mono（中文回落微软雅黑），须随包本地提供、不连 Google（6-1 起用 <code>@fontsource-variable/geist</code> / <code>geist-mono</code> 两个依赖，用户 2026-10-03 同意；Nuxt UI 自带的 <code>@nuxt/fonts</code> 关闭，构建时也不联网取字体）；强调色仍只有一种（靛蓝 #4f5bd5），深色仍用灰底。继续用 Nuxt UI，不换组件库，行为规则不变</td></tr>
     <tr><td>31</td><td>免域名临时隧道（阶段 7）</td><td>用户 2026-10-03 要求：公网向导新增备选，没有域名时可用 Cloudflare 临时隧道（Quick Tunnel，<code>cloudflared tunnel --url http://127.0.0.1:入口端口</code>，免费、不需要 Cloudflare 账号，进程结束地址就失效，每次启动地址都变）。新增设置 <code>public.tunnelMode: 'token' | 'quick'</code>（默认 token，settings 升到 v5 并写迁移）。cloudflared 继续本地解决：本机有就复制到 <code>data/runtime/cloudflared/</code>，没有就自动下载并校验 SHA-256，不依赖用户另装。临时模式不保存地址：地址只来自 cloudflared 输出里的 <code>*.trycloudflare.com</code>，隧道每次重启都清空；该模式下已保存的自有域名不参与地址显示和自检。不写证书，只写一份空配置 <code>data/runtime/cloudflared/quick-tunnel.yml</code> 并用 <code>--config</code> 传给临时隧道（7-1 实测：本机若有命名隧道留下的 <code>~/.cloudflared/config.yml</code>，不带 <code>--config</code> 时临时隧道照样连上，但流量被那份 ingress 接管、一律 404；带上后路由正确）；此外只有子进程（仍记录在 <code>pids.json</code>，停止时结束整个进程树）和上面那份 cloudflared，都在 <code>data/runtime/</code> 下，随数据目录一起删。<b>已知限制（向导里必须明说）</b>：官方文档称临时隧道不支持 SSE。2026-10-03 实测（cloudflared 2026.5.0，假 SSE 服务每秒一个事件共 8 个）：<b>GET 被缓冲</b>，8.7 秒后 8 个事件一次性到达；<b>POST 逐条到达</b>，首条 1.0 秒。LLM 的流式调用（<code>/v1/chat/completions</code>）是 POST，所以流式可用；只有 GET 形式的 SSE 会被缓冲（本项目的 <code>/v1/*</code> 里没有这类接口）。7-1 用真实 llama-server 复测（一个 GGUF 模型、200 token、HTTP/2 和 QUIC 各一次）：流式 POST 逐条到达，200 个事件分 198 / 199 次读到，时间分布与本机直连相当（首条 0.18 / 0.13 秒，本机 0.11 秒）；不带 key 返回 401，非流式 200。仍只是一个地区的边缘；同时在途请求上限 200，超出返回 429；没有 SLA，仅适合试用。公网入口规则不变：只绑 127.0.0.1、只开放 <code>/v1/*</code>、必须带 key</td></tr>
     <tr><td>32</td><td>隧道协议可选（阶段 7）</td><td>用户 2026-10-03 要求：cloudflared 与 Cloudflare 之间的协议给用户选，默认推荐 HTTP/2（兼容性更好，中国大陆建议开启），QUIC 备用。设置 <code>public.tunnelProtocol: 'http2' | 'quic'</code>，默认 http2；settings v5 迁移对已有安装也写 http2（此前是 cloudflared 默认的自动选择，通常是 QUIC），手工改坏的值回落 http2。自有隧道和临时隧道都以 <code>--protocol</code> 参数传入，协议变化会重启隧道。界面在 7-2</td></tr>
+    <tr><td>33</td><td>首次使用引导</td><td>用户 2026-10-03 要求：新用户第一次进来要有指引。① 向导（<code>/setup</code>，没有任何模型目录时自动进入一次）先讲清三步（选目录 → 启用 → 启动），目录可以添加多个（模型可分散在不同位置）。选目录有两种方式：「选择文件夹…」（服务端弹出 Windows 原生选择窗，<code>POST /api/fs/pick-folder</code>，只接受 Host 为 localhost / 127.x / [::1] 的请求，局域网来的请求 403）和粘贴路径。<b>不做拖拽</b>：网页拿不到拖入文件夹的完整路径（只有名字），桌面壳的页面又是 HTTP、没有原生权限。向导里不再放「从旧配置导入」（那是作者自用的 llama-swap 配置，仍在设置页）。② 从扫描启用的模型带 <code>confirmed: false</code>（旧模型和导入的没有这个字段，视为已确认，不会被问）：第一次点「启动」先弹确认框，问三件事——思考（开 = <code>--reasoning on</code> 且 <code>--reasoning-budget -1</code> 不限；关 = <code>--reasoning off</code>。注意 llama.cpp 里 <code>-1</code> 才是不限制，<code>0</code> 是关闭）、视觉（同目录有 mmproj 才能开，否则说明没有）、MTP（有同目录的 MTP 文件就一起选上；没有就当「模型自带」，由用户决定开不开；开了只显示一个倍数，推荐 3，写成 <code>--spec-type draft-mtp --spec-draft-n-max N</code>）。确认后写入当前配置方案和模型文件并启动，之后不再问；后续都能在「编辑」里改。请求里的 <code>model</code> 触发的自动加载不弹窗，按全局默认参数照常启动</td></tr>
+    <tr><td>34</td><td>运行库登记与来源（阶段 8，规划）</td><td>用户 2026-10-03 要求：llama.cpp 版本可由用户自己添加、可删除，模型可选用哪个版本。关键决定 14「只用官方最新版」放宽为：<b>官方版本仍自动更新</b>（行为不变），另允许用户<b>手动添加</b>三种来源：① 选本机一个目录（里面有 llama-server）；② 选本机一个压缩包（zip / tar.gz）；③ 贴 GitHub 地址（<code>https://github.com/用户/仓库</code> 或某个 Release 页面），从该仓库的 Release 里按本机平台挑资产下载。「git 地址」默认解释为 Release 下载；<b>从源码编译</b>要装编译器 / CMake / CUDA 工具链，本阶段不做（坑位）。<b>用户 2026-10-03 已确认</b>：「git 地址」按 Release 下载理解；目录来源复制进 <code>data/runtime/</code>。目录来源<b>复制进</b> <code>data/runtime/llama.cpp/custom/&lt;id&gt;/</code>（推荐，理由：AGENTS.md 规定残留清理只处理 <code>data/runtime/</code> 下的进程，且删除只动自己的目录；代价是占磁盘），不引用原路径。手动添加的版本永不被自动清理；GitHub 来源有 SHA-256 摘要才直接装，没有摘要时显示实际算出的 SHA-256 并要求确认；任何手动添加都先弹确认（来源、大小、「这会运行你选的程序」）。<b>平台隔离（用户 2026-10-03 要求：不允许在 Mac 上切到 Windows 版本，反之亦然）</b>：每个条目登记 <code>os</code> / <code>arch</code>；列表、切换、模型选择只出现与本机一致的版本，别的平台的条目（例如数据目录从另一台机器带来）隐藏、不可选、解析时报「这是另一个平台的版本」，也不删除；添加时按文件内容而不是扩展名核对（PE 头 = Windows、Mach-O = macOS 并核对 arm64 / x86_64、ELF = Linux），不符直接拒绝；GitHub 来源只认与本机 <code>os-arch</code> 对应的资产（Mac 上只认 <code>macos-arm64</code> / <code>macos-x64</code>，不用 Rosetta 跑另一种架构）。登记写在 <code>data/runtimes.json</code>（版本号字段、条目：<code>id</code> / <code>label</code> / <code>source</code> / <code>accel</code> / <code>tag</code> / <code>addedAt</code>），官方版本继续只靠目录扫描，不进登记</td></tr>
+    <tr><td>35</td><td>运行库引用与删除（阶段 8，规划）</td><td>运行库引用串：<code>cuda:b11146</code> / <code>cpu:b11146</code>（官方，类型 + 版本号）、<code>custom:&lt;id&gt;</code>（手动添加）；为空 = 跟随全局。解析顺序：配置方案 ← 模型 ← 全局默认。可删除已安装的版本，但<b>每个通道里最新的官方版本不允许删除</b>（用户 2026-10-03 要求：保证每个通道至少有一个可用版本，也避免与自动更新冲突；界面上该行的删除按钮禁用并说明原因，接口同样拒绝）；手动添加的版本不受此限。<b>正在运行 / 启动中的不能删；全局当前版本、被任何模型或配置方案选中的版本，删除前列出受影响的模型，确认后这些引用清空（回到跟随全局）；若删的是当前版本，全局当前自动落到该通道里最新的官方版本</b>，删除沿用「先改名再删」。自动清理（保留最新 N 个）把被模型选中的版本也加进保护集。<b>兜底（用户 2026-10-03 要求）</b>：启动时引用的版本不存在（被删、手改配置、数据目录换了机器）→ 改用本机、同通道里最新的官方版本，并写一条事件日志和一个界面提示（「版本 X 不存在，已改用 Y」），<b>不改模型的保存配置</b>（版本回来后仍生效）；该通道一个官方版本都没有时才加载失败，提示去下载。引用指向的是另一个平台的版本时同样按「不存在」处理。设备不存在不兜底（见决定 39），因为换设备会改变显存占用</td></tr>
+    <tr><td>36</td><td>全局默认的 GPU / CPU 两份（阶段 8，规划）</td><td>用户要求：全局默认配置增加一份 CPU 版并可切换。现有 <code>defaults</code> 继续作为 GPU 版（Mac 也用它），新增 <code>defaultsCpu</code>（<code>gpuLayers: 0</code>，不设 K/V 量化与 flash-attn，不带 <code>--load-mode mlock</code> 等依赖显存的参数，上下文默认更保守，具体值 8-2 定）。全局切换沿用 <code>llamacpp.acceleration</code>（auto / cuda / cpu），新增 <code>llamacpp.currentCpu</code>（CPU 通道的当前版本；<code>current</code> 仍是 GPU 通道）。<b>实际用哪份默认由「这次启动最终选中的运行库的类型」决定</b>：配置方案可以选 CPU 运行库，这时合并用 <code>defaultsCpu</code>。自动更新只更新已安装的通道：GPU 通道照旧，CPU 通道在用户第一次下载后才更新；手动添加的永不更新。settings 升到 v6：缺省 <code>defaultsCpu</code> 补默认值，<code>currentCpu</code> 为空，其他不改</td></tr>
+    <tr><td>37</td><td>本机检测（阶段 8，规划）</td><td>新增只读检测（不加载模型、不占 GPU、带超时），结果进设置页的「本机」卡片，并给出推荐与警告，<b>不自动改配置</b>。<b>Windows GPU</b>：<code>nvidia-smi</code>（显卡名、显存、驱动版本、<b>驱动支持的最高 CUDA 版本</b>、算力 compute capability）→ 推荐并自动选用不超过驱动能力的 CUDA 运行库（取代手填 <code>cudaRuntime</code>，手填保留为覆盖）；警告：没有 NVIDIA → 建议用 CPU；驱动太旧装不了所选 CUDA 版本 → 建议换 12.x 版或升级驱动；算力低于该版本支持范围；检测到 AMD / Intel 显卡 → 说明本项目目前只支持 NVIDIA CUDA 和 CPU（用户 2026-10-03 确认暂不考虑 AMD / Intel，Vulkan 为坑位）。具体的驱动 / 算力对照表 8-2 开始时查官方文档后写死并加测试，不凭记忆写。<b>CPU（所有平台）</b>：型号、物理 / 逻辑核心数、指令集（AVX / AVX2 / AVX-512 / FMA / F16C，ARM 为 NEON）、内存总量 / 可用、NUMA 节点数；警告：没有 AVX2 → 推理会很慢；可用内存小于模型文件大小 → 提示（<code>mlock</code> 会失败）；逻辑核心多于 64（Windows 处理器组）→ 提示线程设置要手动核对。用户说「CPU 要检测哪些不确定」，以上是建议清单，用户可增删</td></tr>
+    <tr><td>38</td><td>Mac 单独处理（阶段 8，规划）</td><td>用户 2026-10-03 要求：检测到 Mac 时单独处理，<b>界面里不出现 GPU 支持相关内容</b>。落实：Mac 上隐藏 GPU / CUDA / 加速类型选择、设备选择、GPU 显存卡片、CPU / GPU 默认切换（只有一份默认参数，沿用现有非 Windows 默认值），不显示「Metal」「GPU」字样；「本机」卡片只显示芯片 / 型号、核心数（性能核 / 能效核）、统一内存、macOS 版本；运行库管理（添加 / 删除 / 每模型选版本）、用量日志照常提供；Intel Mac 同样不提 GPU。手动添加目录 / 压缩包时 Mac 需要处理可执行权限和 <code>com.apple.quarantine</code>；「选择文件夹…」改用 <code>osascript</code>。用户 2026-10-03 追加：<b>尽量把 Mac 版本做出来</b>，不是只留分支——阶段 8 的每个功能都要有 Mac 路径（见阶段 8「Mac 专项」）。开发机是 Windows，Mac 真机行为无法本地验证：用 GitHub Actions 的 macOS runner 跑测试和真实 llama.cpp 的 CLI 冒烟，真机试用交给用户，报告里如实区分「已在 macOS runner 验证」与「只构造测试」。Mac 套壳 / DMG 与发包仍须用户另行要求（AGENTS.md 阶段关口），本阶段只做服务端与界面。平台判断集中在一个函数 / 一个界面开关里，避免界面散落 <code>os === 'darwin'</code></td></tr>
+    <tr><td>39</td><td>设备选择与「只跑在一个设备上」（阶段 8，规划）</td><td>用户要求：启动方式可选设备（多 GPU、多 CPU），且<b>一个模型只能跑在一个设备上</b>。设备列表来自所选运行库的 <code>llama-server --list-devices</code>（限时执行，按运行库缓存；失败回落 nvidia-smi 的序号），GPU 旁显示显存总量 / 当前空闲。配置方案 / 模型的 <code>device</code>：空 = 自动（沿用运行库默认行为）；选一个 GPU → 只传这一个设备（<code>--device</code>，并关闭跨卡切分 <code>--split-mode none</code>，具体参数组合 8-3 在真实 llama-server 上核对后写死）；选 CPU → <code>--device none</code> 且层数为 0。<b>表单只允许选一个</b>；额外参数里手写 <code>--tensor-split</code> / 多设备 <code>--device a,b</code> 时给警告（以额外参数为准，保持现有规则）。所选设备不存在（卡被拆了 / 换了运行库）→ 加载失败并给中文原因，不自动换设备。CPU 的进阶项（线程数、<code>--numa</code>、<code>--cpu-mask</code>）只在检测到多 NUMA 节点或用户展开「高级」时出现；<b>多路 / 多 NUMA 的真机效果开发机没有条件验证</b>，实现按文档与假进程测试，如实标注。<b>用户 2026-10-03 确认：「多 CPU」指多路 CPU；这种机器很少，不需要特别处理，按检测结果来</b>——只有检测到多个 CPU 插槽 / NUMA 节点时，设备下拉里才多出对应的 CPU 项，没检测到就只有一个「CPU」；不做核心数选择界面（线程数放在「高级」里）。开发机没有多路 CPU，这部分只做假数据测试并如实标注未验证</td></tr>
+    <tr><td>40</td><td>用量日志（阶段 8，规划）</td><td>用户要求：新增用量日志，最多保存一个月，超出自动清理。与现有「请求」日志（含参数摘要，保留 14 天）分开：<code>data/logs/usage/YYYY-MM-DD.json</code>，按「小时 × 模型 × 配置方案 × 来源（本机 / 局域网 / 公网）× key 名」聚合：请求数、成功 / 失败 / 中断、提示 / 生成 token、总耗时、图片张数。<b>不存对话内容、不存参数</b>。数据来自请求结束时的同一条记录（不另起统计口径）；内存累加、定时原子写入（崩溃最多丢一个间隔）。<code>logs.usageKeepDays</code> 默认 30，上限 30（只能调小，7 / 14 / 30）；启动时和每天零点后清理超期文件，按文件名日期判断，只删 <code>data/logs/usage/</code> 下符合命名的文件。界面放在日志页新增「用量」标签：近 30 天每日 token 柱图、按模型 / 来源 / key 的汇总表、可导出 CSV。用户 2026-10-03 已确认：「用量日志」做汇总统计，不做逐条记录</td></tr>
+    <tr><td>41</td><td>放开单开限制（阶段 9，规划）</td><td>用户 2026-10-03 要求：阶段 8 的设备选择做完后，放开「同时只在线一个模型」。设置页新增开关「允许多个模型同时在线」（<code>scheduler.multiLoad</code>，<b>默认关</b>，关时行为与今天完全一致，<code>maxLoaded</code> 固定 1）；打开后 <code>maxLoaded</code> 可调（1–4，用户 2026-10-03 确认「只有用户选择开了多模型并发才开」），不同设备上的模型可以同时在线，同一设备上共享显存（Mac / CPU 共享内存）。多开时加载<b>串行</b>（同一时刻只加载一个，避免两个模型的加载峰值叠加）；达到上限或显存放不下时的处理见决定 42。状态机、请求路由里「当前模型」的说法相应改为「目标模型所在设备上的在线模型」，<code>/v1/models</code> 不变；总览和侧栏「正在服务」显示全部在线模型。这是对核心行为规则的修改，开始 9-3 前要用户确认规则文字，再同步「核心行为规则」</td></tr>
+    <tr><td>42</td><td>多开时的显存保护（阶段 9，规划）</td><td>用户要求：多开要做显存检测，有爆的风险要提示；<b>外部请求（局域网 / 公网）触发的多开也必须拦住</b>。每次加载前用「预估占用」对比目标设备「当前真实可用」（nvidia-smi 实时采样，已含别的程序占用；Mac / CPU 用可用内存）减去安全余量。三档：<b>可以</b>（预估 ≤ 可用的 85%）、<b>有风险</b>（85%–100%）、<b>放不下</b>（&gt; 100%）。处理：① 界面手动启动：有风险 → 弹确认（显示预估明细和可用量，可「仍然启动」）；放不下 → 默认拦住，只给「先停止其他模型」或取消，不提供强行启动（用户想硬来可用额外参数自己负责，不在界面开口）。② <b>请求触发的加载（本机 / 局域网 / 公网一视同仁）放不下时，由用户在设置里二选一</b>（<code>scheduler.onNoRoom</code>，用户 2026-10-03 确认；只在开启多模型并发时才有这个选项，默认「卸载上一个」）：<b>(a) 卸载上一个</b>——沿用今天的换模型流程（旧模型不再接新请求，等在途请求结束，超时强制中断，再卸载并加载目标；一次只卸载到放得下为止，并写事件）；<b>(b) 服务端报错</b>——直接返回错误（HTTP 503，错误码 <code>insufficient_memory</code>，中文原因含预估与可用量、提示调用方联系服务所有者处理），不去加载、不影响已在线模型，写事件和请求记录。两种选择都不会让加载超出可用量；(a) 卸载后仍放不下（模型本身就超过设备容量）也按 (b) 报错。预估不是承诺：加载失败仍走原有失败卡片，且 errors.ts 要识别显存不足的日志并给出针对性提示</td></tr>
+    <tr><td>43</td><td>显存预估与保存时检查（阶段 9，规划）</td><td>用户要求：保存模型设置时按多方面做显存检测，避免用户配出必爆的参数。预估由纯函数完成，输入全部来自已有信息：<b>权重</b>（模型文件大小；GPU 层数 / 总层数决定放 GPU 的比例；分片合并后的总大小）、<b>KV 缓存</b>（GGUF 元数据：层数、KV 头数、每头维度，上下文长度 × K / V 缓存类型的每元素字节数；滑动窗口层、混合 / 循环层按各自规则；并行槽数不放大总上下文，沿用 llama-server 的语义，8-7 核对）、<b>计算缓冲</b>（随 batch / ubatch、上下文、flash-attn 变化的经验式）、<b>mmproj</b>（权重 + 图片处理缓冲）、<b>草稿 / MTP 模型</b>（权重 + 其 KV）、<b>每设备固定开销</b>（CUDA 上下文等）、<b>别的在线模型</b>（取实测占用）、<b>系统内存</b>（CPU 层 / <code>mlock</code> / CPU 运行库）。<b>实测优先</b>：每次加载成功后记下该「模型 + 方案 + 设备 + 参数摘要」的实际显存增量到 <code>data/vram-stats.json</code>（只存数字，不含路径外的信息），下次预估先查实测；预估与实测偏差大时记事件，用于校准系数。加载前先核对该版本 llama.cpp 的 <code>--fit</code> / <code>llama-fit-params</code> 的实际行为：它若能给出更准的结果就作为一路输入（它还可能静默缩小上下文，要明确处理）。保存检查分两类：<b>显存</b>（三档，有风险 / 放不下都可保存，但弹确认并列出明细，因为用户的可用量会变）；<b>参数合理性</b>（只提示不拦，除非 8-7 在真实 llama-server 上证实必然启动失败）：上下文超过模型训练上限且没配 rope 缩放、V 缓存量化但 flash-attn 关、<code>ubatch</code> &gt; <code>batch</code>、选了 CPU 设备却写了很大的 GPU 层数、视觉模型选在 CPU 上、<code>mlock</code> 大于可用内存、并行槽数过多导致每槽上下文过小、选中的设备不存在等。界面在编辑抽屉里实时显示「显存预估」条和明细；Mac / 纯 CPU 显示「内存预估」，<b>Mac 上不出现 GPU / 显存字样</b>（决定 38）</td></tr>
+    <tr><td>44</td><td>不拖垮用户电脑（阶段 9，规划；原则同样适用于阶段 8）</td><td>用户 2026-10-03 强调：<b>一定要保证不把用户电脑搞崩溃</b>。这是高于功能的底线，落实为：① <b>系统内存也算资源</b>：显存放得下不够，CPU 层、<code>mlock</code>、CPU 运行库、Mac 统一内存都要和「系统可用内存 − 给系统留的余量（取总量的 15% 与 2 GiB 中较大者，具体值 9-1 实测后定）」比较；放不下同样拦（手动启动拦、请求触发 503）。② <b>默认参数里的 <code>--load-mode mlock</code></b>（Windows 默认值带它）在可用内存不足时会把系统逼进换页，预估发现 <code>mlock</code> 大于可用内存时，界面警告并在加载时不带该参数（这一条改动要写进命令预览，不静默）。③ <b>运行期看门狗</b>：加载中和运行中按 2 秒采样（沿用 <code>gpu.ts</code> 的采样；系统内存另采）；设备可用显存或系统可用内存跌破<b>危险线</b>（可用 &lt; 5%，值 9-3 定）时，先停止<b>最新加载的、且没有在途请求</b>的模型并写事件；仍不回升再依次停止最久未用的空闲模型；<b>绝不杀别人的进程</b>（只处理自己登记在 <code>pids.json</code> 的子进程）。④ 加载串行、同一设备同一时刻只有一个模型在加载，加载有超时（沿用 <code>loadTimeoutSec</code>）。⑤ 预估误差只能偏保守：系数宁大勿小，实测偏高时下次按实测，实测记录缺失时用保守系数。⑥ 磁盘：手动添加运行库、下载前检查目标盘剩余空间（至少为压缩包大小的 3 倍），不足拒绝；用量日志有上限（决定 40）。⑦ 手动添加的外部程序先预览确认（决定 34）。⑧ 无法检测时（nvidia-smi 缺失、内存读取失败）按「未知」处理：手动启动弹确认，请求触发的多开按拦截处理，不当作「放得下」</td></tr>
   </table>
 </section>
 
@@ -364,6 +378,10 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
     <tr><td><code>/api/logs</code></td><td>历史日志列表与读取</td></tr>
     <tr><td><code>/api/llamacpp</code></td><td><code>GET</code> 版本列表、更新状态、回退建议；<code>POST /api/llamacpp/current</code> <code>{ tag }</code> 切换 / 回退到已安装的版本</td></tr>
     <tr><td><code>/api/import</code></td><td>从旧 <code>swap-config.json</code> 导入</td></tr>
+    <tr><td><code>/api/llamacpp/*</code>（阶段 8 扩展）</td><td><code>POST add</code>（<code>{ kind: 'dir' | 'archive' | 'github', … }</code>，先 <code>preview</code> 再确认）、<code>DELETE :ref</code>（拒绝最新官方版 / 在用版本）、<code>POST current</code> 增加通道参数；只返回与本机平台一致的版本</td></tr>
+    <tr><td><code>GET /api/system</code>（阶段 8）</td><td>本机检测结果与推荐 / 警告；Mac 不含任何 GPU 字段</td></tr>
+    <tr><td><code>GET /api/devices</code>（阶段 8）</td><td>某运行库的设备列表；Mac 返回空并标记不适用</td></tr>
+    <tr><td><code>GET /api/usage</code>（阶段 8）</td><td>用量汇总（日期范围 + 分组）与 CSV 导出</td></tr>
   </table>
 </section>
 
@@ -620,6 +638,12 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
     <li class="task" data-done="true"><span class="t">隧道协议（用户 2026-10-03 会话中追加，关键决定 32）：<code>public.tunnelProtocol</code>（<code>http2</code> 默认 / <code>quic</code> 备用），v5 迁移一并写入 http2，<code>applyPublic</code> 校验；两种隧道都传 <code>--protocol</code>，协议变化会重启；真实隧道两种协议各测一次</span><span class="when">2026-10-03</span></li>
   </ul>
 
+  <h3>首次使用引导（用户 2026-10-03 会话中追加，关键决定 33）</h3>
+  <ul class="tasks">
+    <li class="task" data-done="true"><span class="t">向导重写：三步说明、可添加多个模型目录、「选择文件夹…」（服务端原生窗口，仅本机地址）+ 粘贴路径；设置页的目录行也有选择按钮；向导去掉旧配置导入；完成后进入「模型 → 扫描发现」</span><span class="when">2026-10-03</span></li>
+    <li class="task" data-done="true"><span class="t">首次启动确认框：<code>ModelConfig.confirmed</code>（扫描启用的为 false）、<code>needsSetup</code> 进实时状态、<code>GET/POST /api/models/:id/setup</code>、<code>applyFirstSetup</code>（思考 / 视觉 / MTP + 倍数，同目录候选文件，重复答不叠加参数）；单元测试 <code>tests/core/first-setup.test.ts</code></span><span class="when">2026-10-03</span></li>
+  </ul>
+
   <h3>审查（gpt-6.1sol 或用户指定的模型）</h3>
   <ul class="tasks">
     <li class="task" data-done="false"><span class="t">7-1 完成后做一轮交叉审查：子进程生命周期与残留清理、配置迁移、公网入口鉴权未被削弱；意见按「处理审查意见」流程处理</span><span class="when"></span></li>
@@ -627,9 +651,9 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 
   <h3>7-2 · 界面与收尾（Sonnet 5.5）</h3>
   <ul class="tasks">
-    <li class="task" data-done="false"><span class="t">向导：「选择方式」新增第三项「没有域名，用临时地址」，选它后跳过 Cloudflare 步骤直接到「连接」，连接时写入 <code>tunnelMode: 'quick'</code>；向导正文里「都需要域名」的说法改掉；选择方式和连接页明说临时地址的限制（每次启动都会变、流式可能一次性返回、仅适合试用）</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">总览 / 高级：显示当前模式；「高级」里可在「自有域名」和「临时地址」之间切换；临时模式隐藏「再加一个地址」和隧道 token 区；状态文案不再提 token；「高级」里可选隧道协议「HTTP/2（推荐，兼容性更好，中国大陆建议使用）」/「QUIC（备用）」（<code>tunnelProtocol</code>，关键决定 32）；页面上的地址列表（<code>PublicAddresses.vue</code>、总览公网小卡）按 <code>publicAddresses</code> 同样的规则取：临时模式只用 <code>tunnel.quickHost</code>；文案都在 <code>i18n/zh-CN.ts</code></span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">卸载与清理核对：临时模式不留 token、证书、配置；停止 / 关闭公网访问 / 退出后无 cloudflared 残留；README 和 <code>docs/windows-desktop.md</code> 的卸载说明写明 <code>data/runtime/cloudflared/</code> 随数据目录删除。真机冒烟（下载或复用 cloudflared、起真实临时隧道、非流式和流式各一次、停止后确认进程已退出）开始前先告诉用户</span><span class="when"></span></li>
+    <li class="task" data-done="true"><span class="t">向导：「选择方式」新增第三项「没有域名，用临时地址」，选它后跳过 Cloudflare 步骤直接到「连接」，连接时写入 <code>tunnelMode: 'quick'</code>；向导正文里「都需要域名」的说法改掉；选择方式和连接页明说临时地址的限制（每次启动都会变、流式可能一次性返回、仅适合试用）</span><span class="when">2026-10-03</span></li>
+    <li class="task" data-done="true"><span class="t">总览 / 高级：显示当前模式；「高级」里可在「自有域名」和「临时地址」之间切换；临时模式隐藏「再加一个地址」和隧道 token 区；状态文案不再提 token；「高级」里可选隧道协议「HTTP/2（推荐，兼容性更好，中国大陆建议使用）」/「QUIC（备用）」（<code>tunnelProtocol</code>，关键决定 32）；页面上的地址列表（<code>PublicAddresses.vue</code>、总览公网小卡）按 <code>publicAddresses</code> 同样的规则取：临时模式只用 <code>tunnel.quickHost</code>；文案都在 <code>i18n/zh-CN.ts</code></span><span class="when">2026-10-03</span></li>
+    <li class="task" data-done="true"><span class="t">卸载与清理核对：临时模式不留 token、证书、配置；停止 / 关闭公网访问 / 退出后无 cloudflared 残留；README 和 <code>docs/windows-desktop.md</code> 的卸载说明写明 <code>data/runtime/cloudflared/</code> 随数据目录删除。真机冒烟（下载或复用 cloudflared、起真实临时隧道、非流式和流式各一次、停止后确认进程已退出）开始前先告诉用户</span><span class="when">2026-10-03</span></li>
   </ul>
   <div class="accept"><h3>验收标准</h3>
     <ul>
@@ -639,6 +663,135 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
     </ul>
   </div>
   <div class="note"><b>阶段关口 7</b>：7-2 完成后停下，等用户试用确认。不自动发版。</div>
+</section>
+
+<section id="s8" class="stage">
+  <div class="stage-head"><h2>阶段 8 · 运行库、设备与用量</h2><div class="stage-meta"><span class="count"></span><div class="bar"><i></i></div></div></div>
+  <div class="stage-goal">用户要求（2026-10-03，关键决定 34–40）：llama.cpp 版本可手动添加 / 删除并按模型选择；全局默认分 GPU / CPU 两份并带本机检测；启动方式可选设备；新增 30 天用量日志；模型页加「添加目录」按钮；Mac 单独处理且尽量做全。<b>阶段 7 的关口还没确认，且工作区有未提交的首次使用引导改动：开始 8-1 前先问用户是否进入阶段 8。</b></div>
+  <div class="note"><b>用户已确认（2026-10-03）</b>：多 CPU 指多路 CPU，很少见，按检测结果来；暂不考虑 AMD / Intel；Mac 套壳 / DMG 另开工作包，不在本阶段一次做完。<b>也已确认</b>：「git 地址」按 Release 下载理解（源码编译不做）；目录添加复制进 <code>data/runtime/</code>；用量日志做汇总统计；Mac 源码版启动脚本 <code>start.command</code> 放进 8-6。8-1 开始前只剩两件事：阶段 7 的关口、工作区未提交改动的处理。</div>
+
+  <h3>8-1 · 运行库登记、添加、删除与按模型选择（Opus 5.5）</h3>
+  <ul class="tasks">
+    <li class="task" data-done="false"><span class="t">登记与平台隔离（决定 34）：<code>data/runtimes.json</code>（版本字段、原子写 + 备份）；条目带 <code>os</code> / <code>arch</code> / <code>accel</code> / <code>tag</code>；列表与解析只暴露本机平台的版本；按文件头（PE / Mach-O / ELF + 架构）校验，Mac 上拒绝 Windows 版本，Windows 上拒绝 Mac 版本</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">添加三种来源：本机目录（复制，核对含 llama-server 与同目录依赖库、路径与链接边界、大小上限）、本机压缩包（复用 <code>archive.ts</code> 检查）、GitHub 仓库 / Release 地址（只允许 <code>https://github.com/</code>，API 取 Release，按本机 <code>os-arch</code> 选资产，SHA-256 摘要校验；无摘要时显示算出的值并要求确认）。先 <code>preview</code>（来源、大小、版本号 <code>llama-server --version</code>、类型）再确认；运行 <code>--version</code> 要限时。失败不留半成品（先下载到临时目录再改名）</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">删除与保护（决定 35）：每个通道最新的官方版本、正在运行 / 启动中的版本拒绝删除；被模型 / 方案选中的版本列出受影响模型，确认后引用清空；当前版本被删则落到该通道最新官方版；自动清理的保护集加入被选中的版本；手动添加的版本永不自动清理</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">引用与兜底：<code>ModelConfig.runtime</code> / <code>Profile.runtime</code>（引用串，空 = 跟随），<code>launch.ts</code> 按 配置方案 ← 模型 ← 全局 解析；版本不存在 / 属于别的平台 → 兜底到同通道最新官方版，写事件日志，保存的配置不改；通道无官方版才失败。命令预览显示实际使用的版本与是否兜底。无需迁移（缺省 = 跟随）</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">测试：登记读写与损坏恢复、三种来源（假 Release 夹具 / 小 zip / tar.gz）、平台隔离（构造 PE 与 Mach-O 文件头）、删除保护各分支、兜底、残留清理仍只处理 <code>data/runtime/</code> 下的进程（包括 <code>custom/</code>）</span><span class="when"></span></li>
+  </ul>
+
+  <h3>8-2 · 本机检测与全局 GPU / CPU 默认（Opus 5.5）</h3>
+  <ul class="tasks">
+    <li class="task" data-done="false"><span class="t">本机检测模块（决定 37）：Windows 的 nvidia-smi 驱动 / 最高 CUDA / 算力 / 显存，CPU 型号、核心、指令集、内存、NUMA；先查官方文档定出「驱动 ↔ CUDA 运行库」「算力下限」对照并写进代码注释与测试；带超时，失败返回 unknown，不猜；<code>GET /api/system</code> 返回结果与推荐 / 警告</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">CUDA 运行库自动选取：不超过驱动能力的最高版本（<code>cudaRuntime</code> 手填保留为覆盖）；资产里没有可用版本时给明确原因，不静默降级</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">settings v6（决定 36）：<code>defaultsCpu</code>、<code>llamacpp.currentCpu</code>；迁移只补缺省，旧配置行为不变；参数合并按「最终选中运行库的类型」取 <code>defaults</code> 或 <code>defaultsCpu</code>；CPU 通道的下载 / 自动更新（用户第一次下载后才更新）</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">Mac 检测（决定 38）：芯片 / 型号、性能 / 能效核心、统一内存、macOS 版本；<b>返回结构里没有 GPU 字段</b>；内存警告用「模型 + 上下文占内存比例」表述，不出现 GPU / 显存字样；测试用构造的 <code>sysctl</code> 输出</span><span class="when"></span></li>
+  </ul>
+
+  <h3>8-3 · 设备选择（Opus 5.5）</h3>
+  <ul class="tasks">
+    <li class="task" data-done="false"><span class="t">设备列表（决定 39）：解析所选运行库的 <code>--list-devices</code>（先在真实 llama-server 上核对输出格式与 <code>--device</code> / <code>--split-mode</code> / <code>--main-gpu</code> / <code>--numa</code> / <code>--cpu-mask</code> 的实际行为，再写代码；占 GPU 的核对前先告诉用户），按运行库缓存，失败回落 nvidia-smi 序号；<code>GET /api/devices</code>；Mac 一律返回不适用</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t"><code>device</code> 字段（配置方案 ← 模型 ← 全局）→ 启动参数：自动 / 单个 GPU / CPU；只传一个设备；额外参数里的多设备或 <code>--tensor-split</code> 给警告；设备不存在加载失败并给中文原因；Mac 上忽略并拒绝保存该字段；命令预览显示设备</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">CPU 进阶项（线程、<code>--numa</code>、<code>--cpu-mask</code>）：检测到多 NUMA 节点或展开「高级」才出现；假进程测试覆盖参数拼装；多路机器真机效果如实标注未验证</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">用真实 llama-server 各验证一次：指定 GPU 0 / 指定 CPU 启动，进程只用所选设备（nvidia-smi 看显存落点），结果写进交接；机器只有一张卡时多卡路径只做假进程测试并说明</span><span class="when"></span></li>
+  </ul>
+
+  <h3>审查（gpt-6.1sol 或用户指定的模型）</h3>
+  <ul class="tasks">
+    <li class="task" data-done="false"><span class="t">8-1 至 8-3 完成后做一轮交叉审查：外部二进制 / 压缩包的信任边界与路径校验、删除保护与兜底的状态一致性（运行中删除、并发更新）、平台隔离是否可被绕过、迁移、参数拼装不允许覆盖 <code>--host</code> / <code>--port</code></span><span class="when"></span></li>
+  </ul>
+
+  <h3>8-4 · 用量日志（Sonnet 5.5）</h3>
+  <ul class="tasks">
+    <li class="task" data-done="false"><span class="t">用量存储（决定 40）：请求结束时累加到「小时 × 模型 × 方案 × 来源 × key 名」，内存累加、定时原子写 <code>data/logs/usage/YYYY-MM-DD.json</code>，退出时落盘；不含对话内容与参数</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">保留与清理：<code>logs.usageKeepDays</code>（7 / 14 / 30，上限 30），启动时和每日清理，只删 <code>data/logs/usage/</code> 下符合命名且超期的文件；损坏文件跳过不中断</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t"><code>GET /api/usage</code>（范围 + 分组 + CSV）和日志页「用量」标签：每日 token 柱图、按模型 / 来源 / key 汇总表、导出 CSV；文案进 <code>i18n/zh-CN.ts</code>；测试覆盖聚合、跨日、清理边界、崩溃后读取半写文件</span><span class="when"></span></li>
+  </ul>
+
+  <h3>8-5 · 运行库、设备与检测界面（Sonnet 5.5）</h3>
+  <ul class="tasks">
+    <li class="task" data-done="false"><span class="t">设置页 llama.cpp：版本列表按通道分组，「添加版本」对话框三个来源（选择目录 / 选择压缩包 / 粘贴 GitHub 地址）+ 预览确认；删除确认（列出受影响的模型；最新官方版的删除按钮禁用并说明）；兜底提示条</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">设置页「本机」卡片（检测、推荐、警告）；Windows 上全局默认的 GPU / CPU 切换（两份参数表单，沿用现有 <code>SettingsDefaults</code> 样式）；Mac 上这些全部不渲染</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">编辑抽屉：模型级与配置方案级「llama.cpp 版本」下拉（跟随全局 / 具体版本，只列本机平台的）、「设备」下拉（单选，GPU 旁显示显存；Mac 不显示）、CPU 高级折叠区；命令预览同步</span><span class="when"></span></li>
+  </ul>
+
+  <h3>8-6 · 模型页添加目录与 Mac 收尾（Sonnet 5.5）</h3>
+  <ul class="tasks">
+    <li class="task" data-done="false"><span class="t">模型页顶部「添加目录」按钮：调 <code>usePickFolder</code> 选目录 → 加入 <code>modelDirs</code> 并立即扫描 → 滚动到「扫描发现」；空状态也有同一按钮；重复目录 / 已包含的子目录给提示；不改向导流程</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">Mac 专项收尾（见下）：新增源码版启动脚本 <code>start.command</code>（对应 <code>start.bat</code>，README 写明用法）、<code>osascript</code> 选目录、扫描跳过 <code>._*</code> 与 <code>.DS_Store</code>、界面文案全量审计（去掉所有 Mac 上可见的 GPU / 显存 / Metal 字样，包括现有的 <code>macHint</code>、<code>runtimeHint</code>）、macOS CI 作业</span><span class="when"></span></li>
+  </ul>
+
+  <h3>Mac 专项（决定 38，贯穿 8-1 至 8-6）</h3>
+  <ul class="tasks">
+    <li class="task" data-done="false"><span class="t">运行库：Mac 官方资产是 tar.gz（<code>macos-arm64</code> / <code>macos-x64</code>，无 cudart）；手动添加时设置可执行位、清除 <code>com.apple.quarantine</code>、检查同目录 dylib 与签名（arm64 无签名二进制会被系统拒绝，必要时 ad-hoc 签名）；开始前确认官方是否仍发布 x64 Mac 资产</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">界面隐藏清单：GPU / 加速类型 / CPU-GPU 默认切换 / 设备选择 / 显存卡片 / 本机检测里的 GPU 部分；总览的「显存」小卡在 Mac 上改成「内存」或隐藏（8-6 定，不出现 GPU 字样）</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">平台判断集中到一个 composable / 一个服务端函数（<code>showGpu</code>、<code>showDevices</code>），测试覆盖 darwin 下接口不返回 GPU 字段</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">macOS CI：GitHub Actions macOS runner 跑 <code>bun test</code>、typecheck、假 llama-server 加载 / 兜底 / 平台隔离，并下载真实 macOS 版 llama.cpp 做 <code>--version</code> 冒烟（能小模型加载则加上）；结果如实区分「runner 验证」和「未验证」</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">遗漏项审计（已发现，8-6 前确认归属）：Mac 源码版没有启动脚本（<code>start.bat</code> 只有 Windows）：<b>8-6 新增 <code>start.command</code></b>；应用内更新与安装包只有 Windows（NSIS），<b>Mac 套壳 / DMG / 发包另开工作包（用户 2026-10-03 确认），按 AGENTS.md 仍须用户另行启动，本阶段不做</b>；<code>sharp</code> 需在 Mac 上原生安装；exFAT 外置盘会产生 <code>._*</code> 文件，扫描要跳过；Mac 路径 / <code>~</code> 展开与粘贴路径校验；README / 卸载说明的 Mac 路径；<code>docs/platform-foundation.md</code> 里「不宣称 Mac 已支持」的措辞在验证后更新</span><span class="when"></span></li>
+  </ul>
+
+  <div class="accept"><h3>验收标准</h3>
+    <ul>
+      <li>可从目录、压缩包、GitHub 地址添加版本并在配置方案里选用；Mac 上看不到、选不了、添不进 Windows 版本，反之亦然。</li>
+      <li>最新官方版删不掉；被删 / 缺失的引用启动时兜底到最新官方版并有提示，保存的配置不变。</li>
+      <li>Windows 上 GPU / CPU 默认可切换，检测给出 CUDA 驱动与 CPU 指令集的推荐 / 警告；Mac 上界面任何位置都没有 GPU 相关内容。</li>
+      <li>指定设备后真实进程只用所选设备；用量日志按日聚合，超过 30 天的文件自动清理，不含对话内容。</li>
+      <li>模型页「添加目录」可用；旧配置升级后行为不变；<code>bun test</code> 与 typecheck 通过；macOS CI 通过。</li>
+    </ul>
+  </div>
+  <div class="note"><b>阶段关口 8</b>：8-6 完成后停下，等用户试用（含 Mac 真机，如有）。涉及真实 GPU 的验证开始前先告诉用户；不自动发版。</div>
+</section>
+
+<section id="s9" class="stage">
+  <div class="stage-head"><h2>阶段 9 · 多模型并行与显存保护</h2><div class="stage-meta"><span class="count"></span><div class="bar"><i></i></div></div></div>
+  <div class="stage-goal">用户要求（2026-10-03，关键决定 41–44）：放开单开限制；多开要做显存检测并提示风险；保存模型设置时按多方面检查；外部请求触发的多开也要拦住。<b>依赖阶段 8 的设备选择（8-3）；这会改核心行为规则（决定 9、状态机、请求路由），9-3 开始前先让用户确认规则文字。</b></div>
+  <div class="note"><b>用户已确认</b>：多开由设置开关控制（默认关）；请求放不下时用户二选一「卸载上一个 / 服务端报错」（决定 42）。<b>仍待确认</b>：上限范围 1–4 是否够用；「放不下」时界面是否完全不提供强行启动（推荐不提供）。</div>
+
+  <h3>9-1 · 显存 / 内存预估核心（Opus 5.5）</h3>
+  <ul class="tasks">
+    <li class="task" data-done="false"><span class="t">先在真实 llama-server 上核对：<code>--fit</code> / <code>llama-fit-params</code> 的行为、<code>--parallel</code> 对 KV 总量的影响、各 K / V 缓存类型的字节数、flash-attn 对计算缓冲的影响；用 3 个不同架构的真实 GGUF（稠密、含滑动窗口 / 混合层、带 mmproj）对比预估与 nvidia-smi 实测，记录误差；占 GPU 的核对开始前先告诉用户</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">预估纯函数（决定 43）：权重 / KV / 计算缓冲 / mmproj / 草稿 / 设备固定开销 / 系统内存，输出明细与三档；读取 GGUF 元数据补充层数、KV 头数、每头维度、滑动窗口等字段（<code>gguf.ts</code> 扩展，保持向后兼容）；测试覆盖各量化类型、分片、部分卸载、CPU 设备、无 GPU</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">实测记录 <code>data/vram-stats.json</code>（版本字段、原子写、只存数字）：加载成功后记录设备显存增量；预估优先用实测；偏差过大写事件；<b>Windows WDDM 下 nvidia-smi 可能取不到单进程显存，用加载前后设备已用量之差，且仅在没有别的加载同时进行时记录</b></span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">Mac / CPU：用可用内存（<code>vm_stat</code> / <code>os.freemem</code> 口径要核对，含可回收缓存）代替显存；返回结构不带 GPU 字样；测试用构造数据</span><span class="when"></span></li>
+  </ul>
+
+  <h3>9-2 · 保存时检查与参数合理性（Sonnet 5.5）</h3>
+  <ul class="tasks">
+    <li class="task" data-done="false"><span class="t"><code>POST /api/models/:id/check</code>（不保存，只算）与保存接口里的同一检查：返回显存三档 + 明细 + 参数合理性警告列表（决定 43 列出的各项）；仅在真实 llama-server 证实必然启动失败的组合才作为错误拒绝保存</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">合并参数时按「最终选中的运行库 / 设备」计算（接阶段 8 的引用与设备解析）；别的在线模型占用取实测；检查结果不写入配置</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">测试：每条合理性规则正反各一例；显存三档边界（85% / 100%）；设备不存在；多方案分别计算；旧配置（无 device / runtime）照常</span><span class="when"></span></li>
+  </ul>
+
+  <h3>9-3 · 调度支持多开（Opus 5.5）</h3>
+  <ul class="tasks">
+    <li class="task" data-done="false"><span class="t"><b>开始前：把决定 41 / 42 的规则文字给用户确认，再同步「核心行为规则」和决定 9。</b></span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">调度：<code>scheduler.multiLoad</code> 开关（默认关，关时 <code>maxLoaded</code> 钳制为 1，行为与旧版一致）、开后 <code>maxLoaded</code> 1–4；每个在线模型独立状态；加载串行；达到上限或放不下时按 <code>onNoRoom</code> 处理（卸载上一个沿用 draining 流程 / 报错）；同一模型的多个等待请求仍共享一次加载；迁移只补缺省字段（settings 版本升级）</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">加载前检查（决定 42）：用实时可用量 + 预估；<b>请求触发（本机 / 局域网 / 公网）</b>放不下：<code>onNoRoom = error</code> 或卸载后仍放不下 → 返回 503 <code>insufficient_memory</code>，不加载、不影响在线模型，写事件与请求记录（不含对话内容）；手动启动走 9-4 的确认流程，接口返回「有风险」让界面确认后带确认标记再启动</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">失败识别：<code>errors.ts</code> 识别 CUDA / Metal 显存不足日志并给出针对性提示（降低上下文 / 层数 / 换设备 / 停其他模型）；多进程残留清理、停止全部、退出时结束所有子进程树的行为回归；端口分配并发安全</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">底线（决定 44）：系统内存余量检查；预估发现 <code>mlock</code> 超过可用内存时加载不带该参数并在命令预览里标出；运行期看门狗（设备可用显存 / 系统可用内存低于危险线 → 先停最新加载且无在途请求的模型，再停最久未用的空闲模型，只处理自己登记的子进程）；检测不到时按「未知」处理，不当作放得下；下载前检查磁盘空间</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">测试（假 llama-server + 注入的显存采样）：看门狗触发与恢复、内存余量边界、检测失败按未知、多设备并存、同设备放得下 / 放不下、请求触发被拦、空闲卸载腾地方、在途请求保护、加载串行、崩溃一个不影响另一个、单开配置（默认）行为与旧版完全一致</span><span class="when"></span></li>
+  </ul>
+
+  <h3>审查（gpt-6.1sol 或用户指定的模型）</h3>
+  <ul class="tasks">
+    <li class="task" data-done="false"><span class="t">9-1 至 9-3 完成后做一轮交叉审查：多进程生命周期与残留清理、并发加载 / 卸载竞态、公网请求能否绕过显存拦截、预估偏低时的失败路径、状态机与 <code>/v1</code> 路由是否仍满足「没有 model 字段时用哪个模型」的规则</span><span class="when"></span></li>
+  </ul>
+
+  <h3>9-4 · 界面（Sonnet 5.5）</h3>
+  <ul class="tasks">
+    <li class="task" data-done="false"><span class="t">编辑抽屉：实时「显存预估」条 + 明细（Mac / 纯 CPU 显示「内存预估」，Mac 无 GPU 字样）；保存时有风险 / 放不下的确认对话框；参数合理性警告列表</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">设置页：「允许多个模型同时在线」开关、在线上限（1–4）、「放不下时」二选一（卸载上一个 / 服务端报错）及说明；总览 / 侧栏「正在服务」显示全部在线模型（各自状态、速度、占用）；设备显存卡片在多 GPU 时按卡显示，并标出每张卡上的在线模型</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">模型页：行内显示预估占用与风险档；手动启动有风险时的确认框（可「仍然启动」）；放不下时的提示（可「先停止其他模型」）；请求被拦的事件在日志里可读</span><span class="when"></span></li>
+  </ul>
+
+  <div class="accept"><h3>验收标准</h3>
+    <ul>
+      <li>默认配置（上限 1）行为与阶段 8 完全一致；调高后不同设备上的模型可同时在线并各自服务请求。</li>
+      <li>预估与真实加载的误差有记录；保存时能指出「显存放不下 / 有风险」和不合理参数组合；Mac 与纯 CPU 上没有任何 GPU / 显存字样。</li>
+      <li>放不下时，界面手动启动被拦或需确认；本机 / 局域网 / 公网请求触发的加载放不下时返回 503，不加载、不影响已在线模型；有在途请求的模型不被卸载。</li>
+      <li><code>bun test</code> 与 typecheck 通过；真机验证（两个模型并存、人为制造放不下）如实记录，没条件验证的部分（多卡、Mac）明确标注。</li>
+    </ul>
+  </div>
+  <div class="note"><b>阶段关口 9</b>：9-4 完成后停下，等用户试用。真机验证会实际占用 GPU，开始前先告诉用户；不自动发版。</div>
 </section>
 
 <section id="verify">
@@ -658,14 +811,16 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
   <table>
     <tr><th>坑位</th><th>预留方式</th></tr>
     <tr><td><span class="tag slot">后端</span></td><td>vLLM 等其他后端：<code>backend</code> 字段 + <code>server/core/backends/</code> 模板接口</td></tr>
-    <tr><td><span class="tag slot">调度</span></td><td>在线上限 X 可修改：<code>scheduler.maxLoaded</code> 已存在，界面只读</td></tr>
+    <tr><td><span class="tag slot">调度</span></td><td>在线上限 X 可修改：<code>scheduler.maxLoaded</code> 已存在，界面只读；<b>阶段 9 放开</b>（决定 41）</td></tr>
     <tr><td><span class="tag slot">调度</span></td><td>常驻模型、空闲自动卸载：<code>reserved.pinned</code> / <code>reserved.idleUnloadMin</code></td></tr>
-    <tr><td><span class="tag slot">调度</span></td><td>按显存判断能否共存：<code>gpu.ts</code> 采样数据已有</td></tr>
+    <tr><td><span class="tag slot">调度</span></td><td>按显存判断能否共存：<b>阶段 9 实现</b>（决定 42、43）；常驻 / 空闲自动卸载仍是坑位</td></tr>
     <tr><td><span class="tag slot">公网</span></td><td>按 key 禁止触发切换：<code>apiKeys[].allowSwitch</code></td></tr>
     <tr><td><span class="tag slot">界面</span></td><td>英文界面：新增 <code>i18n/en.ts</code></td></tr>
     <tr><td><span class="tag slot">运行</span></td><td>开机自启服务：加一个注册脚本即可，架构不变</td></tr>
     <tr><td><span class="tag slot">安全</span></td><td>源码版数据目录可用 <code>LLAMA_WEB_DATA</code> 挪到项目外；阶段 5 桌面版默认使用用户数据目录</td></tr>
     <tr><td><span class="tag slot">桌面</span></td><td>Mac 套壳与 DMG、后台静默自动安装 / 签名增量更新（Tauri updater）、系统托盘、Universal 包、Windows ARM：本阶段不实施；Mac 后续须用户另行启动。应用内检查 / 提示 / 下载校验后安装已在 5-3 实现（关键决定 29）</td></tr>
+    <tr><td><span class="tag slot">运行库</span></td><td>从源码编译 llama.cpp（git 仓库 + 编译器 / CMake / CUDA 工具链）、Vulkan / HIP / SYCL 等其他 GPU 后端：阶段 8 不做（决定 34、37）</td></tr>
+    <tr><td><span class="tag slot">设备</span></td><td>多卡并行切分（<code>--tensor-split</code>）：决定 39 要求一个模型只跑在一个设备上，只给警告不提供表单</td></tr>
   </table>
 </section>
 
@@ -695,6 +850,10 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 <section id="changelog">
   <h2>变更记录</h2>
   <table>
+    <tr><td>2026-10-03</td><td>新增阶段 9「多模型并行与显存保护」（仅规划）和关键决定 41–44：用户要求放开单开限制（升级后默认仍为 1）、多开前做显存检测并提示风险、保存模型设置时按权重 / KV / 计算缓冲 / mmproj / 草稿 / 系统内存等多方面检查、外部请求触发的多开放不下时要拦住（503）。决定 9 标注由阶段 9 放开；这会改核心行为规则，9-3 开始前须用户确认规则文字。阶段 9 依赖阶段 8 的设备选择</td></tr>
+    <tr><td>2026-10-03</td><td>新增阶段 8「运行库、设备与用量」（仅规划，未改代码）和关键决定 34–40：手动添加 / 删除 llama.cpp 版本（目录、压缩包、GitHub 地址；平台隔离；最新官方版不可删）、模型 / 配置方案选版本、全局默认 GPU / CPU 两份、本机检测（CUDA 驱动 / 算力、CPU 指令集 / 内存）、设备选择（单设备）、用量日志（30 天）、模型页添加目录、Mac 专项。关键决定 14「只用官方最新版」放宽。待用户确认的问题见阶段 8 开头</td></tr>
+    <tr><td>2026-10-03</td><td>用户要求审查首次使用全流程并补引导（关键决定 33）：向导重写（选择文件夹 / 粘贴路径，不做拖拽，原因见决定）、从扫描启用的模型第一次启动时弹确认框（思考 / 视觉 / MTP 倍数）。向导里去掉旧配置导入。新增 <code>confirmed</code> 字段（无需迁移：缺省视为已确认）</td></tr>
+    <tr><td>2026-10-03</td><td>工作包 7-2：向导第三项「没有域名，用临时地址」（只在首次设置里出现，直接到「连接」，连接时写入 <code>tunnelMode: 'quick'</code>）、总览显示方式、「高级」里切换隧道方式并选协议、临时模式隐藏「再加一个地址」和隧道 token、地址列表统一走 <code>publicAddresses</code>（拆到 <code>server/core/public-addresses.ts</code>，页面共用）、README 与 windows-desktop 卸载说明。真机冒烟通过（临时数据目录，真实 cloudflared + 假 llama-server 经 llama-web 公网入口，见交接）。无决定变化</td></tr>
     <tr><td>2026-10-03</td><td>工作包 7-1（用户直接发起，视为同意进入阶段 7）：<code>tunnelMode</code>、settings v5 迁移、<code>TunnelManager</code> 临时模式、地址与自检过滤。实测后修改关键决定 31：临时隧道改为带 <code>--config</code> 指向 <code>data/runtime/cloudflared/</code> 下的空配置（本机的 <code>~/.cloudflared/config.yml</code> 会让流量 404）；真实 llama-server 流式复测通过。用户在会话中追加隧道协议选项（HTTP/2 默认、QUIC 备用），新增关键决定 32 和 7-1 一项（已完成）、7-2 补充协议界面</td></tr>
     <tr><td>2026-10-03</td><td>新增阶段 7「免域名临时隧道」（7-1、审查、7-2）和关键决定 31：用户要求公网向导为没有域名的人提供 Cloudflare 临时隧道，cloudflared 尽量本地解决（有则复制、无则下载），卸载时清理干净。查到的限制：临时隧道边缘缓冲 SSE、200 并发上限、无 SLA，已写入决定并要求 7-1 实测。各包推荐模型：7-1 Opus 5.5、审查 gpt-6.1sol、7-2 Sonnet 5.5。随后做了评估性实测：POST 流式正常、GET 被缓冲，确定值得做，限制说明已按实测改写。只改了文档，没有改代码，没有跑测试</td></tr>
     <tr><th>日期</th><th>内容</th></tr>

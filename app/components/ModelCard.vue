@@ -18,8 +18,11 @@ const missing = computed(() => props.model.missing)
 const failed = computed(() => state.value === 'failed' || state.value === 'crashed')
 const winding = computed(() => state.value === 'draining' || state.value === 'unloading')
 const editing = ref(false)
+const firstStart = ref(false)
 const quant = computed(() => quantFromFile(props.model.files.model))
 const progress = computed(() => shown.value?.progress ?? null)
+// A model enabled from a scan asks its first-start questions before the first load.
+const onStart = () => (props.model.needsSetup ? (firstStart.value = true) : start(props.model.id))
 const working = computed(() => !!(busy.value[`start:${props.model.id}`] || busy.value[`stop:${props.model.id}`] || busy.value[`retry:${props.model.id}`]))
 </script>
 
@@ -66,7 +69,7 @@ const working = computed(() => !!(busy.value[`start:${props.model.id}`] || busy.
           class="min-w-[76px] justify-center"
           :disabled="missing.length > 0"
           :loading="working"
-          @click="start(model.id)"
+          @click="onStart"
         >
           {{ t.models.card.start }}
         </UButton>
@@ -128,5 +131,6 @@ const working = computed(() => !!(busy.value[`start:${props.model.id}`] || busy.
       </p>
     </div>
     <ModelEditor v-model:open="editing" :model-id="model.id" />
+    <FirstStartDialog v-if="model.needsSetup" v-model:open="firstStart" :model-id="model.id" :name="model.name" />
   </div>
 </template>

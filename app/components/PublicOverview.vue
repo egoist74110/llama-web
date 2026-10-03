@@ -6,7 +6,8 @@ import t from '~~/i18n/zh-CN'
 const emit = defineEmits<{ start: [mode: 'setup' | 'add'] }>()
 const p = t.publicAccess
 const o = p.overview
-const { save, saving } = useSettings()
+const { doc, save, saving } = useSettings()
+const quick = computed(() => doc.value?.public.tunnelMode === 'quick')
 const toast = useToast()
 const closeOpen = ref(false)
 
@@ -24,6 +25,11 @@ async function close() {
       <h3 class="text-sm font-medium text-default">
         {{ o.status }}
       </h3>
+      <p class="flex flex-wrap items-baseline gap-x-2 text-sm">
+        <span class="w-16 shrink-0 text-muted">{{ o.mode }}</span>
+        <span class="text-default">{{ quick ? o.modeQuick : o.modeOwn }}</span>
+        <span v-if="quick" class="text-xs text-muted">{{ p.quickLimits.items[0] }}</span>
+      </p>
       <PublicStatus />
     </section>
 
@@ -52,7 +58,7 @@ async function close() {
     </section>
 
     <div class="flex flex-wrap gap-2 border-t border-default pt-4">
-      <UButton size="sm" color="neutral" variant="outline" icon="i-lucide-plus" @click="emit('start', 'add')">
+      <UButton v-if="!quick" size="sm" color="neutral" variant="outline" icon="i-lucide-plus" @click="emit('start', 'add')">
         {{ o.add }}
       </UButton>
       <UButton size="sm" color="neutral" variant="outline" icon="i-lucide-route" @click="emit('start', 'setup')">
