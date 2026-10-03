@@ -17,6 +17,7 @@ export type FailureKind =
   | 'unsupported-arch' // llama.cpp does not know the model architecture
   | 'bad-model' // the model file is broken / not a GGUF
   | 'port-in-use'
+  | 'device-missing' // the chosen device is not on the build's device list (also found before the process starts)
   // From the cause
   | 'no-port' | 'spawn-failed' | 'register-failed' | 'exited' | 'timeout' | 'aborted' | 'crashed'
   | 'model-missing' | 'profile-missing' | 'no-runtime' | 'bad-args' | 'unknown'
@@ -35,6 +36,8 @@ const OUTPUT_RULES: Array<[FailureKind, RegExp]> = [
   // "out of memory" alone also appears in harmless text: it needs a GPU / allocator word on the same line.
   ['oom', /(?:cuda|cublas|vulkan|hip|metal|ggml|alloc|device)\w*[^\n]*out of memory|out of memory[^\n]*(?:cuda|vulkan|device)|cudaMalloc failed|failed to allocate (?:CUDA|Vulkan|\S+ )?(?:buffer|memory)|unable to allocate .*buffer|ggml_backend_\w*alloc_buffer: allocating .* failed|failed to allocate .*compute buffer|CUDA_ERROR_OUT_OF_MEMORY|ErrorOutOfDeviceMemory|std::bad_alloc|not enough memory/i],
   ['port-in-use', /couldn't bind HTTP server socket|address already in use|only one usage of each socket address/i],
+  // llama-server: `error while handling argument "--device": invalid device: CUDA7` (checked on b11146); before unknown-arg, which would also match.
+  ['device-missing', /invalid device: \S+/i],
   ['unknown-arg', /error: invalid argument|invalid argument:|unknown argument|error while handling argument|unrecognized (?:option|argument)/i],
   ['mmproj-mismatch', /mmproj.*(?:mismatch|incompatible|not compatible|does not match|failed)|(?:failed to load|unable to load) (?:mmproj|multimodal|vision)|clip_init: failed|clip_model_load: .*(?:failed|error)|unknown projector type|mtmd_init_from_file: error/i],
   ['unsupported-arch', /unknown model architecture|unsupported (?:model )?architecture/i],
@@ -71,7 +74,7 @@ export function classify(code: string, exitCode: number | null, tail: readonly s
 const CODE_KINDS: Record<string, true> = {
   'no-port': true, 'spawn-failed': true, 'register-failed': true, 'exited': true, 'timeout': true,
   'aborted': true, 'crashed': true, 'model-missing': true, 'profile-missing': true,
-  'file-missing': true, 'no-runtime': true, 'bad-args': true, 'unknown': true,
+  'file-missing': true, 'no-runtime': true, 'bad-args': true, 'device-missing': true, 'unknown': true,
 }
 
 /** Absolute paths in an output line -> `<dir>/file`: the card is readable from the LAN, local folders should not be. */

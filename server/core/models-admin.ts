@@ -2,7 +2,7 @@
 // active profile, checking that configured files still exist. Pure module (no Nitro).
 import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { ArgsSyntaxError, PARAM_DEFS, splitArgs, type ParamOverrides, type ParamValue } from './args'
+import { ArgsSyntaxError, normalizeDevice, PARAM_DEFS, paramValueOk, splitArgs, type ParamOverrides, type ParamValue } from './args'
 import type { ModelConfig, ModelsDoc, Profile } from './config'
 import { aliasOf } from './importer'
 import { parseRuntimeRef } from './runtimes'
@@ -24,7 +24,7 @@ export class EnableError extends Error {
 
 export type ProfileErrorCode =
   | 'model-not-found' | 'profile-not-found' | 'profile-exists' | 'name-invalid' | 'last-profile'
-  | 'bad-overrides' | 'bad-extra-args' | 'template-not-found' | 'in-use' | 'bad-setup' | 'runtime-invalid'
+  | 'bad-overrides' | 'bad-extra-args' | 'template-not-found' | 'in-use' | 'bad-setup' | 'runtime-invalid' | 'device-invalid'
 
 export class ProfileError extends Error {
   constructor(public code: ProfileErrorCode, message: string = code, public detail?: string) {
@@ -247,6 +247,7 @@ export function sanitizeOverrides(raw: unknown): ParamOverrides {
     else if (typeof v === 'number' && Number.isFinite(v)) out[d.key] = v
     else if (typeof v === 'string' && v.length <= 200 && !/[\r\n]/.test(v)) out[d.key] = v.trim()
     else throw new ProfileError('bad-overrides', 'bad-overrides', d.key)
+    if (!paramValueOk(d.key, out[d.key]!)) throw new ProfileError('bad-overrides', 'bad-overrides', d.key)
   }
   return out as ParamOverrides
 }
@@ -257,6 +258,15 @@ export interface ProfileForm {
   chatTemplate: string | null
   /** llama.cpp build reference; undefined = leave the saved choice, null = follow the model / global version. */
   runtime?: string | null
+  /** Device: undefined = leave the saved choice, null = follow the model / global default. */
+  device?: string | null
+}
+
+/** A device choice from the client: empty / null clears it; one valid value (`auto`, `cpu`, `CUDA0`) is kept. */
+export function sanitizeDevice(raw: unknown): string | null {
+  const v = normalizeDevice(raw)
+  if (v === null) throw new ProfileError('device-invalid')
+  return v || null
 }
 
 /** A runtime reference from the client: empty / null clears it; anything else must look like one (`cuda:b123`, `custom:<id>`). */
@@ -277,11 +287,12 @@ export function sanitizeForm(raw: unknown): ProfileForm {
   return {
     overrides: sanitizeOverrides(r.overrides), extraArgs, chatTemplate,
     ...(r.runtime === undefined ? {} : { runtime: sanitizeRuntimeRef(r.runtime) }),
+    ...(r.device === undefined ? {} : { device: sanitizeDevice(r.device) }),
   }
 }
 
 /** Save the form into a profile. Extra args must parse and the template must exist. */
-export function saveProfile(doc: ModelsDoc, modelId: string, name: string, form: ProfileForm, templates: string[], runtimeOk?: (ref: string) => boolean): Profile {
+export function saveProfile(doc: ModelsDoc, modelId: string, name: string, form: ProfileForm, templates: string[], runtimeOk?: (ref: string) => boolean, deviceOk?: (device: string) => boolean): Profile {
   const model = findModel(doc, modelId)
   if (!Object.hasOwn(model.profiles, name)) throw new ProfileError('profile-not-found')
   try {
@@ -294,6 +305,7 @@ export function saveProfile(doc: ModelsDoc, modelId: string, name: string, form:
     throw new ProfileError('template-not-found', 'template-not-found', form.chatTemplate)
   }
   if (form.runtime && runtimeOk && !runtimeOk(form.runtime)) throw new ProfileError('runtime-invalid')
+  if (form.device && deviceOk && !deviceOk(form.device)) throw new ProfileError('device-invalid')
   const profile = model.profiles[name]!
   // Other fields (per-profile preprocess overrides) are kept.
   profile.overrides = form.overrides
@@ -302,6 +314,10 @@ export function saveProfile(doc: ModelsDoc, modelId: string, name: string, form:
   if (form.runtime !== undefined) {
     if (form.runtime) profile.runtime = form.runtime
     else delete profile.runtime
+  }
+  if (form.device !== undefined) {
+    if (form.device) profile.device = form.device
+    else delete profile.device
   }
   return profile
 }
@@ -312,6 +328,14 @@ export function setModelRuntime(doc: ModelsDoc, modelId: string, ref: string | n
   if (ref && runtimeOk && !runtimeOk(ref)) throw new ProfileError('runtime-invalid')
   if (ref) model.runtime = ref
   else delete model.runtime
+}
+
+/** The model's own device (profiles can still choose their own); null follows the global default. */
+export function setModelDevice(doc: ModelsDoc, modelId: string, device: string | null, deviceOk?: (device: string) => boolean): void {
+  const model = findModel(doc, modelId)
+  if (device && deviceOk && !deviceOk(device)) throw new ProfileError('device-invalid')
+  if (device) model.device = device
+  else delete model.device
 }
 
 /** New profile: empty, or a copy of `from`. Returns the (trimmed) name. */

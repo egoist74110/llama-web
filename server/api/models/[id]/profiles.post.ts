@@ -9,6 +9,7 @@
 import {
   createProfile, deleteProfile, listTemplates, ProfileError, renameProfile, sanitizeForm, saveProfile,
 } from '../../../core/models-admin'
+import { hasDeviceSelection } from '../../../core/config'
 import { t } from '../../../core/i18n'
 import { selectableHere } from '../../../core/runtimes'
 import { getContext } from '../../../service/context'
@@ -50,7 +51,7 @@ export default defineEventHandler(async (event) => {
         const form = sanitizeForm(body.form)
         const templates = listTemplates(ctx.dataDir)
         const env = ctx.runtimes.env()
-        ctx.updateModels((doc) => { saveProfile(doc, model.id, name, form, templates, r => selectableHere(r, env)) })
+        ctx.updateModels((doc) => { saveProfile(doc, model.id, name, form, templates, r => selectableHere(r, env), () => hasDeviceSelection(ctx.platform)) })
         const restarted = body.restart === true && restartIfUp(model.id, name)
         return { ok: true, restarted }
       }

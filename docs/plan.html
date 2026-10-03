@@ -381,7 +381,8 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
     <tr><td><code>/api/import</code></td><td>从旧 <code>swap-config.json</code> 导入</td></tr>
     <tr><td><code>/api/llamacpp/*</code>（阶段 8 扩展）</td><td><code>POST add/preview</code>（<code>{ kind: 'dir' | 'archive' | 'github', path | url }</code>，暂存并运行 <code>--version</code>）→ <code>POST add/confirm</code>（<code>{ stageId, label?, acceptUnverified? }</code>）/ <code>POST add/cancel</code>、<code>GET delete-plan?ref=</code>（受影响模型、是否当前版本）、<code>DELETE /api/llamacpp/:ref?confirm=1</code>（拒绝最新官方版 / 在用版本）；<code>GET</code> 多返回 <code>runtimes</code>，只含与本机平台一致的版本；<code>POST /api/models/:id/runtime</code> 设模型级版本，方案级走 <code>profiles save</code> 的 <code>form.runtime</code>。<code>POST current</code> 的通道参数随 8-2 的 <code>currentCpu</code> 一起做</td></tr>
     <tr><td><code>GET /api/system</code>（阶段 8）</td><td>本机检测结果与推荐 / 警告；Mac 不含任何 GPU 字段</td></tr>
-    <tr><td><code>GET /api/devices</code>（阶段 8）</td><td>某运行库的设备列表；Mac 返回空并标记不适用</td></tr>
+    <tr><td><code>GET /api/devices</code>（阶段 8，8-3 已实现）</td><td>某运行库的设备列表（<code>?runtime=</code> 引用串、<code>?refresh=1</code>）；来源 list-devices / nvidia-smi 序号回落 / unavailable；附 CPU 核心数与是否多路；Mac 返回 <code>{ applicable: false }</code></td></tr>
+    <tr><td><code>POST /api/models/:id/device</code>（阶段 8）</td><td>模型自己的设备 <code>{ device, restart? }</code>；配置方案的设备走 profiles 的 save；Mac 拒绝</td></tr>
     <tr><td><code>GET /api/usage</code>（阶段 8）</td><td>用量汇总（日期范围 + 分组）与 CSV 导出</td></tr>
   </table>
 </section>
@@ -690,10 +691,10 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 
   <h3>8-3 · 设备选择（Opus 5.5）</h3>
   <ul class="tasks">
-    <li class="task" data-done="false"><span class="t">设备列表（决定 39）：解析所选运行库的 <code>--list-devices</code>（先在真实 llama-server 上核对输出格式与 <code>--device</code> / <code>--split-mode</code> / <code>--main-gpu</code> / <code>--numa</code> / <code>--cpu-mask</code> 的实际行为，再写代码；占 GPU 的核对前先告诉用户），按运行库缓存，失败回落 nvidia-smi 序号；<code>GET /api/devices</code>；Mac 一律返回不适用</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t"><code>device</code> 字段（配置方案 ← 模型 ← 全局）→ 启动参数：自动 / 单个 GPU / CPU；只传一个设备；额外参数里的多设备或 <code>--tensor-split</code> 给警告；设备不存在加载失败并给中文原因；Mac 上忽略并拒绝保存该字段；命令预览显示设备</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">CPU 进阶项（线程、<code>--numa</code>、<code>--cpu-mask</code>）：检测到多 NUMA 节点或展开「高级」才出现；假进程测试覆盖参数拼装；多路机器真机效果如实标注未验证</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">用真实 llama-server 各验证一次：指定 GPU 0 / 指定 CPU 启动，进程只用所选设备（nvidia-smi 看显存落点），结果写进交接；机器只有一张卡时多卡路径只做假进程测试并说明</span><span class="when"></span></li>
+    <li class="task" data-done="true"><span class="t">设备列表（决定 39）：解析所选运行库的 <code>--list-devices</code>（先在真实 llama-server 上核对输出格式与 <code>--device</code> / <code>--split-mode</code> / <code>--main-gpu</code> / <code>--numa</code> / <code>--cpu-mask</code> 的实际行为，再写代码；占 GPU 的核对前先告诉用户），按运行库缓存，失败回落 nvidia-smi 序号；<code>GET /api/devices</code>（<code>?runtime=</code>、<code>?refresh=1</code>）；Mac 一律返回不适用。已在 b11146 上核对：<code>--list-devices</code> 的设备在 stdout，格式 <code>CUDA0: 名称 (总 MiB, 空闲 MiB free)</code>；未知设备名使 llama-server 以退出码 1 退出并打印 <code>invalid device: 名称</code></span><span class="when">2026-10-03</span></li>
+    <li class="task" data-done="true"><span class="t"><code>device</code> 字段（配置方案 ← 模型 ← 全局）→ 启动参数：自动 / 单个 GPU / CPU；只传一个设备；额外参数里的多设备或 <code>--tensor-split</code> 给警告；设备不存在加载失败并给中文原因（启动前先对照该运行库的设备列表，列表拿不到时由进程报错 <code>invalid device</code> 识别）；Mac 上忽略并拒绝保存该字段；命令预览显示设备。全局默认放在 <code>defaults.device</code> / <code>defaultsCpu.device</code>（按最终选中运行库的类型取，无需迁移）；<code>auto</code> 为显式「自动」，可覆盖下一层的设备</span><span class="when">2026-10-03</span></li>
+    <li class="task" data-done="true"><span class="t">CPU 进阶项（线程、<code>--numa</code>、<code>--cpu-mask</code>）：检测到多 NUMA 节点或展开「高级」才出现；假进程测试覆盖参数拼装；多路机器真机效果如实标注未验证</span><span class="when">2026-10-03</span></li>
+    <li class="task" data-done="true"><span class="t">用真实 llama-server 各验证一次：指定 GPU 0 / 指定 CPU 启动，进程只用所选设备（nvidia-smi 看显存落点），结果写进交接；机器只有一张卡时多卡路径只做假进程测试并说明</span><span class="when">2026-10-03</span></li>
   </ul>
 
   <h3>审查（gpt-6.1sol 或用户指定的模型）</h3>
@@ -859,6 +860,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 <section id="changelog">
   <h2>变更记录</h2>
   <table>
+    <tr><td>2026-10-03</td><td>工作包 8-3：设备选择（<code>devices.ts</code>、<code>GET /api/devices</code>、<code>POST /api/models/:id/device</code>、方案 / 模型 / 全局 <code>device</code>）。真实 llama-server 核对后写死的参数：单 GPU = <code>--device &lt;id&gt; --split-mode none</code>（不传 <code>--main-gpu</code>：它是 <code>--device</code> 过滤后的序号，默认 0 即所选卡）；CPU = <code>--device none</code> 加 <code>-ngl 0</code>（<code>--device none</code> 单独就不占显存，实测）。新增三个 CPU 参数键 <code>threads</code> / <code>numa</code> / <code>cpuMask</code>；<code>--list-devices</code> 的 stdout 格式与未知设备的错误文字已实测。无配置迁移：字段缺省 = 继承</td></tr>
     <tr><td>2026-10-03</td><td>工作包 8-1：运行库登记（<code>runtimes.json</code>，只存 id / 平台 / 加速类型 / 版本号，可执行文件路径永远由 id 推出）、三种添加来源（先暂存预览、确认才登记）、删除保护、模型 / 方案 <code>runtime</code> 引用与兜底。实现中定下：<code>--version</code> 在预览阶段运行（界面要在调用预览前先弹「这会运行你选的程序」）；同一时刻只暂存一个预览、30 分钟过期；GitHub 资产只认 <code>https://github.com/</code>；Mac 要求同架构（不走 Rosetta）。接口见「接口」表。没有改界面（8-5）</td></tr>
     <tr><td>2026-10-03</td><td>新增阶段 9「多模型并行与显存保护」（仅规划）和关键决定 41–44：用户要求放开单开限制（升级后默认仍为 1）、多开前做显存检测并提示风险、保存模型设置时按权重 / KV / 计算缓冲 / mmproj / 草稿 / 系统内存等多方面检查、外部请求触发的多开放不下时要拦住（503）。决定 9 标注由阶段 9 放开；这会改核心行为规则，9-3 开始前须用户确认规则文字。阶段 9 依赖阶段 8 的设备选择</td></tr>
     <tr><td>2026-10-03</td><td>新增阶段 8「运行库、设备与用量」（仅规划，未改代码）和关键决定 34–40：手动添加 / 删除 llama.cpp 版本（目录、压缩包、GitHub 地址；平台隔离；最新官方版不可删）、模型 / 配置方案选版本、全局默认 GPU / CPU 两份、本机检测（CUDA 驱动 / 算力、CPU 指令集 / 内存）、设备选择（单设备）、用量日志（30 天）、模型页添加目录、Mac 专项。关键决定 14「只用官方最新版」放宽。待用户确认的问题见阶段 8 开头</td></tr>

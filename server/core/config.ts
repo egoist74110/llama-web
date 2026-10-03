@@ -1,6 +1,6 @@
 // settings.json / models.json schemas, defaults and light normalisation (see plan「配置与数据」).
 // Hand-edited files may omit sections; missing values are filled from the defaults.
-import { DEFAULT_LAUNCH_DEFAULTS, type LaunchDefaults, type ParamOverrides } from './args'
+import { DEFAULT_LAUNCH_DEFAULTS, normalizeDevice, type LaunchDefaults, type ParamOverrides } from './args'
 import type { FileRef, ModelDir } from './types'
 import type { Acceleration, PlatformInfo } from './platform'
 
@@ -94,6 +94,8 @@ export interface Profile {
   preprocess?: { image?: Partial<ImagePreprocess> }
   /** llama.cpp build: `cuda:b11146` / `cpu:b11146` / `metal:b11146` / `custom:<id>`; empty = follow the model, then the global version. */
   runtime?: string | null
+  /** Device: `auto`, `cpu` or one id from `--list-devices` (`CUDA0`); empty = follow the model, then the global default. */
+  device?: string | null
 }
 
 export interface ModelConfig {
@@ -113,6 +115,8 @@ export interface ModelConfig {
   confirmed?: boolean
   /** llama.cpp build for this model (see Profile.runtime); a profile's own choice wins. Empty = follow the global version. */
   runtime?: string | null
+  /** Device for this model (see Profile.device); a profile's own choice wins. Empty = follow the global default. */
+  device?: string | null
   /** Placeholder, not used yet. */
   reserved?: { pinned: boolean, idleUnloadMin: number }
 }
@@ -138,6 +142,9 @@ export const DEFAULT_CPU_DEFAULTS: LaunchDefaults = {
 
 /** Hosts with a separate CPU channel and its own defaults: Windows only (a Mac has one channel and one set of defaults). */
 export const hasCpuChannel = (host: { os: NodeJS.Platform }) => host.os === 'win32'
+
+/** Device selection (decision 39) exists everywhere except on a Mac, which has one unified device (decision 38). */
+export const hasDeviceSelection = (host: { os: NodeJS.Platform }) => host.os !== 'darwin'
 
 /** Current version setting of an official channel. */
 export const currentTagFor = (s: Settings, host: { os: NodeJS.Platform }, accel: string): string =>
@@ -242,6 +249,12 @@ export function normalizeSettings(doc: Settings): Settings {
   if (!TUNNEL_PROTOCOLS.includes(out.public.tunnelProtocol)) out.public.tunnelProtocol = 'http2'
   out.public.wizard = cleanWizard(out.public.wizard)
   if (!['auto', 'cuda', 'cpu', 'metal'].includes(out.llamacpp.acceleration)) throw new Error('Invalid llamacpp.acceleration')
+  // The global device choice is one valid value or nothing (a hand-edited bad one is dropped = automatic).
+  for (const key of ['defaults', 'defaultsCpu'] as const) {
+    const dev = out[key].device
+    if (dev !== undefined && !normalizeDevice(dev)) delete out[key].device
+    else if (dev !== undefined) out[key].device = normalizeDevice(dev)
+  }
   // Placeholder (decision 9): the field exists but the online limit stays fixed at 1.
   out.scheduler.maxLoaded = 1
   return out as Settings
@@ -271,6 +284,9 @@ export function normalizeModels(doc: ModelsDoc): ModelsDoc {
     // A runtime reference is a string or nothing (a wrong type is dropped; a stale value falls back at launch).
     if (typeof m.runtime !== 'string') delete m.runtime
     for (const p of Object.values(m.profiles)) if (isObj(p) && typeof p.runtime !== 'string') delete p.runtime
+    // Same for the device: a valid choice or nothing.
+    if (!normalizeDevice(m.device)) delete m.device
+    for (const p of Object.values(m.profiles)) if (isObj(p) && !normalizeDevice(p.device)) delete p.device
   }
   return doc
 }

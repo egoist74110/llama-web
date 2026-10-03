@@ -20,6 +20,10 @@ export interface LaunchParams {
   reasoning: ParamValue
   reasoningFormat: ParamValue
   reasoningBudget: ParamValue
+  /** CPU tuning (decision 39): thread count, NUMA strategy, affinity mask. Null = do not pass. */
+  threads: ParamValue
+  numa: ParamValue
+  cpuMask: ParamValue
 }
 
 export type ParamKey = keyof LaunchParams
@@ -27,6 +31,8 @@ export type ParamKey = keyof LaunchParams
 /** Global defaults: every form field plus the raw extra-args text. */
 export interface LaunchDefaults extends LaunchParams {
   extraArgs: string
+  /** Global device choice (see `normalizeDevice`); missing / empty = automatic. */
+  device?: string
 }
 
 /**
@@ -47,7 +53,24 @@ export const PARAM_DEFS: ReadonlyArray<{ key: ParamKey, flag: string, aliases: s
   { key: 'reasoning', flag: '--reasoning', aliases: [] },
   { key: 'reasoningFormat', flag: '--reasoning-format', aliases: [] },
   { key: 'reasoningBudget', flag: '--reasoning-budget', aliases: [] },
+  { key: 'threads', flag: '--threads', aliases: ['-t'] },
+  { key: 'numa', flag: '--numa', aliases: [] },
+  { key: 'cpuMask', flag: '--cpu-mask', aliases: ['-C'] },
 ]
+
+export const NUMA_MODES = ['distribute', 'isolate', 'numactl']
+
+/**
+ * Value check for the CPU tuning parameters (the other parameters are validated by llama-server at
+ * load time). A wrong value here would only surface as a failed load, so it is refused at save.
+ */
+export function paramValueOk(key: ParamKey, v: ParamValue): boolean {
+  if (v === null) return true
+  if (key === 'threads') return typeof v === 'number' ? Number.isInteger(v) && v >= -1 && v <= 4096 : /^-?\d{1,4}$/.test(v) && Number(v) >= -1
+  if (key === 'numa') return typeof v === 'string' && NUMA_MODES.includes(v)
+  if (key === 'cpuMask') return typeof v === 'string' && /^(0x)?[0-9a-fA-F]{1,1024}$/.test(v)
+  return true
+}
 
 export const DEFAULT_LAUNCH_DEFAULTS: LaunchDefaults = {
   ctxSize: 262144,
@@ -61,6 +84,9 @@ export const DEFAULT_LAUNCH_DEFAULTS: LaunchDefaults = {
   reasoning: 'on',
   reasoningFormat: 'auto',
   reasoningBudget: -1,
+  threads: null,
+  numa: null,
+  cpuMask: null,
   extraArgs: '--jinja --no-prefill-assistant --props --slots --load-mode mlock -cb',
 }
 
@@ -82,7 +108,7 @@ const REPEATABLE = new Set([
 
 // Extra alias groups used only to recognise duplicates (canonical = first entry).
 const OTHER_ALIASES: string[][] = [
-  ['--threads', '-t'], ['--threads-batch', '-tb'], ['--tensor-split', '-ts'],
+  ['--threads-batch', '-tb'], ['--tensor-split', '-ts'], ['--device', '-dev'],
   ['--split-mode', '-sm'], ['--main-gpu', '-mg'], ['--override-tensor', '-ot'],
   ['--cont-batching', '-cb'], ['--no-cont-batching', '-nocb'],
 ]
@@ -175,6 +201,8 @@ export type ArgWarningCode =
   | 'extra-syntax-error' // extra args text has an unterminated quote (severity: error)
   | 'invalid-port' // port is not 1..65535 (severity: error)
   | 'extra-overrides-form' // an extra arg replaces a form-managed flag
+  | 'extra-overrides-device' // an extra arg replaces a flag of the chosen device (--device / --split-mode)
+  | 'extra-multi-device' // extra args spread the model over several devices (--tensor-split / --device a,b)
   | 'duplicate-in-layer' // same flag twice inside one extra-args text; the last one wins
   | 'reserved-flag-removed' // --host / --port in extra args were dropped
   | 'preview-program-percent' // preview only: program path cmd.exe may expand (%NAME% with spaces)
@@ -188,6 +216,40 @@ export interface ArgWarning {
   detail?: string
 }
 
+/** Device ids come from `llama-server --list-devices` (`CUDA0`, `Vulkan1`): a letter, then letters, digits and `_ . -`. */
+const DEVICE_ID = /^[A-Za-z][A-Za-z0-9_.-]{0,31}$/
+
+/**
+ * A device choice as stored: '' = inherit from the next layer, 'auto' = leave it to llama.cpp,
+ * 'cpu', or exactly one device id. Returns null for anything else (several devices, `none`,
+ * flags, spaces): llama-web only runs a model on one device (decision 39).
+ */
+export function normalizeDevice(raw: unknown): string | null {
+  if (raw === undefined || raw === null) return ''
+  if (typeof raw !== 'string') return null
+  const v = raw.trim()
+  if (v === '') return ''
+  const lower = v.toLowerCase()
+  if (lower === 'auto' || lower === 'cpu') return lower
+  return lower !== 'none' && DEVICE_ID.test(v) ? v : null
+}
+
+/** First choice that is not empty, layers ordered profile, model, global; `auto` when none is set. */
+export function resolveDevice(...layers: Array<string | null | undefined>): string {
+  for (const l of layers) {
+    const v = normalizeDevice(l)
+    if (v) return v
+  }
+  return 'auto'
+}
+
+/** The launch arguments one device choice adds (empty for `auto`). */
+export function deviceArgs(device: string): Array<[flag: string, value: string]> {
+  if (device === 'cpu') return [['--device', 'none']]
+  if (device === 'auto' || !normalizeDevice(device)) return []
+  return [['--device', device], ['--split-mode', 'none']]
+}
+
 export interface BuildInput {
   /** Absolute paths of resolved files. */
   paths: { model: string, mmproj?: string | null, draft?: string | null, chatTemplate?: string | null }
@@ -197,6 +259,8 @@ export interface BuildInput {
   profile?: { overrides?: ParamOverrides, extraArgs?: string }
   host: string
   port: number
+  /** Resolved device choice (`auto`, `cpu` or one id). Left out on a host without device selection (Mac). */
+  device?: string
 }
 
 export interface BuildResult {
@@ -226,6 +290,9 @@ export function mergeParams(defaults: LaunchParams, ...layers: Array<ParamOverri
 export function buildLaunchArgs(input: BuildInput): BuildResult {
   const warnings: ArgWarning[] = []
   const effective = mergeParams(input.defaults, input.model?.overrides, input.profile?.overrides)
+  const device = input.device ?? 'auto'
+  // A CPU run keeps every layer on the CPU whatever the form says.
+  if (device === 'cpu') effective.gpuLayers = 0
 
   if (!Number.isInteger(input.port) || input.port < 1 || input.port > 65535) {
     warnings.push({ code: 'invalid-port', severity: 'error', detail: String(input.port) })
@@ -293,7 +360,19 @@ export function buildLaunchArgs(input: BuildInput): BuildResult {
     }
     args.push(d.flag, String(v))
   }
-  for (const g of extra) args.push(...g.tokens)
+  for (const [flag, value] of deviceArgs(device)) {
+    if (extraCanon.has(flag)) {
+      warnings.push({ code: 'extra-overrides-device', severity: 'warning', flag })
+      continue
+    }
+    args.push(flag, value)
+  }
+  for (const g of extra) {
+    if (g.canon === '--tensor-split' || (g.canon === '--device' && g.tokens.some(t => t.includes(',')))) {
+      warnings.push({ code: 'extra-multi-device', severity: 'warning', flag: g.canon })
+    }
+    args.push(...g.tokens)
+  }
   args.push('--host', input.host, '--port', String(input.port))
 
   return { ok: !warnings.some(w => w.severity === 'error'), args, warnings, effective }

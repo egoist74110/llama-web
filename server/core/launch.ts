@@ -3,15 +3,15 @@
 // scheduler records them as a load failure.
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { buildLaunchArgs, cmdProgramMayExpand, formatCmdCommand, formatPosixCommand, type ArgWarning, type BuildInput, type LaunchParams, type ParamOverrides } from './args'
+import { buildLaunchArgs, cmdProgramMayExpand, resolveDevice, formatCmdCommand, formatPosixCommand, type ArgWarning, type BuildInput, type LaunchDefaults, type LaunchParams, type ParamOverrides } from './args'
 import { installedDir } from './llamacpp'
 import type { RuntimeTarget } from './platform'
-import { currentTagFor, defaultsFor, type ModelConfig, type ModelsDoc, type Settings } from './config'
+import { currentTagFor, defaultsFor, hasDeviceSelection, type ModelConfig, type ModelsDoc, type Settings } from './config'
 import type { Target } from './scheduler'
 import { resolveFileRef } from './scanner'
 import { parseRuntimeRef, resolveRuntimeRef, RuntimeResolveError, type FallbackReason, type RuntimeAccel, type RuntimeEnv } from './runtimes'
 
-export type LaunchConfigErrorCode = 'model-missing' | 'profile-missing' | 'file-missing' | 'no-runtime' | 'bad-args'
+export type LaunchConfigErrorCode = 'model-missing' | 'profile-missing' | 'file-missing' | 'no-runtime' | 'bad-args' | 'device-missing'
 
 export class LaunchConfigError extends Error {
   constructor(public code: LaunchConfigErrorCode, message: string, public warnings: ArgWarning[] = []) {
@@ -33,6 +33,8 @@ export interface RuntimeUse {
 export interface LaunchPlan {
   exe: string
   runtime: RuntimeUse
+  /** Device the model runs on: `auto`, `cpu` or one id (always `auto` on a Mac). */
+  device: string
   /** Argument array (without the executable) for an allocated port. */
   args: (port: number) => string[]
   tag: string
@@ -57,6 +59,16 @@ export interface PlanInput {
 /** The reference a launch asks for: the profile's own choice, else the model's, else none (= global version). */
 export const requestedRuntime = (model: Pick<ModelConfig, 'runtime'>, profileRuntime: string | null | undefined): string =>
   (profileRuntime || model.runtime || '').trim()
+
+/**
+ * The device a launch asks for: the profile's own choice, else the model's, else the global
+ * default of the defaults set in use. A Mac has no device choice, so a stored value is ignored.
+ */
+export function chosenDevice(
+  profileDevice: string | null | undefined, model: Pick<ModelConfig, 'device'>, defaults: Pick<LaunchDefaults, 'device'>, os: NodeJS.Platform,
+): string {
+  return hasDeviceSelection({ os }) ? resolveDevice(profileDevice, model.device, defaults.device) : 'auto'
+}
 
 /**
  * Executable for a launch: follows the profile / model reference when there is one (falling back to
@@ -89,7 +101,7 @@ export interface PreviewInput {
   settings: Settings
   model: ModelConfig
   /** Form values to preview (may be unsaved). */
-  form: { overrides: ParamOverrides, extraArgs: string, chatTemplate: string | null, runtime?: string | null }
+  form: { overrides: ParamOverrides, extraArgs: string, chatTemplate: string | null, runtime?: string | null, device?: string | null }
   host: string
   exists?: (path: string) => boolean
   platform?: NodeJS.Platform
@@ -100,6 +112,8 @@ export interface PreviewInput {
 export interface LaunchPreview {
   /** The build the command runs, and the fallback when the chosen one is unusable. */
   runtime: RuntimeUse
+  /** Device the command runs the model on (`auto`, `cpu` or one id). */
+  device: string
   /**
    * Full command line as the UI shows it; the same arguments planLaunch would pass. On Windows
    * it is written for cmd.exe (quoting and ^ escapes), elsewhere in the project's own syntax.
@@ -153,10 +167,13 @@ export function previewLaunch(input: PreviewInput): LaunchPreview {
   }
   const port = settings.scheduler.portRange[0]
   const win = (input.platform ?? process.platform) === 'win32'
+  const os = input.target?.os ?? input.platform ?? process.platform
+  const defaults = defaultsFor(settings, { os }, runtime.accel)
+  const device = chosenDevice(form.device, model, defaults, os)
   const built = buildLaunchArgs({
-    paths, defaults: defaultsFor(settings, { os: input.target?.os ?? input.platform ?? process.platform }, runtime.accel),
+    paths, defaults,
     profile: { overrides: form.overrides, extraArgs: form.extraArgs },
-    host: input.host, port,
+    host: input.host, port, device,
   })
   const program = exe ?? (win ? 'llama-server.exe' : 'llama-server')
   const warnings = [...built.warnings]
@@ -164,7 +181,7 @@ export function previewLaunch(input: PreviewInput): LaunchPreview {
   return {
     command: win ? formatCmdCommand(program, built.args) : formatPosixCommand(program, built.args),
     shell: win ? 'cmd' : 'posix',
-    ok: built.ok, warnings, effective: built.effective, missing, port, runtime,
+    ok: built.ok, warnings, effective: built.effective, missing, port, runtime, device,
   }
 }
 
@@ -204,12 +221,16 @@ export function planLaunch(target: Target, input: PlanInput): LaunchPlan {
     paths.chatTemplate = abs
   }
 
+  const os = input.target?.os ?? input.platform ?? process.platform
+  const defaults = defaultsFor(settings, { os }, runtime.accel)
+  const device = chosenDevice(profile.device, model, defaults, os)
   const build = (port: number) => buildLaunchArgs({
     paths,
-    defaults: defaultsFor(settings, { os: input.target?.os ?? input.platform ?? process.platform }, runtime.accel),
+    defaults,
     profile: { overrides: profile.overrides, extraArgs: profile.extraArgs },
     host: input.host,
     port,
+    device,
   })
   const probe = build(settings.scheduler.portRange[0])
   if (!probe.ok) {
@@ -218,6 +239,7 @@ export function planLaunch(target: Target, input: PlanInput): LaunchPlan {
   return {
     exe,
     runtime,
+    device,
     args: port => build(port).args,
     tag: `${model.id}:${target.profile}`,
     loadTimeoutMs: settings.scheduler.loadTimeoutSec * 1000,

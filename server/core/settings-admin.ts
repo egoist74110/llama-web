@@ -3,8 +3,8 @@
 // SettingsError. Sections are independent; a missing section is left alone.
 import { existsSync, statSync } from 'node:fs'
 import { isAbsolute, resolve } from 'node:path'
-import { ArgsSyntaxError, PARAM_DEFS, splitArgs, type LaunchDefaults, type ParamValue } from './args'
-import { cleanWizard, hasCpuChannel, TUNNEL_MODES, TUNNEL_PROTOCOLS, type ModelsDoc, type Settings, type TunnelMode, type TunnelProtocol } from './config'
+import { ArgsSyntaxError, normalizeDevice, PARAM_DEFS, paramValueOk, splitArgs, type LaunchDefaults, type ParamValue } from './args'
+import { cleanWizard, hasCpuChannel, hasDeviceSelection, TUNNEL_MODES, TUNNEL_PROTOCOLS, type ModelsDoc, type Settings, type TunnelMode, type TunnelProtocol } from './config'
 import type { PublicStatus } from './public-entry'
 import type { ModelDir } from './types'
 
@@ -94,7 +94,7 @@ export function applyModelDirs(draft: Settings, raw: unknown, models: ModelsDoc)
 }
 
 /** Global default launch parameters. Missing keys keep their value; `''` / null mean "do not pass". */
-export function applyDefaults(draft: Settings, raw: unknown, key: 'defaults' | 'defaultsCpu' = 'defaults'): void {
+export function applyDefaults(draft: Settings, raw: unknown, key: 'defaults' | 'defaultsCpu' = 'defaults', host: { os: NodeJS.Platform } = { os: process.platform }): void {
   if (!isObj(raw)) throw new SettingsError('bad-request')
   const next: Record<string, ParamValue | string> = { ...draft[key] }
   for (const d of PARAM_DEFS) {
@@ -104,6 +104,13 @@ export function applyDefaults(draft: Settings, raw: unknown, key: 'defaults' | '
     else if (typeof v === 'number' && Number.isFinite(v)) next[d.key] = v
     else if (typeof v === 'string' && v.length <= 200 && !/[\r\n]/.test(v)) next[d.key] = v.trim()
     else throw new SettingsError('bad-param', d.key)
+    if (!paramValueOk(d.key, next[d.key] as ParamValue)) throw new SettingsError('bad-param', d.key)
+  }
+  if (raw.device !== undefined) {
+    const dev = normalizeDevice(raw.device)
+    if (dev === null || (dev && !hasDeviceSelection(host))) throw new SettingsError('bad-param', 'device')
+    if (dev) next.device = dev
+    else delete next.device
   }
   if (raw.extraArgs !== undefined) {
     if (typeof raw.extraArgs !== 'string' || raw.extraArgs.length > 10_000) throw new SettingsError('bad-extra-args')
@@ -229,11 +236,11 @@ export function applySettingsPatch(draft: Settings, patch: unknown, models: Mode
   if (!isObj(patch) || !SECTIONS.some(k => patch[k] !== undefined)) throw new SettingsError('bad-request')
   const p = patch as SettingsPatch
   if (p.modelDirs !== undefined) applyModelDirs(draft, p.modelDirs, models)
-  if (p.defaults !== undefined) applyDefaults(draft, p.defaults)
+  if (p.defaults !== undefined) applyDefaults(draft, p.defaults, 'defaults', host)
   if (p.defaultsCpu !== undefined) {
     // A Mac has one channel and one set of defaults.
     if (!hasCpuChannel(host)) throw new SettingsError('bad-request')
-    applyDefaults(draft, p.defaultsCpu, 'defaultsCpu')
+    applyDefaults(draft, p.defaultsCpu, 'defaultsCpu', host)
   }
   if (p.image !== undefined) applyImagePreprocess(draft, p.image)
   if (p.server !== undefined) applyServer(draft, p.server)

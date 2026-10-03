@@ -3,11 +3,12 @@
 // and shared by the custom Bun entry, the Nitro plugin and the dev-mode routes.
 import { join } from 'node:path'
 import {
-  currentTagFor, defaultModels, defaultSettings, hasCpuChannel, MODELS_VERSION, normalizeModels, normalizeSettings, SETTINGS_MIGRATIONS, SETTINGS_VERSION,
+  currentTagFor, defaultModels, defaultSettings, hasCpuChannel, hasDeviceSelection, MODELS_VERSION, normalizeModels, normalizeSettings, SETTINGS_MIGRATIONS, SETTINGS_VERSION,
   type ModelsDoc, type Settings,
 } from '../core/config'
 import { authenticate, defaultSecrets, normalizeSecrets, SECRETS_MIGRATIONS, SECRETS_VERSION, type SecretsDoc } from '../core/keys'
-import { LaunchConfigError, planLaunch } from '../core/launch'
+import { describeDevices, DeviceProbe, deviceMissing, type DevicesView } from '../core/devices'
+import { LaunchConfigError, llamaServerExe, planLaunch } from '../core/launch'
 import { LogStore } from '../core/logs'
 import type { RuntimeStatus } from '../core/llamacpp'
 import { GpuSampler, parseNvidiaSmi, runNvidiaSmi } from '../core/gpu'
@@ -27,8 +28,8 @@ import { CloudflareSetup } from '../core/cloudflare'
 import { Updater } from '../core/updater'
 import { RuntimeInstaller } from '../core/runtime-add'
 import { RuntimeManager } from '../core/runtime-manager'
-import { channelsFor, RuntimeRegistry, type RuntimeAccel } from '../core/runtimes'
-import { cudaLimitsFor, detectSystem, systemWarnings, type SystemInfo } from '../core/system'
+import { channelsFor, resolveRuntimeRef, RuntimeRegistry, type RuntimeAccel } from '../core/runtimes'
+import { cudaLimitsFor, detectSystem, runCmd, systemWarnings, type SystemInfo } from '../core/system'
 import { APP_REPO, APP_VERSION } from '../core/app-info'
 import { AppUpdater } from '../core/app-update'
 import { Hold } from '../core/write-pair'
@@ -65,6 +66,8 @@ export interface AppContext {
   downloadSecondary(): Promise<void>
   /** Detected facts about this machine, with recommendations and warnings (cached for a minute; `refresh` re-detects). */
   getSystem(opts?: { refresh?: boolean }): Promise<SystemInfo>
+  /** Devices of one llama.cpp build (`runtime` = a reference, empty = the global version); `{ applicable: false }` on a Mac. */
+  getDevices(opts?: { runtime?: string | null, refresh?: boolean }): Promise<DevicesView | { applicable: false }>
   /** Hand-added llama.cpp builds: list, delete (with protection), and the add flow (preview, then confirm). */
   runtimes: RuntimeManager
   runtimeAdd: RuntimeInstaller
@@ -250,6 +253,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     systemRun ??= detectSystem().then((info) => { systemCache = { at: Date.now(), info }; return info }).finally(() => { systemRun = null })
     return systemRun
   }
+  const deviceProbe = new DeviceProbe(runCmd)
   const channelUpdater = (target: RuntimeTarget, withSelectionError: boolean) => new Updater({
     dataDir,
     target, selectionError: withSelectionError ? selectionError : undefined,
@@ -318,6 +322,11 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     launch: async (target) => {
       await cleanupDone
       const plan = planLaunch(target, { dataDir, settings: getSettings(), models: getModels(), host: runner.host, target: selectedTarget, runtimeEnv: runtimes.env() })
+      // The chosen device must be on the list of the build that runs; there is no silent switch to another one (decision 39).
+      if (plan.device !== 'auto' && plan.device !== 'cpu') {
+        const devices = await deviceProbe.list(plan.exe)
+        if (deviceMissing(plan.device, devices)) throw new LaunchConfigError('device-missing', `Device ${plan.device} is not on the device list of ${plan.runtime.label}`)
+      }
       if (plan.runtime.fallback) {
         const f = plan.runtime.fallback
         log(`runtime ${plan.tag}: ${f.from} is ${f.reason}, using ${f.to}`)
@@ -448,6 +457,19 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     async getSystem(opts) {
       const info = await detect(opts?.refresh === true)
       return { ...info, warnings: systemWarnings(info, { cudaRuntime: getSettings().llamacpp.cudaRuntime }) }
+    },
+    async getDevices(opts) {
+      if (!hasDeviceSelection(platform)) return { applicable: false }
+      const ref = opts?.runtime?.trim() || null
+      let exe: string | null
+      try {
+        exe = ref ? resolveRuntimeRef(ref, runtimes.env()).exe : llamaServerExe(dataDir, getSettings(), platform.os, selectedTarget)
+      } catch {
+        exe = null
+      }
+      const list = exe ? await deviceProbe.list(exe, { refresh: opts?.refresh === true }) : { source: 'unavailable' as const, gpus: [] }
+      const info = await detect(opts?.refresh === true)
+      return describeDevices(ref, list, info.cpu, info.nvidia?.gpus ?? [])
     }, runtimes, runtimeAdd, appUpdate, runner, scheduler, ops, proxy, publicEntry, applyPublic, live, logs, cleanupDone,
     shutdown() {
       closing ??= (async () => {

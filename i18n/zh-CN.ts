@@ -318,6 +318,7 @@ export default {
       'file-in-use': '所选主模型已经被另一个模型使用。',
       'bad-setup': 'MTP 倍数需要是 1 到 16 的整数。',
       'runtime-invalid': '所选的 llama.cpp 版本不存在，或不属于这台电脑的平台。',
+      'device-invalid': '设备只能选「自动」、「CPU」或一个设备（例如 CUDA0），Mac 上不能选设备。',
     },
     edit: {
       open: '编辑',
@@ -412,6 +413,8 @@ export default {
           'extra-syntax-error': '额外参数有没配对的引号（{layer}）：{detail}',
           'invalid-port': '端口不合法：{detail}',
           'extra-overrides-form': '额外参数里的 {flag} 覆盖了表单里的设置。',
+          'extra-overrides-device': '额外参数里的 {flag} 覆盖了所选设备的设置，以额外参数为准。',
+          'extra-multi-device': '额外参数里的 {flag} 会把模型分到多个设备上；llama-web 目前只支持一个模型跑在一个设备上，这样启动不受保证。',
           'duplicate-in-layer': '额外参数里 {flag} 出现了多次，以最后一个为准（{layer}）。',
           'reserved-flag-removed': '{flag} 由 llama-web 分配，额外参数里的已被忽略（{layer}）。',
           'preview-program-percent': '程序路径同时含空格和成对的 %，CMD 可能把它当成环境变量展开，复制的命令可能找不到程序。llama-web 自己启动不受影响。',
@@ -430,6 +433,9 @@ export default {
         reasoning: { label: '思考模式', hint: '--reasoning。是否让模型先思考再回答：on / off / auto。' },
         reasoningFormat: { label: '思考内容格式', hint: '--reasoning-format。思考内容在返回里的放法：auto、none、deepseek、deepseek-legacy。' },
         reasoningBudget: { label: '思考长度上限', hint: '--reasoning-budget。-1 不限制，0 关闭思考，其他数值为最多思考的 token 数。' },
+        threads: { label: 'CPU 线程数', hint: '--threads。生成时用的 CPU 线程数；-1 由 llama.cpp 自己决定。跑在 CPU 上时再调。' },
+        numa: { label: 'NUMA 策略', hint: '--numa。多路 CPU 才需要：distribute 均匀铺开，isolate 只用启动时所在节点，numactl 沿用 numactl 的设置。' },
+        cpuMask: { label: 'CPU 亲和掩码', hint: '--cpu-mask。十六进制掩码，限定可以用哪些 CPU 核心，例如 ff 表示前 8 个。' },
       },
     },
     toast: {
@@ -1137,6 +1143,7 @@ export default {
     'file-missing': '模型文件不存在或目录未配置',
     'no-runtime': '没有可用的 llama.cpp（data/runtime 下找不到 llama-server）',
     'bad-args': '启动参数有错误',
+    'device-missing': '所选设备不存在',
     // Recognised from the llama-server output (server/core/errors.ts).
     'oom': '显存不足',
     'cuda-error': 'CUDA 报错',
@@ -1166,6 +1173,7 @@ export default {
       'spawn-failed': '无法启动 llama-server 可执行文件。确认 data/runtime 下的文件完整，没有被杀毒软件隔离。',
       'no-runtime': '还没有可用的 llama.cpp。等后台下载完成，或到「设置」查看状态。',
       'bad-args': '启动参数有错误。打开该方案的命令预览查看具体问题。',
+      'device-missing': '所选的设备不在这个 llama.cpp 的设备列表里（显卡被拆了、换了 llama.cpp 版本，或驱动没有识别它）。不会自动换成别的设备，因为换设备会改变显存占用。到该模型的「设备」设置里重新选择，或改回「自动」。',
       'unknown': '原因未识别。看下面的日志最后几行，或打开完整日志。',
     },
     noRetry: '不会自动重试，处理后请手动重试。',
