@@ -26,6 +26,7 @@ async function copyApi() {
 const modelName = (id: string) => state.value?.models.find(m => m.id === id)?.name ?? id
 
 // --- tiles ------------------------------------------------------------------------------
+const ui = usePlatformUi()
 const gpus = computed(() => (metrics.value?.gpu.available ? metrics.value.gpu.gpus : []))
 const gb = (mib: number) => (mib / 1024).toFixed(1)
 const pct = (used: number, total: number) => (total > 0 ? Math.min(100, Math.round(used / total * 100)) : 0)
@@ -99,7 +100,7 @@ const tokens = (n: number | null) => (n === null ? '–' : n.toLocaleString('zh-
       <OverviewHero />
 
       <div class="grid grid-cols-[repeat(auto-fit,minmax(min(200px,100%),1fr))] gap-3.5">
-        <section v-if="gpus.length" class="lw-card flex flex-col gap-2.5 px-[18px] py-4">
+        <section v-if="ui.hasGpu && gpus.length" class="lw-card flex flex-col gap-2.5 px-[18px] py-4">
           <div class="flex justify-between gap-2 text-xs text-dimmed">
             <span>{{ tl.vram }}</span>
             <span class="truncate" :title="gpus.map(g => g.name).join('\n')">{{ gpus.length === 1 ? gpus[0]!.name : fmt(tl.gpuCount, { n: gpus.length }) }}</span>

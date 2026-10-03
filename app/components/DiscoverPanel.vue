@@ -13,18 +13,27 @@ const toast = useToast()
 const scan = useState<ScanDoc | null>('scan-result', () => null)
 const scanning = ref(false)
 
-async function rescan() {
-  if (scanning.value) return
+let inflight: Promise<ScanDoc | null> | null = null
+/** Scan now; a scan already running is joined, not repeated. Resolves to the result (null on failure). */
+function rescan(): Promise<ScanDoc | null> {
+  if (inflight) return inflight
   scanning.value = true
-  try {
-    scan.value = await $fetch<ScanDoc>('/api/scan', { method: 'POST', body: {} })
-  } catch (e) {
-    const err = e as { data?: { message?: string }, message?: string }
-    toast.add({ title: t.models.toast.scanFailed, description: err.data?.message ?? err.message, color: 'error', icon: 'i-lucide-circle-alert' })
-  } finally {
-    scanning.value = false
-  }
+  inflight = (async () => {
+    try {
+      scan.value = await $fetch<ScanDoc>('/api/scan', { method: 'POST', body: {} })
+      return scan.value
+    } catch (e) {
+      const err = e as { data?: { message?: string }, message?: string }
+      toast.add({ title: t.models.toast.scanFailed, description: err.data?.message ?? err.message, color: 'error', icon: 'i-lucide-circle-alert' })
+      return null
+    } finally {
+      scanning.value = false
+      inflight = null
+    }
+  })()
+  return inflight
 }
+defineExpose({ rescan })
 onMounted(() => { if (!scan.value) void rescan() })
 
 const models = computed(() => scan.value?.entries.filter(e => e.kind === 'model' || e.kind === 'invalid') ?? [])

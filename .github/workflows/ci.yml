@@ -1,0 +1,43 @@
+# Checks that run on every push and pull request. The macOS job is the only place the macOS branches
+# of the code run on real macOS (decision 38): unit tests, type check, and a smoke test that installs
+# the real macOS llama.cpp release and runs `llama-server --version`. It loads no model, so it says
+# nothing about Metal inference, the folder dialog, or the Finder launcher; those still need a Mac.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Unit tests
+        run: bun test
+
+      - name: Type check
+        run: bun run typecheck
+
+      - name: Launcher syntax
+        run: bash -n start.command
+
+      - name: Real llama.cpp release for macOS (--version)
+        run: bun scripts/ci-llamacpp-smoke.ts

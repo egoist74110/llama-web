@@ -2,6 +2,7 @@
 import t from '~~/i18n/zh-CN'
 
 const s = t.settings.image
+const ui = usePlatformUi()
 const { doc, saving, save } = useSettings()
 
 const state = reactive({ enabled: true, maxEdge: '', format: 'jpeg', quality: '' })
@@ -23,7 +24,7 @@ const submit = () => save('image', { image: { enabled: state.enabled, maxEdge: N
 </script>
 
 <template>
-  <AppCard :title="s.title" :hint="s.hint">
+  <AppCard :title="s.title" :hint="ui.isMac ? t.platform.mac.imageHint : s.hint">
     <div class="divide-y divide-default">
       <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 pb-3">
         <div class="min-w-0 flex-1 basis-56">

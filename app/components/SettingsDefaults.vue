@@ -9,7 +9,6 @@ type Key = 'defaults' | 'defaultsCpu'
 type FormState = { values: Record<string, string>, device: string, extraArgs: string }
 
 const s = t.settings.defaults
-const params = t.models.edit.params
 const { doc, saving, save } = useSettings()
 const ui = usePlatformUi()
 const toast = useToast()
@@ -131,13 +130,13 @@ async function submit() {
           <div v-for="f in b.fields" :key="f.key" class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3" :class="{ 'first:pt-0': !b.advanced && !showDevice }">
             <div class="min-w-0 flex-1 basis-56">
               <p class="text-sm text-default">
-                {{ params[f.key].label }}
+                {{ paramText(f.key, ui.isMac).label }}
               </p>
               <p class="text-xs text-muted">
-                {{ params[f.key].hint }}
+                {{ paramText(f.key, ui.isMac).hint }}
               </p>
             </div>
-            <USelect v-if="f.kind === 'select'" :model-value="toSelectValue(state.values[f.key])" :items="selectItems(f, state.values[f.key]!)" size="sm" class="w-40" :aria-label="params[f.key].label" @update:model-value="(v: unknown) => { state.values[f.key] = fromSelectValue(v) }" />
+            <USelect v-if="f.kind === 'select'" :model-value="toSelectValue(state.values[f.key])" :items="selectItems(f, state.values[f.key]!)" size="sm" class="w-40" :aria-label="paramText(f.key, ui.isMac).label" @update:model-value="(v: unknown) => { state.values[f.key] = fromSelectValue(v) }" />
             <UInput
               v-else
               :model-value="state.values[f.key]"
@@ -146,7 +145,7 @@ async function submit() {
               class="w-40"
               :placeholder="s.empty"
               :color="invalidKeys.includes(f.key) ? 'error' : undefined"
-              :aria-label="params[f.key].label"
+              :aria-label="paramText(f.key, ui.isMac).label"
               @update:model-value="(v: string | number | undefined) => { state.values[f.key] = v == null ? '' : String(v) }"
             />
           </div>

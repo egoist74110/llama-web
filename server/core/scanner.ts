@@ -51,6 +51,8 @@ interface Found {
 
 const SHARD_RE = /^(.*)-(\d{5})-of-(\d{5})\.gguf$/i
 const SKIP_DIR = /^(\.|\$)|^system volume information$/i
+/** macOS metadata: AppleDouble companions (`._x.gguf`, written on exFAT / network drives) are not models. */
+const SKIP_FILE = /^(\._|\.ds_store$)/i
 
 /** Resolve a FileRef to an absolute path, or null if the dir is unknown or the path escapes it. */
 export function resolveFileRef(dirs: ModelDir[], ref: FileRef): string | null {
@@ -89,7 +91,7 @@ async function walk(dir: ModelDir, out: Found[], warnings: ScanWarning[]): Promi
       const childAbs = join(abs, item.name)
       if (item.isDirectory()) {
         if (depth < dir.maxDepth && !SKIP_DIR.test(item.name)) await visit(childAbs, childRel, depth + 1)
-      } else if (item.isFile() && /\.gguf$/i.test(item.name)) {
+      } else if (item.isFile() && /\.gguf$/i.test(item.name) && !SKIP_FILE.test(item.name)) {
         try {
           out.push({ dirId: dir.id, rel: childRel, abs: childAbs, size: (await stat(childAbs)).size })
         } catch { /* vanished while scanning */ }

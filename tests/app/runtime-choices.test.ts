@@ -16,7 +16,7 @@ const gpuView: DevicesView = {
 }
 
 test('platform flags: a Mac has no GPU interface, Windows has GPU and the CPU channel', () => {
-  expect(platformUi('darwin')).toMatchObject({ known: true, isMac: true, hasGpu: false, hasCpuChannel: false, canPickFolder: false })
+  expect(platformUi('darwin')).toMatchObject({ known: true, isMac: true, hasGpu: false, hasCpuChannel: false, canPickFolder: true })
   expect(platformUi('win32')).toMatchObject({ known: true, isMac: false, hasGpu: true, hasCpuChannel: true, canPickFolder: true })
   // Before the first snapshot nothing platform-specific shows.
   expect(platformUi(undefined)).toMatchObject({ known: false, hasGpu: false, hasCpuChannel: false })

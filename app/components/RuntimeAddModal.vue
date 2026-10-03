@@ -153,7 +153,7 @@ const warningText = (code: string) => (s.warnings as Record<string, string>)[cod
         <div v-if="kind === 'dir'" class="space-y-1.5">
           <label class="text-xs font-medium text-muted">{{ s.dirLabel }}</label>
           <div class="flex flex-wrap gap-2">
-            <UInput v-model="dirPath" class="min-w-0 flex-1 basis-60" :placeholder="s.dirPlaceholder" :aria-label="s.dirLabel" :ui="{ base: 'font-mono text-xs' }" />
+            <UInput v-model="dirPath" class="min-w-0 flex-1 basis-60" :placeholder="ui.isMac ? t.platform.mac.dirPlaceholder : s.dirPlaceholder" :aria-label="s.dirLabel" :ui="{ base: 'font-mono text-xs' }" />
             <UButton v-if="ui.canPickFolder" size="sm" color="neutral" variant="outline" icon="i-lucide-folder-open" :loading="picking" @click="choose">
               {{ s.pick }}
             </UButton>
@@ -165,7 +165,7 @@ const warningText = (code: string) => (s.warnings as Record<string, string>)[cod
 
         <div v-else-if="kind === 'archive'" class="space-y-1.5">
           <label class="text-xs font-medium text-muted">{{ s.archiveLabel }}</label>
-          <UInput v-model="archivePath" class="w-full" :placeholder="s.archivePlaceholder" :aria-label="s.archiveLabel" :ui="{ base: 'font-mono text-xs' }" />
+          <UInput v-model="archivePath" class="w-full" :placeholder="ui.isMac ? t.platform.mac.archivePlaceholder : s.archivePlaceholder" :aria-label="s.archiveLabel" :ui="{ base: 'font-mono text-xs' }" />
           <p class="text-xs text-dimmed">
             {{ s.archiveHint }}
           </p>

@@ -30,7 +30,6 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ save: [form: object, restart: boolean], dirty: [boolean] }>()
 
-const params = t.models.edit.params
 const edit = t.models.edit
 const rd = edit.rd
 const ui = usePlatformUi()
@@ -266,10 +265,10 @@ const globalExtra = computed(() => props.defaults.extraArgs?.trim())
           <div v-for="f in b.fields" :key="f.key" class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3">
             <div class="min-w-0 flex-1 basis-56">
               <p class="text-sm text-default">
-                {{ params[f.key].label }}
+                {{ paramText(f.key, ui.isMac).label }}
               </p>
               <p class="text-xs text-muted">
-                {{ params[f.key].hint }}
+                {{ paramText(f.key, ui.isMac).hint }}
               </p>
             </div>
             <div class="flex items-center gap-2">
@@ -278,7 +277,7 @@ const globalExtra = computed(() => props.defaults.extraArgs?.trim())
                 :items="modeItems"
                 size="sm"
                 class="w-24"
-                :aria-label="params[f.key].label"
+                :aria-label="paramText(f.key, ui.isMac).label"
                 @update:model-value="(m: string) => setMode(f.key, m as Mode)"
               />
               <template v-if="state.rows[f.key].mode === 'custom'">

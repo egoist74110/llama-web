@@ -56,3 +56,11 @@ llama.cpp 旧平铺目录只供 Windows x64 CUDA 使用；CPU 和 Mac 不扫描�
 验证包括三平台资产构造测试、缺资产 / 错架构 / 校验失败、临时目录清理、真实小 zip / tar.gz / tgz、解压取消 / 超时、进程组信号模拟、身份与路径不匹配、PID 复用、旧配置备份、旧 runtime 回退与平台隔离、真实第二实例拒绝及死 owner 恢复。Windows 构建产物另用假 llama-server 验证旧目录加载、转发、命令预览、SSE、父进程退出与锁恢复。
 
 未运行 Mac 构建或真机，不使用 Windows node_modules 生成 Mac 产物；未加载真实模型或占用推理 GPU，未修改用户真实配置、Cloudflare 或已有运行实例。
+
+## 8-6 补充：Mac 源码版收尾与验证范围
+
+- 新增 `start.command`（对应 `start.bat`）、`osascript` 选择文件夹、扫描跳过 `._*` / `.DS_Store`、`~` 展开、界面文案审计（Mac 上不出现 GPU / 显存 / Metal / 盘符）、`.github/workflows/ci.yml` 的 macOS 作业。
+- **runner 验证（作业写好，结果以 GitHub Actions 为准，本地 Windows 上没有运行过）**：`bun test`、`bun run typecheck`、`bash -n start.command`、下载真实 macOS 版 llama.cpp 并运行 `llama-server --version`。
+- **未验证（仍需 Mac 真机）**：Metal 加载与推理、模型占用的统一内存、`osascript` 对话框与系统权限提示、Finder 双击 `start.command`、手动添加压缩包时的隔离标记 / 签名、`sharp` 的原生安装、进程树清理。
+- 因此「不宣称 Mac 已支持」的措辞保持不变；README 把 Mac 源码版标为「尚未在 Mac 真机验证」。
+- 桌面壳 / DMG / 发包不在阶段 8，须用户另行启动。

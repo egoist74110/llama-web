@@ -1,4 +1,4 @@
-// "Choose folder…" button: the server opens the native Windows dialog on this machine.
+// "Choose folder…" button: the server opens the native system dialog (Windows or macOS) on this machine.
 import t from '~~/i18n/zh-CN'
 
 export function usePickFolder() {

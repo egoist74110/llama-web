@@ -9,7 +9,7 @@ export interface PlatformUi {
   hasGpu: boolean
   /** The CPU build is a second channel next to CUDA (Windows): two default-parameter sets, a download button. */
   hasCpuChannel: boolean
-  /** The server can open a native folder dialog. */
+  /** The server can open a native folder dialog (Windows dialog, macOS osascript). */
   canPickFolder: boolean
 }
 
@@ -21,6 +21,6 @@ export function platformUi(os: string | undefined | null): PlatformUi {
     isMac,
     hasGpu: known && !isMac,
     hasCpuChannel: os === 'win32',
-    canPickFolder: os === 'win32',
+    canPickFolder: os === 'win32' || os === 'darwin',
   }
 }

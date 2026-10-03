@@ -7,7 +7,7 @@
 - 扫描模型目录、读取 GGUF 元数据；每个模型可建多套参数方案（`名字:方案` 调用）
 - 界面：总览 / 模型 / 日志 / 设置；实时速度、加载进度、显存、失败诊断
 - 自动更新官方 llama.cpp（CUDA 构建），保留旧版本，界面一键回退
-- 平台：Windows 11 + NVIDIA GPU。开发计划与决定见 [`docs/plan.html`](docs/plan.html)
+- 平台：Windows 11（NVIDIA GPU 或 CPU）；macOS 源码版见下文，**尚未在 Mac 真机验证**。开发计划与决定见 [`docs/plan.html`](docs/plan.html)
 
 ## 安装
 
@@ -23,6 +23,16 @@
 bun install
 ```
 
+### macOS 源码版（未在 Mac 真机验证）
+
+同样需要 [Bun](https://bun.sh)。首次启动会按芯片下载官方 macOS 版 llama.cpp 并校验 SHA-256；Mac 只有这一种版本，设置页里没有显卡、设备或 CPU / GPU 切换。没有安装包、应用内更新和桌面壳：升级时 `git pull` 后运行 `./start.command build`。
+
+- 数据都在仓库下的 `data/`；卸载 = 删除仓库目录（想保留配置先备份 `data/`）。
+- 模型放在外置 exFAT / 网络盘时，macOS 会产生 `._xxx.gguf` 伴随文件，扫描会自动跳过它们。
+- 「选择文件夹」使用系统的 `osascript` 对话框；第一次使用时系统可能询问是否允许终端控制其他应用。也可以直接粘贴路径，`~/models` 会展开成你的主目录。
+- 从网上下载的压缩包会带隔离标记；手动添加的 llama.cpp 若被系统拒绝运行，需要在终端执行 `xattr -dr com.apple.quarantine <目录>`。
+- CI 里有 macOS 作业（`bun test`、类型检查、下载真实 macOS 版 llama.cpp 运行 `--version`），它不加载模型，Metal 推理、选择文件夹对话框和 Finder 双击启动仍需真机确认。
+
 ## 启动
 
 双击 `start.bat`（没有构建产物时会先安装依赖并构建）。关闭窗口或按 Ctrl+C 即停止服务并结束所有 llama-server。
@@ -31,6 +41,8 @@ bun install
 start.bat          # 运行上次的构建
 start.bat build    # 重新构建后运行
 ```
+
+macOS 源码版用 `start.command`（Finder 里双击，或在终端运行 `./start.command`；第一次若提示没有执行权限，先 `chmod +x start.command`），参数相同。
 
 默认地址 `http://localhost:5001`（监听 `0.0.0.0`，局域网可访问，完整功能，不需要 key）。第一次打开会进入设置向导：添加模型目录并启用模型。
 

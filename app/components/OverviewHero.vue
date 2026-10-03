@@ -6,6 +6,7 @@ import t from '~~/i18n/zh-CN'
 import type { LaunchPreview } from '~~/server/core/launch'
 
 const { state, metrics, serverNow } = useLive()
+const ui = usePlatformUi()
 const { trend } = useSpeedTrend()
 const { busy, stop } = useModelActions()
 const h = t.overview.hero
@@ -163,7 +164,7 @@ const pillCls = (s: string) => (s === 'ready' ? 'lw-st-ready' : s === 'failed' |
         retry-button
       />
       <template v-else>
-        <p v-if="top.inst.error" class="text-sm text-error">{{ reasonText(top.inst.error) }}</p>
+        <p v-if="top.inst.error" class="text-sm text-error">{{ loadErrorText(top.inst.error, ui.isMac) }}</p>
         <p class="text-xs text-muted">{{ t.overview.failedHint }}</p>
       </template>
     </div>

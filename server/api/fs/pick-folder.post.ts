@@ -6,7 +6,7 @@ import { t } from '../../core/i18n'
 
 export default defineEventHandler(async (event) => {
   if (!isLoopbackHost(getRequestHeader(event, 'host'))) throw createError({ statusCode: 403, message: t.settings.dirs.pickLocalOnly })
-  if (process.platform !== 'win32') throw createError({ statusCode: 501, message: t.settings.dirs.pickUnsupported })
+  if (process.platform !== 'win32' && process.platform !== 'darwin') throw createError({ statusCode: 501, message: t.settings.dirs.pickUnsupported })
   try {
     return { path: await pickFolder({ title: t.settings.dirs.pickTitle }) }
   } catch (e) {

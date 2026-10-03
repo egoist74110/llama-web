@@ -7,6 +7,7 @@ const s = t.setup
 const { state } = useLive()
 const { doc, saving, load, save } = useSettings()
 const { picking, pick } = usePickFolder()
+const ui = usePlatformUi()
 const toast = useToast()
 
 onMounted(load)
@@ -81,7 +82,7 @@ const configured = computed(() => (doc.value?.modelDirs.length ?? 0) > 0 || stat
         </UButton>
       </div>
       <form class="mt-3 flex flex-wrap gap-2" @submit.prevent="addDir()">
-        <UInput v-model="path" class="min-w-64 flex-1 font-mono" :placeholder="t.settings.dirs.pathPlaceholder" :aria-label="s.dir.path" />
+        <UInput v-model="path" class="min-w-64 flex-1 font-mono" :placeholder="dirPathPlaceholder(ui.isMac)" :aria-label="s.dir.path" />
         <UButton type="submit" color="neutral" variant="outline" :disabled="!path.trim() || !doc" :loading="saving === 'wizard-dir' || scanning">
           {{ s.dir.add }}
         </UButton>

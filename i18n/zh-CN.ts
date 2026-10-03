@@ -33,6 +33,28 @@ export default {
   },
   platform: {
     runtimeHint: '运行库按系统、架构和加速类型隔离。需要选择时，在 settings.json 的 llamacpp.acceleration 填 auto、cuda、cpu 或 metal 后重启；既有模型参数不变。未知 NVIDIA 设备不会自动下载 CUDA。',
+    // Wording used instead of the Windows text on a Mac (decision 38): no GPU / VRAM / Metal / drive letters.
+    // app/utils/platform-text.ts picks these; keys mirror the texts they replace.
+    mac: {
+      pathPlaceholder: '例如 /Volumes/models 或 ~/models',
+      dirPlaceholder: '例如 ~/llama.cpp/b1234',
+      archivePlaceholder: '例如 ~/Downloads/llama-b1234.tar.gz',
+      restartRequired: '端口已保存为 {port}，但当前进程仍在使用 {current}。关闭运行 start.command 的终端窗口后重新启动才会生效。',
+      maxLoadedHint: '内存有限，始终只保留一个模型；切换时先卸载旧模型。',
+      imageHint: '请求里的图片先压缩再交给模型，省内存也省时间。个别模型可以在方案里单独覆盖。',
+      loadError: { oom: '内存不足' },
+      advice: {
+        oom: '内存放不下。可以：调小上下文长度（ctx）；把 K / V 缓存类型改成 q8_0；换更小的量化文件；或先关掉别的占内存的程序。',
+        crashed: '模型运行中进程意外退出。看下面的日志最后几行，可能是内存不够或输入太长；处理后手动重试。',
+      },
+      params: {
+        ctxSize: { hint: '--ctx-size。能记住的最多 token 数，越大越占内存；0 表示用模型自带的长度。' },
+        cacheTypeK: { hint: '--cache-type-k。注意力缓存里 K 的精度，q4_0 省内存，f16 最准。' },
+        flashAttn: { hint: '--flash-attn。省内存、更快；on / off / auto。' },
+        gpuLayers: { label: '加速层数', hint: '--n-gpu-layers。交给系统加速的层数，999 表示全部。' },
+        ubatchSize: { hint: '--ubatch-size。实际计算时的批大小，越大越快但更占内存。' },
+      },
+    },
   },
   app: {
     title: 'llama-web',
@@ -188,7 +210,6 @@ export default {
     failedHint: '加载失败后不会自动重试。处理问题后到「模型」页点「重试」。',
     progress: '加载进度约 {n}%',
     gpu: {
-      macHint: 'macOS 的 GPU 显存采样尚未实现；Metal、进程退出和推理仍需 Mac 真机验证。',
       util: '核心占用 {n}%',
     },
   },
@@ -225,6 +246,19 @@ export default {
     filter: { placeholder: '筛选模型', label: '筛选模型', none: '没有匹配的模型。' },
     enabled: {
       title: '已启用的模型',
+    addDir: {
+      button: '添加目录',
+      paste: '输入路径',
+      title: '添加模型目录',
+      hint: '填写存放 .gguf 模型的文件夹的完整路径，添加后会立即扫描。',
+      pathLabel: '目录路径',
+      cancel: '取消',
+      confirm: '添加并扫描',
+      duplicate: '这个目录已经在列表里了：{path}',
+      inside: '这个目录已经被 {path} 包含（扫描深度 {depth} 以内），不需要再添加。',
+      found: '已添加目录。找到 {n} 个可启用的模型。',
+      foundNone: '已添加目录，但没有找到可启用的模型。检查路径和扫描深度。',
+    },
       hint: '客户端用模型名（或「名字:方案」）调用；第一个请求到来时会自动加载。',
       empty: '还没有启用任何模型。',
       emptyHint: '到「扫描发现」里启用模型目录中的文件。',
@@ -602,7 +636,7 @@ export default {
     },
     errors: {
       'bad-request': '提交的内容不完整或格式不对。',
-      'dir-path': '目录路径必须是完整的绝对路径（例如 X:\\models）：{detail}',
+      'dir-path': '目录路径必须是完整的绝对路径（例如 X:\\models 或 /Volumes/models）：{detail}',
       'dir-duplicate': '目录重复了：{detail}',
       'dir-depth': '扫描深度必须是 0 到 10 之间的整数：{detail}',
       'dir-limit': '模型目录太多了。',

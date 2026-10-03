@@ -138,3 +138,14 @@ test('resolveFileRef joins dir and rel, and rejects unknown dirs and traversal',
   expect(resolveFileRef(dirs, { dirId: 'main', rel: 'a/../../evil.gguf' })).toBeNull()
   expect(resolveFileRef(dirs, { dirId: 'main', rel: '' })).toBeNull()
 })
+
+test('skips macOS metadata files (AppleDouble ._ companions, .DS_Store)', async () => {
+  writeGguf(join(root, 'real.gguf'), modelSpec())
+  // exFAT / network drives get a "._real.gguf" next to every file; it is not a model.
+  writeFileSync(join(root, '._real.gguf'), 'AppleDouble')
+  writeFileSync(join(root, '.DS_Store'), 'x')
+  writeGguf(join(root, 'sub', 'next.gguf'), modelSpec())
+  writeFileSync(join(root, 'sub', '._next.gguf'), 'AppleDouble')
+  const { entries } = await scanModelDirs([dir()])
+  expect(entries.map(e => e.ref.rel)).toEqual(['real.gguf', 'sub/next.gguf'])
+})

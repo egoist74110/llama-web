@@ -5,6 +5,7 @@ import t from '~~/i18n/zh-CN'
 const s = t.settings.dirs
 const { doc, saving, save } = useSettings()
 const { picking, pick } = usePickFolder()
+const ui = usePlatformUi()
 
 interface Row { key: number, id?: string, path: string, enabled: boolean, depth: string }
 let seq = 0
@@ -51,7 +52,7 @@ async function submit() {
     <ul class="divide-y divide-default">
       <li v-for="(r, i) in rows" :key="r.key" class="space-y-2 py-3 first:pt-0">
         <div class="flex flex-wrap items-center gap-2">
-          <UInput v-model="r.path" class="min-w-64 flex-1 font-mono" :placeholder="s.pathPlaceholder" :aria-label="s.path" :color="r.path.trim() ? undefined : 'error'" />
+          <UInput v-model="r.path" class="min-w-64 flex-1 font-mono" :placeholder="dirPathPlaceholder(ui.isMac)" :aria-label="s.path" :color="r.path.trim() ? undefined : 'error'" />
           <UButton color="neutral" variant="outline" size="sm" icon="i-lucide-folder-open" :loading="picking" :aria-label="s.pick" :title="s.pick" @click="choose(r)" />
           <label class="flex items-center gap-1.5 text-xs text-muted">
             {{ s.depth }}

@@ -2,7 +2,8 @@
 // settings plus an untrusted patch from the client and either applies it to the draft or throws
 // SettingsError. Sections are independent; a missing section is left alone.
 import { existsSync, statSync } from 'node:fs'
-import { isAbsolute, resolve } from 'node:path'
+import { homedir } from 'node:os'
+import { isAbsolute, join, resolve } from 'node:path'
 import { ArgsSyntaxError, normalizeDevice, PARAM_DEFS, paramValueOk, splitArgs, type LaunchDefaults, type ParamValue } from './args'
 import { cleanWizard, hasCpuChannel, hasDeviceSelection, TUNNEL_MODES, TUNNEL_PROTOCOLS, type ModelsDoc, type Settings, type TunnelMode, type TunnelProtocol } from './config'
 import type { PublicStatus } from './public-entry'
@@ -35,9 +36,14 @@ export function dirKey(path: string): string {
   return process.platform === 'win32' ? p.toLowerCase() : p
 }
 
+/** A leading `~` (alone or before a separator) means the user's home folder; other forms are left alone. */
+export function expandHome(p: string, home: string = homedir()): string {
+  return p === '~' || /^~[\\/]/.test(p) ? join(home, p.slice(1)) : p
+}
+
 function cleanPath(raw: unknown): string {
   if (typeof raw !== 'string') throw new SettingsError('dir-path')
-  const p = raw.trim().replace(/^"(.*)"$/, '$1').trim()
+  const p = expandHome(raw.trim().replace(/^"(.*)"$/, '$1').trim())
   if (!p || p.length > 500 || /[\u0000-\u001f]/.test(p) || !isAbsolute(p)) throw new SettingsError('dir-path', raw.trim())
   return p
 }

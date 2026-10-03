@@ -7,6 +7,7 @@ import { quantFromFile } from '~/utils/overview'
 const props = defineProps<{ model: StateDoc['models'][number] }>()
 const { busy, start, stop, retry, setProfile } = useModelActions()
 const { state: live } = useLive()
+const ui = usePlatformUi()
 
 // Shown state: the current profile's instance, else whatever profile is up.
 const shown = computed(() => props.model.instances.find(i => i.profile === props.model.activeProfile) ?? props.model.instances[0] ?? null)
@@ -115,7 +116,7 @@ const working = computed(() => !!(busy.value[`start:${props.model.id}`] || busy.
       :failure="shown.failure"
     />
     <p v-else-if="shown?.error" class="m-0 text-sm text-error">
-      {{ reasonText(shown.error) }}
+      {{ loadErrorText(shown.error, ui.isMac) }}
     </p>
     <div v-if="missing.length" class="rounded-[10px] bg-error/10 px-3.5 py-2.5 text-sm text-error">
       <p class="m-0 font-medium">

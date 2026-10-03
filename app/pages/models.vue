@@ -11,6 +11,20 @@ const tabs = [
 const list = computed(() => state.value?.models ?? [])
 const filter = ref('')
 const needle = computed(() => filter.value.trim().toLowerCase())
+const toast = useToast()
+const discover = ref<{ rescan: () => Promise<{ entries: Array<{ kind: string, enabledAs: string | null }> } | null> } | null>(null)
+const discoverEl = ref<HTMLElement | null>(null)
+
+// A folder was just added: show the scan tab, scan it, tell how many models it holds.
+async function onDirAdded() {
+  tab.value = 'discover'
+  await nextTick()
+  discoverEl.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  // Joins the scan the panel starts on mount (when it holds no result yet) instead of repeating it.
+  const doc = await discover.value?.rescan()
+  const n = doc ? doc.entries.filter(e => e.kind === 'model' && !e.enabledAs).length : null
+  if (n !== null) toast.add({ title: n ? fmt(t.models.addDir.found, { n }) : t.models.addDir.foundNone, color: n ? 'success' : 'warning', icon: n ? 'i-lucide-check' : 'i-lucide-circle-alert' })
+}
 const shown = computed(() => (needle.value ? list.value.filter(m => m.name.toLowerCase().includes(needle.value) || m.files.model.toLowerCase().includes(needle.value)) : list.value))
 </script>
 
@@ -33,13 +47,16 @@ const shown = computed(() => (needle.value ? list.value.filter(m => m.name.toLow
           <span v-if="x.value === 'enabled' && list.length" class="lw-num text-[11px] text-dimmed">{{ list.length }}</span>
         </button>
       </div>
-      <UInput
-        v-model="filter"
-        class="w-[min(280px,100%)]"
-        icon="i-lucide-search"
-        :placeholder="t.models.filter.placeholder"
-        :aria-label="t.models.filter.label"
-      />
+      <div class="flex flex-wrap items-center gap-2">
+        <ModelAddDir @added="onDirAdded" />
+        <UInput
+          v-model="filter"
+          class="w-[min(280px,100%)]"
+          icon="i-lucide-search"
+          :placeholder="t.models.filter.placeholder"
+          :aria-label="t.models.filter.label"
+        />
+      </div>
     </div>
 
     <template v-if="tab === 'enabled'">
@@ -54,9 +71,12 @@ const shown = computed(() => (needle.value ? list.value.filter(m => m.name.toLow
         <p class="mt-1 text-[13px] text-muted">
           {{ t.models.enabled.emptyHint }}
         </p>
-        <UButton class="mt-3" size="sm" color="neutral" variant="outline" @click="tab = 'discover'">
-          {{ t.models.enabled.goDiscover }}
-        </UButton>
+        <div class="mt-3 flex flex-wrap items-center gap-2">
+          <ModelAddDir @added="onDirAdded" />
+          <UButton size="sm" color="neutral" variant="outline" @click="tab = 'discover'">
+            {{ t.models.enabled.goDiscover }}
+          </UButton>
+        </div>
       </section>
       <p v-else-if="!shown.length" class="py-6 text-center text-sm text-muted">
         {{ t.models.filter.none }}
@@ -66,6 +86,8 @@ const shown = computed(() => (needle.value ? list.value.filter(m => m.name.toLow
       </section>
     </template>
 
-    <DiscoverPanel v-else :filter="needle" />
+    <div v-else ref="discoverEl" class="scroll-mt-4">
+      <DiscoverPanel ref="discover" :filter="needle" />
+    </div>
   </div>
 </template>

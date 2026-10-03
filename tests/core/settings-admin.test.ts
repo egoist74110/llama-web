@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 import { cleanWizard, defaultModels, defaultSettings, normalizeSettings, SETTINGS_MIGRATIONS, type ModelConfig, type ModelsDoc, type Settings } from '../../server/core/config'
 import {
-  applyDefaults, applyImagePreprocess, applyModelDirs, applyPublic, applyServer, applySettingsPatch, dirStatus, isFirstRun, SettingsError,
+  applyDefaults, applyImagePreprocess, applyModelDirs, applyPublic, applyServer, applySettingsPatch, dirStatus, expandHome, isFirstRun, SettingsError,
 } from '../../server/core/settings-admin'
 
 // Absolute on the host (X:\… is not absolute on macOS / Linux); Windows-only semantics are tested separately.
@@ -43,6 +43,19 @@ describe('applyModelDirs', () => {
     ], models())
     expect(s.modelDirs.map(d => d.id)).toEqual(['main', 'dir-1', 'dir-2'])
     expect(s.modelDirs[0]).toEqual({ id: 'main', path: abs('y-moved'), enabled: false, maxDepth: 1 })
+  })
+
+  test('a leading ~ means the home folder (macOS paste); other uses of ~ stay relative and are rejected', () => {
+    const home = abs('home', 'me')
+    expect(expandHome('~', home)).toBe(home)
+    expect(expandHome('~/models', home)).toBe(join(home, 'models'))
+    expect(expandHome('~\\models', home)).toBe(join(home, 'models'))
+    expect(expandHome('~other/models', home)).toBe('~other/models')
+    expect(expandHome('/Volumes/m', home)).toBe('/Volumes/m')
+    const s = settingsWith([])
+    expect(() => applyModelDirs(s, [{ path: '~other/models', enabled: true, maxDepth: 1 }], models())).toThrow(SettingsError)
+    applyModelDirs(s, [{ path: '~/models', enabled: true, maxDepth: 1 }], models())
+    expect(s.modelDirs[0]!.path).toBe(join(homedir(), 'models'))
   })
 
   test('strips quotes and whitespace; rejects relative, empty and non-string paths', () => {

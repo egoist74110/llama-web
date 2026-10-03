@@ -15,7 +15,8 @@ const props = defineProps<{
 
 const { busy, retry } = useModelActions()
 const f = t.failure
-const advice = computed(() => (f.advice as Record<string, string>)[props.failure.kind] ?? f.advice.unknown)
+const ui = usePlatformUi()
+const advice = computed(() => failureAdvice(props.failure.kind, ui.value.isMac))
 // The end of the output is what matters: keep it in view.
 const tailEl = ref<HTMLElement | null>(null)
 const toEnd = () => nextTick(() => { if (tailEl.value) tailEl.value.scrollTop = tailEl.value.scrollHeight })

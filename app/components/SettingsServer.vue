@@ -3,6 +3,7 @@
 import t from '~~/i18n/zh-CN'
 
 const s = t.settings.server
+const ui = usePlatformUi()
 const { doc, saving, save } = useSettings()
 
 const f = reactive({ port: '', from: '', to: '', load: '', drain: '' })
@@ -92,7 +93,7 @@ const submit = () => save('server', {
             {{ s.maxLoaded }}
           </p>
           <p class="text-xs text-muted">
-            {{ s.maxLoadedHint }}
+            {{ ui.isMac ? t.platform.mac.maxLoadedHint : s.maxLoadedHint }}
           </p>
         </div>
         <span class="w-40 text-sm text-muted">{{ fmt(s.maxLoadedValue, { n: doc?.server.maxLoaded ?? 1 }) }}</span>
@@ -108,7 +109,7 @@ const submit = () => save('server', {
       <span v-if="dirty" class="text-xs text-warning">{{ t.settings.dirty }}</span>
     </div>
     <p v-if="doc?.restartRequired" class="mt-3 text-xs text-warning">
-      {{ fmt(s.restartRequired, { port: doc.server.port, current: doc.bootPort }) }}
+      {{ fmt(ui.isMac ? t.platform.mac.restartRequired : s.restartRequired, { port: doc.server.port, current: doc.bootPort }) }}
     </p>
   </AppCard>
 </template>
