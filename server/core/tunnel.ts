@@ -1,5 +1,7 @@
 // Cloudflare tunnel hosting (plan 阶段 4, 4-4): find (or download) cloudflared, run
 // `cloudflared tunnel run` with the tunnel token and watch it. Pure module (no Nitro).
+// Quick mode (阶段 7, decision 31) runs `cloudflared tunnel --url http://127.0.0.1:<port>` instead:
+// no token, no account; the random *.trycloudflare.com address is read from its output.
 //
 // - The token comes from data/secrets.json and is handed to the child through the TUNNEL_TOKEN
 //   environment variable (same effect as `--token`, but not visible in the process list).
@@ -8,9 +10,10 @@
 //   install is copied there), so the startup residue cleanup, which only kills processes whose
 //   executable is under data/runtime/, also covers a tunnel left behind by a hard kill.
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
-import { chmodSync, copyFileSync, existsSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs'
+import { chmodSync, copyFileSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, posix, win32 } from 'node:path'
 import { download, getBody, RuntimeError, type FetchFn, type NetOptions, type ReleaseAsset } from './llamacpp'
+import type { TunnelMode, TunnelProtocol } from './config'
 import type { PublicStatus } from './public-entry'
 import { killTree, type PidRegistry } from './runner'
 import { cloudflaredAssetName } from './platform'
@@ -256,12 +259,19 @@ export type TunnelStatus =
 
 export interface TunnelInfo {
   status: TunnelStatus
+  /** Mode of the tunnel that is (or was last) set up; null before the first start. */
+  mode: TunnelMode | null
   cloudflared: { source: 'system' | 'downloaded', version: string | null } | null
   /**
    * Host names the tunnel routes to this public entry, from the configuration cloudflared
    * received from Cloudflare (null = not seen yet for this token).
    */
   hostnames: string[] | null
+  /**
+   * Quick mode: the *.trycloudflare.com host name of the running process, from its output.
+   * Null while none was printed yet; cleared on every (re)start and when the process ends.
+   */
+  quickHost: string | null
 }
 
 const HOST = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/
@@ -291,17 +301,75 @@ export function ingressHostnames(line: string, port: number): string[] | null {
   return out
 }
 
+/**
+ * The quick tunnel's host name in a cloudflared output line (`|  https://a-b-c.trycloudflare.com  |`),
+ * or null. Only a single label under trycloudflare.com counts, never the API host
+ * (`api.trycloudflare.com`, which shows up in error lines), and never in an error / warning line.
+ */
+export function quickTunnelHost(line: string): string | null {
+  if (/\b(?:ERR|WRN|error)\b/i.test(line)) return null
+  const m = /\bhttps:\/\/([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)\.trycloudflare\.com(?![a-z0-9.-])/i.exec(line)
+  const label = m?.[1]?.toLowerCase()
+  return label && label !== 'api' ? `${label}.trycloudflare.com` : null
+}
+
+/**
+ * Configuration file handed to a quick tunnel with `--config`, so a `~/.cloudflared/config.yml`
+ * left by another (named) tunnel is not read: with a `tunnel:` key in it cloudflared refuses to
+ * start a quick tunnel. Lives next to our cloudflared copy and is deleted with the data directory.
+ */
+export const quickConfigPath = (dataDir: string) => join(dataDir, 'runtime', 'cloudflared', 'quick-tunnel.yml')
+const QUICK_CONFIG = '# Written by llama-web for the quick tunnel: keeps cloudflared from reading ~/.cloudflared/config.yml.\n{}\n'
+
+/** Write the (empty) quick tunnel configuration when it is missing or different. */
+export function ensureQuickConfig(dataDir: string): string {
+  const file = quickConfigPath(dataDir)
+  let same = false
+  try { same = readFileSync(file, 'utf8') === QUICK_CONFIG } catch { /* missing */ }
+  if (!same) {
+    mkdirSync(dirname(file), { recursive: true })
+    const tmp = `${file}.${process.pid}.tmp`
+    writeFileSync(tmp, QUICK_CONFIG)
+    try { renameSync(tmp, file) } catch (e) { rmSync(tmp, { force: true }); throw e }
+  }
+  return file
+}
+
+/** cloudflared arguments (an array, never a shell string). Token mode passes the token in the environment. */
+export function tunnelArgs(mode: TunnelMode, port: number, configFile: string, protocol: TunnelProtocol): string[] {
+  const common = ['tunnel', '--no-autoupdate', '--protocol', protocol]
+  return mode === 'quick'
+    ? [...common, '--config', configFile, '--url', `http://127.0.0.1:${port}`]
+    : [...common, 'run']
+}
+
 export interface TunnelConfig {
   /** settings.public.tunnelEnabled */
   tunnelEnabled: boolean
+  /** settings.public.tunnelMode */
+  mode: TunnelMode
+  /** settings.public.tunnelProtocol */
+  protocol: TunnelProtocol
   /** settings.public.enabled and what the listener is doing. */
   publicEnabled: boolean
   publicState: PublicStatus['state']
-  /** The saved tunnel token ('' = none). */
+  /** The saved tunnel token ('' = none; not used in quick mode). */
   token: string
-  /** Public entry port (only recorded in pids.json). */
+  /** Public entry port: recorded in pids.json; in quick mode also the tunnel's target. */
   port: number
 }
+
+/** What the running process was started with. A different launch means a restart. */
+interface Launch {
+  mode: TunnelMode
+  /** '' in quick mode. */
+  token: string
+  port: number
+  protocol: TunnelProtocol
+}
+
+/** Token mode follows the token (the port is in the remote configuration); quick mode its port. Both the protocol. */
+const launchKey = (l: Launch) => `${l.protocol}:${l.mode === 'quick' ? `quick:${l.port}` : `token:${l.token}`}`
 
 export interface TunnelManagerOptions {
   dataDir: string
@@ -314,8 +382,8 @@ export interface TunnelManagerOptions {
   fetch?: FetchFn
   platform?: NodeJS.Platform
   env?: Record<string, string | undefined>
-  /** Replaces `tunnel --no-autoupdate run` (tests). */
-  buildArgs?: () => string[]
+  /** Replaces the cloudflared arguments (tests). */
+  buildArgs?: (launch: { mode: TunnelMode, port: number, protocol: TunnelProtocol }) => string[]
   /** Waits before automatic restarts after an unexpected exit. */
   retryDelaysMs?: number[]
   /** A connection that lasted this long resets the retry delays. */
@@ -332,7 +400,7 @@ const BAD_TOKEN = /Provided Tunnel token is not valid|Unauthorized: Invalid tunn
 
 export class TunnelManager {
   private cfg: TunnelConfig | null = null
-  private activeToken: string | null = null
+  private active: Launch | null = null
   private gen = 0
   private child: ChildProcess | null = null
   private childDone: Promise<void> | null = null
@@ -341,7 +409,7 @@ export class TunnelManager {
   private queue: Promise<void> = Promise.resolve()
   private closed = false
   private lines: string[] = []
-  private info: TunnelInfo = { status: { state: 'off', reason: 'disabled' }, cloudflared: null, hostnames: null }
+  private info: TunnelInfo = { status: { state: 'off', reason: 'disabled' }, mode: null, cloudflared: null, hostnames: null, quickHost: null }
   private lastKey = ''
   private hostsToken: string | null = null
   /** The running preparation (find / download cloudflared) and the way to cancel it. */
@@ -370,7 +438,7 @@ export class TunnelManager {
   /** Start again now (after an error, instead of waiting for the automatic retry). */
   retry(): void {
     this.queue = this.queue.then(async () => {
-      if (this.closed || !this.activeToken || this.child || this.info.status.state === 'preparing') return
+      if (this.closed || !this.active || this.child || this.info.status.state === 'preparing') return
       this.attempt = 0
       this.begin()
     }).catch(() => {})
@@ -385,7 +453,7 @@ export class TunnelManager {
 
   private offReason(c: TunnelConfig): TunnelOffReason | null {
     if (!c.tunnelEnabled) return 'disabled'
-    if (!c.token) return 'no-token'
+    if (c.mode !== 'quick' && !c.token) return 'no-token'
     if (!c.publicEnabled) return 'public-off'
     if (c.publicState === 'unavailable') return 'public-unavailable'
     if (c.publicState !== 'listening') return 'public-error'
@@ -397,18 +465,25 @@ export class TunnelManager {
     if (!cfg || this.closed) return
     const reason = this.offReason(cfg)
     if (reason) {
-      if (this.activeToken !== null || this.info.status.state !== 'off') await this.teardown()
-      this.activeToken = null
+      if (this.active !== null || this.info.status.state !== 'off') await this.teardown()
+      this.active = null
       if (!cfg.token) this.forgetHosts()
       this.set({ state: 'off', reason })
       return
     }
-    if (this.activeToken === cfg.token) return
+    const protocol: TunnelProtocol = cfg.protocol === 'quic' ? 'quic' : 'http2'
+    const launch: Launch = cfg.mode === 'quick'
+      ? { mode: 'quick', token: '', port: cfg.port, protocol }
+      : { mode: 'token', token: cfg.token, port: cfg.port, protocol }
+    if (this.active && launchKey(this.active) === launchKey(launch)) return
     await this.teardown()
-    this.activeToken = cfg.token
-    // Host names belong to a tunnel: a different token may be a different tunnel.
-    if (this.hostsToken !== cfg.token) this.forgetHosts()
-    this.hostsToken = cfg.token
+    this.active = launch
+    // Host names belong to a tunnel: a different token may be a different tunnel. A quick tunnel
+    // routes none of the user's own host names, so none are shown while it runs (they come back
+    // with the configuration cloudflared receives when the own tunnel starts again).
+    if (launch.mode === 'quick' || this.hostsToken !== launch.token) this.forgetHosts()
+    if (launch.mode === 'token') this.hostsToken = launch.token
+    this.info = { ...this.info, mode: launch.mode }
     this.attempt = 0
     this.begin()
   }
@@ -432,7 +507,8 @@ export class TunnelManager {
     await this.opts.registry?.flushIdentities()
     this.child = null
     this.childDone = null
-    this.activeToken = null
+    this.active = null
+    this.info = { ...this.info, quickHost: null }
   }
 
   private begin(): void {
@@ -443,8 +519,9 @@ export class TunnelManager {
   }
 
   private async run(gen: number): Promise<void> {
-    const token = this.activeToken
-    if (!token || !this.cfg) return
+    const launch = this.active
+    if (!launch || !this.cfg) return
+    const token = launch.token || null
     const stale = () => gen !== this.gen || this.closed
     try {
       await this.opts.ready
@@ -470,7 +547,8 @@ export class TunnelManager {
       const version = await (this.opts.version ?? cloudflaredVersion)(prepared.exe)
       if (stale()) return
       this.info = { ...this.info, cloudflared: { source: prepared.source, version } }
-      this.spawnChild(gen, prepared.exe, token)
+      const configFile = launch.mode === 'quick' ? ensureQuickConfig(this.opts.dataDir) : ''
+      this.spawnChild(gen, prepared.exe, launch, configFile)
     } catch (e) {
       if (stale()) return
       const code: TunnelErrorCode = e instanceof TunnelError ? e.code : 'prepare-failed'
@@ -479,14 +557,21 @@ export class TunnelManager {
     }
   }
 
-  private spawnChild(gen: number, exe: string, token: string): void {
-    const port = this.cfg?.port ?? 0
-    const args = this.opts.buildArgs?.() ?? ['tunnel', '--no-autoupdate', 'run']
+  private spawnChild(gen: number, exe: string, launch: Launch, configFile: string): void {
+    const { mode, port, protocol } = launch
+    const token = launch.token || null
+    const args = this.opts.buildArgs?.({ mode, port, protocol }) ?? tunnelArgs(mode, port, configFile, protocol)
+    // Quick mode: no token at all, not even one inherited from llama-web's own environment.
+    const env: Record<string, string | undefined> = { ...process.env }
+    delete env.TUNNEL_TOKEN
+    if (mode === 'token' && token) env.TUNNEL_TOKEN = token
+    // Every start (and restart) gets a new quick address: the old one is gone.
+    this.info = { ...this.info, quickHost: null }
     let child: ChildProcess
     try {
       child = (this.opts.spawn ?? spawn)(exe, args, {
         cwd: dirname(exe),
-        env: { ...process.env, TUNNEL_TOKEN: token },
+        env,
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
         shell: false,
@@ -538,8 +623,14 @@ export class TunnelManager {
       if (this.lines.length > TAIL_LINES) this.lines.splice(0, this.lines.length - TAIL_LINES)
       try { this.opts.onLine?.(line) } catch { /* listeners must not break capture */ }
       if (gen !== this.gen) return
-      if (BAD_TOKEN.test(line)) badToken = true
-      const hosts = ingressHostnames(line, port)
+      if (mode === 'quick') {
+        const quick = this.info.quickHost ? null : quickTunnelHost(line)
+        if (quick) {
+          this.info = { ...this.info, quickHost: quick }
+          this.set(this.info.status)
+        }
+      } else if (BAD_TOKEN.test(line)) badToken = true
+      const hosts = mode === 'token' ? ingressHostnames(line, port) : null
       if (hosts) {
         this.info = { ...this.info, hostnames: hosts }
         this.set(this.info.status)
@@ -573,7 +664,14 @@ export class TunnelManager {
       if (exited) return
       exited = true
       try { this.opts.registry?.remove(pid) } catch { /* registry is best effort */ }
-      if (this.child === child) this.child = null
+      if (this.child === child) {
+        this.child = null
+        // The quick address died with the process.
+        if (this.info.quickHost) {
+          this.info = { ...this.info, quickHost: null }
+          this.set(this.info.status)
+        }
+      }
       done()
       // Stopped on purpose (settings change, shutdown) or replaced: nothing to report.
       if (gen !== this.gen || this.closed || spawnFailed) return
@@ -611,7 +709,7 @@ export class TunnelManager {
   }
 
   private set(status: TunnelStatus): void {
-    const key = JSON.stringify(status) + JSON.stringify(this.info.cloudflared) + JSON.stringify(this.info.hostnames)
+    const key = JSON.stringify([status, this.info.mode, this.info.cloudflared, this.info.hostnames, this.info.quickHost])
     this.info = { ...this.info, status }
     if (key === this.lastKey) return
     this.lastKey = key

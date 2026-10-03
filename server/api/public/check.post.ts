@@ -1,6 +1,7 @@
 // Self-check of the public addresses: request each one's /v1/models without a key from this
 // machine (through Cloudflare and the tunnel); 401 = reachable. The addresses come from the
-// saved domain and the tunnel's configuration, never from the request.
+// saved domain and the tunnel's configuration (quick mode: only the quick tunnel's address),
+// never from the request.
 import { checkAddresses, publicAddresses } from '../../core/public-check'
 import { getContext } from '../../service/context'
 
@@ -9,7 +10,7 @@ const MAX = 20
 
 export default defineEventHandler(async () => {
   const ctx = getContext()
-  const hosts = publicAddresses(ctx.getSettings().public.domain, ctx.tunnel.status().hostnames)
+  const hosts = publicAddresses(ctx.getSettings().public, ctx.tunnel.status())
     .filter(h => HOST.test(h)).slice(0, MAX)
   return { results: await checkAddresses(hosts, { fetch }) }
 })

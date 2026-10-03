@@ -4,7 +4,7 @@
 import { existsSync, statSync } from 'node:fs'
 import { isAbsolute, resolve } from 'node:path'
 import { ArgsSyntaxError, PARAM_DEFS, splitArgs, type LaunchDefaults, type ParamValue } from './args'
-import { cleanWizard, type ModelsDoc, type Settings } from './config'
+import { cleanWizard, TUNNEL_MODES, TUNNEL_PROTOCOLS, type ModelsDoc, type Settings, type TunnelMode, type TunnelProtocol } from './config'
 import type { PublicStatus } from './public-entry'
 import type { ModelDir } from './types'
 
@@ -176,8 +176,8 @@ const DOMAIN = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2
 
 /**
  * Public entry (plan 关键决定 3): on/off, its port (loopback only, never the main port or inside
- * the llama-server range), the public domain (display only), whether llama-web hosts the tunnel
- * and the progress of the public access guide.
+ * the llama-server range), the public domain (display only), whether llama-web hosts the tunnel,
+ * which kind of tunnel (own / quick, decision 31), its protocol (HTTP/2 / QUIC) and the progress of the public access guide.
  * The tunnel token is not part of this patch: it has its own endpoint and is never echoed back.
  */
 export function applyPublic(draft: Settings, raw: unknown): void {
@@ -197,13 +197,17 @@ export function applyPublic(draft: Settings, raw: unknown): void {
   }
   const tunnelEnabled = raw.tunnelEnabled === undefined ? cur.tunnelEnabled : raw.tunnelEnabled
   if (typeof tunnelEnabled !== 'boolean') throw new SettingsError('bad-request')
+  const tunnelMode = raw.tunnelMode === undefined ? cur.tunnelMode : raw.tunnelMode
+  if (!TUNNEL_MODES.includes(tunnelMode as TunnelMode)) throw new SettingsError('bad-request')
+  const tunnelProtocol = raw.tunnelProtocol === undefined ? cur.tunnelProtocol : raw.tunnelProtocol
+  if (!TUNNEL_PROTOCOLS.includes(tunnelProtocol as TunnelProtocol)) throw new SettingsError('bad-request')
   // Guide progress: null ends it; anything else must be a complete, valid progress.
   let wizard = cur.wizard
   if (raw.wizard !== undefined) {
     wizard = raw.wizard === null ? null : cleanWizard(raw.wizard)
     if (raw.wizard !== null && !wizard) throw new SettingsError('bad-request')
   }
-  draft.public = { enabled, port, domain, tunnelEnabled, wizard }
+  draft.public = { enabled, port, domain, tunnelEnabled, tunnelMode: tunnelMode as TunnelMode, tunnelProtocol: tunnelProtocol as TunnelProtocol, wizard }
 }
 
 export interface SettingsPatch {

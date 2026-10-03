@@ -6,10 +6,22 @@ const respond = (status: number, body = '') => async () => new Response(body, { 
 const fail = (e: object) => async () => { throw Object.assign(new Error((e as { message?: string }).message ?? 'x'), e) }
 
 describe('publicAddresses', () => {
-  test('saved domain first, then the tunnel host names; no duplicates or blanks', () => {
-    expect(publicAddresses('llm.example.com', ['b.example.net', 'LLM.example.com'])).toEqual(['llm.example.com', 'b.example.net'])
-    expect(publicAddresses('', null)).toEqual([])
-    expect(publicAddresses('', ['a.example.com'])).toEqual(['a.example.com'])
+  const own = (domain: string) => ({ tunnelMode: 'token' as const, domain })
+  const quick = (domain: string) => ({ tunnelMode: 'quick' as const, domain })
+  const t = (hostnames: string[] | null, quickHost: string | null = null) => ({ hostnames, quickHost })
+
+  test('own tunnel: saved domain first, then the tunnel host names; no duplicates or blanks', () => {
+    expect(publicAddresses(own('llm.example.com'), t(['b.example.net', 'LLM.example.com']))).toEqual(['llm.example.com', 'b.example.net'])
+    expect(publicAddresses(own(''), t(null))).toEqual([])
+    expect(publicAddresses(own(''), t(['a.example.com']))).toEqual(['a.example.com'])
+    // A quick address left in the status does not count for the own tunnel.
+    expect(publicAddresses(own('llm.example.com'), t(null, 'a-b-c.trycloudflare.com'))).toEqual(['llm.example.com'])
+  })
+
+  test('quick tunnel: only the address the running process printed, never the saved domain', () => {
+    expect(publicAddresses(quick('llm.example.com'), t(['b.example.net'], 'A-b-c.trycloudflare.com'))).toEqual(['a-b-c.trycloudflare.com'])
+    // Not printed yet (or the process ended): nothing to show or check.
+    expect(publicAddresses(quick('llm.example.com'), t(['b.example.net'], null))).toEqual([])
   })
 })
 

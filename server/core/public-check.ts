@@ -3,6 +3,7 @@
 // The entry answers 401 to a request without a key, so 401 means the whole path works.
 // Pure module (no Nitro); fetch is injected.
 import { lookup as dnsLookup } from 'node:dns/promises'
+import type { TunnelMode } from './config'
 import type { FetchFn } from './llamacpp'
 
 export type CheckCode =
@@ -31,9 +32,17 @@ export interface CheckResult {
   ms: number
 }
 
-/** Addresses to show and check: the saved domain first, then what the tunnel routes here. */
-export function publicAddresses(domain: string, hostnames: string[] | null | undefined): string[] {
-  return [...new Set([domain, ...(hostnames ?? [])].map(h => h.trim().toLowerCase()).filter(Boolean))]
+/**
+ * Addresses to show and check. Own tunnel: the saved domain first, then what the tunnel routes
+ * here. Quick tunnel (decision 31): only the *.trycloudflare.com address the running process
+ * printed; the saved domain and the own tunnel's host names do not lead here then.
+ */
+export function publicAddresses(
+  pub: { tunnelMode: TunnelMode, domain: string },
+  tunnel: { hostnames: string[] | null | undefined, quickHost: string | null | undefined },
+): string[] {
+  const hosts = pub.tunnelMode === 'quick' ? [tunnel.quickHost ?? ''] : [pub.domain, ...(tunnel.hostnames ?? [])]
+  return [...new Set(hosts.map(h => h.trim().toLowerCase()).filter(Boolean))]
 }
 
 function classify(status: number, body: string): CheckCode {

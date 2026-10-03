@@ -223,7 +223,7 @@ describe('settings version 2 (tunnel hosted by llama-web)', () => {
 
   test('normalize fills the switch and removes a leftover tunnel name', () => {
     const s = normalizeSettings({ ...defaultSettings(), public: { enabled: true, port: 8080, domain: '', tunnelName: 'x' } } as never)
-    expect(s.public).toEqual({ enabled: true, port: 8080, domain: '', tunnelEnabled: false, wizard: null })
+    expect(s.public).toEqual({ enabled: true, port: 8080, domain: '', tunnelEnabled: false, tunnelMode: 'token', tunnelProtocol: 'http2', wizard: null })
   })
 })
 
@@ -267,18 +267,82 @@ describe('settings version 3 (public access guide progress)', () => {
   })
 })
 
+describe('settings version 5 (tunnel mode, decision 31)', () => {
+  test('migration 4 -> 5: an existing installation keeps its own tunnel, everything else untouched', () => {
+    const old = { version: 4, public: { enabled: true, port: 8081, domain: 'a.example.com', tunnelEnabled: true, wizard: null }, llamacpp: { acceleration: 'cuda' } }
+    const next = SETTINGS_MIGRATIONS[4]!(structuredClone(old))
+    expect(next.public).toEqual({ ...old.public, tunnelMode: 'token', tunnelProtocol: 'http2' })
+    expect(next.llamacpp).toEqual(old.llamacpp)
+    // A value already there (a newer file written back by hand) is not overwritten.
+    expect(SETTINGS_MIGRATIONS[4]!({ version: 4, public: { tunnelMode: 'quick' } }).public.tunnelMode).toBe('quick')
+    // No public section at all: nothing to do, normalize fills the default.
+    expect(normalizeSettings(SETTINGS_MIGRATIONS[4]!({ version: 4 })).public.tunnelMode).toBe('token')
+  })
+
+  test('the whole chain from version 1 ends in token mode', () => {
+    let doc: any = { version: 1, public: { enabled: true, port: 8080, domain: 'a.example.com', tunnelName: 'x' } }
+    for (let v = 1; v < 5; v++) doc = SETTINGS_MIGRATIONS[v]!(doc)
+    expect(normalizeSettings(doc).public).toMatchObject({ enabled: true, domain: 'a.example.com', tunnelEnabled: false, tunnelMode: 'token', tunnelProtocol: 'http2' })
+  })
+
+  test('normalize: a hand-edited unknown mode falls back to token; quick survives', () => {
+    for (const tunnelMode of ['QUICK', 'trycloudflare', 1, null]) {
+      expect(normalizeSettings({ ...defaultSettings(), public: { ...defaultSettings().public, tunnelMode } } as never).public.tunnelMode).toBe('token')
+    }
+    expect(normalizeSettings({ ...defaultSettings(), public: { ...defaultSettings().public, tunnelMode: 'quick' } }).public.tunnelMode).toBe('quick')
+    expect(defaultSettings().public.tunnelMode).toBe('token')
+  })
+
+  test('applyPublic saves the mode, keeps it when omitted and refuses anything else', () => {
+    const s = settingsWith()
+    applyPublic(s, { tunnelMode: 'quick', tunnelEnabled: true, enabled: true })
+    expect(s.public).toMatchObject({ tunnelMode: 'quick', tunnelEnabled: true, enabled: true })
+    applyPublic(s, { enabled: true })
+    expect(s.public.tunnelMode).toBe('quick')
+    for (const tunnelMode of ['Quick', 'named', '', 1, null, true]) {
+      expect(codeOf(() => applyPublic(s, { tunnelMode }))).toBe('bad-request')
+    }
+    expect(s.public.tunnelMode).toBe('quick')
+    applyPublic(s, { tunnelMode: 'token' })
+    expect(s.public.tunnelMode).toBe('token')
+  })
+
+  test('protocol: HTTP/2 by default, QUIC as the alternative, anything else refused (hand edits fall back to HTTP/2)', () => {
+    expect(defaultSettings().public.tunnelProtocol).toBe('http2')
+    const s = settingsWith()
+    applyPublic(s, { tunnelProtocol: 'quic' })
+    expect(s.public.tunnelProtocol).toBe('quic')
+    applyPublic(s, { enabled: true })
+    expect(s.public.tunnelProtocol).toBe('quic')
+    for (const tunnelProtocol of ['auto', 'HTTP2', 'h2mux', '', null, 2]) {
+      expect(codeOf(() => applyPublic(s, { tunnelProtocol }))).toBe('bad-request')
+      expect(normalizeSettings({ ...defaultSettings(), public: { ...defaultSettings().public, tunnelProtocol } } as never).public.tunnelProtocol).toBe('http2')
+    }
+    expect(s.public.tunnelProtocol).toBe('quic')
+    expect(SETTINGS_MIGRATIONS[4]!({ version: 4, public: { tunnelProtocol: 'quic' } }).public.tunnelProtocol).toBe('quic')
+  })
+
+  test('the guide accepts the quick branch', () => {
+    const quick = { step: 'connect', mode: 'setup', path: 'quick', zoneId: '', subdomain: '', domain: '' }
+    expect(cleanWizard(quick)).toEqual(quick as never)
+    const s = settingsWith()
+    applyPublic(s, { wizard: quick })
+    expect(s.public.wizard?.path).toBe('quick')
+  })
+})
+
 describe('applyPublic', () => {
   test('saves on/off, port, lower-cased domain and the tunnel switch', () => {
     const s = settingsWith()
     applyPublic(s, { enabled: true, port: 8081, domain: '  LLM.Example.com ', tunnelEnabled: true })
-    expect(s.public).toEqual({ enabled: true, port: 8081, domain: 'llm.example.com', tunnelEnabled: true, wizard: null })
+    expect(s.public).toEqual({ enabled: true, port: 8081, domain: 'llm.example.com', tunnelEnabled: true, tunnelMode: 'token', tunnelProtocol: 'http2', wizard: null })
   })
 
   test('missing keys are kept; an empty domain is allowed', () => {
     const s = settingsWith()
     applyPublic(s, { domain: 'a.example.com', tunnelEnabled: true })
     applyPublic(s, { enabled: true })
-    expect(s.public).toEqual({ enabled: true, port: 8080, domain: 'a.example.com', tunnelEnabled: true, wizard: null })
+    expect(s.public).toEqual({ enabled: true, port: 8080, domain: 'a.example.com', tunnelEnabled: true, tunnelMode: 'token', tunnelProtocol: 'http2', wizard: null })
     applyPublic(s, { domain: '' })
     expect(s.public.domain).toBe('')
   })

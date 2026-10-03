@@ -5,8 +5,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { isAlive, PidRegistry } from '../../server/core/runner'
 import {
-  candidatePaths, cloudflaredPath, extractToken, ingressHostnames, tunnelIdOf, findCloudflared, maskToken, prepareCloudflared, redact, releaseAssetName,
-  TunnelError, TunnelManager, type PrepareOptions, type TunnelConfig, type TunnelInfo, type TunnelStatus,
+  candidatePaths, cloudflaredPath, ensureQuickConfig, extractToken, ingressHostnames, tunnelIdOf, findCloudflared, maskToken, prepareCloudflared,
+  quickConfigPath, quickTunnelHost, redact, releaseAssetName, tunnelArgs, TunnelError, TunnelManager, type PrepareOptions, type TunnelConfig, type TunnelInfo, type TunnelStatus,
 } from '../../server/core/tunnel'
 
 const FIXTURE = join(import.meta.dir, '..', 'fixtures', 'fake-cloudflared.ts')
@@ -172,12 +172,14 @@ async function until<T>(fn: () => T | undefined | false | null, ms = 8000): Prom
 }
 
 const baseCfg = (over: Partial<TunnelConfig> = {}): TunnelConfig => ({
-  tunnelEnabled: true, publicEnabled: true, publicState: 'listening', token: TOKEN, port: 8080, ...over,
+  tunnelEnabled: true, mode: 'token', protocol: 'http2', publicEnabled: true, publicState: 'listening', token: TOKEN, port: 8080, ...over,
 })
 
 function makeManager(mode: () => string, over: Partial<ConstructorParameters<typeof TunnelManager>[0]> = {}) {
   const statuses: TunnelStatus[] = []
+  const infos: TunnelInfo[] = []
   const lines: string[] = []
+  const launches: Array<{ mode: string, port: number, protocol: string }> = []
   const registry = new PidRegistry(join(dir, 'run', 'pids.json'))
   let spawns = 0
   const m = new TunnelManager({
@@ -185,13 +187,13 @@ function makeManager(mode: () => string, over: Partial<ConstructorParameters<typ
     registry,
     prepare: async () => ({ exe: process.execPath, source: 'system' }),
     version: async () => '2099.1.0',
-    buildArgs: () => { spawns++; return [FIXTURE, mode()] },
+    buildArgs: (l) => { spawns++; launches.push(l); return [FIXTURE, mode()] },
     retryDelaysMs: [30, 30],
-    onStatus: (i: TunnelInfo) => statuses.push(i.status),
+    onStatus: (i: TunnelInfo) => { statuses.push(i.status); infos.push(i) },
     onLine: l => lines.push(l),
     ...over,
   })
-  return { m, statuses, lines, registry, spawns: () => spawns }
+  return { m, statuses, infos, lines, launches, registry, spawns: () => spawns }
 }
 
 const errorOf = (m: TunnelManager) => { const s = m.status().status; return s.state === 'error' ? s : null }
@@ -219,6 +221,167 @@ describe('ingressHostnames', () => {
     expect(ingressHostnames('INF Registered tunnel connection connIndex=0', 8080)).toBeNull()
     expect(ingressHostnames('INF Updated to new configuration config="{not json" version=1', 8080)).toBeNull()
     expect(ingressHostnames('INF Updated to new configuration version=1', 8080)).toBeNull()
+  })
+})
+
+describe('quick tunnel helpers', () => {
+  const at = (m: string) => `2026-10-01T00:00:00Z INF ${m}`
+
+  test('the address comes from the banner line, lower-cased', () => {
+    expect(quickTunnelHost(at('|  https://Some-Random-Words.trycloudflare.com                    |'))).toBe('some-random-words.trycloudflare.com')
+    expect(quickTunnelHost('https://abc-1.trycloudflare.com')).toBe('abc-1.trycloudflare.com')
+  })
+
+  test('not an address: the API host, error / warning lines, deeper or longer names, other text', () => {
+    for (const line of [
+      at('Requesting new quick Tunnel on trycloudflare.com...'),
+      at('POST https://api.trycloudflare.com/tunnel'),
+      '2026-10-01T00:00:00Z ERR failed to request quick Tunnel: Post "https://abc.trycloudflare.com/tunnel"',
+      '2026-10-01T00:00:00Z WRN https://abc.trycloudflare.com is slow',
+      at('https://a.b.trycloudflare.com'),
+      at('https://abc.trycloudflare.com.example.com'),
+      at('https://-abc.trycloudflare.com'),
+      at('http://abc.trycloudflare.com'),
+      at('Registered tunnel connection connIndex=0'),
+    ]) expect(quickTunnelHost(line)).toBeNull()
+  })
+
+  test('arguments are an array: quick points at the loopback entry port with our own config file; both carry the protocol', () => {
+    expect(tunnelArgs('quick', 8081, 'X:\\data\\q.yml', 'http2')).toEqual(['tunnel', '--no-autoupdate', '--protocol', 'http2', '--config', 'X:\\data\\q.yml', '--url', 'http://127.0.0.1:8081'])
+    expect(tunnelArgs('token', 8081, 'ignored', 'quic')).toEqual(['tunnel', '--no-autoupdate', '--protocol', 'quic', 'run'])
+  })
+
+  test('the config file lives under data/runtime/cloudflared and is rewritten only when changed', () => {
+    const file = ensureQuickConfig(dir)
+    expect(file).toBe(quickConfigPath(dir))
+    expect(file.startsWith(join(dir, 'runtime', 'cloudflared'))).toBe(true)
+    const text = readFileSync(file, 'utf8')
+    expect(text).toContain('{}')
+    expect(text).not.toMatch(/^\s*tunnel:/m)
+    utimesSync(file, new Date(1_000_000), new Date(1_000_000))
+    ensureQuickConfig(dir)
+    expect(statSync(file).mtimeMs).toBe(1_000_000)
+    writeFileSync(file, 'tunnel: someone-else\n')
+    ensureQuickConfig(dir)
+    expect(readFileSync(file, 'utf8')).toBe(text)
+    expect(readdirSync(join(dir, 'runtime', 'cloudflared'))).toEqual(['quick-tunnel.yml'])
+  })
+})
+
+describe('TunnelManager quick mode', () => {
+  const quickCfg = (over: Partial<TunnelConfig> = {}) => baseCfg({ mode: 'quick', ...over })
+  const hostOf = (m: TunnelManager) => m.status().quickHost
+
+  test('needs no token, never passes one (not even an inherited one), and reads the address from the output', async () => {
+    const inherited = process.env.TUNNEL_TOKEN
+    process.env.TUNNEL_TOKEN = TOKEN
+    try {
+      const { m, registry, launches } = makeManager(() => 'quick')
+      m.apply(quickCfg({ token: '' }))
+      await until(() => m.status().status.state === 'connected' && hostOf(m))
+      expect(m.status()).toMatchObject({ mode: 'quick', hostnames: null, status: { state: 'connected', connections: 1 } })
+      expect(hostOf(m)).toMatch(/^fake-words-\d+\.trycloudflare\.com$/)
+      expect(launches).toEqual([{ mode: 'quick', port: 8080, protocol: 'http2' }])
+      expect(m.tail(50).join('\n')).toContain('token-length=0')
+      const rec = registry.list()
+      expect(rec).toHaveLength(1)
+      expect(rec[0]).toMatchObject({ tag: 'tunnel', port: 8080 })
+      // A saved token is ignored in quick mode as well.
+      m.apply(quickCfg())
+      await new Promise(r => setTimeout(r, 100))
+      expect(launches).toHaveLength(1)
+      const pid = rec[0]!.pid
+      m.apply(quickCfg({ publicEnabled: false }))
+      await until(() => m.status().status.state === 'off')
+      expect(m.status().status).toEqual({ state: 'off', reason: 'public-off' })
+      expect(hostOf(m)).toBeNull()
+      await until(() => !isAlive(pid))
+      expect(registry.list()).toEqual([])
+      await m.shutdown()
+    } finally {
+      if (inherited === undefined) delete process.env.TUNNEL_TOKEN
+      else process.env.TUNNEL_TOKEN = inherited
+    }
+  })
+
+  test('the address is cleared when the process ends and a restart prints a new one', async () => {
+    const { m, infos, spawns } = makeManager(() => 'quick-crash', { retryDelaysMs: [150, 60_000] })
+    m.apply(quickCfg())
+    const first = await until(() => hostOf(m))
+    await until(() => spawns() === 2 && hostOf(m) && hostOf(m) !== first)
+    const second = hostOf(m)!
+    const seq = infos.map(i => i.quickHost).filter((h, i, a) => i === 0 || h !== a[i - 1])
+    // Never the old address once the process is gone: first -> none -> second.
+    expect(seq.slice(seq.indexOf(first), seq.indexOf(second) + 1)).toEqual([first, null, second])
+    expect(infos.find(i => i.status.state === 'error')?.quickHost).toBeNull()
+    await m.shutdown()
+    expect(hostOf(m)).toBeNull()
+  })
+
+  test('a different port restarts the quick tunnel at the new port', async () => {
+    const { m, launches, registry } = makeManager(() => 'quick')
+    m.apply(quickCfg())
+    const first = await until(() => hostOf(m))
+    m.apply(quickCfg({ port: 8099 }))
+    await until(() => launches.length === 2 && hostOf(m) && hostOf(m) !== first)
+    expect(launches).toEqual([{ mode: 'quick', port: 8080, protocol: 'http2' }, { mode: 'quick', port: 8099, protocol: 'http2' }])
+    await until(() => registry.list().length === 1 && registry.list()[0]!.port === 8099)
+    await m.shutdown()
+  })
+
+  test('switching modes restarts; the own tunnel host names are not shown while the quick one runs', async () => {
+    let mode = 'config'
+    const { m, launches } = makeManager(() => mode)
+    m.apply(baseCfg())
+    await until(() => m.status().hostnames?.length)
+    mode = 'quick'
+    m.apply(quickCfg())
+    await until(() => hostOf(m) && m.status().status.state === 'connected')
+    expect(m.status()).toMatchObject({ mode: 'quick', hostnames: null })
+    mode = 'config'
+    m.apply(baseCfg())
+    await until(() => m.status().hostnames?.length)
+    expect(m.status()).toMatchObject({ mode: 'token', quickHost: null, hostnames: ['llm.example.com', 'b.example.net'] })
+    expect(launches.map(l => l.mode)).toEqual(['token', 'quick', 'token'])
+    await m.shutdown()
+  })
+
+  test('a different protocol restarts either kind of tunnel; the same settings do not', async () => {
+    let mode = 'connect'
+    const { m, launches } = makeManager(() => mode)
+    m.apply(baseCfg())
+    await until(() => m.status().status.state === 'connected')
+    m.apply(baseCfg({ protocol: 'quic' }))
+    await until(() => launches.length === 2 && m.status().status.state === 'connected')
+    mode = 'quick'
+    m.apply(quickCfg({ protocol: 'quic' }))
+    await until(() => launches.length === 3 && hostOf(m))
+    m.apply(quickCfg({ protocol: 'quic' }))
+    m.apply(quickCfg({ protocol: 'http2' }))
+    await until(() => launches.length === 4 && hostOf(m))
+    await new Promise(r => setTimeout(r, 100))
+    expect(launches.map(l => `${l.mode}/${l.protocol}`)).toEqual(['token/http2', 'token/quic', 'quick/quic', 'quick/http2'])
+    await m.shutdown()
+  })
+
+  test('stopping kills the whole process tree and leaves pids.json clean', async () => {
+    const { m, registry } = makeManager(() => 'quick-child')
+    m.apply(quickCfg())
+    await until(() => m.status().status.state === 'connected' && /child=\d+/.test(m.tail(50).join('\n')))
+    const child = Number(/child=(\d+)/.exec(m.tail(50).join('\n'))![1])
+    expect(isAlive(child)).toBe(true)
+    await m.shutdown()
+    await until(() => !isAlive(child))
+    expect(registry.list()).toEqual([])
+  })
+
+  test('the quick config file is written before the start, next to the cloudflared copy', async () => {
+    const { m } = makeManager(() => 'quick')
+    expect(existsSync(quickConfigPath(dir))).toBe(false)
+    m.apply(quickCfg())
+    await until(() => hostOf(m))
+    expect(existsSync(quickConfigPath(dir))).toBe(true)
+    await m.shutdown()
   })
 })
 

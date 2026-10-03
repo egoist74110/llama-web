@@ -16,6 +16,16 @@
 
 ---
 
+## 2026-10-03 · 工作包 7-1 · Opus 5.5
+- 完成：plan 7-1 四项打勾，另加一项（用户会话中追加，关键决定 32）也已完成。`public.tunnelMode`（token / quick）和 `public.tunnelProtocol`（http2 默认 / quic），settings v5 迁移（旧配置 → token + http2）、normalize 回落、`applyPublic` 校验、`cleanWizard` 接受 `path: 'quick'`、一键完成写回 token。`TunnelManager`：`Launch`（模式 / token / 端口 / 协议）决定是否重启；临时模式不要 token、环境里删掉 TUNNEL_TOKEN；参数 `tunnel --no-autoupdate --protocol <p> --config data/runtime/cloudflared/quick-tunnel.yml --url http://127.0.0.1:端口`；`TunnelInfo` 新增 `mode`、`quickHost`（启动、重启、进程退出、停止时都清空）。`publicAddresses(pub, tunnel)` 和 `/api/public/check` 在临时模式下只用 `quickHost`。用户确认阶段 6 关口的方式：直接发起了 7-1。
+- 验证：`bun test` 693 pass / 0 fail；类型检查 `node node_modules/vue-tsc/bin/vue-tsc.js -b --noEmit` 通过（**`bun run typecheck` 被 GameGuard 弄崩**，本机开着 GameMon；用故意写错的文件确认过 vue-tsc 确实在检查）。实测（用户同意，临时目录，没碰仓库 data/ 和 ~/.cloudflared，cloudflared 2026.5.0）：① 临时 HOME 里放带 tunnel + ingress 的 config.yml：不带 `--config` 时隧道照样连上，但 `GET /` 返回 **404**（被那份 ingress 接管）；带上我们的 `--config` 后返回 502（路由到了空端口 9，正确）→ `--config` 是必要的，已写进决定 31。② 用 TunnelManager 临时模式 + 真实 llama-server（只绑 127.0.0.1，随机 --api-key，一个已配置模型，200 token）跑 HTTP/2、QUIC 各一次：都是不带 key 返回 401、非流式 200、流式 200 个事件分 198 / 199 次读到，首条 0.18 / 0.13 秒（本机直连 0.11 秒）→ 流式正常，和决定 31 一致；cloudflared 的 Registered 行确认 protocol=http2 / quic；关闭后 cloudflared 进程退出、pids.json 为空，没有残留进程。
+- 没测：经 llama-web 公网入口（:8080）的完整链路，这次直连 llama-server 的 --api-key（入口代码没改）；从零下载 cloudflared（这次复用本机已装的）。这两项都放在 7-2 的真机冒烟里。
+- 剩余：无（7-1 范围内）。界面全部留给 7-2：`PublicAddresses.vue` 和 `pages/index.vue` 目前还直接用 `domain` + `hostnames`，临时模式要改用 `quickHost`（plan 7-2 已写）；协议选择界面也在 7-2。
+- 坑：`shutdown()` 后 status 仍停在 connected（原有行为，只在退出时调用，没改）。Windows 下 env 键名大小写不同的 `tunnel_token` 不会被删除（极少见）。
+- 下一步：7-1 审查（gpt-6.1sol，指南「阶段审查」提示词，范围限定在 7-1 的改动），然后 7-2（Sonnet 5.5）。
+
+---
+
 ## 2026-10-03 · 阶段 7 规划（免域名临时隧道） · Sonnet 5.5
 - 完成：用户要求公网向导新增「没有域名，用 Cloudflare 临时隧道」，cloudflared 本地解决、卸载清理干净。新增关键决定 31、plan 阶段 7（7-1、审查、7-2）、指南阶段 7 卡片（含各包推荐模型：7-1 Opus 5.5、审查 gpt-6.1sol、7-2 Sonnet 5.5）。
 - 验证：只改了文档（plan.html、claude-guide.html、handoff.md），没改代码，没跑 `bun test` / typecheck。

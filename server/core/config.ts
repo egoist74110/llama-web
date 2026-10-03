@@ -24,18 +24,37 @@ export interface PublicWizard {
   step: WizardStep
   /** `setup` = first run (port, key, …); `add` = add another address to the running tunnel. */
   mode: 'setup' | 'add'
-  /** Branch: Cloudflare API token (one click) or the dashboard guide + pasted tunnel token. */
-  path: 'api' | 'manual' | null
+  /**
+   * Branch: Cloudflare API token (one click), the dashboard guide + pasted tunnel token, or a
+   * Cloudflare quick tunnel (no domain, no account; decision 31).
+   */
+  path: 'api' | 'manual' | 'quick' | null
   zoneId: string
   subdomain: string
   /** Host name the user entered in the manual branch. */
   domain: string
 }
 
+/**
+ * How llama-web runs the tunnel (decision 31): `token` = the user's own tunnel (token in
+ * secrets.json, their own domain); `quick` = Cloudflare quick tunnel with a random
+ * *.trycloudflare.com address that changes on every start.
+ */
+export type TunnelMode = 'token' | 'quick'
+export const TUNNEL_MODES: TunnelMode[] = ['token', 'quick']
+
+/**
+ * Transport between cloudflared and Cloudflare (`--protocol`). `http2` (TCP) is the default: it
+ * gets through more networks (recommended in mainland China, where UDP / QUIC is often throttled);
+ * `quic` is the alternative.
+ */
+export type TunnelProtocol = 'http2' | 'quic'
+export const TUNNEL_PROTOCOLS: TunnelProtocol[] = ['http2', 'quic']
+
 export interface Settings {
   version: number
   server: { host: string, port: number }
-  public: { enabled: boolean, port: number, domain: string, tunnelEnabled: boolean, wizard: PublicWizard | null }
+  public: { enabled: boolean, port: number, domain: string, tunnelEnabled: boolean, tunnelMode: TunnelMode, tunnelProtocol: TunnelProtocol, wizard: PublicWizard | null }
   modelDirs: ModelDir[]
   llamacpp: { cudaRuntime: string, current: string, keepVersions: number, autoUpdate: boolean, acceleration: Acceleration }
   scheduler: {
@@ -81,7 +100,7 @@ export interface ModelsDoc {
   models: ModelConfig[]
 }
 
-export const SETTINGS_VERSION = 4
+export const SETTINGS_VERSION = 5
 export const MODELS_VERSION = 1
 
 export function defaultSettings(platform?: PlatformInfo): Settings {
@@ -89,7 +108,7 @@ export function defaultSettings(platform?: PlatformInfo): Settings {
   return {
     version: SETTINGS_VERSION,
     server: { host: '0.0.0.0', port: 5001 },
-    public: { enabled: false, port: 8080, domain: '', tunnelEnabled: false, wizard: null },
+    public: { enabled: false, port: 8080, domain: '', tunnelEnabled: false, tunnelMode: 'token', tunnelProtocol: 'http2', wizard: null },
     modelDirs: [],
     llamacpp: { cudaRuntime: '13.3', current: '', keepVersions: 2, autoUpdate: true, acceleration: 'auto' },
     scheduler: { maxLoaded: 1, loadTimeoutSec: 600, drainTimeoutSec: 300, heartbeatSec: 15, portRange: [7100, 7199] },
@@ -125,6 +144,15 @@ export const SETTINGS_MIGRATIONS: Record<number, (old: any) => any> = {
     else old.llamacpp = { acceleration: 'cuda' }
     return old
   },
+  // 5: tunnel mode (decision 31): every existing installation keeps its own tunnel. Tunnel protocol:
+  // HTTP/2, the recommended default (the user asked for it as the default, 2026-10-03).
+  4: (old) => {
+    if (isObj(old.public)) {
+      old.public.tunnelMode ??= 'token'
+      old.public.tunnelProtocol ??= 'http2'
+    }
+    return old
+  },
 }
 
 export function defaultModels(): ModelsDoc {
@@ -153,6 +181,9 @@ export function normalizeSettings(doc: Settings): Settings {
   }
   delete (out.public as Record<string, unknown>).tunnelName
   if (typeof out.public.tunnelEnabled !== 'boolean') out.public.tunnelEnabled = false
+  // A hand-edited unknown mode falls back to the user's own tunnel (never silently to a public random address).
+  if (!TUNNEL_MODES.includes(out.public.tunnelMode)) out.public.tunnelMode = 'token'
+  if (!TUNNEL_PROTOCOLS.includes(out.public.tunnelProtocol)) out.public.tunnelProtocol = 'http2'
   out.public.wizard = cleanWizard(out.public.wizard)
   if (!['auto', 'cuda', 'cpu', 'metal'].includes(out.llamacpp.acceleration)) throw new Error('Invalid llamacpp.acceleration')
   // Placeholder (decision 9): the field exists but the online limit stays fixed at 1.
@@ -167,7 +198,7 @@ export function cleanWizard(raw: unknown): PublicWizard | null {
   if (!isObj(raw)) return null
   if (!WIZARD_STEPS.includes(raw.step)) return null
   if (raw.mode !== 'setup' && raw.mode !== 'add') return null
-  const path = raw.path === 'api' || raw.path === 'manual' ? raw.path : null
+  const path = raw.path === 'api' || raw.path === 'manual' || raw.path === 'quick' ? raw.path : null
   const text = (v: unknown) => (typeof v === 'string' && v.length <= WIZARD_TEXT_MAX && !/[\u0000-\u001f]/.test(v) ? v.trim() : '')
   return { step: raw.step, mode: raw.mode, path, zoneId: text(raw.zoneId), subdomain: text(raw.subdomain).toLowerCase(), domain: text(raw.domain).toLowerCase() }
 }

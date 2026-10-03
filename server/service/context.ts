@@ -330,7 +330,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
   function applyTunnel() {
     const s = getSettings().public
     tunnel.apply({
-      tunnelEnabled: s.tunnelEnabled, publicEnabled: s.enabled, publicState: publicEntry.status().state,
+      tunnelEnabled: s.tunnelEnabled, mode: s.tunnelMode, protocol: s.tunnelProtocol, publicEnabled: s.enabled, publicState: publicEntry.status().state,
       token: secretsRef.get().tunnelToken, port: s.port,
     })
   }

@@ -68,6 +68,8 @@ describe('cloudflareHooks (context wiring) with real stores', () => {
 
   test('success saves the token and switches hosting on, then reconciles once with both files written', async () => {
     const w = wire()
+    // Was using the quick tunnel: the one-click setup switches back to the own tunnel.
+    w.settingsRef.update((d) => { d.public.tunnelMode = 'quick' })
     const cf = new FakeCloudflare()
     const inp = input()
     const p = await planSetup(client(cf), inp)
@@ -77,7 +79,7 @@ describe('cloudflareHooks (context wiring) with real stores', () => {
     const s = new CloudflareSetup(cloudflareHooks({ ...w, applyPublic }))
     expect((await s.apply(client(cf), inp, p.fingerprint)).state).toBe('done')
     expect(w.secretsRef.get().tunnelToken).not.toBe('')
-    expect(w.settingsRef.get().public).toMatchObject({ enabled: true, tunnelEnabled: true, domain: 'llm.example.com', port: 8080 })
+    expect(w.settingsRef.get().public).toMatchObject({ enabled: true, tunnelEnabled: true, tunnelMode: 'token', domain: 'llm.example.com', port: 8080 })
     // Both files really written.
     expect((JSON.parse(readFileSync(w.secretsStore.file, 'utf8')) as SecretsDoc).tunnelToken).toBe(w.secretsRef.get().tunnelToken)
     expect(seen).toEqual([{ token: true, hosting: true }])

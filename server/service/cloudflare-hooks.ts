@@ -23,15 +23,16 @@ export function cloudflareHooks(o: {
 }): SetupHooks {
   const { settingsRef, secretsRef, hold } = o
   return {
-    // On success: save the tunnel token, then switch the public entry and hosting on and show the
-    // hostname as the client address. Both files or neither: the hosted tunnel is only switched after
-    // both writes went through; one reconciliation afterwards, whether they did or not (see Hold).
+    // On success: save the tunnel token, then switch the public entry and hosting (own tunnel, not
+    // the quick one) on and show the hostname as the client address. Both files or neither: the
+    // hosted tunnel is only switched after both writes went through; one reconciliation afterwards,
+    // whether they did or not (see Hold).
     // The token itself is never logged.
     onSaved: ({ tunnelToken, hostname }) => {
       const previous = secretsRef.get().tunnelToken
       hold.run(() => writePair(
         () => secretsRef.update((draft) => { draft.tunnelToken = tunnelToken }),
-        () => settingsRef.update((draft) => { draft.public = { ...draft.public, enabled: true, tunnelEnabled: true, domain: hostname } }),
+        () => settingsRef.update((draft) => { draft.public = { ...draft.public, enabled: true, tunnelEnabled: true, tunnelMode: 'token', domain: hostname } }),
         () => secretsRef.update((draft) => { draft.tunnelToken = previous }),
       ), o.applyPublic)
     },
