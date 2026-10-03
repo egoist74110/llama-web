@@ -32,6 +32,8 @@ export interface StateInstance {
 
 export interface StateDoc {
   platform?: PlatformInfo
+  /** Local host address for clients on other devices; null when no usable IPv4 exists. */
+  network?: { lanHost: string | null }
   /** Server clock (epoch ms) at the time of the snapshot. */
   now: number
   models: Array<{
@@ -270,7 +272,7 @@ export class LiveHub {
   }
 
   snapshot(): StateDoc {
-    const { scheduler, models, queue, llamacpp, tunnel, cloudflare, cloudflareRev, firstRun, platform, appUpdate } = this.opts.snapshot()
+    const { scheduler, models, queue, llamacpp, tunnel, cloudflare, cloudflareRev, firstRun, platform, appUpdate, network } = this.opts.snapshot()
     return {
       now: this.now(),
       models: models.map(m => ({
@@ -285,6 +287,7 @@ export class LiveHub {
       })),
       queue, llamacpp, tunnel, cloudflare: cloudflare ?? null, cloudflareRev: cloudflareRev ?? null, firstRun: firstRun === true, platform,
       ...(appUpdate ? { appUpdate } : {}),
+      ...(network ? { network } : {}),
     }
   }
 

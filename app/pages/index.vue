@@ -1,15 +1,16 @@
 <script setup lang="ts">
 // Overview dashboard (decision 30): hero card, four stat tiles, recent events and requests.
-// Everything comes from useLive(); the API address is this page's own origin.
+// Everything comes from useLive(); local API addresses use the server's LAN host.
 import t from '~~/i18n/zh-CN'
 import type { ActivityEvent } from '~~/server/core/live'
+import { apiAddress } from '~/utils/overview'
 
 const { state, events, requests, metrics } = useLive()
 const toast = useToast()
 const o = t.overview
 const tl = o.tiles
 
-const apiUrl = computed(() => (import.meta.client ? `${window.location.origin}/v1` : ''))
+const apiUrl = computed(() => (import.meta.client ? apiAddress(window.location.origin, state.value?.network?.lanHost) : ''))
 const copied = ref(false)
 async function copyApi() {
   try {

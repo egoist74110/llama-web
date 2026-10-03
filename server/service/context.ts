@@ -13,6 +13,7 @@ import { LogStore } from '../core/logs'
 import type { RuntimeStatus } from '../core/llamacpp'
 import { GpuSampler, parseNvidiaSmi, runNvidiaSmi } from '../core/gpu'
 import { describeModels, LiveHub } from '../core/live'
+import { detectLanAddress, getLanAddress } from '../core/network'
 import { LoadProgress, trackWeightLoad } from '../core/load-progress'
 import { ModelOps } from '../core/model-ops'
 import { createProxy, type Proxy, type ProxyEvent } from '../core/proxy'
@@ -297,11 +298,15 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
   const gpu = new GpuSampler({ intervalMs: () => Math.max(500, getSettings().gpu.sampleSec * 1000), active: () => platform.os === 'win32' && live.subscriberCount > 0, onChange: () => live.notifyMetrics() })
   gpu.start()
   startupClose.push(() => gpu.stop())
+  const networkProbe = new AbortController()
+  startupClose.push(() => networkProbe.abort())
+  let preferredLanHost: string | null = null
   const live: LiveHub = new LiveHub({
     onActivity: e => logs.appendEvent(e),
     metrics: () => ({ speed: speed.snapshot(), gpu: gpu.value }),
     snapshot: () => ({
       platform,
+      network: { lanHost: getLanAddress(preferredLanHost) },
       scheduler: scheduler.snapshot(),
       models: describeModels(getModels(), { dirs: getSettings().modelDirs }),
       queue: scheduler.snapshot().queue.map(q => ({ modelId: q.modelId, profile: q.profile, started: q.started, waiting: q.waiting })),
@@ -312,6 +317,10 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
       ...(({ job, rev }) => ({ cloudflare: job, cloudflareRev: rev }))(cloudflare.view()),
       firstRun: isFirstRun(getSettings(), getModels()),
     }),
+  })
+  void detectLanAddress({ signal: networkProbe.signal }).then(host => {
+    preferredLanHost = host
+    if (!networkProbe.signal.aborted) live.notify()
   })
   const scheduler: Scheduler = new Scheduler({
     maxLoaded: getSettings().scheduler.maxLoaded,
@@ -473,6 +482,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     }, runtimes, runtimeAdd, appUpdate, runner, scheduler, ops, proxy, publicEntry, applyPublic, live, logs, cleanupDone,
     shutdown() {
       closing ??= (async () => {
+        networkProbe.abort()
         await cleanupDone
         publicEntry.close()
         await tunnel.shutdown()

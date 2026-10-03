@@ -1,6 +1,18 @@
 // Pure helpers for the overview dashboard and the sidebar "now serving" card (bun-testable).
 import type { MetricsDoc, StateDoc, StateInstance } from '~~/server/core/live'
 
+/** Keep public/LAN origins; replace a local browser's loopback host with the server LAN IP. */
+export function apiAddress(origin: string, lanHost?: string | null): string {
+  try {
+    const url = new URL(origin)
+    if (lanHost && (url.hostname === 'localhost' || url.hostname === 'localhost.' || url.hostname === '0.0.0.0'
+      || /^127(?:\.\d{1,3}){3}$/.test(url.hostname) || url.hostname === '[::1]')) {
+      url.hostname = lanHost
+    }
+    return `${url.origin}/v1`
+  } catch { return '' }
+}
+
 /** Seconds of history the speed curve shows. */
 export const TREND_SECONDS = 40
 

@@ -12,6 +12,8 @@ export default defineNuxtConfig({
   ssr: false,
   icon: { clientBundle: { scan: true } },
   devtools: { enabled: false },
+  // Match the main production entry: local clients may connect from other LAN devices.
+  devServer: { host: '0.0.0.0' },
   typescript: { strict: true },
   nitro: { preset: 'bun' },
   $production: {

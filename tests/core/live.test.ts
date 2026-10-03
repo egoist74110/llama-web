@@ -3,7 +3,7 @@ import { handleStream, LiveHub, type ActivityEvent, type LiveHubOptions, type St
 import { LoadError } from '../../server/core/runner'
 import type { SchedulerSnapshot } from '../../server/core/scheduler'
 
-function setup(extra: Partial<LiveHubOptions> = {}) {
+function setup(extra: Partial<LiveHubOptions> = {}, network?: StateDoc['network']) {
   let clock = 1000
   const sched: SchedulerSnapshot = { models: [], queue: [] }
   const hub = new LiveHub({
@@ -13,6 +13,7 @@ function setup(extra: Partial<LiveHubOptions> = {}) {
     ...extra,
     snapshot: () => ({
       scheduler: sched,
+      network,
       models: [{ id: 'm1', name: 'Model One', activeProfile: 'default', profiles: ['default'], hasMmproj: false, needsSetup: false, files: { model: 'main/m.gguf', mmproj: null, draft: null }, missing: [], instances: [] }],
       queue: sched.queue.map(q => ({ modelId: q.modelId, profile: q.profile, started: q.started, waiting: q.waiting })),
       llamacpp: { current: 'b1', runtime: { state: 'ready', tag: 'b1' }, versions: [], rollback: null },
@@ -25,6 +26,11 @@ function setup(extra: Partial<LiveHubOptions> = {}) {
 const wait = (ms: number) => new Promise(r => setTimeout(r, ms))
 
 describe('LiveHub', () => {
+  test('carries the server LAN host into the shared state snapshot', () => {
+    const { hub } = setup({}, { lanHost: '192.168.1.20' })
+    expect(hub.snapshot().network).toEqual({ lanHost: '192.168.1.20' })
+  })
+
   test('carries the first-run flag (false unless the snapshot source says so)', () => {
     const { hub } = setup()
     expect(hub.snapshot().firstRun).toBe(false)

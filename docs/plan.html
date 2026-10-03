@@ -245,7 +245,7 @@ li.task .when{color:var(--ok);font-size:12px;white-space:nowrap}
     <tr><td>—</td><td>名字 / 仓库</td><td><code>llama-web</code>，GitHub <b>公开</b>仓库</td></tr>
     <tr><td>17–19</td><td>敏感信息</td><td>代码不含个人路径、域名、key；公网域名 / 隧道名 / key 全部做成配置项；只靠 <code>.gitignore</code> 排除 <code>data/</code>；旧 key 不导入，由用户重新生成</td></tr>
     <tr><td>18</td><td>界面语言</td><td>只做中文，文案集中在一个文件</td></tr>
-    <tr><td>20</td><td>局域网权限</td><td>局域网完整权限、免 key；只有 <code>:8080</code> 公网入口要 key</td></tr>
+    <tr><td>20</td><td>局域网权限与地址</td><td>局域网完整权限、免 key；只有 <code>:8080</code> 公网入口要 key。本机打开总览时，API 地址优先显示服务端主网卡 IPv4 与实际访问端口，方便其他设备使用；通过局域网地址或公网域名打开时保留该地址。找不到可用 IPv4 时保留本机地址。开发模式默认也监听 <code>0.0.0.0</code>，与正式主入口一致；公网入口的监听与鉴权规则不变</td></tr>
     <tr><td>21</td><td>界面</td><td>Nuxt UI；总览 / 模型 / 日志 / 设置 四页；简洁、留白、分组卡片；显存每 2 秒采样</td></tr>
     <tr><td>22</td><td>加载失败 / 崩溃</td><td>不自动重试；中文原因 + 最后 30 行日志；崩溃后下一个请求最多自动重载一次，再失败需手动重试（额度按进程计：自动重载出来的进程再崩溃即 failed，不因成功服务过请求而重置；手动启动 / 重试后重新获得一次）；加载超时默认 600 秒</td></tr>
     <tr><td>23</td><td>启动时加载</td><td>不自动加载，等第一个请求</td></tr>
@@ -370,7 +370,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
     <tr><th>路径</th><th>用途</th></tr>
     <tr><td><code>/v1/*</code></td><td>OpenAI 兼容：chat/completions、completions、embeddings、models 等；按 <code>model</code> 路由</td></tr>
     <tr><td><code>/upstream/:model/*</code></td><td>直通当前运行的 llama-server（例如它自带的网页、<code>/props</code>、<code>/slots</code>），仅 :5001</td></tr>
-    <tr><td><code>GET /api/state</code></td><td>整体状态快照：模型状态、队列、版本、显存</td></tr>
+    <tr><td><code>GET /api/state</code></td><td>整体状态快照：模型状态、队列、版本、显存、局域网 IPv4（<code>network.lanHost</code>，无可用地址时为 null）；同样通过 <code>/api/stream</code> 推送</td></tr>
     <tr><td><code>GET /api/stream</code></td><td>SSE：状态变化、日志行、实时速度、显存采样</td></tr>
     <tr><td><code>/api/models</code></td><td>已启用模型的增删改；启动 / 停止 / 重试 / 切换方案；命令预览</td></tr>
     <tr><td><code>/api/scan</code></td><td>触发扫描；返回发现的文件及元数据、候选 mmproj / draft</td></tr>
@@ -446,6 +446,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
     <li class="task" data-done="true"><span class="t">Nuxt UI 接入、布局（顶栏 + 侧栏）、深浅色主题、<code>i18n/zh-CN.ts</code></span><span class="when">2026-09-30</span></li>
     <li class="task" data-done="true"><span class="t"><code>/api/stream</code> SSE 推送状态，前端统一的实时状态 composable</span><span class="when">2026-09-30</span></li>
     <li class="task" data-done="true"><span class="t">总览页：当前模型卡片、加载进度、排队情况、最近事件</span><span class="when">2026-09-30</span></li>
+    <li class="task" data-done="true"><span class="t">本机总览显示局域网 API 地址与实际端口；公网地址保持原逻辑；开发入口可由局域网访问</span><span class="when">2026-10-03</span></li>
     <li class="task" data-done="true"><span class="t">模型页 · 已启用：卡片列表、启动 / 停止 / 重试、方案下拉切换、文件丢失标红</span><span class="when">2026-09-30</span></li>
     <li class="task" data-done="true"><span class="t">模型页 · 扫描发现：元数据展示、重新扫描按钮、一键启用</span><span class="when">2026-09-30</span></li>
     <li class="task" data-done="true"><span class="t">模型编辑：文件区（主模型 / mmproj / draft 下拉，同目录提示但默认不选）、聊天模板选择</span><span class="when">2026-09-30</span></li>
@@ -861,6 +862,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 <section id="changelog">
   <h2>变更记录</h2>
   <table>
+    <tr><td>2026-10-03</td><td>用户要求本机总览的 API 地址显示局域网 IP（决定 20）：从服务端网卡与默认路由选择 IPv4，经实时快照交给界面，保留实际访问端口；局域网访问和公网域名继续使用原地址。开发服务器默认绑定 <code>0.0.0.0</code>；公网隧道与 API key 逻辑不变。无可用 IPv4 时回落本机地址</td></tr>
     <tr><td>2026-10-03</td><td>用户纠正 API 模型发现规则（决定 7）：隐藏内置的 <code>名字:默认</code>，只有用户自建方案额外列出 <code>名字:方案</code>；三个只有默认方案的模型现在只返回三个基础名。已有显式方案调用及基础名使用当前方案的行为不变。</td></tr>
     <tr><td>2026-10-03</td><td>工作包 8-3：设备选择（<code>devices.ts</code>、<code>GET /api/devices</code>、<code>POST /api/models/:id/device</code>、方案 / 模型 / 全局 <code>device</code>）。真实 llama-server 核对后写死的参数：单 GPU = <code>--device &lt;id&gt; --split-mode none</code>（不传 <code>--main-gpu</code>：它是 <code>--device</code> 过滤后的序号，默认 0 即所选卡）；CPU = <code>--device none</code> 加 <code>-ngl 0</code>（<code>--device none</code> 单独就不占显存，实测）。新增三个 CPU 参数键 <code>threads</code> / <code>numa</code> / <code>cpuMask</code>；<code>--list-devices</code> 的 stdout 格式与未知设备的错误文字已实测。无配置迁移：字段缺省 = 继承</td></tr>
     <tr><td>2026-10-03</td><td>工作包 8-1：运行库登记（<code>runtimes.json</code>，只存 id / 平台 / 加速类型 / 版本号，可执行文件路径永远由 id 推出）、三种添加来源（先暂存预览、确认才登记）、删除保护、模型 / 方案 <code>runtime</code> 引用与兜底。实现中定下：<code>--version</code> 在预览阶段运行（界面要在调用预览前先弹「这会运行你选的程序」）；同一时刻只暂存一个预览、30 分钟过期；GitHub 资产只认 <code>https://github.com/</code>；Mac 要求同架构（不走 Rosetta）。接口见「接口」表。没有改界面（8-5）</td></tr>

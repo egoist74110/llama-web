@@ -1,6 +1,22 @@
 import { expect, test } from 'bun:test'
 import type { MetricsDoc, StateDoc, StateInstance } from '../../server/core/live'
-import { ctxNumber, instanceSpeed, pushTrend, quantFromFile, rankInstances, sparkArea, sparkPoints } from '../../app/utils/overview'
+import { apiAddress, ctxNumber, instanceSpeed, pushTrend, quantFromFile, rankInstances, sparkArea, sparkPoints } from '../../app/utils/overview'
+
+test('API address replaces loopback with the server LAN IP and keeps the actual port', () => {
+  for (const host of ['localhost', 'localhost.', '0.0.0.0', '127.0.0.1', '127.1.2.3', '[::1]']) {
+    expect(apiAddress(`http://${host}:3000`, '192.168.1.20')).toBe('http://192.168.1.20:3000/v1')
+  }
+  expect(apiAddress('http://localhost:5001', '10.0.0.20')).toBe('http://10.0.0.20:5001/v1')
+})
+
+test('API address keeps public domains and addresses used by other LAN devices', () => {
+  expect(apiAddress('https://llm.example.com', '192.168.1.20')).toBe('https://llm.example.com/v1')
+  expect(apiAddress('https://127.example.com', '192.168.1.20')).toBe('https://127.example.com/v1')
+  expect(apiAddress('https://demo.trycloudflare.com', '192.168.1.20')).toBe('https://demo.trycloudflare.com/v1')
+  expect(apiAddress('http://10.0.0.20:5001', '192.168.1.20')).toBe('http://10.0.0.20:5001/v1')
+  expect(apiAddress('http://localhost:3000', null)).toBe('http://localhost:3000/v1')
+  expect(apiAddress('', null)).toBe('')
+})
 
 const inst = (profile: string, state: StateInstance['state']): StateInstance =>
   ({ profile, state, inflight: 0, error: null, failure: null, since: null, progress: null })

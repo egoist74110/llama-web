@@ -1,5 +1,15 @@
 # 交接记录
 
+## 2026-10-03 · 总览局域网 API 地址 · Codex
+- 完成：本机打开总览时，API 地址用服务端主网卡 IPv4 + 页面实际端口；局域网地址 / 公网域名继续使用原地址，隧道展示不变。`network.lanHost` 经 LiveHub 的 snapshot 推送，页面不新增请求或轮询。默认路由通过不发送数据的 UDP connect 探测，失败时优先物理网卡、排除回环 / 链路本地地址；找不到可用 IPv4 保留原地址。Nuxt 开发监听改为 `0.0.0.0`，匹配正式主入口。同步决定 20、接口说明和阶段 2 完成项。
+- 验证：专项 `bun test tests/core/network.test.ts tests/core/live.test.ts tests/app/overview.test.ts` 38 pass；最终 `bun test` 849 pass / 0 fail / 51 skip（包含同时进行的运行库修正）；`bun run typecheck`、`git diff --check` 通过。真实默认路由探测选中主网卡；`/api/state` 有 LAN 地址，本机通过该 IP 请求 `/v1/models` 返回 200 / JSON / 3 个模型，IPv4 回环也返回 200，监听确认为 `0.0.0.0:3000`。公网域名保留规则通过构造测试。
+- 资源检查：探测 socket 与超时定时器在成功 / 错误 / 超时 / 取消时关闭，abort 监听移除；context 启动失败与 shutdown 也取消探测。临时暂存 patch 已删除；开发服务重启后保持运行。
+- 没测：未操作浏览器验证复制按钮，未用第二台设备测试局域网访问；没有 macOS 真机，未重建安装包。无 GPU 推理测试。
+- 工作区：运行库 / 设备审查修正同时在进行，本轮只暂存地址相关文件和 context 中自己的 hunks，保留其他改动。
+- 剩余：本次修正无。下一步沿用阶段 8 的原审查流程，再进入 8-4（Sonnet 5.5）；不在本轮继续。
+
+---
+
 ## 2026-10-03 · API 模型列表修正 · Codex
 - 完成：按用户确认修改决定 7 与请求路由规则。`GET /v1/models` 隐藏内置 `名字:默认`，保留基础名与用户自建方案；基础名仍使用当前方案，旧的显式默认方案调用及模型详情查询仍有效。`DEFAULT_PROFILE` 统一放在 config，models-admin 保留导出。
 - 验证：先跑回归测试复现重复条目（4 fail）；修复后专项测试 6 pass。首次全量测试发现模型详情接口依赖发现列表（830 pass / 1 fail / 51 skip），改为按实际路由校验；最终 `bun test` 831 pass / 0 fail / 51 skip，`bun run typecheck` 通过，`git diff --check` 通过。真实开发服务 `GET /v1/models` 返回 200，只有三个基础名；新增方案的列表变化用隔离假数据经 HTTP 验证，无模型加载。
