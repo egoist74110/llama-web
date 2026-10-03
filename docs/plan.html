@@ -714,9 +714,9 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 
   <h3>8-5 · 运行库、设备与检测界面（Sonnet 5.5）</h3>
   <ul class="tasks">
-    <li class="task" data-done="false"><span class="t">设置页 llama.cpp：版本列表按通道分组，「添加版本」对话框三个来源（选择目录 / 选择压缩包 / 粘贴 GitHub 地址）+ 预览确认；删除确认（列出受影响的模型；最新官方版的删除按钮禁用并说明）；兜底提示条</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">设置页「本机」卡片（检测、推荐、警告）；Windows 上全局默认的 GPU / CPU 切换（两份参数表单，沿用现有 <code>SettingsDefaults</code> 样式）；Mac 上这些全部不渲染</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">编辑抽屉：模型级与配置方案级「llama.cpp 版本」下拉（跟随全局 / 具体版本，只列本机平台的）、「设备」下拉（单选，GPU 旁显示显存；Mac 不显示）、CPU 高级折叠区；命令预览同步</span><span class="when"></span></li>
+    <li class="task" data-done="true"><span class="t">设置页 llama.cpp：版本列表按通道分组，「添加版本」对话框三个来源（选择目录 / 选择压缩包 / 粘贴 GitHub 地址）+ 预览确认；删除确认（列出受影响的模型；最新官方版的删除按钮禁用并说明）；兜底提示条</span><span class="when">2026-10-03</span></li>
+    <li class="task" data-done="true"><span class="t">设置页「本机」卡片（检测、推荐、警告）；Windows 上全局默认的 GPU / CPU 切换（两份参数表单，沿用现有 <code>SettingsDefaults</code> 样式）；Mac 上这些全部不渲染</span><span class="when">2026-10-03</span></li>
+    <li class="task" data-done="true"><span class="t">编辑抽屉：模型级与配置方案级「llama.cpp 版本」下拉（跟随全局 / 具体版本，只列本机平台的）、「设备」下拉（单选，GPU 旁显示显存；Mac 不显示）、CPU 高级折叠区；命令预览同步</span><span class="when">2026-10-03</span></li>
   </ul>
 
   <h3>8-6 · 模型页添加目录与 Mac 收尾（Sonnet 5.5）</h3>
@@ -867,6 +867,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
     <tr><td>2026-10-03</td><td>用户要求本机总览的 API 地址显示局域网 IP（决定 20）：从服务端网卡与默认路由选择 IPv4，经实时快照交给界面，保留实际访问端口；局域网访问和公网域名继续使用原地址。开发服务器默认绑定 <code>0.0.0.0</code>；公网隧道与 API key 逻辑不变。无可用 IPv4 时回落本机地址</td></tr>
     <tr><td>2026-10-03</td><td>用户纠正 API 模型发现规则（决定 7）：隐藏内置的 <code>名字:默认</code>，只有用户自建方案额外列出 <code>名字:方案</code>；三个只有默认方案的模型现在只返回三个基础名。已有显式方案调用及基础名使用当前方案的行为不变。</td></tr>
     <tr><td>2026-10-03</td><td>工作包 8-3：设备选择（<code>devices.ts</code>、<code>GET /api/devices</code>、<code>POST /api/models/:id/device</code>、方案 / 模型 / 全局 <code>device</code>）。真实 llama-server 核对后写死的参数：单 GPU = <code>--device &lt;id&gt; --split-mode none</code>（不传 <code>--main-gpu</code>：它是 <code>--device</code> 过滤后的序号，默认 0 即所选卡）；CPU = <code>--device none</code> 加 <code>-ngl 0</code>（<code>--device none</code> 单独就不占显存，实测）。新增三个 CPU 参数键 <code>threads</code> / <code>numa</code> / <code>cpuMask</code>；<code>--list-devices</code> 的 stdout 格式与未知设备的错误文字已实测。无配置迁移：字段缺省 = 继承</td></tr>
+    <tr><td>2026-10-03</td><td>工作包 8-5：设置页「本机」卡片、llama.cpp 版本管理（按通道分组、添加 / 删除、兜底提示条）、Windows 的 GPU / CPU 两份全局默认与设备默认、编辑抽屉里模型级与方案级的版本 / 设备下拉和 CPU 进阶折叠区；平台开关集中在 <code>app/utils/platform-ui.ts</code>（Mac 上这些全部不渲染）。选择压缩包只能粘贴路径（没有文件选择窗口），选择文件夹只在 Windows 出现，Mac 的 osascript 留给 8-6</td></tr>
     <tr><td>2026-10-03</td><td>工作包 8-1：运行库登记（<code>runtimes.json</code>，只存 id / 平台 / 加速类型 / 版本号，可执行文件路径永远由 id 推出）、三种添加来源（先暂存预览、确认才登记）、删除保护、模型 / 方案 <code>runtime</code> 引用与兜底。实现中定下：<code>--version</code> 在预览阶段运行（界面要在调用预览前先弹「这会运行你选的程序」）；同一时刻只暂存一个预览、30 分钟过期；GitHub 资产只认 <code>https://github.com/</code>；Mac 要求同架构（不走 Rosetta）。接口见「接口」表。没有改界面（8-5）</td></tr>
     <tr><td>2026-10-03</td><td>新增阶段 9「多模型并行与显存保护」（仅规划）和关键决定 41–44：用户要求放开单开限制（升级后默认仍为 1）、多开前做显存检测并提示风险、保存模型设置时按权重 / KV / 计算缓冲 / mmproj / 草稿 / 系统内存等多方面检查、外部请求触发的多开放不下时要拦住（503）。决定 9 标注由阶段 9 放开；这会改核心行为规则，9-3 开始前须用户确认规则文字。阶段 9 依赖阶段 8 的设备选择</td></tr>
     <tr><td>2026-10-03</td><td>新增阶段 8「运行库、设备与用量」（仅规划，未改代码）和关键决定 34–40：手动添加 / 删除 llama.cpp 版本（目录、压缩包、GitHub 地址；平台隔离；最新官方版不可删）、模型 / 配置方案选版本、全局默认 GPU / CPU 两份、本机检测（CUDA 驱动 / 算力、CPU 指令集 / 内存）、设备选择（单设备）、用量日志（30 天）、模型页添加目录、Mac 专项。关键决定 14「只用官方最新版」放宽。待用户确认的问题见阶段 8 开头</td></tr>

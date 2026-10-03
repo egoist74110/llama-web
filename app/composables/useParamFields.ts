@@ -5,7 +5,7 @@ import type { ParamKey } from '~~/server/core/args'
 
 export interface ParamField {
   key: ParamKey
-  kind: 'number' | 'select'
+  kind: 'number' | 'select' | 'text'
   options?: string[]
 }
 
@@ -24,3 +24,13 @@ export const PARAM_FIELDS: ParamField[] = [
   { key: 'reasoningFormat', kind: 'select', options: ['auto', 'none', 'deepseek', 'deepseek-legacy'] },
   { key: 'reasoningBudget', kind: 'number' },
 ]
+
+/** CPU tuning (threads, NUMA, affinity mask): shown in a collapsed "advanced" block, not in the main list. */
+export const CPU_FIELDS: ParamField[] = [
+  { key: 'threads', kind: 'number' },
+  { key: 'numa', kind: 'select', options: ['distribute', 'isolate', 'numactl'] },
+  { key: 'cpuMask', kind: 'text' },
+]
+
+/** Every field the forms read and write. */
+export const ALL_FIELDS: ParamField[] = [...PARAM_FIELDS, ...CPU_FIELDS]

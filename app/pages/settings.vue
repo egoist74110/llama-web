@@ -7,6 +7,7 @@ onMounted(load)
 // Section directory: anchors inside the page, the active one follows the scroll position.
 const all = [
   { id: 's-dirs', label: t.settings.dirs.title, needsDoc: true },
+  { id: 's-system', label: t.settings.system.title, needsDoc: true },
   { id: 's-llama', label: t.llamacpp.title, needsDoc: true },
   { id: 's-defaults', label: t.settings.defaults.title, needsDoc: true },
   { id: 's-image', label: t.settings.image.title, needsDoc: true },
@@ -82,6 +83,7 @@ function go(id: string) {
         </div>
         <template v-else>
           <SettingsDirs id="s-dirs" />
+          <SettingsSystem id="s-system" />
           <SettingsLlamacpp id="s-llama" />
           <SettingsDefaults id="s-defaults" />
           <SettingsImage id="s-image" />

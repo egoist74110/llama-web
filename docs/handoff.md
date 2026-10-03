@@ -1,5 +1,13 @@
 # 交接记录
 
+## 2026-10-03 · 工作包 8-5 · Sonnet 5.5
+- 完成：plan 8-5 三项打勾。设置页：新「本机」卡片（`SettingsSystem.vue`，`GET /api/system`，重新检测、推荐与警告；Mac 只显示芯片 / 型号 / 核心 / 统一内存 / macOS）；llama.cpp 卡片重写（`SettingsLlamacpp.vue`：Windows 分「NVIDIA（CUDA）版 / CPU 版」两个通道，CPU 通道没装时有下载按钮；Mac 单通道、不写通道名；添加版本 `RuntimeAddModal.vue`——三个来源，先弹「会运行你选的程序」再预览，预览页显示大小 / 版本号 / SHA-256 / 警告，没公布摘要要勾选确认，关闭或取消会丢弃暂存；删除 `RuntimeDeleteModal.vue`——先取 delete-plan，列出受影响的模型 / 方案和当前版本变化；最新官方版删除按钮禁用并有说明；`runtime-fallback` 事件做成提示条）；全局默认（`SettingsDefaults.vue`）Windows 有「GPU 版 / CPU 版」两个标签，GPU 版带全局设备下拉，CPU 进阶（线程 / NUMA / 掩码）折叠；编辑抽屉：参数页顶部 `ModelRuntimeBox.vue`（模型级版本 / 设备，各自保存，可保存并重启），`ProfileForm.vue` 里方案级版本 / 设备下拉、CPU 进阶折叠区（检测到多路 CPU 或已设置时默认展开）、命令预览下显示实际使用的版本 / 设备 / 兜底。平台开关集中在 `app/utils/platform-ui.ts`（`usePlatformUi()`），文案在 `i18n/zh-CN.ts` 的 `settings.system`、`llamacpp.manage`、`models.edit.rd`、`settings.defaults`。
+- 验证：`bun test` 939 通过 0 失败（新增 `tests/app/runtime-choices.test.ts`：平台开关、Mac 无加速字样、版本 / 设备选项）；`bun run typecheck` 通过。界面在源码版（`nuxt dev`，临时数据目录、关自动更新）里看过：浅 / 深色、窄屏（390 宽）；真实走了一遍「目录 → 预览（运行真实 `--version`）→ 添加 → 删除」，错误路径（路径不存在）；设备下拉列出本机显卡。Mac：浏览器里把 `/api/system`、`/api/devices`、`/api/settings`、`/api/llamacpp` 的响应和实时快照的平台改成构造的 darwin 数据，设置页和编辑抽屉里没有设备 / 通道 / GPU 标签 / CPU·GPU 切换；用脚本扫了页面文字，剩下的 GPU / 显存字样都是原有的参数说明和别的卡片（见下）。临时数据目录已删。
+- 没测：真实 GitHub 下载、压缩包来源（只测了目录）、「下载 CPU 版」按钮、切换另一通道版本（secondary）、兜底提示条（只看代码）、删除时有受影响模型的列表（只看代码）、「保存并重启」、真机 Mac。
+- 决定 / 坑：① 选择压缩包没有文件选择窗口，只能粘贴完整路径（服务端没有 pick-file 接口，不在本包范围）；选择文件夹按钮只在 Windows 出现，Mac 的 osascript 留给 8-6（把 `platform-ui.ts` 的 `canPickFolder` 打开即可）。② Mac 上仍能看到的 GPU / 显存字样：全局默认参数里「GPU 层数」「省显存」等原有说明、总览 `macHint`、`platform.runtimeHint`（本卡里 Mac 不渲染）、调度设置里「显存有限」——8-6 的文案审计要处理。③ 模型编辑抽屉里「继承」显示的默认值仍取主通道那份（8-2 的遗留 ⑥ 未改）。④ 「全局设备」只在 GPU 版标签里；`defaultsCpu.device` 不开放。⑤ `usageKeepDays` 仍没有界面（8-4 遗留，用户定）。⑥ 本机卡片的 Mac 内存提示沿用服务端文案。
+- 剩余：无（8-5 范围内）。
+- 下一步：8-6（Sonnet 5.5，指南 #p8-6）。
+
 ## 2026-10-03 · 更新检查修正 · Codex
 - 完成：按用户要求更新决定 15 / 29。llama.cpp 各官方通道与应用自身自动检查每 24 小时最多一次；新文件 `data/update-checks.json`（v1）经 JsonStore 原子写入、保留 3 份备份，在请求之前记录尝试时间，失败 / 中断也计入，重启不重复检查。应用保持每天的运行期间检查；llama.cpp 保持只在启动时检查。手动应用检查 / 显式运行库下载绕过间隔。已有回退选择与运行中的模型保持原有行为。
 - 原因：用本机 Node fetch 请求日志所列 GitHub API，实际返回 HTTP 403、`x-ratelimit-remaining: 0`；原代码把所有 HTTP 错误归为 network，细节只留下 URL。现在区分 network / rate-limited / http；支持主要限流响应头、429 和 403 的 secondary rate limit 消息，不输出响应正文。中文提示同步更新。

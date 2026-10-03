@@ -11,9 +11,15 @@ export function useLlamacpp() {
   const toast = useToast()
   /** Version waiting for confirmation; null when the dialog is closed. */
   const pending = useState<string | null>('llamacpp-pending', () => null)
+  /** Channel of that version when it is not the main one (the other channel on Windows). */
+  const pendingChannel = useState<string | null>('llamacpp-pending-channel', () => null)
+  const { bump } = useRuntimeDoc()
   const busy = useState<boolean>('llamacpp-busy', () => false)
 
-  const ask = (tag: string) => { pending.value = tag }
+  const ask = (tag: string, channel?: string) => {
+    pendingChannel.value = channel ?? null
+    pending.value = tag
+  }
 
   async function confirm() {
     const tag = pending.value
@@ -21,9 +27,10 @@ export function useLlamacpp() {
     busy.value = true
     try {
       // The live snapshot picks up the new current version by itself.
-      await $fetch('/api/llamacpp/current', { method: 'POST', body: { tag } })
+      await $fetch('/api/llamacpp/current', { method: 'POST', body: { tag, ...(pendingChannel.value ? { channel: pendingChannel.value } : {}) } })
       toast.add({ title: fmt(t.llamacpp.switched, { tag }), color: 'success', icon: 'i-lucide-check' })
       pending.value = null
+      bump()
     } catch (e) {
       toast.add({ title: t.llamacpp.actionFailed, description: messageOf(e), color: 'error', icon: 'i-lucide-circle-alert' })
     } finally {

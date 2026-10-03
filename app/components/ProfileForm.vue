@@ -9,7 +9,7 @@ import type { ParamField } from '~/composables/useParamFields'
 
 type Mode = 'inherit' | 'custom' | 'omit'
 interface Row { mode: Mode, value: string }
-type FormState = { rows: Record<ParamKey, Row>, extraArgs: string, chatTemplate: string }
+type FormState = { rows: Record<ParamKey, Row>, extraArgs: string, chatTemplate: string, runtime: string, device: string }
 
 const props = defineProps<{
   modelId: string
@@ -24,21 +24,28 @@ const props = defineProps<{
   /** Unsaved file choices, so the preview matches what the drawer shows. */
   files: { file: unknown, mmproj: unknown, draft: unknown }
   busy: boolean
+  /** The model's own build / device choice (this profile's choice wins over it; empty = follow the global one). */
+  modelRuntime?: string
+  modelDevice?: string
 }>()
 const emit = defineEmits<{ save: [form: object, restart: boolean], dirty: [boolean] }>()
 
 const params = t.models.edit.params
 const edit = t.models.edit
+const rd = edit.rd
+const ui = usePlatformUi()
+const { doc: runtimeDoc, rows: runtimeRows, load: loadRuntimes } = useRuntimeDoc()
+const devices = useDevices()
 
 function fromProfile(p: Profile): FormState {
   const rows = {} as Record<ParamKey, Row>
-  for (const f of PARAM_FIELDS) {
+  for (const f of ALL_FIELDS) {
     const v = (p.overrides as Record<string, unknown>)[f.key]
     rows[f.key] = v === undefined ? { mode: 'inherit', value: '' }
       : v === null || v === '' ? { mode: 'omit', value: '' }
         : { mode: 'custom', value: String(v) }
   }
-  return { rows, extraArgs: p.extraArgs ?? '', chatTemplate: p.chatTemplate ?? '' }
+  return { rows, extraArgs: p.extraArgs ?? '', chatTemplate: p.chatTemplate ?? '', runtime: p.runtime ?? '', device: p.device ?? '' }
 }
 
 const state = reactive<FormState>(fromProfile(props.profile))
@@ -81,21 +88,28 @@ function selectItems(field: ParamField, current: string) {
   return items
 }
 
-const invalidKeys = computed(() => PARAM_FIELDS.filter((f) => {
+const invalidKeys = computed(() => ALL_FIELDS.filter((f) => {
   const row = state.rows[f.key]
   return f.kind === 'number' && row.mode === 'custom' && row.value.trim() !== '' && !Number.isFinite(Number(row.value))
 }).map(f => f.key))
 
 function toForm() {
   const overrides: Record<string, string | number | null> = {}
-  for (const f of PARAM_FIELDS) {
+  for (const f of ALL_FIELDS) {
     const row = state.rows[f.key]
     if (row.mode === 'inherit') continue
     const raw = row.value.trim()
     // A custom value left empty means there is nothing to pass.
     overrides[f.key] = row.mode === 'omit' || raw === '' ? null : f.kind === 'number' ? Number(raw) : raw
   }
-  return { overrides: overrides as ParamOverrides, extraArgs: state.extraArgs, chatTemplate: state.chatTemplate || null }
+  return {
+    overrides: overrides as ParamOverrides,
+    extraArgs: state.extraArgs,
+    chatTemplate: state.chatTemplate || null,
+    runtime: state.runtime || null,
+    // A Mac has no device choice: the field is never sent there.
+    ...(ui.value.hasGpu ? { device: state.device || null } : {}),
+  }
 }
 
 const templateItems = computed(() => {
@@ -105,6 +119,29 @@ const templateItems = computed(() => {
   }
   return items
 })
+
+// ---- Build and device ------------------------------------------------------------------------
+onMounted(() => { if (!runtimeDoc.value) void loadRuntimes() })
+const rowOf = (ref: string) => runtimeRows.value.find(r => r.ref === ref)
+const inheritRuntimeLabel = computed(() => {
+  const ref = props.modelRuntime ?? ''
+  const label = ref ? (rowOf(ref) ? runtimeRowLabel(rowOf(ref)!, ui.value.isMac) : ref) : (runtimeDoc.value?.current ?? '')
+  return label ? fmt(rd.inheritRuntimeOf, { label }) : rd.inherit
+})
+const runtimeChoices = computed(() => runtimeItems(runtimeRows.value, state.runtime, ui.value.isMac, inheritRuntimeLabel.value))
+// The device list belongs to the build that will run: this profile's, else the model's, else the global one.
+const effectiveRuntime = computed(() => state.runtime || props.modelRuntime || '')
+watch([effectiveRuntime, () => props.active, () => ui.value.hasGpu], () => {
+  if (props.active && ui.value.hasGpu) void devices.load(effectiveRuntime.value)
+}, { immediate: true })
+const deviceChoices = computed(() => deviceItems(devices.viewOf(effectiveRuntime.value), state.device))
+const deviceNote = computed(() => (devices.failedOf(effectiveRuntime.value) ? rd.listFailed : devices.viewOf(effectiveRuntime.value)?.source === 'nvidia-smi' ? rd.listFromSmi : ''))
+const cpuMulti = computed(() => !!devices.viewOf(effectiveRuntime.value)?.cpu.multi)
+const advancedOpen = computed(() => cpuMulti.value || CPU_FIELDS.some(f => state.rows[f.key].mode !== 'inherit'))
+const blocks = [
+  { id: 'main', advanced: false, fields: PARAM_FIELDS },
+  { id: 'cpu', advanced: true, fields: CPU_FIELDS },
+]
 
 // ---- Preview (server-built) ------------------------------------------------------------------
 const preview = ref<LaunchPreview | null>(null)
@@ -177,6 +214,42 @@ const globalExtra = computed(() => props.defaults.extraArgs?.trim())
       </p>
     </div>
 
+    <div class="space-y-3">
+      <div class="space-y-1.5">
+        <h4 class="text-sm font-medium text-highlighted">
+          {{ rd.runtime }}
+        </h4>
+        <USelect
+          :model-value="toSelectValue(state.runtime)"
+          :items="runtimeChoices"
+          class="w-full sm:w-80"
+          :aria-label="rd.runtime"
+          @update:model-value="(v: unknown) => { state.runtime = fromSelectValue(v) }"
+        />
+        <p class="text-xs text-muted">
+          {{ rd.runtimeHint }}
+        </p>
+      </div>
+      <div v-if="ui.hasGpu" class="space-y-1.5">
+        <h4 class="text-sm font-medium text-highlighted">
+          {{ rd.device }}
+        </h4>
+        <USelect
+          :model-value="toSelectValue(state.device)"
+          :items="deviceChoices"
+          class="w-full sm:w-80"
+          :aria-label="rd.device"
+          @update:model-value="(v: unknown) => { state.device = fromSelectValue(v) }"
+        />
+        <p class="text-xs text-muted">
+          {{ rd.deviceHint }}
+        </p>
+        <p v-if="deviceNote" class="text-xs text-warning">
+          {{ deviceNote }}
+        </p>
+      </div>
+    </div>
+
     <div>
       <h4 class="text-sm font-medium text-highlighted">
         {{ edit.form.title }}
@@ -184,48 +257,54 @@ const globalExtra = computed(() => props.defaults.extraArgs?.trim())
       <p class="text-xs text-muted">
         {{ edit.form.hint }}
       </p>
-      <div class="mt-1 divide-y divide-default">
-        <div v-for="f in PARAM_FIELDS" :key="f.key" class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3">
-          <div class="min-w-0 flex-1 basis-56">
-            <p class="text-sm text-default">
-              {{ params[f.key].label }}
-            </p>
-            <p class="text-xs text-muted">
-              {{ params[f.key].hint }}
-            </p>
-          </div>
-          <div class="flex items-center gap-2">
-            <USelect
-              :model-value="state.rows[f.key].mode"
-              :items="modeItems"
-              size="sm"
-              class="w-24"
-              :aria-label="params[f.key].label"
-              @update:model-value="(m: string) => setMode(f.key, m as Mode)"
-            />
-            <template v-if="state.rows[f.key].mode === 'custom'">
+      <component :is="b.advanced ? 'details' : 'div'" v-for="b in blocks" :key="b.id" :open="b.advanced ? advancedOpen || undefined : undefined" :class="b.advanced ? 'mt-1 border-t border-default' : 'mt-1'">
+        <summary v-if="b.advanced" class="cursor-pointer select-none py-3 text-sm font-medium text-highlighted">
+          {{ rd.advanced }}
+          <span class="block text-xs font-normal text-muted">{{ rd.advancedHint }}</span>
+        </summary>
+        <div class="divide-y divide-default">
+          <div v-for="f in b.fields" :key="f.key" class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3">
+            <div class="min-w-0 flex-1 basis-56">
+              <p class="text-sm text-default">
+                {{ params[f.key].label }}
+              </p>
+              <p class="text-xs text-muted">
+                {{ params[f.key].hint }}
+              </p>
+            </div>
+            <div class="flex items-center gap-2">
               <USelect
-                v-if="f.kind === 'select'"
-                v-model="state.rows[f.key].value"
-                :items="selectItems(f, state.rows[f.key].value)"
+                :model-value="state.rows[f.key].mode"
+                :items="modeItems"
                 size="sm"
-                class="w-36"
+                class="w-24"
+                :aria-label="params[f.key].label"
+                @update:model-value="(m: string) => setMode(f.key, m as Mode)"
               />
-              <UInput
-                v-else
-                :model-value="state.rows[f.key].value"
-                type="number"
-                size="sm"
-                class="w-36"
-                :color="invalidKeys.includes(f.key) ? 'error' : undefined"
-                @update:model-value="(v: string | number | undefined) => { state.rows[f.key].value = v == null ? '' : String(v) }"
-              />
-            </template>
-            <span v-else-if="state.rows[f.key].mode === 'inherit'" class="w-36 text-xs text-muted">{{ inheritedText(f.key) }}</span>
-            <span v-else class="w-36 text-xs text-muted">{{ edit.form.omit }}</span>
+              <template v-if="state.rows[f.key].mode === 'custom'">
+                <USelect
+                  v-if="f.kind === 'select'"
+                  v-model="state.rows[f.key].value"
+                  :items="selectItems(f, state.rows[f.key].value)"
+                  size="sm"
+                  class="w-36"
+                />
+                <UInput
+                  v-else
+                  :model-value="state.rows[f.key].value"
+                  :type="f.kind === 'number' ? 'number' : 'text'"
+                  size="sm"
+                  class="w-36"
+                  :color="invalidKeys.includes(f.key) ? 'error' : undefined"
+                  @update:model-value="(v: string | number | undefined) => { state.rows[f.key].value = v == null ? '' : String(v) }"
+                />
+              </template>
+              <span v-else-if="state.rows[f.key].mode === 'inherit'" class="w-36 text-xs text-muted">{{ inheritedText(f.key) }}</span>
+              <span v-else class="w-36 text-xs text-muted">{{ edit.form.omit }}</span>
+            </div>
           </div>
         </div>
-      </div>
+      </component>
     </div>
 
     <div class="space-y-1.5">
@@ -267,6 +346,11 @@ const globalExtra = computed(() => props.defaults.extraArgs?.trim())
       </p>
       <p v-if="previewError" class="text-xs text-error">
         {{ previewError }}
+      </p>
+      <p v-if="preview" class="m-0 text-xs text-muted">
+        {{ fmt(rd.runtimeBuild, { label: preview.runtime.label }) }}
+        <span v-if="preview.runtime.fallback" class="text-warning">{{ fmt(rd.runtimeFallback, { from: preview.runtime.fallback.from }) }}</span>
+        <template v-if="ui.hasGpu"> · {{ deviceUsedText(preview.device) }}</template>
       </p>
       <ul v-if="preview" class="space-y-0.5 text-xs">
         <li v-if="!preview.ok" class="text-error">
