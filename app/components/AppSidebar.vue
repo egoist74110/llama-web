@@ -38,6 +38,11 @@ const big = computed(() => {
   return sp.generation === null ? { value: '–', unit: L.serving.waiting } : { value: n, unit: L.serving.last }
 })
 const version = computed(() => state.value?.llamacpp.current || L.llamacppNone)
+const runtimeUpdate = computed(() => {
+  const c = state.value?.llamacpp.check
+  return c?.state === 'checked' && c.available ? c.tag : null
+})
+const { view: appVersion, release: appRelease } = useAppUpdate()
 
 const colorMode = useColorMode()
 const modes = [
@@ -94,7 +99,14 @@ const modes = [
           <span class="lw-live-dot" :class="{ 'is-off': !connected }" />
           {{ connected ? L.connected : L.disconnectedShort }}
         </span>
-        <span class="truncate font-mono">{{ L.llamacpp }} {{ version }}</span>
+      </div>
+      <div class="flex flex-wrap items-center gap-2 text-xs text-dimmed">
+        <span class="font-mono">{{ L.llamacpp }} {{ version }}</span>
+        <NuxtLink v-if="runtimeUpdate" to="/settings#s-llama" class="text-primary">{{ fmt(t.llamacpp.update.available, { tag: runtimeUpdate }) }}</NuxtLink>
+      </div>
+      <div v-if="appVersion" class="flex flex-wrap items-center gap-2 text-xs text-dimmed">
+        <span class="font-mono">{{ t.app.title }} v{{ appVersion.current }}</span>
+        <NuxtLink v-if="appRelease && appVersion.skipped !== appRelease.version" to="/settings#s-about" class="text-primary">{{ fmt(t.appUpdate.inlineAvailable, { version: appRelease.version }) }}</NuxtLink>
       </div>
       <div class="lw-seg w-full" role="group" :aria-label="L.theme">
         <button

@@ -231,11 +231,12 @@ export interface SettingsPatch {
   image?: unknown
   server?: unknown
   public?: unknown
+  llamacpp?: unknown
   /** Marks the first-run wizard as finished (or skipped). */
   setupDone?: unknown
 }
 
-const SECTIONS = ['modelDirs', 'defaults', 'defaultsCpu', 'image', 'server', 'public', 'setupDone']
+const SECTIONS = ['modelDirs', 'defaults', 'defaultsCpu', 'image', 'server', 'public', 'setupDone', 'llamacpp']
 
 /** Apply every section present in the patch; validation of any section failing aborts the whole patch. */
 export function applySettingsPatch(draft: Settings, patch: unknown, models: ModelsDoc, host: { os: NodeJS.Platform } = { os: process.platform }): void {
@@ -251,6 +252,10 @@ export function applySettingsPatch(draft: Settings, patch: unknown, models: Mode
   if (p.image !== undefined) applyImagePreprocess(draft, p.image)
   if (p.server !== undefined) applyServer(draft, p.server)
   if (p.public !== undefined) applyPublic(draft, p.public)
+  if (p.llamacpp !== undefined) {
+    if (!isObj(p.llamacpp) || typeof p.llamacpp.autoUpdate !== 'boolean' || Object.keys(p.llamacpp).some(k => k !== 'autoUpdate')) throw new SettingsError('bad-request')
+    draft.llamacpp.autoUpdate = p.llamacpp.autoUpdate
+  }
   if (p.setupDone !== undefined) {
     if (typeof p.setupDone !== 'boolean') throw new SettingsError('bad-request')
     draft.setup.done = p.setupDone

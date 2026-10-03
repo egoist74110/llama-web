@@ -68,6 +68,7 @@ export interface Settings {
     /** Current version of the Windows CPU channel (decision 36); empty until the CPU build is downloaded. */
     currentCpu: string
     keepVersions: number
+    /** Daily checks always run; this preference enables automatic installation. */
     autoUpdate: boolean
     acceleration: Acceleration
   }
@@ -130,7 +131,7 @@ export interface ModelsDoc {
   models: ModelConfig[]
 }
 
-export const SETTINGS_VERSION = 6
+export const SETTINGS_VERSION = 7
 export const MODELS_VERSION = 1
 
 /**
@@ -165,7 +166,7 @@ export function defaultSettings(platform?: PlatformInfo): Settings {
     server: { host: '0.0.0.0', port: 5001 },
     public: { enabled: false, port: 8080, domain: '', tunnelEnabled: false, tunnelMode: 'token', tunnelProtocol: 'http2', wizard: null },
     modelDirs: [],
-    llamacpp: { cudaRuntime: '', current: '', currentCpu: '', keepVersions: 2, autoUpdate: true, acceleration: 'auto' },
+    llamacpp: { cudaRuntime: '', current: '', currentCpu: '', keepVersions: 2, autoUpdate: false, acceleration: 'auto' },
     scheduler: { maxLoaded: 1, loadTimeoutSec: 600, drainTimeoutSec: 300, heartbeatSec: 15, portRange: [7100, 7199] },
     defaults: windowsCuda ? { ...DEFAULT_LAUNCH_DEFAULTS } : {
       ...DEFAULT_LAUNCH_DEFAULTS, cacheTypeK: null, cacheTypeV: null, flashAttn: null,
@@ -223,6 +224,12 @@ export const SETTINGS_MIGRATIONS: Record<number, (old: any) => any> = {
     old.defaultsCpu ??= cpuOnly ? { ...DEFAULT_CPU_DEFAULTS, ...old.defaults } : { ...DEFAULT_CPU_DEFAULTS }
     return old
   },
+  // 7: runtime auto-installation defaults off; daily release checks remain enabled.
+  6: (old) => {
+    if (!isObj(old.llamacpp)) old.llamacpp = {}
+    old.llamacpp.autoUpdate = false
+    return old
+  },
 }
 
 export function defaultModels(): ModelsDoc {
@@ -256,6 +263,7 @@ export function normalizeSettings(doc: Settings): Settings {
   if (!TUNNEL_PROTOCOLS.includes(out.public.tunnelProtocol)) out.public.tunnelProtocol = 'http2'
   out.public.wizard = cleanWizard(out.public.wizard)
   if (!['auto', 'cuda', 'cpu', 'metal'].includes(out.llamacpp.acceleration)) throw new Error('Invalid llamacpp.acceleration')
+  if (typeof out.llamacpp.autoUpdate !== 'boolean') throw new Error('Invalid llamacpp.autoUpdate')
   // The global device choice is one valid value or nothing (a hand-edited bad one is dropped = automatic).
   for (const key of ['defaults', 'defaultsCpu'] as const) {
     const dev = out[key].device

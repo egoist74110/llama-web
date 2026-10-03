@@ -1,5 +1,14 @@
 # 交接记录
 
+## 2026-10-03 · 自动更新开关与版本旁提示 · Codex
+- 完成：按用户最终说明更新决定 15 / 29。llama.cpp 自动更新默认关（settings v7 迁移为关，保留其他配置）；llama-web 自身默认开启检查与自动安装（app-update.json v2 迁移开启，保留跳过版本）。两者关闭自动更新仍每天检查，只提示、不自动安装。检查尝试 / 结果跨重启保存，失败也计入 24 小时间隔；运行库新增运行期间计时，手动检查可绕过间隔且只读元数据。
+- 界面：两张设置卡都有自动更新开关与旁边的「检查更新」按钮；运行库可显式下载。应用与运行库版本旁显示新版提示，侧栏 / 总览 / 版本列表接实时状态；移除 AppUpdatePrompt 的自动打开和横幅，保留用户主动安装的确认框。主通道与已安装次通道可检查、下载，尚未安装次通道不自动下载，手动添加的版本不自动更新。
+- 安装：桌面应用自动下载继续比对 GitHub SHA256 摘要和 SHA256SUMS，安装前复核，沿用私有管道与桌面壳再次复核 / 被动安装 / 重开流程。关闭开关、跳过版本、退出可阻止后续自动安装；校验失败或壳交接失败保留错误状态。源码版没有 installer 回调，只链接发布页。运行库已有回退 / 下载中手动选择 / 在用目录保护保持原规则。
+- 验证：最终 `bun test`：925 pass / 51 skip / 0 fail，67 文件，72.78s；`bun run typecheck` 通过；`git diff --check` 通过。新增回归覆盖开关、迁移、跨重启缓存、关闭仍每日检查、运行期间计时与停止、下载中关闭 / 退出、坏摘要与安装交接失败。手动应用检查会等待自动安装，因此前端允许等待期间修改偏好 / 取消下载，同时合并重复动作，新增实际 composable 行为测试。曾出现两处联合类型收窄错误与旧版本号测试断言，已修正并重新通过。
+- 没跑：build / 桌面打包、浏览器深浅色 / 窄屏、真实下载与安装、GPU / 推理、Mac 真机。现有运行服务未重启；没有读取真实 secrets / 配置或触发真实安装。测试只用构造数据，测试计时器在 teardown 停止。
+- 相邻改动：保留工作区已有的 models.addDir 文案层级修正并纳入提交，否则 8-6 基线里的 ModelAddDir 找不到文案、类型检查失败；没有改动其目录添加逻辑。
+- 收尾：README / 计划 / 交接已同步；停在本次更新修正，不自动进入下个阶段。下一步请重启源码服务试用两个开关与版本旁提示；新版桌面包及实际自动安装流程仍待后续打包验收。
+
 ## 2026-10-03 · 工作包 8-6 · Sonnet 5.5
 - 完成：plan 8-6 第 1 项和 Mac 专项收尾里的两项打勾。模型页「添加目录」（`ModelAddDir.vue`：选目录 / 旁边「输入路径」粘贴；`app/utils/model-dirs.ts` 判断重复和「已被某目录包含」；添加后切到「扫描发现」、扫描并提示找到几个；空状态也有按钮；`DiscoverPanel` 暴露 `rescan()`，同时进行的扫描会合并）。扫描跳过 `._*` / `.DS_Store`；`expandHome`（`~` 展开）；`folder-picker.ts` 加 osascript（标题走参数不拼进脚本，取消 = null），`/api/fs/pick-folder` 和 `canPickFolder` 对 Mac 打开；Mac 文案审计（`i18n` 的 `platform.mac` + `app/utils/platform-text.ts`，参数说明 / 内存不足提示 / 路径示例 / 重启提示 / 图片说明用 Mac 版，总览显存卡加平台判断，删掉未使用的 `macHint`）；`start.command`（+ `.gitattributes` 保持 LF，提交时设了可执行位）、`.github/workflows/ci.yml` 的 macOS 作业 + `scripts/ci-llamacpp-smoke.ts`、README 的 Mac 段、`docs/platform-foundation.md` 补验证范围。
 - 验证：新增测试 `scanner`（`._`）、`folder-picker`、`settings-admin`（`~`）、`app/model-dirs`、`app/platform-text`、`platform/start-command`，我这部分的相关测试全部通过。源码版（`nuxt dev`，临时数据目录）里在浏览器走了：粘贴路径 → 添加 → 自动切到扫描发现，`._` 文件没出现；换大小写 + 结尾斜杠再添加 → 提示「已经在列表里」。`bun run typecheck` 在我改的文件上无报错。

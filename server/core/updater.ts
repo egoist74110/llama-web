@@ -1,7 +1,6 @@
-// llama.cpp update and rollback on top of llamacpp.ts. At startup (in the background, never
-// during normal running) it adopts an installed version, checks the official latest Release at
-// most once per 24 hours across restarts,
-// downloads it when it is not installed yet and makes it the current version, then removes
+// llama.cpp update and rollback on top of llamacpp.ts. Daily checks survive restarts;
+// autoUpdate controls installation, while manual checks only fetch release metadata.
+// It adopts an installed version, downloads updates when enabled, then removes
 // old version directories beyond `keepVersions` (at least 2). A version directory that a
 // running or starting llama-server uses, and the current version, are never removed.
 // Pure module (no Nitro): settings and "in use" come in as callbacks.
@@ -19,6 +18,11 @@ import {
 
 const TAG_RE = /^b\d+$/
 
+export type RuntimeCheck =
+  | { state: 'idle' | 'checking' }
+  | { state: 'checked', at: number, tag: string, url: string, available: boolean }
+  | { state: 'error', at: number, code: string, detail: string }
+
 export interface VersionView {
   tag: string
   current: boolean
@@ -34,8 +38,9 @@ export interface LlamacppDoc {
   rollback: string | null
   autoUpdate: boolean
   keepVersions: number
+  check: RuntimeCheck
   /** The other official channel of a Windows host (CPU beside CUDA, or the reverse); null when there is none. */
-  secondary?: { accel: string, current: string, status: RuntimeStatus, versions: VersionView[] } | null
+  secondary?: { accel: string, current: string, status: RuntimeStatus, versions: VersionView[], check: RuntimeCheck } | null
   /** Official and hand-added builds of this computer (decisions 34 / 35); other platforms are hidden. */
   runtimes?: RuntimeListing
 }
@@ -101,15 +106,40 @@ export class Updater {
   private abort = new AbortController()
   private readonly checks: UpdateCheckStore
   private readonly checkKey: string
+  private checkView: RuntimeCheck = { state: 'idle' }
+  private timer: ReturnType<typeof setTimeout> | null = null
 
   constructor(private readonly opts: UpdaterOptions) {
     this.installed = listInstalled(opts.dataDir, opts.platform, opts.target)
     this.checks = new UpdateCheckStore(opts.dataDir)
     this.checkKey = `llamacpp:${opts.target ? targetKey(opts.target) : opts.platform ?? process.platform}`
+    const record = this.checks.get(this.checkKey)
+    const saved = record?.result as { tag?: string, code?: string, detail?: string } | null
+    if (record && typeof saved?.tag === 'string' && TAG_RE.test(saved.tag)) this.checked(saved.tag, record.at)
+    else if (record && typeof saved?.code === 'string' && typeof saved.detail === 'string') this.checkView = { state: 'error', at: record.at, code: saved.code, detail: saved.detail }
   }
 
   getStatus(): RuntimeStatus {
     return this.status
+  }
+
+  getUpdateCheck(): RuntimeCheck {
+    return this.checkView.state === 'checked' ? { ...this.checkView, available: this.checkView.tag !== this.opts.llamacpp().current } : this.checkView
+  }
+
+  private checked(tag: string, at: number): void {
+    this.checkView = { state: 'checked', at, tag, url: `https://github.com/ggml-org/llama.cpp/releases/tag/${tag}`, available: tag !== this.opts.llamacpp().current }
+  }
+
+  /** Reconcile a changed preference without making a request. The timer checks the fresh setting. */
+  scheduleChecks(): void {
+    if (this.timer) clearTimeout(this.timer)
+    this.timer = null
+    if (this.abort.signal.aborted) return
+    const now = (this.opts.now ?? Date.now)()
+    const delay = this.checks.remaining(this.checkKey, now) || 24 * 60 * 60 * 1000
+    this.timer = setTimeout(() => { this.timer = null; void this.run().catch(() => {}) }, delay)
+    this.timer.unref?.()
   }
 
   /** Re-read the installed versions from disk. */
@@ -191,19 +221,21 @@ export class Updater {
   }
 
   /** Startup check (single flight). Never throws: failures end in an `error` status. */
-  run(opts: { force?: boolean } = {}): Promise<RuntimeStatus> {
-    this.running ??= this.check(opts.force === true).finally(() => { this.running = null })
+  run(opts: { force?: boolean, manual?: boolean } = {}): Promise<RuntimeStatus> {
+    this.running ??= this.check(opts.force === true, opts.manual === true).finally(() => { this.running = null; this.scheduleChecks() })
     return this.running
   }
 
   /** Shutdown: cancel the network work of a running check and wait until it has cleaned up. */
   async stop(): Promise<void> {
     this.abort.abort(new Error('shutdown'))
+    if (this.timer) clearTimeout(this.timer)
+    this.timer = null
     await this.running?.catch(() => {})
   }
 
   /** `force`: an explicit download bypasses the automatic-check cooldown and autoUpdate switch. */
-  private async check(force: boolean): Promise<RuntimeStatus> {
+  private async check(force: boolean, manual: boolean): Promise<RuntimeStatus> {
     const { dataDir, platform } = this.opts
     clearLeftovers(dataDir, this.opts.target)
     const installed = this.refresh()
@@ -214,15 +246,10 @@ export class Updater {
       if (current) this.opts.setCurrent(current)
     }
     const cfg = this.opts.llamacpp()
-    if (!cfg.autoUpdate && !force) {
-      this.safePrune()
-      return this.set(current ? { state: 'ready', tag: current, note: 'auto-off' } : { state: 'disabled' })
-    }
-
     const before = current
     try {
       const at = (this.opts.now ?? Date.now)()
-      if (!force && this.checks.remaining(this.checkKey, at) > 0) {
+      if (!force && !manual && this.checks.remaining(this.checkKey, at) > 0) {
         this.safePrune()
         const result = this.checks.get(this.checkKey)?.result as Partial<RuntimeStatus> | null
         if (!current && result?.state === 'error' && typeof result.code === 'string' && typeof result.detail === 'string') {
@@ -231,11 +258,19 @@ export class Updater {
         return this.set(current ? { state: 'ready', tag: current, note: 'cached' } : { state: 'idle' })
       }
       this.checks.save(this.checkKey, at)
+      this.checkView = { state: 'checking' }
       if (this.opts.selectionError) throw new RuntimeError('asset-missing', 'Choose runtime acceleration in settings.json and restart', this.opts.selectionError)
       this.set({ state: 'working', step: 'resolve', detail: '' })
       const fetchFn = this.opts.fetch ?? fetch
       const net: NetOptions = { ...this.opts.net, signal: this.abort.signal }
       const latest = await resolveLatest(fetchFn, cfg.cudaRuntime, platform, net, this.opts.target, this.opts.cudaLimits?.())
+      this.checked(latest.tag, at)
+      this.checks.save(this.checkKey, at, { tag: latest.tag })
+      if (!force && (!this.opts.llamacpp().autoUpdate || manual)) {
+        this.safePrune()
+        const now = this.opts.llamacpp().current
+        return this.set(now ? { state: 'ready', tag: now, note: now === latest.tag ? 'latest' : 'available', latest: latest.tag } : { state: 'disabled' })
+      }
       if (this.refresh().includes(latest.tag)) {
         // Already installed. A version picked by hand (rollback) stays current.
         const now = this.opts.llamacpp().current
@@ -250,10 +285,11 @@ export class Updater {
       const now = this.opts.llamacpp().current
       // Switched by hand while downloading: keep that choice, the new version is just installed.
       const picked = now !== before && installedNow.includes(now)
-      if (!picked) this.opts.setCurrent(latest.tag)
+      const installOnly = !force && !this.opts.llamacpp().autoUpdate
+      if (!picked && !installOnly) this.opts.setCurrent(latest.tag)
       this.safePrune()
-      const tag = picked ? now : latest.tag
-      return this.set(picked
+      const tag = picked || installOnly ? now : latest.tag
+      return this.set(picked || installOnly
         ? { state: 'ready', tag, note: 'pinned', latest: latest.tag }
         : { state: 'ready', tag, note: 'updated', from: before || null, latest: latest.tag })
     } catch (e) {
@@ -261,6 +297,7 @@ export class Updater {
       const usable = this.refresh().includes(using) ? using : null
       const code = e instanceof RuntimeError ? e.code : 'unknown'
       const detail = e instanceof RuntimeError ? (e.detail ?? e.message) : (e as Error).message
+      this.checkView = { state: 'error', at: (this.opts.now ?? Date.now)(), code, detail }
       try {
         const at = this.checks.get(this.checkKey)?.at ?? (this.opts.now ?? Date.now)()
         this.checks.save(this.checkKey, at, { state: 'error', code, detail })

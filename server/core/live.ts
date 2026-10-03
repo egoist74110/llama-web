@@ -6,7 +6,7 @@ import type { GpuDoc } from './gpu'
 import { missingFiles, type ModelFile } from './models-admin'
 import type { JobRev, SetupJob } from './cloudflare'
 import type { RuntimeStatus } from './llamacpp'
-import type { VersionView } from './updater'
+import type { RuntimeCheck, VersionView } from './updater'
 import type { AppUpdateView } from './app-update'
 import type { RequestRecord } from './request-log'
 import type { LogStream } from './runner'
@@ -53,6 +53,8 @@ export interface StateDoc {
   queue: Array<{ modelId: string, profile: string, started: boolean, waiting: number }>
   llamacpp: {
     current: string
+    check?: RuntimeCheck
+    secondary?: { accel: string, current: string, runtime: RuntimeStatus, check: RuntimeCheck } | null
     runtime: RuntimeStatus
     /** Installed versions, newest first. */
     versions: VersionView[]

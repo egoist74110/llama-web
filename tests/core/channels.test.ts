@@ -19,8 +19,12 @@ import { Updater } from '../../server/core/updater'
 import { sha } from '../fixtures/fake-github'
 
 let data: string
+const updaters: Updater[] = []
 beforeEach(() => { data = mkdtempSync(join(tmpdir(), 'lw-ch-')) })
-afterEach(() => { rmSync(data, { recursive: true, force: true }) })
+afterEach(async () => {
+  await Promise.all(updaters.splice(0).map(u => u.stop()))
+  rmSync(data, { recursive: true, force: true })
+})
 
 const cuda: RuntimeTarget = { os: 'win32', arch: 'x64', acceleration: 'cuda' }
 const cpu: RuntimeTarget = { ...cuda, acceleration: 'cpu' }
@@ -35,9 +39,10 @@ const install = (t: RuntimeTarget, tag: string) => {
 
 describe('settings version 6', () => {
   test('the version and the new defaults', () => {
-    expect(SETTINGS_VERSION).toBe(6)
+    expect(SETTINGS_VERSION).toBe(7)
     const d = defaultSettings()
-    expect(d.version).toBe(6)
+    expect(d.version).toBe(SETTINGS_VERSION)
+    expect(d.llamacpp.autoUpdate).toBe(false)
     expect(d.defaultsCpu).toEqual(DEFAULT_CPU_DEFAULTS)
     expect(d.llamacpp.currentCpu).toBe('')
     expect(d.llamacpp.cudaRuntime).toBe('') // new installations choose the CUDA runtime automatically
@@ -238,13 +243,15 @@ describe('automatic CUDA runtime choice', () => {
 
 describe('the other channel (decision 36)', () => {
   function updater(target: RuntimeTarget, state: { current: string, autoUpdate: boolean }, r: ReturnType<typeof release>, limits = { maxMajor: 13, maxComputeCap: 12 as number | null }) {
-    return new Updater({
+    const u = new Updater({
       dataDir: data, target, platform: 'win32', fetch: r.fetchFn, extract: r.extract,
       llamacpp: () => ({ cudaRuntime: '', current: state.current, keepVersions: 2, autoUpdate: state.autoUpdate }),
       setCurrent: (t) => { state.current = t },
       cudaLimits: () => limits,
       usedExes: () => [],
     })
+    updaters.push(u)
+    return u
   }
 
   test('a CPU channel that was never downloaded stays untouched by the startup rule (the caller only runs an installed channel)', () => {
@@ -258,7 +265,8 @@ describe('the other channel (decision 36)', () => {
     const state = { current: '', autoUpdate: false }
     const u = updater(cpu, state, r)
     expect(await u.run()).toEqual({ state: 'disabled' }) // not forced: auto update off means no download
-    expect(r.calls).toEqual([])
+    expect(r.calls).toHaveLength(3)
+    expect(r.downloads()).toEqual([])
     const st = await u.run({ force: true })
     expect(st).toMatchObject({ state: 'ready', tag: 'b500', note: 'updated' })
     expect(state.current).toBe('b500')

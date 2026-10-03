@@ -1,10 +1,10 @@
 <script setup lang="ts">
 // About and updates of llama-web itself: version, manual check, the offered release (notes +
-// actions, see AppUpdatePanel) and the automatic check switch. State from the live snapshot.
+// actions, see AppUpdatePanel) and the automatic install switch. State from the live snapshot.
 import t from '~~/i18n/zh-CN'
 
 const s = t.appUpdate
-const { view, release, busy, check, setAutoCheck } = useAppUpdate()
+const { view, release, busy, check, setAutoUpdate } = useAppUpdate()
 const time = (at: number) => new Date(at).toLocaleString('zh-CN', { hour12: false })
 const status = computed(() => {
   const c = view.value?.check
@@ -25,6 +25,7 @@ const working = computed(() => view.value?.download.state === 'downloading' || v
         <div class="flex flex-wrap items-center gap-2 text-sm">
           <span class="text-muted">{{ s.current }}</span>
           <span class="font-mono text-highlighted">v{{ view.current }}</span>
+          <ULink v-if="release" to="#app-update" class="text-xs text-primary">{{ fmt(s.inlineAvailable, { version: release.version }) }}</ULink>
           <UBadge v-if="isPre" color="warning" variant="subtle" size="sm">
             {{ s.prerelease }}
           </UBadge>
@@ -32,32 +33,24 @@ const working = computed(() => view.value?.download.state === 'downloading' || v
             {{ s.allReleases }}
           </ULink>
         </div>
-        <UButton
-          size="sm"
-          color="neutral"
-          variant="outline"
-          icon="i-lucide-refresh-cw"
-          :loading="busy === 'check' || view.check.state === 'checking'"
-          :disabled="working"
-          @click="check"
-        >
-          {{ s.check }}
-        </UButton>
       </div>
       <p class="text-sm" :class="view.check.state === 'error' ? 'text-error' : view.check.state === 'available' ? 'text-primary' : 'text-muted'">
         {{ status }}
       </p>
-      <AppUpdatePanel v-if="release" compact />
-      <div class="flex items-start justify-between gap-4 border-t border-default pt-3">
+      <AppUpdatePanel v-if="release" id="app-update" compact />
+      <div class="flex flex-wrap items-start justify-between gap-4 border-t border-default pt-3">
         <div>
           <p class="text-sm text-default">
-            {{ s.autoCheck }}
+            {{ s.autoUpdate }}
           </p>
           <p class="text-xs text-muted">
-            {{ s.autoCheckHint }}
+            {{ s.autoUpdateHint }}
           </p>
         </div>
-        <USwitch :model-value="view.autoCheck" :disabled="!!busy" @update:model-value="setAutoCheck" />
+        <div class="flex items-center gap-3">
+          <USwitch :model-value="view.autoUpdate" :disabled="busy === 'prefs' || busy === 'install'" :aria-label="s.autoUpdate" @update:model-value="setAutoUpdate" />
+          <UButton size="sm" color="neutral" variant="outline" icon="i-lucide-refresh-cw" :loading="busy === 'check' || view.check.state === 'checking'" :disabled="working" @click="check">{{ s.check }}</UButton>
+        </div>
       </div>
     </div>
     <USkeleton v-else class="h-20 w-full" />

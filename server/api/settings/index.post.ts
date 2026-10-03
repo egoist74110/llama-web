@@ -9,6 +9,8 @@ export default defineEventHandler(async (event) => {
   const ctx = getContext()
   try {
     ctx.updateSettings(draft => applySettingsPatch(draft, body, ctx.getModels(), ctx.platform))
+    ctx.updater.scheduleChecks()
+    if (ctx.secondary?.updater.refresh().length) ctx.secondary.updater.scheduleChecks()
   } catch (e) {
     settingsError(e)
   }

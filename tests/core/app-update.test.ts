@@ -53,6 +53,7 @@ function updater(current: string, feed: ReturnType<typeof fakeFeed>, desktop = t
   let changes = 0
   const installs: InstallRequest[] = []
   const u = new AppUpdater({ current, repo: REPO, dataDir: data, fetch: feed.fetchFn, onChange: () => { changes++ }, firstCheckMs: 60_000, everyMs: 60_000 })
+  u.setPrefs({ autoUpdate: false }) // Existing cases exercise explicit download/install actions.
   if (desktop) u.setInstaller(r => installs.push(r))
   return { u, installs, changes: () => changes }
 }
@@ -60,6 +61,114 @@ function updater(current: string, feed: ReturnType<typeof fakeFeed>, desktop = t
 test('package metadata gives the version and the GitHub repository', () => {
   expect(compareVersions(APP_VERSION, '0.0.0')).toBeGreaterThan(0)
   expect(APP_REPO).toMatch(/^[\w.-]+\/[\w.-]+$/)
+})
+
+test('desktop defaults enable daily checks and automatically verify and install a newer release', async () => {
+  const feed = fakeFeed([release('0.2.0')])
+  const installs: InstallRequest[] = []
+  const u = new AppUpdater({ current: '0.1.0', repo: REPO, dataDir: data, fetch: feed.fetchFn })
+  u.setInstaller(r => installs.push(r))
+  try {
+    expect(u.view()).toMatchObject({ autoCheck: true, autoUpdate: true })
+    await u.check()
+    expect(feed.calls).toHaveLength(3)
+    expect(installs).toEqual([{ file: join(u.dir, 'llama-web_0.2.0_x64-setup.exe'), sha256: sha('INSTALLER-0.2.0'), version: '0.2.0' }])
+    expect(u.view().download.state).toBe('installing')
+  } finally { u.stop() }
+})
+
+test('automatic installation off preserves daily checks and only publishes an available version', async () => {
+  const feed = fakeFeed([release('0.2.0')])
+  const { u, installs } = updater('0.1.0', feed)
+  try {
+    u.start()
+    await u.check()
+    expect(u.view()).toMatchObject({ autoCheck: true, autoUpdate: false, check: { state: 'available' }, download: { state: 'none' } })
+    expect(feed.calls).toHaveLength(1)
+    expect(installs).toEqual([])
+  } finally { u.stop() }
+})
+
+test('legacy app preferences migrate to enabled automatic updates with a backup', () => {
+  const original = JSON.stringify({ version: 1, autoCheck: false, skipped: '0.2.0' })
+  writeFileSync(join(data, 'app-update.json'), original)
+  const u = new AppUpdater({ current: '0.1.0', repo: REPO, dataDir: data })
+  try {
+    expect(u.view()).toMatchObject({ autoCheck: true, autoUpdate: true, skipped: '0.2.0' })
+    expect(JSON.parse(readFileSync(join(data, 'app-update.json'), 'utf8')).version).toBe(2)
+  } finally { u.stop() }
+})
+
+test('automatic installs never hand off a corrupt or skipped release', async () => {
+  const feed = fakeFeed([release('0.2.0', { digest: `sha256:${sha('wrong')}` })])
+  const u = new AppUpdater({ current: '0.1.0', repo: REPO, dataDir: data, fetch: feed.fetchFn })
+  const installs: InstallRequest[] = []
+  u.setInstaller(r => installs.push(r))
+  try {
+    await u.check()
+    expect(u.view().check.state).toBe('available')
+    expect(u.view().download).toMatchObject({ state: 'error', code: 'digest-mismatch' })
+    expect(installs).toEqual([])
+    u.setPrefs({ skipped: '0.2.0' })
+    feed.calls.length = 0
+    await u.check()
+    expect(feed.calls).toHaveLength(1)
+    expect(installs).toEqual([])
+  } finally { u.stop() }
+})
+
+test('turning automatic updates off while downloading prevents installer hand-off', async () => {
+  const feed = fakeFeed([release('0.2.0')])
+  const installs: InstallRequest[] = []
+  const u = new AppUpdater({ current: '0.1.0', repo: REPO, dataDir: data, fetch: async (url, init) => {
+    if (url.endsWith('.exe')) u.setPrefs({ autoUpdate: false })
+    return feed.fetchFn(url, init)
+  } })
+  u.setInstaller(r => installs.push(r))
+  try {
+    await u.check()
+    expect(u.view().download.state).toBe('ready')
+    expect(installs).toEqual([])
+  } finally { u.stop() }
+})
+
+test('shutdown during an automatic download cancels it and never hands off an installer', async () => {
+  const feed = fakeFeed([release('0.2.0')])
+  const installs: InstallRequest[] = []
+  const u = new AppUpdater({ current: '0.1.0', repo: REPO, dataDir: data, fetch: async (url, init) => {
+    if (url.endsWith('.exe')) u.stop()
+    return feed.fetchFn(url, init)
+  } })
+  u.setInstaller(r => installs.push(r))
+  try {
+    await u.check()
+    expect(installs).toEqual([])
+    expect(existsSync(u.dir)).toBe(false)
+  } finally { u.stop() }
+})
+
+test('daily timer keeps checking with automatic installation off and does not download', async () => {
+  const feed = fakeFeed([release('0.2.0')])
+  const u = new AppUpdater({ current: '0.1.0', repo: REPO, dataDir: data, fetch: feed.fetchFn, firstCheckMs: 5, everyMs: 30 })
+  const installs: InstallRequest[] = []
+  u.setInstaller(r => installs.push(r))
+  try {
+    u.setPrefs({ autoUpdate: false })
+    u.start()
+    await new Promise(r => setTimeout(r, 90))
+    expect(feed.calls.length).toBeGreaterThanOrEqual(2)
+    expect(feed.calls.every(url => url.includes('/releases?'))).toBe(true)
+    expect(installs).toEqual([])
+  } finally { u.stop() }
+})
+
+test('installer hand-off failure is reported and does not leave an installing state', async () => {
+  const u = new AppUpdater({ current: '0.1.0', repo: REPO, dataDir: data, fetch: fakeFeed([release('0.2.0')]).fetchFn })
+  u.setInstaller(() => { throw new Error('closed channel') })
+  try {
+    await u.check()
+    expect(u.view().download).toMatchObject({ state: 'error', code: 'failed' })
+  } finally { u.stop() }
 })
 
 test('SemVer precedence including prerelease identifiers', () => {
@@ -197,6 +306,7 @@ test('feed override only accepts loopback test URLs and then only loopback asset
   const r = release('0.2.0', { host: 'http://127.0.0.1:9/dl' })
   const feed = fakeFeed([r])
   const u = new AppUpdater({ current: '0.1.0', repo: REPO, dataDir: data, feed: local, fetch: feed.fetchFn })
+  u.setPrefs({ autoUpdate: false })
   u.setInstaller(() => {})
   await u.check()
   expect(feed.calls[0]).toBe(`${local}?per_page=30`)

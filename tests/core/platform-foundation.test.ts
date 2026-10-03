@@ -81,10 +81,11 @@ test('scoped updater can rollback to a legacy tag and prunes only its own platfo
   put(undefined, 'b100'); put(cuda, 'b200'); put(cuda, 'b300'); const other = put(mac, 'b1')
   const cfg = { cudaRuntime: '13.3', current: 'b300', keepVersions: 2, autoUpdate: false }
   const u = new Updater({ dataDir: data, platform: 'win32', target: cuda, llamacpp: () => cfg,
-    setCurrent: t => { cfg.current = t }, usedExes: () => [] })
+    setCurrent: t => { cfg.current = t }, usedExes: () => [], fetch: release(['llama-b9-bin-win-cuda-13.3-x64.zip']).fetch })
   expect(u.rollbackTarget()).toBe('b200'); expect(u.use('b100')).toBe('b100')
   await u.run()
   expect(existsSync(other)).toBe(true); expect(existsSync(installedDir(data, 'b100', cuda))).toBe(true)
+  await u.stop()
 })
 
 function release(names: string[]) {

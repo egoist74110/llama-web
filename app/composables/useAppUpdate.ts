@@ -16,17 +16,20 @@ export function useAppUpdate() {
   /** Prompt dialog open (layout); `confirming` = the install confirmation step. */
   const open = useState<boolean>('app-update-open', () => false)
   const confirming = useState<boolean>('app-update-confirm', () => false)
-  const busy = useState<string | null>('app-update-busy', () => null)
+  const pending = useState<string[]>('app-update-pending', () => [])
+  const busy = computed(() => pending.value.at(-1) ?? null)
 
   async function call(action: string, body?: Record<string, unknown>) {
-    if (busy.value) return
-    busy.value = action
+    if (pending.value.includes(action)) return
+    // A check can include a long automatic download: preferences and cancellation stay usable.
+    if (pending.value.length && action !== 'prefs' && action !== 'cancel') return
+    pending.value = [...pending.value, action]
     try {
       await $fetch(`/api/app-update/${action}`, { method: 'POST', ...(body ? { body } : {}) })
     } catch (e) {
       toast.add({ title: t.appUpdate.actionFailed, description: messageOf(e), color: 'error', icon: 'i-lucide-circle-alert' })
     } finally {
-      busy.value = null
+      pending.value = pending.value.filter(a => a !== action)
     }
   }
 
@@ -37,6 +40,7 @@ export function useAppUpdate() {
     cancel: () => call('cancel'),
     install: () => call('install'),
     setAutoCheck: (autoCheck: boolean) => call('prefs', { autoCheck }),
+    setAutoUpdate: (autoUpdate: boolean) => call('prefs', { autoUpdate }),
     skip: (version: string | null) => call('prefs', { skipped: version }),
   }
 }

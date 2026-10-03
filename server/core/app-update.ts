@@ -143,7 +143,8 @@ export interface AppUpdateView {
   /** The desktop app can download and install; the source version only links to the release. */
   canInstall: boolean
   autoCheck: boolean
-  /** Version the user chose to skip (no prompt for it; the settings card still shows it). */
+  autoUpdate: boolean
+  /** Skipped release: no automatic installation or inline notice; settings still show it. */
   skipped: string | null
   check: AppUpdateCheck
   download: AppUpdateDownload
@@ -154,13 +155,15 @@ export interface AppUpdateView {
 export interface AppUpdatePrefs {
   version: number
   autoCheck: boolean
+  autoUpdate: boolean
   skipped: string | null
 }
-export const APP_UPDATE_PREFS_VERSION = 1
+export const APP_UPDATE_PREFS_VERSION = 2
 function normalizePrefs(doc: AppUpdatePrefs): AppUpdatePrefs {
   if (typeof doc.autoCheck !== 'boolean') throw new Error('autoCheck must be a boolean')
+  if (typeof doc.autoUpdate !== 'boolean') throw new Error('autoUpdate must be a boolean')
   if (doc.skipped !== null && (typeof doc.skipped !== 'string' || !parseVersion(doc.skipped))) throw new Error('skipped must be a version or null')
-  return { version: APP_UPDATE_PREFS_VERSION, autoCheck: doc.autoCheck, skipped: doc.skipped }
+  return { version: APP_UPDATE_PREFS_VERSION, autoCheck: doc.autoCheck, autoUpdate: doc.autoUpdate, skipped: doc.skipped }
 }
 
 /** What the shell needs to start a verified installer. */
@@ -230,10 +233,11 @@ export class AppUpdater {
     this.dir = join(opts.dataDir, 'run', 'app-update')
     this.prefs = new JsonStore<AppUpdatePrefs>({
       dataDir: opts.dataDir, name: 'app-update.json', version: APP_UPDATE_PREFS_VERSION, keepBackups: 3,
-      defaults: () => ({ version: APP_UPDATE_PREFS_VERSION, autoCheck: true, skipped: null }), validate: normalizePrefs,
+      defaults: () => ({ version: APP_UPDATE_PREFS_VERSION, autoCheck: true, autoUpdate: true, skipped: null }), validate: normalizePrefs,
+      migrations: { 1: d => ({ ...d, autoCheck: true, autoUpdate: true }) },
     })
     try { this.prefsValue = this.prefs.load() }
-    catch { this.prefsValue = { version: APP_UPDATE_PREFS_VERSION, autoCheck: true, skipped: null } }
+    catch { this.prefsValue = { version: APP_UPDATE_PREFS_VERSION, autoCheck: true, autoUpdate: true, skipped: null } }
     const cached = this.checks.get(this.checkKey)
     if (cached?.result) {
       try {
@@ -263,6 +267,7 @@ export class AppUpdater {
       current: this.opts.current,
       canInstall: this.installer !== null,
       autoCheck: this.prefsValue.autoCheck,
+      autoUpdate: this.prefsValue.autoUpdate,
       skipped: this.prefsValue.skipped,
       check: this.checkState,
       download: this.downloadState,
@@ -270,9 +275,10 @@ export class AppUpdater {
     }
   }
 
-  setPrefs(p: { autoCheck?: boolean, skipped?: string | null }): AppUpdateView {
+  setPrefs(p: { autoCheck?: boolean, autoUpdate?: boolean, skipped?: string | null }): AppUpdateView {
     this.prefsValue = this.prefs.update((d) => {
       if (p.autoCheck !== undefined) d.autoCheck = p.autoCheck
+      if (p.autoUpdate !== undefined) d.autoUpdate = p.autoUpdate
       if (p.skipped !== undefined) d.skipped = p.skipped
     })
     this.schedule(Math.max(this.opts.firstCheckMs ?? FIRST_CHECK_MS, this.checks.remaining(this.checkKey, this.now(), this.opts.everyMs ?? CHECK_EVERY_MS)))
@@ -313,6 +319,12 @@ export class AppUpdater {
       try { this.checks.save(this.checkKey, attemptedAt, { error: code }) } catch { /* Keep the reported failure. */ }
     }
     this.changed()
+    if (!this.stopped && this.candidate && this.installer && this.prefsValue.autoUpdate && this.prefsValue.skipped !== this.candidate.version && this.view().check.state === 'available') {
+      try {
+        await this.download()
+        if (!this.stopped && this.prefsValue.autoUpdate && this.prefsValue.skipped !== this.candidate.version) await this.install({ automatic: true })
+      } catch { /* Download/install failures are reported in downloadState. */ }
+    }
   }
 
   private applyReleaseList(list: GithubRelease[], at: number): void {
@@ -400,12 +412,13 @@ export class AppUpdater {
   }
 
   /** Verify the downloaded installer once more and ask the shell to install it. The shell then stops this process. */
-  async install(): Promise<void> {
+  async install(opts: { automatic?: boolean } = {}): Promise<void> {
     if (!this.installer) throw new AppUpdateError('not-desktop', 'Only the desktop app installs updates')
     const r = this.ready
     if (!r || this.downloadState.state !== 'ready') throw new AppUpdateError('not-ready', 'Installer not downloaded')
     let actual: string
     try { actual = await sha256File(r.file) } catch { actual = '' }
+    if (this.stopped || (opts.automatic && (!this.prefsValue.autoUpdate || this.prefsValue.skipped === r.version))) return
     if (actual !== r.sha256) {
       this.dropDownload()
       this.downloadState = { state: 'error', version: r.version, code: 'digest-mismatch' }
@@ -414,7 +427,11 @@ export class AppUpdater {
     }
     this.downloadState = { state: 'installing', version: r.version }
     this.changed()
-    this.installer(r)
+    try { this.installer(r) } catch {
+      this.downloadState = { state: 'error', version: r.version, code: 'failed' }
+      this.changed()
+      throw new AppUpdateError('failed', 'Installer hand-off failed')
+    }
   }
 
   stop(): void {

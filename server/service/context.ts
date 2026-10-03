@@ -317,7 +317,10 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
       scheduler: scheduler.snapshot(),
       models: describeModels(getModels(), { dirs: getSettings().modelDirs }),
       queue: scheduler.snapshot().queue.map(q => ({ modelId: q.modelId, profile: q.profile, started: q.started, waiting: q.waiting })),
-      llamacpp: { current: currentTagFor(getSettings(), platform, selectedTarget.acceleration), runtime: updater.getStatus(), versions: updater.versions(), rollback: updater.rollbackTarget() },
+      llamacpp: {
+        current: currentTagFor(getSettings(), platform, selectedTarget.acceleration), runtime: updater.getStatus(), check: updater.getUpdateCheck(), versions: updater.versions(), rollback: updater.rollbackTarget(),
+        secondary: secondary ? { accel: secondary.accel, current: secondary.current(), runtime: secondary.updater.getStatus(), check: secondary.updater.getUpdateCheck() } : null,
+      },
       tunnel: tunnel.status(),
       appUpdate: appUpdate.view(),
       // Job and its version from one view: the page orders snapshots and HTTP responses by it.

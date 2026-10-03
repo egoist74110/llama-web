@@ -19,6 +19,7 @@ watch(() => [
   rev.value, state.value?.llamacpp.current,
   state.value?.llamacpp.versions.map(v => `${v.tag}${v.inUse ? '*' : ''}`).join(','),
   state.value?.llamacpp.runtime.state,
+  JSON.stringify(state.value?.llamacpp.secondary),
 ].join('|'), () => { void load() })
 
 const status = computed(() => state.value?.llamacpp.runtime)
@@ -40,6 +41,12 @@ const isRollback = (r: RuntimeRow) => {
 }
 const channelTitle = (accel: string) => accelLabel(accel, ui.value.isMac)
 const downloading = computed(() => secondary.value?.status.state === 'working')
+function availableFor(r: RuntimeRow): string | null {
+  if (!r.current || r.kind !== 'official') return null
+  const c = r.accel === secondary.value?.accel ? secondary.value.check : doc.value?.check
+  return c?.state === 'checked' && c.available ? c.tag : null
+}
+const needsDownload = (r: RuntimeRow) => !!availableFor(r) && !rows.value.some(v => v.kind === 'official' && v.accel === r.accel && v.tag === availableFor(r))
 
 function useRow(r: RuntimeRow) {
   ask(r.tag, secondary.value && r.accel === secondary.value.accel ? r.accel : undefined)
@@ -83,6 +90,7 @@ function dismissFallbacks() {
 
 <template>
   <AppCard :title="s.title" :hint="fmt(s.hint, { n: keep })">
+    <LlamacppUpdateControls @changed="load" />
     <template #actions>
       <UButton size="xs" color="neutral" variant="outline" icon="i-lucide-plus" class="whitespace-nowrap" @click="addOpen = true">
         {{ m.add }}
@@ -141,10 +149,12 @@ function dismissFallbacks() {
             <span class="lw-radio" :class="{ on: r.current }" />
             <span class="min-w-0 break-all font-mono text-[13px]">{{ runtimeBaseName(r) }}</span>
             <span v-if="r.current" class="lw-chip lw-chip-accent">{{ s.current }}</span>
+            <span v-if="availableFor(r)" class="text-xs text-primary">{{ fmt(s.update.available, { tag: availableFor(r)! }) }}</span>
             <span v-if="r.latestOfficial && !r.current" class="lw-chip">{{ m.latestOfficial }}</span>
             <span v-if="r.kind === 'custom'" class="lw-chip">{{ m.custom }}</span>
             <span v-if="r.inUse" class="lw-st lw-st-ready">{{ s.inUse }}</span>
             <span class="flex-1" />
+            <UButton v-if="needsDownload(r)" size="xs" icon="i-lucide-download" :disabled="status?.state === 'working' || downloading" @click="downloadChannel(r.accel)">{{ s.update.download }}</UButton>
             <UButton
               v-if="r.kind === 'official' && !r.current"
               size="xs"

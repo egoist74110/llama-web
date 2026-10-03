@@ -16,9 +16,9 @@ export function describeLlamacpp(): LlamacppDoc {
   sec?.updater.refresh()
   return {
     current, status: ctx.updater.getStatus(), versions: ctx.updater.versions(), rollback: ctx.updater.rollbackTarget(),
-    autoUpdate, keepVersions: Math.max(2, Math.floor(keepVersions) || 2),
+    autoUpdate, keepVersions: Math.max(2, Math.floor(keepVersions) || 2), check: ctx.updater.getUpdateCheck(),
     runtimes: ctx.runtimes.list(),
-    secondary: sec ? { accel: sec.accel, current: sec.current(), status: sec.updater.getStatus(), versions: sec.updater.versions() } : null,
+    secondary: sec ? { accel: sec.accel, current: sec.current(), status: sec.updater.getStatus(), versions: sec.updater.versions(), check: sec.updater.getUpdateCheck() } : null,
   }
 }
 

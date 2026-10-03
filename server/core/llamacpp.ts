@@ -375,5 +375,5 @@ export type RuntimeStatus =
   | { state: 'idle' }
   | { state: 'disabled' }
   | { state: 'working', step: 'resolve' | 'download' | 'extract', detail: string, tag?: string }
-  | { state: 'ready', tag: string, note?: 'latest' | 'updated' | 'pinned' | 'auto-off' | 'switched' | 'cached', from?: string | null, latest?: string }
+  | { state: 'ready', tag: string, note?: 'latest' | 'updated' | 'pinned' | 'auto-off' | 'switched' | 'cached' | 'available', from?: string | null, latest?: string }
   | { state: 'error', code: string, detail: string, using?: string | null }

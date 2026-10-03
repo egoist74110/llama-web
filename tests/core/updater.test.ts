@@ -8,8 +8,12 @@ import { pruneCandidates, UpdateError, Updater, versionOfExe, type PruneResult }
 import { EXE, fakeExtract, fakeGithub, sha, type FakeOpts } from '../fixtures/fake-github'
 
 let data: string
+const updaters: Updater[] = []
 beforeEach(() => { data = mkdtempSync(join(tmpdir(), 'lw-upd-')) })
-afterEach(() => { rmSync(data, { recursive: true, force: true }) })
+afterEach(async () => {
+  await Promise.all(updaters.splice(0).map(u => u.stop()))
+  rmSync(data, { recursive: true, force: true })
+})
 
 const dirOf = (tag: string) => join(versionsDir(data), tag)
 function install(...tags: string[]) {
@@ -34,13 +38,17 @@ function setup(o: { current?: string, autoUpdate?: boolean, keep?: number, used?
     onStatus: s => statuses.push(s),
     onPrune: r => prunes.push(r),
   })
+  updaters.push(u)
   return { u, cfg, gh, statuses, prunes, used }
 }
 
-test('nothing installed, auto update off: disabled, no network', async () => {
+test('nothing installed, auto update off: daily metadata check without download', async () => {
   const { u, gh } = setup({ autoUpdate: false })
   expect(await u.run()).toEqual({ state: 'disabled' })
-  expect(gh.calls).toEqual([])
+  expect(gh.calls).toHaveLength(3)
+  expect(gh.downloads()).toEqual([])
+  expect(u.getUpdateCheck()).toMatchObject({ state: 'checked', available: true })
+  await u.stop()
 })
 
 test('automatic checks survive restart and wait 24 hours, including failed attempts', async () => {
@@ -74,12 +82,14 @@ test('a successful runtime check skips another startup while preserving rollback
   await restarted.u.stop()
 })
 
-test('auto update off keeps / adopts an installed version without checking', async () => {
+test('auto update off adopts an installed version and reports a new release without installing', async () => {
   install('b100', 'b200')
-  const { u, cfg, gh } = setup({ autoUpdate: false, current: 'b999' })
-  expect(await u.run()).toEqual({ state: 'ready', tag: 'b200', note: 'auto-off' })
+  const { u, cfg, gh } = setup({ autoUpdate: false, current: 'b999', gh: { tag: 'b300' } })
+  expect(await u.run()).toEqual({ state: 'ready', tag: 'b200', note: 'available', latest: 'b300' })
   expect(cfg.current).toBe('b200')
-  expect(gh.calls).toEqual([])
+  expect(gh.calls).toHaveLength(3)
+  expect(gh.downloads()).toEqual([])
+  await u.stop()
 })
 
 test('first start: downloads the latest and makes it current', async () => {
@@ -88,6 +98,69 @@ test('first start: downloads the latest and makes it current', async () => {
   expect(cfg.current).toBe('b300')
   expect(statuses.some(s => s.state === 'working' && s.step === 'download' && s.tag === 'b300')).toBe(true)
   expect(existsSync(join(dirOf('b300'), 'cudart64_13.dll'))).toBe(true)
+})
+
+test('manual checks bypass the daily limit but never install, even with automatic updates enabled', async () => {
+  install('b200')
+  const s = setup({ current: 'b200', gh: { tag: 'b300' } })
+  try {
+    await s.u.run({ manual: true })
+    await s.u.run({ manual: true })
+    expect(s.gh.calls).toHaveLength(6)
+    expect(s.gh.downloads()).toEqual([])
+    expect(s.cfg.current).toBe('b200')
+    expect(s.u.getUpdateCheck()).toMatchObject({ state: 'checked', tag: 'b300', available: true })
+  } finally { await s.u.stop() }
+})
+
+test('disabled automatic installation still checks daily across restarts and restores the inline notice', async () => {
+  install('b200')
+  let now = Date.UTC(2026, 9, 3, 12)
+  const a = setup({ current: 'b200', autoUpdate: false, gh: { tag: 'b300' }, now: () => now })
+  await a.u.run()
+  await a.u.stop()
+  const b = setup({ current: 'b200', autoUpdate: false, gh: { tag: 'b400' }, now: () => now })
+  try {
+    expect(b.u.getUpdateCheck()).toMatchObject({ state: 'checked', tag: 'b300', available: true })
+    await b.u.run()
+    expect(b.gh.calls).toEqual([])
+    now += 24 * 60 * 60 * 1000
+    await b.u.run()
+    expect(b.gh.calls).toHaveLength(3)
+    expect(b.u.getUpdateCheck()).toMatchObject({ state: 'checked', tag: 'b400', available: true })
+    expect(b.gh.downloads()).toEqual([])
+    expect(b.cfg.current).toBe('b200')
+  } finally { await b.u.stop() }
+})
+
+test('a daily timer checks an open service with automatic installation off and stops cleanly', async () => {
+  install('b200')
+  let now = Date.UTC(2026, 9, 3, 12)
+  const s = setup({ current: 'b200', autoUpdate: false, gh: { tag: 'b300' }, now: () => now })
+  try {
+    await s.u.run()
+    now += 24 * 60 * 60 * 1000 - 10
+    s.u.scheduleChecks()
+    now += 10
+    await new Promise(r => setTimeout(r, 60))
+    expect(s.gh.calls).toHaveLength(6)
+    expect(s.gh.downloads()).toEqual([])
+    s.u.scheduleChecks()
+    await s.u.stop()
+    now += 24 * 60 * 60 * 1000
+    await new Promise(r => setTimeout(r, 20))
+    expect(s.gh.calls).toHaveLength(6)
+  } finally { await s.u.stop() }
+})
+
+test('turning automatic updates off during download prevents changing the selected version', async () => {
+  install('b200')
+  const s = setup({ current: 'b200', gh: { tag: 'b300', onDownload: () => { s.cfg.autoUpdate = false } } })
+  try {
+    await s.u.run()
+    expect(s.cfg.current).toBe('b200')
+    expect(s.u.getUpdateCheck()).toMatchObject({ state: 'checked', available: true })
+  } finally { await s.u.stop() }
 })
 
 test('new release: installs it, switches current, keeps the previous one for rollback', async () => {
@@ -259,6 +332,7 @@ function stalled(o: { current?: string, fetch: typeof fetch, net?: { timeoutMs?:
     setCurrent: (t) => { s.cfg.current = t },
     usedExes: () => [],
   })
+  updaters.push(u)
   return { u, cfg: s.cfg }
 }
 

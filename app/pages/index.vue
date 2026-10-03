@@ -132,7 +132,10 @@ const tokens = (n: number | null) => (n === null ? '–' : n.toLocaleString('zh-
 
         <section class="lw-card flex flex-col gap-2.5 px-[18px] py-4">
           <div class="text-xs text-dimmed">{{ tl.llamacpp }}</div>
-          <div class="truncate font-mono text-[22px] font-medium">{{ state.llamacpp.current || t.layout.llamacppNone }}</div>
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="font-mono text-[22px] font-medium">{{ state.llamacpp.current || t.layout.llamacppNone }}</span>
+            <NuxtLink v-if="state.llamacpp.check?.state === 'checked' && state.llamacpp.check.available" to="/settings#s-llama" class="text-xs text-primary">{{ fmt(t.llamacpp.update.available, { tag: state.llamacpp.check.tag }) }}</NuxtLink>
+          </div>
           <div class="flex flex-wrap gap-1.5">
             <span v-if="runtimeChip" class="lw-chip" :title="runtimeText(runtime)">{{ runtimeChip }}</span>
           </div>
