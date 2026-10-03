@@ -16,6 +16,17 @@
 
 ---
 
+## 2026-10-03 · 工作包 6-1 · Opus 5.5
+- 完成：plan 6-1 三项打勾。设计变量（main.css，浅 / 深两套映射到 Nuxt UI 变量，primary indigo / neutral gray）、本地 Geist 字体（新依赖 `@fontsource-variable/geist`、`geist-mono`，用户同意；`ui.fonts: false` 关掉 @nuxt/fonts）、左侧栏 `AppSidebar`（≥820px 侧栏固定、只有 `.lw-main` 滚动；窄屏侧栏在上、导航横排）、总览 `pages/index.vue` + `OverviewHero`。新组件用 `lw-*` 类（`lw-card` / `lw-chip` / `lw-st-*` / `lw-seg` / `lw-bar` / `lw-tbl`），6-2 沿用。纯逻辑在 `app/utils/overview.ts`（有测试），速度曲线由 `useSpeedTrend`（布局里启动，每秒从 useLive 采样）。日志页支持 `?tab=events|requests`。
+- 与交互稿差异（数据里没有的不显示，已写进变更记录）：最近请求的「速度」列改「耗时」；llama.cpp 小卡无 CUDA 标签；无 nvidia-smi 时显存卡隐藏；更新提示条只留「查看更新」+ 本次关闭；ctx 取命令预览接口（实例变化时取一次），量化取文件名。
+- 验证：`bun test` 675 pass / 0 fail，`bun run typecheck` 通过（收尾时开着带 GameGuard 反作弊的游戏，Bun 启动子进程会崩溃，关掉后重跑通过）。源码版（独立 worktree 构建，端口 5091，临时数据 + 假 llama-server）在浏览器面板看了浅 / 深 / 1280×600 / 390 宽：运行中（实时 t/s、曲线）、加载中进度、加载失败卡、空状态、断线横幅、模型 / 设置页在新骨架下可用，桌面宽度整页不滚动、侧栏不动、无外部请求、字体为本地 Geist。桌面版：`bun run desktop:build` 出的 0.1.0-beta.1 本地包装到测试目录，经 WebView2 调试端口截图浅 / 深 / 窄屏（`.cache/6-1/shots/`），本地字体、无外部请求、剪贴板可用、关窗进程退出、卸载 0。断网启动没有单独测（字体全在包内、页面没有外部请求）。更新提示条新样式没有实际触发看过。
+- 事故：`bun run build` 会先清空仓库 `.output`；用户自己的实例当时正从 `.output` 运行（:5001），被弄坏，用户已停掉。现在仓库 `.output` 是 a74a939 的构建（旧界面）；要用新界面需 `start.bat build`。以后测试一律在独立 worktree 构建，不碰仓库 `.output`。
+- 坑：静默安装（/S）后安装包会自动启动应用（默认数据目录），再用自定义环境启动会被单实例挡掉、立即以 0 退出；测试脚本要先结束自动启动的那个（见 `.cache/6-1/desktop-check.ts`），并清理 `%LOCALAPPDATA%\io.github.llama-web.desktop`（本轮已删）。`tauri build` 又改了 Cargo.lock，已 checkout。
+- 剩余：无（6-1 范围内）。旧组件（StateDot / StateBadge / PageHeader / AppCard 等）6-2 仍在用，6-2 结束时删不用的。
+- 下一步：6-2（Sonnet 5.5，提示词在指南 #p6-2），完成后阶段 6 关口停下等用户试用。
+
+---
+
 ## 2026-10-03 · 阶段 6 规划（界面重设计交互稿） · Opus 5.5
 - 完成：用户觉得第一版界面是临时凑合的，做了可交互的设计稿并获确认（没有意见；要求桌面宽度下侧栏固定不滚动、只有内容区滚动）。新增关键决定 30、plan 阶段 6（6-1、6-2）、指南阶段 6 卡片；交互稿源文件存到 `docs/design/ui-v2-prototype.dc.html`。
 - 验证：只改了文档，没改代码，没跑 `bun test`。交互稿没有在浏览器里截图核对过。
