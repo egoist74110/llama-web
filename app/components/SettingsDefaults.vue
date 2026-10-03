@@ -3,10 +3,11 @@
 // Windows keeps two sets, one for GPU builds and one for CPU builds (decision 36); the build a model
 // finally uses picks which set applies. A Mac has a single set and no device choice (decision 38).
 import t from '~~/i18n/zh-CN'
+import type { GpuChoice } from '~~/server/core/gpu-group'
 import type { ParamField } from '~/composables/useParamFields'
 
 type Key = 'defaults' | 'defaultsCpu'
-type FormState = { values: Record<string, string>, device: string, extraArgs: string }
+type FormState = { values: Record<string, string>, gpu: GpuForm, extraArgs: string }
 
 const s = t.settings.defaults
 const { doc, saving, save } = useSettings()
@@ -14,13 +15,13 @@ const ui = usePlatformUi()
 const toast = useToast()
 const devices = useDevices()
 
-const emptyState = (): FormState => ({ values: {}, device: '', extraArgs: '' })
+const emptyState = (): FormState => ({ values: {}, gpu: emptyGpuForm(), extraArgs: '' })
 function from(d: Record<string, unknown>): FormState {
   const values: Record<string, string> = {}
   for (const f of ALL_FIELDS) values[f.key] = d[f.key] === null || d[f.key] === undefined ? '' : String(d[f.key])
   // An explicit "auto" and no choice mean the same at the root.
-  const device = typeof d.device === 'string' && d.device !== 'auto' ? d.device : ''
-  return { values, device, extraArgs: String(d.extraArgs ?? '') }
+  const gpu = gpuFormFrom({ ...d, device: typeof d.device === 'string' && d.device !== 'auto' ? d.device : '' } as GpuChoice)
+  return { values, gpu, extraArgs: String(d.extraArgs ?? '') }
 }
 
 const which = ref<Key>('defaults')
@@ -47,8 +48,9 @@ const invalidKeys = computed(() => ALL_FIELDS.filter(f => f.kind === 'number' &&
 
 // The device only exists for GPU builds on Windows.
 const showDevice = computed(() => ui.value.hasGpu && which.value === 'defaults')
-onMounted(() => { void devices.load('') })
-const deviceChoices = computed(() => deviceItems(devices.viewOf(''), state.value.device, t.models.edit.rd.deviceAuto).filter(i => i.value !== 'auto'))
+// The platform arrives with the first live snapshot, which can be after this card is mounted.
+watch(() => ui.value.hasGpu, (has) => { if (has) void devices.load('') }, { immediate: true })
+const gpuInvalid = computed(() => showDevice.value && !ratioValid(state.value.gpu))
 
 const blocks = computed(() => [
   { id: 'main', advanced: false, fields: PARAM_FIELDS },
@@ -75,7 +77,7 @@ async function submit() {
     const raw = st.values[f.key]!.trim()
     defaults[f.key] = raw === '' ? null : f.kind === 'number' ? Number(raw) : raw
   }
-  if (showDevice.value) defaults.device = st.device
+  if (showDevice.value) Object.assign(defaults, gpuBody(st.gpu))
   await save(key, { [key]: defaults })
 }
 </script>
@@ -102,22 +104,15 @@ async function submit() {
     </div>
 
     <div>
-      <div v-if="showDevice" class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-default pb-3">
-        <div class="min-w-0 flex-1 basis-56">
-          <p class="text-sm text-default">
-            {{ s.device }}
-          </p>
-          <p class="text-xs text-muted">
-            {{ s.deviceHint }}
-          </p>
-        </div>
-        <USelect
-          :model-value="toSelectValue(state.device)"
-          :items="deviceChoices"
-          size="sm"
-          class="w-56 max-w-full"
-          :aria-label="s.device"
-          @update:model-value="(v: unknown) => { state.device = fromSelectValue(v) }"
+      <div v-if="showDevice" class="border-b border-default pb-3">
+        <DeviceChoice
+          v-model="state.gpu"
+          :view="devices.viewOf('')"
+          runtime=""
+          :inherit-label="null"
+          :label="s.device"
+          :hint="s.deviceHint"
+          id-prefix="defaults"
         />
       </div>
 
@@ -163,7 +158,7 @@ async function submit() {
       </p>
     </div>
     <div class="mt-4 flex flex-wrap items-center gap-2">
-      <UButton size="sm" icon="i-lucide-save" :disabled="!dirty || !!invalidKeys.length" :loading="saving === which" @click="submit">
+      <UButton size="sm" icon="i-lucide-save" :disabled="!dirty || !!invalidKeys.length || gpuInvalid" :loading="saving === which" @click="submit">
         {{ t.settings.save }}
       </UButton>
       <UButton size="sm" color="neutral" variant="outline" icon="i-lucide-rotate-ccw" @click="restore">

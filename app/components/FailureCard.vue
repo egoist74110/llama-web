@@ -26,7 +26,7 @@ const working = computed(() => !!busy.value[`retry:${props.modelId}`])
 
 // Just updated llama.cpp and a load fails: suggest the previous version, unless the cause is
 // clearly not the engine (memory, files, ports, configuration, or a model needing a newer build).
-const NOT_VERSION = new Set(['oom', 'file-missing', 'port-in-use', 'no-runtime', 'bad-args', 'unsupported-arch'])
+const NOT_VERSION = new Set(['oom', 'file-missing', 'port-in-use', 'no-runtime', 'bad-args', 'unsupported-arch', 'split-mode-unsupported'])
 const { state: live } = useLive()
 const llamacpp = useLlamacpp()
 const rollback = computed(() => {

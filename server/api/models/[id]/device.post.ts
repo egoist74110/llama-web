@@ -1,17 +1,18 @@
-// The model's own device: { device: 'auto' | 'cpu' | '<id>' | null, restart? }. null follows the global default.
-// A profile's own choice (profiles.post `save` with form.device) wins over this. Refused on a Mac.
+// The model's own device choice: { device: 'auto' | 'cpu' | '<id>' | null, devices?, splitMode?, tensorSplit?, mainGpu?, restart? }.
+// Empty / null follows the global default; `devices` (two or more ids) is a GPU group with its split settings (decision 45).
+// A profile's own choice (profiles.post `save`) wins over this. Refused on a Mac.
 import { hasDeviceSelection } from '../../../core/config'
-import { ProfileError, sanitizeDevice, setModelDevice } from '../../../core/models-admin'
+import { ProfileError, sanitizeGpu, setModelGpu } from '../../../core/models-admin'
 import { getContext } from '../../../service/context'
 import { editError, requireModel, restartIfUp } from '../../../service/models-api'
 
 export default defineEventHandler(async (event) => {
   const model = requireModel(getRouterParam(event, 'id'))
-  const body = await readBody<{ device?: unknown, restart?: unknown }>(event)
+  const body = await readBody<Record<string, unknown>>(event)
   const ctx = getContext()
   try {
-    const device = sanitizeDevice(body?.device ?? null)
-    ctx.updateModels((doc) => { setModelDevice(doc, model.id, device, () => hasDeviceSelection(ctx.platform)) })
+    const choice = sanitizeGpu(body ?? {})
+    ctx.updateModels((doc) => { setModelGpu(doc, model.id, choice, () => hasDeviceSelection(ctx.platform)) })
   } catch (e) {
     if (e instanceof ProfileError) editError(e)
     throw e

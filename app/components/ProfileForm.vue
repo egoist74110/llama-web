@@ -9,7 +9,7 @@ import type { ParamField } from '~/composables/useParamFields'
 
 type Mode = 'inherit' | 'custom' | 'omit'
 interface Row { mode: Mode, value: string }
-type FormState = { rows: Record<ParamKey, Row>, extraArgs: string, chatTemplate: string, runtime: string, device: string }
+type FormState = { rows: Record<ParamKey, Row>, extraArgs: string, chatTemplate: string, runtime: string, gpu: GpuForm }
 
 const props = defineProps<{
   modelId: string
@@ -44,7 +44,7 @@ function fromProfile(p: Profile): FormState {
       : v === null || v === '' ? { mode: 'omit', value: '' }
         : { mode: 'custom', value: String(v) }
   }
-  return { rows, extraArgs: p.extraArgs ?? '', chatTemplate: p.chatTemplate ?? '', runtime: p.runtime ?? '', device: p.device ?? '' }
+  return { rows, extraArgs: p.extraArgs ?? '', chatTemplate: p.chatTemplate ?? '', runtime: p.runtime ?? '', gpu: gpuFormFrom(p) }
 }
 
 const state = reactive<FormState>(fromProfile(props.profile))
@@ -91,6 +91,8 @@ const invalidKeys = computed(() => ALL_FIELDS.filter((f) => {
   const row = state.rows[f.key]
   return f.kind === 'number' && row.mode === 'custom' && row.value.trim() !== '' && !Number.isFinite(Number(row.value))
 }).map(f => f.key))
+// A ratio that does not match the chosen GPUs cannot be saved.
+const gpuInvalid = computed(() => ui.value.hasGpu && !ratioValid(state.gpu))
 
 function toForm() {
   const overrides: Record<string, string | number | null> = {}
@@ -106,8 +108,8 @@ function toForm() {
     extraArgs: state.extraArgs,
     chatTemplate: state.chatTemplate || null,
     runtime: state.runtime || null,
-    // A Mac has no device choice: the field is never sent there.
-    ...(ui.value.hasGpu ? { device: state.device || null } : {}),
+    // A Mac has no device choice: the fields are never sent there.
+    ...(ui.value.hasGpu ? gpuBody(state.gpu) : {}),
   }
 }
 
@@ -133,7 +135,6 @@ const effectiveRuntime = computed(() => state.runtime || props.modelRuntime || '
 watch([effectiveRuntime, () => props.active, () => ui.value.hasGpu], () => {
   if (props.active && ui.value.hasGpu) void devices.load(effectiveRuntime.value)
 }, { immediate: true })
-const deviceChoices = computed(() => deviceItems(devices.viewOf(effectiveRuntime.value), state.device))
 const deviceNote = computed(() => (devices.failedOf(effectiveRuntime.value) ? rd.listFailed : devices.viewOf(effectiveRuntime.value)?.source === 'nvidia-smi' ? rd.listFromSmi : ''))
 const cpuMulti = computed(() => !!devices.viewOf(effectiveRuntime.value)?.cpu.multi)
 const advancedOpen = computed(() => cpuMulti.value || CPU_FIELDS.some(f => state.rows[f.key].mode !== 'inherit'))
@@ -167,7 +168,7 @@ async function refreshPreview() {
 
 function schedule() {
   clearTimeout(timer)
-  if (!props.active || invalidKeys.value.length) return
+  if (!props.active || invalidKeys.value.length || gpuInvalid.value) return
   timer = setTimeout(refreshPreview, 250)
 }
 watch([() => JSON.stringify(state), () => JSON.stringify(props.files), () => props.active, () => props.templates.join('\n')], schedule, { immediate: true })
@@ -229,24 +230,17 @@ const globalExtra = computed(() => props.defaults.extraArgs?.trim())
           {{ rd.runtimeHint }}
         </p>
       </div>
-      <div v-if="ui.hasGpu" class="space-y-1.5">
-        <h4 class="text-sm font-medium text-highlighted">
-          {{ rd.device }}
-        </h4>
-        <USelect
-          :model-value="toSelectValue(state.device)"
-          :items="deviceChoices"
-          class="w-full sm:w-80"
-          :aria-label="rd.device"
-          @update:model-value="(v: unknown) => { state.device = fromSelectValue(v) }"
-        />
-        <p class="text-xs text-muted">
-          {{ rd.deviceHint }}
-        </p>
-        <p v-if="deviceNote" class="text-xs text-warning">
-          {{ deviceNote }}
-        </p>
-      </div>
+      <DeviceChoice
+        v-if="ui.hasGpu"
+        v-model="state.gpu"
+        :view="devices.viewOf(effectiveRuntime)"
+        :runtime="effectiveRuntime"
+        :inherit-label="rd.inherit"
+        :label="rd.device"
+        :hint="rd.deviceHint"
+        :note="deviceNote"
+        id-prefix="profile"
+      />
     </div>
 
     <div>
@@ -365,7 +359,7 @@ const globalExtra = computed(() => props.defaults.extraArgs?.trim())
     </div>
 
     <div class="flex flex-wrap items-center gap-2 border-t border-default pt-4">
-      <UButton size="sm" icon="i-lucide-save" :disabled="!dirty || !!invalidKeys.length" :loading="busy" @click="emit('save', toForm(), false)">
+      <UButton size="sm" icon="i-lucide-save" :disabled="!dirty || !!invalidKeys.length || gpuInvalid" :loading="busy" @click="emit('save', toForm(), false)">
         {{ edit.form.save }}
       </UButton>
       <UButton
@@ -374,7 +368,7 @@ const globalExtra = computed(() => props.defaults.extraArgs?.trim())
         color="neutral"
         variant="outline"
         icon="i-lucide-rotate-cw"
-        :disabled="!dirty || !!invalidKeys.length"
+        :disabled="!dirty || !!invalidKeys.length || gpuInvalid"
         :loading="busy"
         @click="emit('save', toForm(), true)"
       >

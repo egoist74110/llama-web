@@ -2,11 +2,13 @@
 // The model's own llama.cpp build and device (a profile's own choice wins over these; empty follows the
 // global default). Saved separately from the profile forms. The device choice does not exist on a Mac.
 import t from '~~/i18n/zh-CN'
+import type { GpuChoice } from '~~/server/core/gpu-group'
 
 const props = defineProps<{
   modelId: string
   runtime: string | null | undefined
-  device: string | null | undefined
+  /** The model's stored device fields (device / devices / splitMode / tensorSplit / mainGpu). */
+  gpu: GpuChoice
   /** Some profile of this model is running: saving offers a restart. */
   running: boolean
 }>()
@@ -19,22 +21,23 @@ const devices = useDevices()
 const { rows, load } = useRuntimeDoc()
 
 const runtime = ref(props.runtime ?? '')
-const device = ref(props.device ?? '')
+const gpu = ref(gpuFormFrom(props.gpu))
 const saving = ref(false)
-watch(() => [props.runtime, props.device], () => {
+const gpuKey = computed(() => JSON.stringify(gpuBody(gpuFormFrom(props.gpu))))
+watch(() => [props.runtime, gpuKey.value], () => {
   runtime.value = props.runtime ?? ''
-  device.value = props.device ?? ''
+  gpu.value = gpuFormFrom(props.gpu)
 })
 
 onMounted(() => { void load() })
 watch([runtime, () => ui.value.hasGpu], () => { if (ui.value.hasGpu) void devices.load(runtime.value) }, { immediate: true })
 
 const runtimeChoices = computed(() => runtimeItems(rows.value, runtime.value, ui.value.isMac, rd.inheritGlobal))
-const deviceChoices = computed(() => deviceItems(devices.viewOf(runtime.value), device.value, rd.inheritGlobal))
 const deviceNote = computed(() => (devices.failedOf(runtime.value) ? rd.listFailed : devices.viewOf(runtime.value)?.source === 'nvidia-smi' ? rd.listFromSmi : ''))
 
 const runtimeChanged = computed(() => runtime.value !== (props.runtime ?? ''))
-const deviceChanged = computed(() => ui.value.hasGpu && device.value !== (props.device ?? ''))
+const deviceChanged = computed(() => ui.value.hasGpu && JSON.stringify(gpuBody(gpu.value)) !== gpuKey.value)
+const gpuInvalid = computed(() => ui.value.hasGpu && !ratioValid(gpu.value))
 const dirty = computed(() => runtimeChanged.value || deviceChanged.value)
 
 async function save(restart: boolean) {
@@ -44,7 +47,7 @@ async function save(restart: boolean) {
   try {
     // The restart request rides on the last call so the model is restarted once, with both choices in place.
     if (runtimeChanged.value) await $fetch(`${base}/runtime`, { method: 'POST', body: { runtime: runtime.value || null, restart: restart && !deviceChanged.value } })
-    if (deviceChanged.value) await $fetch(`${base}/device`, { method: 'POST', body: { device: device.value || null, restart } })
+    if (deviceChanged.value) await $fetch(`${base}/device`, { method: 'POST', body: { ...gpuBody(gpu.value), restart } })
     toast.add({ title: restart ? rd.savedRestarting : rd.saved, color: 'success', icon: 'i-lucide-check' })
     emit('saved')
   } catch (e) {
@@ -76,24 +79,22 @@ async function save(restart: boolean) {
         @update:model-value="(v: unknown) => { runtime = fromSelectValue(v) }"
       />
     </div>
-    <div v-if="ui.hasGpu" class="space-y-1.5">
-      <label class="text-xs font-medium text-muted">{{ rd.device }}</label>
-      <USelect
-        :model-value="toSelectValue(device)"
-        :items="deviceChoices"
-        class="w-full"
-        :aria-label="rd.device"
-        @update:model-value="(v: unknown) => { device = fromSelectValue(v) }"
-      />
-      <p v-if="deviceNote" class="m-0 text-xs text-warning">
-        {{ deviceNote }}
-      </p>
-    </div>
+    <DeviceChoice
+      v-if="ui.hasGpu"
+      v-model="gpu"
+      :view="devices.viewOf(runtime)"
+      :runtime="runtime"
+      :inherit-label="rd.inheritGlobal"
+      :label="rd.device"
+      :hint="rd.deviceHint"
+      :note="deviceNote"
+      id-prefix="model"
+    />
     <div class="flex flex-wrap items-center gap-2">
-      <UButton size="sm" icon="i-lucide-save" :disabled="!dirty" :loading="saving" @click="save(false)">
+      <UButton size="sm" icon="i-lucide-save" :disabled="!dirty || gpuInvalid" :loading="saving" @click="save(false)">
         {{ rd.save }}
       </UButton>
-      <UButton v-if="running" size="sm" color="neutral" variant="outline" icon="i-lucide-rotate-cw" :disabled="!dirty" :loading="saving" @click="save(true)">
+      <UButton v-if="running" size="sm" color="neutral" variant="outline" icon="i-lucide-rotate-cw" :disabled="!dirty || gpuInvalid" :loading="saving" @click="save(true)">
         {{ rd.saveRestart }}
       </UButton>
       <span v-if="dirty" class="text-xs text-warning">{{ t.models.edit.form.dirty }}</span>

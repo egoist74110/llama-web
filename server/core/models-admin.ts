@@ -2,6 +2,7 @@
 // active profile, checking that configured files still exist. Pure module (no Nitro).
 import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { applyGpuChoice, hasGpuFields, sanitizeGpuChoice } from './gpu-group'
 import { ArgsSyntaxError, normalizeDevice, PARAM_DEFS, paramValueOk, splitArgs, type ParamOverrides, type ParamValue } from './args'
 import { DEFAULT_PROFILE, type ModelConfig, type ModelsDoc, type Profile } from './config'
 import { aliasOf } from './importer'
@@ -260,6 +261,15 @@ export interface ProfileForm {
   runtime?: string | null
   /** Device: undefined = leave the saved choice, null = follow the model / global default. */
   device?: string | null
+  /** Set when the client sent any device field (device / devices / splitMode / tensorSplit / mainGpu): then it is the whole choice (decision 45). */
+  gpu?: ReturnType<typeof sanitizeGpuChoice> & object
+}
+
+/** The whole device choice from a client body (single value or GPU group + split settings); throws `device-invalid` when it does not hold together. */
+export function sanitizeGpu(raw: unknown): NonNullable<ProfileForm['gpu']> {
+  const c = sanitizeGpuChoice(raw)
+  if (!c) throw new ProfileError('device-invalid')
+  return c
 }
 
 /** A device choice from the client: empty / null clears it; one valid value (`auto`, `cpu`, `CUDA0`) is kept. */
@@ -287,7 +297,9 @@ export function sanitizeForm(raw: unknown): ProfileForm {
   return {
     overrides: sanitizeOverrides(r.overrides), extraArgs, chatTemplate,
     ...(r.runtime === undefined ? {} : { runtime: sanitizeRuntimeRef(r.runtime) }),
-    ...(r.device === undefined ? {} : { device: sanitizeDevice(r.device) }),
+    ...(hasGpuFields(r)
+      ? (() => { const gpu = sanitizeGpu(r); return { gpu, device: gpu.device || null } })()
+      : {}),
   }
 }
 
@@ -305,7 +317,8 @@ export function saveProfile(doc: ModelsDoc, modelId: string, name: string, form:
     throw new ProfileError('template-not-found', 'template-not-found', form.chatTemplate)
   }
   if (form.runtime && runtimeOk && !runtimeOk(form.runtime)) throw new ProfileError('runtime-invalid')
-  if (form.device && deviceOk && !deviceOk(form.device)) throw new ProfileError('device-invalid')
+  const chosen = form.gpu ? form.gpu.device || form.gpu.devices[0] : form.device
+  if (chosen && deviceOk && !deviceOk(chosen)) throw new ProfileError('device-invalid')
   const profile = model.profiles[name]!
   // Other fields (per-profile preprocess overrides) are kept.
   profile.overrides = form.overrides
@@ -315,7 +328,8 @@ export function saveProfile(doc: ModelsDoc, modelId: string, name: string, form:
     if (form.runtime) profile.runtime = form.runtime
     else delete profile.runtime
   }
-  if (form.device !== undefined) {
+  if (form.gpu) applyGpuChoice(profile, form.gpu)
+  else if (form.device !== undefined) {
     if (form.device) profile.device = form.device
     else delete profile.device
   }
@@ -328,6 +342,14 @@ export function setModelRuntime(doc: ModelsDoc, modelId: string, ref: string | n
   if (ref && runtimeOk && !runtimeOk(ref)) throw new ProfileError('runtime-invalid')
   if (ref) model.runtime = ref
   else delete model.runtime
+}
+
+/** The model's own device choice, single or GPU group (profiles can still choose their own); empty follows the global default. */
+export function setModelGpu(doc: ModelsDoc, modelId: string, choice: NonNullable<ProfileForm['gpu']>, deviceOk?: (device: string) => boolean): void {
+  const model = findModel(doc, modelId)
+  const chosen = choice.device || choice.devices[0]
+  if (chosen && deviceOk && !deviceOk(chosen)) throw new ProfileError('device-invalid')
+  applyGpuChoice(model, choice)
 }
 
 /** The model's own device (profiles can still choose their own); null follows the global default. */

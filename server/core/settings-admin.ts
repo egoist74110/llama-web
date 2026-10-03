@@ -4,7 +4,8 @@
 import { existsSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
-import { ArgsSyntaxError, normalizeDevice, PARAM_DEFS, paramValueOk, splitArgs, type LaunchDefaults, type ParamValue } from './args'
+import { applyGpuChoice, hasGpuFields, sanitizeGpuChoice } from './gpu-group'
+import { ArgsSyntaxError, PARAM_DEFS, paramValueOk, splitArgs, type LaunchDefaults, type ParamValue } from './args'
 import { cleanWizard, hasCpuChannel, hasDeviceSelection, TUNNEL_MODES, TUNNEL_PROTOCOLS, type ModelsDoc, type Settings, type TunnelMode, type TunnelProtocol } from './config'
 import type { PublicStatus } from './public-entry'
 import type { ModelDir } from './types'
@@ -102,7 +103,7 @@ export function applyModelDirs(draft: Settings, raw: unknown, models: ModelsDoc)
 /** Global default launch parameters. Missing keys keep their value; `''` / null mean "do not pass". */
 export function applyDefaults(draft: Settings, raw: unknown, key: 'defaults' | 'defaultsCpu' = 'defaults', host: { os: NodeJS.Platform } = { os: process.platform }): void {
   if (!isObj(raw)) throw new SettingsError('bad-request')
-  const next: Record<string, ParamValue | string> = { ...draft[key] }
+  const next: Record<string, unknown> = { ...draft[key] }
   for (const d of PARAM_DEFS) {
     const v = raw[d.key]
     if (v === undefined) continue
@@ -112,11 +113,11 @@ export function applyDefaults(draft: Settings, raw: unknown, key: 'defaults' | '
     else throw new SettingsError('bad-param', d.key)
     if (!paramValueOk(d.key, next[d.key] as ParamValue)) throw new SettingsError('bad-param', d.key)
   }
-  if (raw.device !== undefined) {
-    const dev = normalizeDevice(raw.device)
-    if (dev === null || (dev && !hasDeviceSelection(host))) throw new SettingsError('bad-param', 'device')
-    if (dev) next.device = dev
-    else delete next.device
+  // The device choice is five fields (single device, or a GPU group with its split settings): any of them in the body replaces the whole choice.
+  if (hasGpuFields(raw)) {
+    const c = sanitizeGpuChoice(raw)
+    if (!c || ((c.device || c.devices.length) && !hasDeviceSelection(host))) throw new SettingsError('bad-param', 'device')
+    applyGpuChoice(next, c)
   }
   if (raw.extraArgs !== undefined) {
     if (typeof raw.extraArgs !== 'string' || raw.extraArgs.length > 10_000) throw new SettingsError('bad-extra-args')

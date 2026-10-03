@@ -7,8 +7,11 @@ import {
   type ModelsDoc, type Settings,
 } from '../core/config'
 import { authenticate, defaultSecrets, normalizeSecrets, SECRETS_MIGRATIONS, SECRETS_VERSION, type SecretsDoc } from '../core/keys'
-import { describeDevices, DeviceProbe, deviceMissing, type DevicesView } from '../core/devices'
-import { LaunchConfigError, llamaServerExe, planLaunch } from '../core/launch'
+import { describeDevices, DeviceProbe, type DevicesView } from '../core/devices'
+import { chooseExe, LaunchConfigError, llamaServerExe, planLaunch, runtimeKeyOf, type DeviceInfo } from '../core/launch'
+import { comboKey } from '../core/gpu-group'
+import { blamesSplitMode, SplitModeLoadError, SplitStats } from '../core/split-stats'
+import { diagnose } from '../core/errors'
 import { LogStore } from '../core/logs'
 import { UsageStore } from '../core/usage'
 import type { RuntimeStatus } from '../core/llamacpp'
@@ -70,6 +73,12 @@ export interface AppContext {
   getSystem(opts?: { refresh?: boolean }): Promise<SystemInfo>
   /** Devices of one llama.cpp build (`runtime` = a reference, empty = the global version); `{ applicable: false }` on a Mac. */
   getDevices(opts?: { runtime?: string | null, refresh?: boolean }): Promise<DevicesView | { applicable: false }>
+  /** Device list and split modes of one build for the command preview; null on a Mac or when the build cannot be run. */
+  getDeviceInfo(runtime?: string | null): Promise<DeviceInfo | null>
+  /** Row / tensor combinations the user confirmed or that failed to load (decision 45). */
+  splitStats: SplitStats
+  /** Record key of a group on the build `runtime` resolves to (empty = the global version); null when no build can be resolved. */
+  splitKey(runtime: string | null | undefined, devices: readonly string[], mode: string): string | null
   /** Hand-added llama.cpp builds: list, delete (with protection), and the add flow (preview, then confirm). */
   runtimes: RuntimeManager
   runtimeAdd: RuntimeInstaller
@@ -262,6 +271,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     return systemRun
   }
   const deviceProbe = new DeviceProbe(runCmd)
+  const splitStats = new SplitStats(dataDir)
   const channelUpdater = (target: RuntimeTarget, withSelectionError: boolean) => new Updater({
     dataDir,
     target, selectionError: withSelectionError ? selectionError : undefined,
@@ -340,15 +350,19 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     isPrecondition: e => e instanceof LaunchConfigError && e.code === 'no-runtime',
     launch: async (target) => {
       await cleanupDone
-      const plan = planLaunch(target, { dataDir, settings: getSettings(), models: getModels(), host: runner.host, target: selectedTarget, runtimeEnv: runtimes.env() })
+      let plan = planLaunch(target, { dataDir, settings: getSettings(), models: getModels(), host: runner.host, target: selectedTarget, runtimeEnv: runtimes.env() })
       // Protect the build from deletion from here on (before the first await) until it runs or the start fails.
       const launchId = ++launchSeq
       launching.set(launchId, plan.exe)
       try {
-        // The chosen device must be on the list of the build that runs; there is no silent switch to another one (decision 39).
-        if (plan.device !== 'auto' && plan.device !== 'cpu') {
+        // The chosen devices must be on the list of the build that runs, and a split mode must be one it lists; there is no
+        // silent switch to another device or mode (decisions 39, 45). With nothing chosen and several GPUs the one with the
+        // most memory is picked. A build whose answer cannot be read blocks nothing (the process reports a bad device itself).
+        if (hasDeviceSelection(platform) && plan.device !== 'cpu') {
           const devices = await deviceProbe.list(plan.exe)
-          if (deviceMissing(plan.device, devices)) throw new LaunchConfigError('device-missing', `Device ${plan.device} is not on the device list of ${plan.runtime.label}`)
+          const splitModes = plan.group ? await deviceProbe.splitModes(plan.exe) : null
+          plan = plan.resolve({ devices, splitModes }, plan.combo ? splitStats.get(plan.combo) : undefined)
+          if (plan.autoPicked) log(`device ${plan.tag}: automatic choice is ${plan.autoPicked} (the GPU with the most memory)`)
         }
         if (plan.runtime.fallback) {
           const f = plan.runtime.fallback
@@ -374,7 +388,8 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
             onPartial: (_stream, partial) => report(progress.partial(partial)),
           })
           launching.delete(launchId) // runner.list() covers it from here on
-          void rp.ready.then(stopTracking, stopTracking)
+          const combo = plan.combo
+          void rp.ready.then(() => { stopTracking(); if (combo) splitStats.succeed(combo) }, stopTracking)
           void rp.exited.then((x) => {
             stopTracking()
             run.append(`# llama-web: exited code=${x.code ?? '-'} signal=${x.signal ?? '-'}${x.requested ? ' (stopped by llama-web)' : ''}`)
@@ -386,6 +401,15 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
           stopTracking()
           run.append(`# llama-web: could not start: ${(e as Error).message}`)
           run.close()
+          // A row / tensor group that died while loading, for no reason that points at memory, files or arguments, is
+          // remembered and named as the cause (decision 45); a plain layer split is not experimental and stays out of it.
+          const mode = plan.group?.splitMode
+          const kind = mode && plan.combo && mode !== 'layer' ? diagnose(e)?.kind : undefined
+          if (kind && blamesSplitMode(kind)) {
+            try { splitStats.fail(plan.combo!, kind) } catch (err) { logError('split-modes.json could not be written:', (err as Error).message) }
+            log(`split mode ${plan.tag}: ${mode} on ${plan.group!.devices.join(',')} failed to load (${kind}); remembered, there is no automatic change`)
+            throw new SplitModeLoadError(e, mode!)
+          }
           throw e
         }
       } finally {
@@ -466,6 +490,15 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
   // Under `nuxt dev` nothing attaches the public listener; this still reports why the tunnel is off.
   applyTunnel()
 
+  /** Executable of a build reference (empty = the global version); null when it cannot be resolved. */
+  const exeOf = (ref: string | null): string | null => {
+    try {
+      return ref ? resolveRuntimeRef(ref, runtimes.env()).exe : llamaServerExe(dataDir, getSettings(), platform.os, selectedTarget)
+    } catch {
+      return null
+    }
+  }
+
   let closing: Promise<void> | null = null
   return {
     dataDir, bootPort: getSettings().server.port, getSettings, getModels, updateSettings: settingsRef.update, updateModels: modelsRef.update,
@@ -485,16 +518,29 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     async getDevices(opts) {
       if (!hasDeviceSelection(platform)) return { applicable: false }
       const ref = opts?.runtime?.trim() || null
-      let exe: string | null
+      const exe = exeOf(ref)
+      const refresh = opts?.refresh === true
+      const [list, splitModes] = exe ? await Promise.all([deviceProbe.list(exe, { refresh }), deviceProbe.splitModes(exe)]) : [{ source: 'unavailable' as const, gpus: [] }, null]
+      const info = await detect(refresh)
+      return describeDevices(ref, list, info.cpu, info.nvidia?.gpus ?? [], splitModes)
+    },
+    async getDeviceInfo(runtime) {
+      if (!hasDeviceSelection(platform)) return null
+      const exe = exeOf(runtime?.trim() || null)
+      if (!exe) return null
+      const [devices, splitModes] = await Promise.all([deviceProbe.list(exe), deviceProbe.splitModes(exe)])
+      return { devices, splitModes }
+    },
+    splitStats,
+    splitKey(runtime, devices, mode) {
       try {
-        exe = ref ? resolveRuntimeRef(ref, runtimes.env()).exe : llamaServerExe(dataDir, getSettings(), platform.os, selectedTarget)
+        const { runtime: use } = chooseExe(runtime?.trim() ?? '', { dataDir, settings: getSettings(), platform: platform.os, target: selectedTarget, runtimeEnv: runtimes.env() })
+        return comboKey(runtimeKeyOf(use), devices, mode)
       } catch {
-        exe = null
+        return null
       }
-      const list = exe ? await deviceProbe.list(exe, { refresh: opts?.refresh === true }) : { source: 'unavailable' as const, gpus: [] }
-      const info = await detect(opts?.refresh === true)
-      return describeDevices(ref, list, info.cpu, info.nvidia?.gpus ?? [])
-    }, runtimes, runtimeAdd, appUpdate, runner, scheduler, ops, proxy, publicEntry, applyPublic, live, logs, usage, cleanupDone,
+    },
+    runtimes, runtimeAdd, appUpdate, runner, scheduler, ops, proxy, publicEntry, applyPublic, live, logs, usage, cleanupDone,
     shutdown() {
       closing ??= (async () => {
         networkProbe.abort()

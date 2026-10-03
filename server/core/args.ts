@@ -4,6 +4,7 @@
 // Merge order (later wins): global defaults <- model overrides <- profile overrides <- extra args.
 // Extra args are concatenated in the same order (global, model, profile) and appended after
 // the form-managed flags, so the last occurrence of a flag is the effective one.
+import type { GpuGroup } from './gpu-group'
 
 export type ParamValue = string | number | null
 
@@ -33,6 +34,11 @@ export interface LaunchDefaults extends LaunchParams {
   extraArgs: string
   /** Global device choice (see `normalizeDevice`); missing / empty = automatic. */
   device?: string
+  /** Global GPU group and its split settings (decision 45); see gpu-group.ts. Missing / empty = no group. */
+  devices?: string[]
+  splitMode?: string
+  tensorSplit?: string
+  mainGpu?: string
 }
 
 /**
@@ -203,6 +209,9 @@ export type ArgWarningCode =
   | 'extra-overrides-form' // an extra arg replaces a form-managed flag
   | 'extra-overrides-device' // an extra arg replaces a flag of the chosen device (--device / --split-mode)
   | 'extra-multi-device' // extra args spread the model over several devices (--tensor-split / --device a,b)
+  | 'split-mode-unsupported' // the build does not list the chosen split mode (severity: error; only when the build's help said so)
+  | 'split-mode-unconfirmed' // row / tensor on a build + devices + mode never confirmed (decision 45)
+  | 'split-mode-failed-before' // the same combination failed to load before (detail: what the failure was)
   | 'duplicate-in-layer' // same flag twice inside one extra-args text; the last one wins
   | 'reserved-flag-removed' // --host / --port in extra args were dropped
   | 'preview-program-percent' // preview only: program path cmd.exe may expand (%NAME% with spaces)
@@ -243,8 +252,17 @@ export function resolveDevice(...layers: Array<string | null | undefined>): stri
   return 'auto'
 }
 
-/** The launch arguments one device choice adds (empty for `auto`). */
-export function deviceArgs(device: string): Array<[flag: string, value: string]> {
+/**
+ * The launch arguments one device choice adds (empty for `auto`). A GPU group (decision 45) is two or more
+ * devices: `--device a,b --split-mode <mode>`, plus `--tensor-split` / `--main-gpu` only when set.
+ */
+export function deviceArgs(device: string, group: GpuGroup | null = null): Array<[flag: string, value: string]> {
+  if (group) {
+    const out: Array<[string, string]> = [['--device', group.devices.join(',')], ['--split-mode', group.splitMode]]
+    if (group.tensorSplit) out.push(['--tensor-split', group.tensorSplit])
+    if (group.mainGpu) out.push(['--main-gpu', group.mainGpu])
+    return out
+  }
   if (device === 'cpu') return [['--device', 'none']]
   if (device === 'auto' || !normalizeDevice(device)) return []
   return [['--device', device], ['--split-mode', 'none']]
@@ -261,6 +279,8 @@ export interface BuildInput {
   port: number
   /** Resolved device choice (`auto`, `cpu` or one id). Left out on a host without device selection (Mac). */
   device?: string
+  /** A GPU group: then `device` is its ids joined by `,` and the group's flags are passed. */
+  group?: GpuGroup | null
 }
 
 export interface BuildResult {
@@ -278,12 +298,17 @@ export interface BuildResult {
   device: string
 }
 
+/** Value of a flag group: `--flag=value` or the token after the flag. */
+function groupValue(g: ArgGroup): string {
+  const first = g.tokens[0] ?? ''
+  return (first.includes('=') && first.startsWith('--') ? first.slice(first.indexOf('=') + 1) : (g.tokens[1] ?? '')).trim()
+}
+
 /** Device choice of the last `--device` / `-dev` in the extra args (`--device X`, `-dev X`, `--device=X`), or null when absent. */
 export function extraDevice(extra: ArgGroup[]): string | null {
   const g = [...extra].reverse().find(x => x.canon === '--device')
   if (!g) return null
-  const first = g.tokens[0] ?? ''
-  const raw = first.includes('=') && first.startsWith('--') ? first.slice(first.indexOf('=') + 1) : (g.tokens[1] ?? '')
+  const raw = groupValue(g)
   const v = raw.trim().toLowerCase() === 'none' ? 'cpu' : normalizeDevice(raw)
   return v || 'auto'
 }
@@ -375,7 +400,7 @@ export function buildLaunchArgs(input: BuildInput): BuildResult {
     }
     args.push(d.flag, String(v))
   }
-  for (const [flag, value] of deviceArgs(device)) {
+  for (const [flag, value] of deviceArgs(device, input.group ?? null)) {
     if (extraCanon.has(flag)) {
       warnings.push({ code: 'extra-overrides-device', severity: 'warning', flag })
       continue
@@ -383,8 +408,9 @@ export function buildLaunchArgs(input: BuildInput): BuildResult {
     args.push(flag, value)
   }
   for (const g of extra) {
-    if (g.canon === '--tensor-split' || (g.canon === '--device' && g.tokens.some(t => t.includes(',')))) {
-      warnings.push({ code: 'extra-multi-device', severity: 'warning', flag: g.canon })
+    const splitsModel = g.canon === '--split-mode' && groupValue(g).toLowerCase() !== 'none'
+    if (g.canon === '--tensor-split' || g.canon === '--main-gpu' || splitsModel || (g.canon === '--device' && g.tokens.some(t => t.includes(',')))) {
+      warnings.push({ code: 'extra-multi-device', severity: 'warning', flag: g.canon ?? undefined })
     }
     args.push(...g.tokens)
   }

@@ -1,6 +1,7 @@
 // settings.json / models.json schemas, defaults and light normalisation (see plan「配置与数据」).
 // Hand-edited files may omit sections; missing values are filled from the defaults.
-import { DEFAULT_LAUNCH_DEFAULTS, normalizeDevice, type LaunchDefaults, type ParamOverrides } from './args'
+import { DEFAULT_LAUNCH_DEFAULTS, type LaunchDefaults, type ParamOverrides } from './args'
+import { cleanStoredChoice, type GpuChoice } from './gpu-group'
 import type { FileRef, ModelDir } from './types'
 import type { Acceleration, PlatformInfo } from './platform'
 import { normalizeUsageKeepDays } from './usage'
@@ -90,7 +91,7 @@ export interface Settings {
   setup: { done: boolean }
 }
 
-export interface Profile {
+export interface Profile extends Pick<GpuChoice, 'devices' | 'splitMode' | 'tensorSplit' | 'mainGpu'> {
   overrides: ParamOverrides
   extraArgs: string
   /** File name inside data/templates/, or null for the model's built-in template. */
@@ -99,11 +100,14 @@ export interface Profile {
   preprocess?: { image?: Partial<ImagePreprocess> }
   /** llama.cpp build: `cuda:b11146` / `cpu:b11146` / `metal:b11146` / `custom:<id>`; empty = follow the model, then the global version. */
   runtime?: string | null
-  /** Device: `auto`, `cpu` or one id from `--list-devices` (`CUDA0`); empty = follow the model, then the global default. */
+  /**
+   * Device: `auto`, `cpu` or one id from `--list-devices` (`CUDA0`); empty = follow the model, then the global default.
+   * A GPU group (`devices`, two or more ids, with `splitMode` / `tensorSplit` / `mainGpu`) replaces it, see gpu-group.ts.
+   */
   device?: string | null
 }
 
-export interface ModelConfig {
+export interface ModelConfig extends Pick<GpuChoice, 'devices' | 'splitMode' | 'tensorSplit' | 'mainGpu'> {
   id: string
   /** Name clients use in the `model` field. */
   name: string
@@ -265,11 +269,8 @@ export function normalizeSettings(doc: Settings): Settings {
   if (!['auto', 'cuda', 'cpu', 'metal'].includes(out.llamacpp.acceleration)) throw new Error('Invalid llamacpp.acceleration')
   if (typeof out.llamacpp.autoUpdate !== 'boolean') throw new Error('Invalid llamacpp.autoUpdate')
   // The global device choice is one valid value or nothing (a hand-edited bad one is dropped = automatic).
-  for (const key of ['defaults', 'defaultsCpu'] as const) {
-    const dev = out[key].device
-    if (dev !== undefined && !normalizeDevice(dev)) delete out[key].device
-    else if (dev !== undefined) out[key].device = normalizeDevice(dev)
-  }
+  // Same for a GPU group: it is valid as a whole (devices, mode, ratio) or dropped.
+  for (const key of ['defaults', 'defaultsCpu'] as const) cleanStoredChoice(out[key])
   // Usage log retention: 7 / 14 / 30 only, never above 30 (decision 40).
   out.logs.usageKeepDays = normalizeUsageKeepDays(out.logs.usageKeepDays)
   // Placeholder (decision 9): the field exists but the online limit stays fixed at 1.
@@ -302,8 +303,8 @@ export function normalizeModels(doc: ModelsDoc): ModelsDoc {
     if (typeof m.runtime !== 'string') delete m.runtime
     for (const p of Object.values(m.profiles)) if (isObj(p) && typeof p.runtime !== 'string') delete p.runtime
     // Same for the device: a valid choice or nothing.
-    if (!normalizeDevice(m.device)) delete m.device
-    for (const p of Object.values(m.profiles)) if (isObj(p) && !normalizeDevice(p.device)) delete p.device
+    cleanStoredChoice(m)
+    for (const p of Object.values(m.profiles)) if (isObj(p)) cleanStoredChoice(p)
   }
   return doc
 }

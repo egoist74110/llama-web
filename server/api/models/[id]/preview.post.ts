@@ -2,8 +2,9 @@
 // builder the launcher uses; `form` / `files` are the (possibly unsaved) values on screen.
 import type { ModelConfig } from '../../../core/config'
 import { t } from '../../../core/i18n'
-import { previewLaunch } from '../../../core/launch'
+import { requestedRuntime, previewLaunch } from '../../../core/launch'
 import { listTemplates, ProfileError, sanitizeForm } from '../../../core/models-admin'
+import { readGpuChoice } from '../../../core/gpu-group'
 import { getContext } from '../../../service/context'
 import { editError, requireModel, requireProfile } from '../../../service/models-api'
 
@@ -22,9 +23,10 @@ export default defineEventHandler(async (event) => {
   const saved = model.profiles[name]!
   const ctx = getContext()
   try {
-    const form = body?.form === undefined
-      ? { overrides: saved.overrides, extraArgs: saved.extraArgs, chatTemplate: saved.chatTemplate ?? null, runtime: saved.runtime ?? null, device: saved.device ?? null }
-      : sanitizeForm(body.form)
+    // Values on screen win; the saved profile fills in what the form does not carry (its device choice is five fields, see gpu-group.ts).
+    const form = body?.form === undefined ? undefined : sanitizeForm(body.form)
+    const runtime = form?.runtime === undefined ? saved.runtime ?? null : form.runtime
+    const gpu = form?.gpu ?? readGpuChoice(saved)
     const files = body?.files ?? {}
     const shown: ModelConfig = {
       ...model,
@@ -34,7 +36,9 @@ export default defineEventHandler(async (event) => {
     }
     return previewLaunch({
       dataDir: ctx.dataDir, settings: ctx.getSettings(), model: shown, host: ctx.runner.host, target: ctx.runtimeTarget, runtimeEnv: ctx.runtimes.env(),
-      form: { ...form, runtime: form.runtime === undefined ? saved.runtime ?? null : form.runtime, device: form.device === undefined ? saved.device ?? null : form.device },
+      form: { overrides: form?.overrides ?? saved.overrides, extraArgs: form?.extraArgs ?? saved.extraArgs, chatTemplate: form ? form.chatTemplate : saved.chatTemplate ?? null, runtime, ...gpu },
+      deviceInfo: (await ctx.getDeviceInfo(requestedRuntime(shown, runtime))) ?? undefined,
+      comboRecord: key => ctx.splitStats.get(key),
     })
   } catch (e) {
     if (e instanceof ProfileError) editError(e)

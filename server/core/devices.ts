@@ -56,10 +56,23 @@ export async function probeDevices(exe: string, run: RunCmd, timeoutMs = 15_000)
   return { source: 'list-devices', gpus: parseListDevices(text) }
 }
 
+/**
+ * Split modes this build accepts: the values in braces after `--split-mode` in its `--help` (checked on
+ * b11146: `-sm,   --split-mode {none,layer,row,tensor}`). `none` is how a single device is pinned and is not a
+ * choice of its own. Null = the help does not say (a wrapper, an older layout): nothing is blocked then.
+ */
+export function parseSplitModes(help: string): string[] | null {
+  const m = /--split-mode\s+\{([^}]+)\}/.exec(help)
+  if (!m) return null
+  return m[1]!.split(',').map(x => x.trim().toLowerCase()).filter(x => /^[a-z]+$/.test(x) && x !== 'none')
+}
+
 /** Per-executable cache of the probe (the device set only changes with hardware or driver, so a minute is plenty). */
 export class DeviceProbe {
   private cache = new Map<string, { at: number, value: DeviceList }>()
   private running = new Map<string, Promise<DeviceList>>()
+  private modes = new Map<string, string[] | null>()
+  private modeRuns = new Map<string, Promise<string[] | null>>()
 
   constructor(private run: RunCmd, private ttlMs = 60_000, private now: () => number = Date.now) {}
 
@@ -77,8 +90,25 @@ export class DeviceProbe {
     return p
   }
 
+  /**
+   * Split modes of one build (`--help`). A version never changes its own help, so a readable answer is kept for good;
+   * a failed run is not remembered. Null = unknown.
+   */
+  splitModes(exe: string): Promise<string[] | null> {
+    if (this.modes.has(exe)) return Promise.resolve(this.modes.get(exe)!)
+    const busy = this.modeRuns.get(exe)
+    if (busy) return busy
+    const p = this.run(exe, ['--help'], 15_000).then(parseSplitModes, () => null).then((v) => {
+      if (v) this.modes.set(exe, v)
+      return v
+    }).finally(() => this.modeRuns.delete(exe))
+    this.modeRuns.set(exe, p)
+    return p
+  }
+
   forget(exe: string) {
     this.cache.delete(exe)
+    this.modes.delete(exe)
   }
 }
 
@@ -106,13 +136,15 @@ export interface DevicesView {
   source: DeviceSource
   gpus: GpuDevice[]
   cpu: CpuDeviceInfo
+  /** Split modes the build accepts (`layer`, `row`, `tensor`); null = could not be read, nothing is blocked. */
+  splitModes: string[] | null
 }
 
 /** Payload of `GET /api/devices` (a Mac gets `{ applicable: false }` from the route and never reaches this). */
-export function describeDevices(runtime: string | null, list: DeviceList, cpu: Pick<CpuInfo, 'logicalCores' | 'sockets' | 'numaNodes'>, nvidia: readonly NvidiaGpu[]): DevicesView {
+export function describeDevices(runtime: string | null, list: DeviceList, cpu: Pick<CpuInfo, 'logicalCores' | 'sockets' | 'numaNodes'>, nvidia: readonly NvidiaGpu[], splitModes: string[] | null = null): DevicesView {
   const usable = list.source === 'list-devices' ? list : { source: nvidia.length ? 'nvidia-smi' as const : list.source, gpus: devicesFromNvidia(nvidia) }
   return {
-    applicable: true, runtime, source: usable.source, gpus: usable.gpus,
+    applicable: true, runtime, source: usable.source, gpus: usable.gpus, splitModes,
     cpu: {
       logicalCores: cpu.logicalCores, sockets: cpu.sockets, numaNodes: cpu.numaNodes,
       multi: (cpu.sockets ?? 1) > 1 || (cpu.numaNodes ?? 1) > 1,

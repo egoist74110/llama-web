@@ -4,6 +4,7 @@
 import { LaunchConfigError } from './launch'
 import { LoadError } from './runner'
 import { ModelCrashError } from './scheduler'
+import { blamesSplitMode, SplitModeLoadError } from './split-stats'
 
 /** Keys of i18n `loadError` / `failure` that a diagnosis can produce. */
 export type FailureKind =
@@ -18,6 +19,8 @@ export type FailureKind =
   | 'bad-model' // the model file is broken / not a GGUF
   | 'port-in-use'
   | 'device-missing' // the chosen device is not on the build's device list (also found before the process starts)
+  | 'split-mode-unsupported' // the build's help does not list the chosen split mode (found before the process starts)
+  | 'split-mode-failed' // a row / tensor group died while loading for no reason that points elsewhere (decision 45)
   // From the cause
   | 'no-port' | 'spawn-failed' | 'register-failed' | 'exited' | 'timeout' | 'aborted' | 'crashed'
   | 'model-missing' | 'profile-missing' | 'no-runtime' | 'bad-args' | 'unknown'
@@ -74,7 +77,7 @@ export function classify(code: string, exitCode: number | null, tail: readonly s
 const CODE_KINDS: Record<string, true> = {
   'no-port': true, 'spawn-failed': true, 'register-failed': true, 'exited': true, 'timeout': true,
   'aborted': true, 'crashed': true, 'model-missing': true, 'profile-missing': true,
-  'file-missing': true, 'no-runtime': true, 'bad-args': true, 'device-missing': true, 'unknown': true,
+  'file-missing': true, 'no-runtime': true, 'bad-args': true, 'device-missing': true, 'split-mode-unsupported': true, 'unknown': true,
 }
 
 /** Absolute paths in an output line -> `<dir>/file`: the card is readable from the LAN, local folders should not be. */
@@ -89,6 +92,10 @@ export function redactPaths(line: string): string {
 /** Diagnose the `error` of a failed / crashed instance (or a rejected load). Null when there is none. */
 export function diagnose(cause: unknown): FailureDoc | null {
   if (!cause) return null
+  if (cause instanceof SplitModeLoadError) {
+    const d = diagnose(cause.inner)
+    return d && blamesSplitMode(d.kind) ? { ...d, kind: 'split-mode-failed' } : d
+  }
   const c = causeOf(cause)
   return { kind: classify(c.code, c.exitCode, c.tail), code: c.code, exitCode: c.exitCode, tail: c.tail.slice(-30).map(redactPaths) }
 }
