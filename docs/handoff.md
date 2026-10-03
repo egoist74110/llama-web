@@ -16,6 +16,15 @@
 
 ---
 
+## 2026-10-03 · 阶段 7 审查意见处理 · Opus 5.5
+- 完成：`docs/reviews/stage-7-codex.md` 三条都已标注。S7-001 已修复：新增 `cloudflaredEnv()`，两种模式都去掉继承的全部 `TUNNEL_*`（大小写不敏感），token 模式只写回保存的 token。S7-002 已修复：`quickTunnelHost` 只按日志前缀级别和 `error=` 字段判断错误行，地址里的 error / err / wrn 单词不再误判。S7-003：计划文字澄清（只有临时模式换端口重启，token 模式行为不变），并修复 token 模式换端口后 hostnames 仍按旧端口筛选的问题（记住最近一次配置行，按新端口重新筛选）。
+- 验证：`bun test` 703 pass / 0 fail；`bun run typecheck` 退出 0。两项都在包含另一会话未提交改动（首次启动 / 目录选择相关）的工作区里跑的；这些改动没提交、没碰。没有真实隧道验证。
+- 剩余：无（审查范围内）。审查报告里建议的完整链路验收（quick 隧道 → :8080 → proxy，401 / 404 / 流式 / 断开）放在 7-2 真机冒烟。
+- 决定 / 坑：剥离全部 `TUNNEL_*` 也作用于 token 模式（以前只删 TUNNEL_TOKEN），环境变量不再是 cloudflared 的隐式输入。
+- 下一步：7-2（Sonnet 5.5，提示词在指南 #p7-2）。
+
+---
+
 ## 2026-10-03 · 工作包 7-1 · Opus 5.5
 - 完成：plan 7-1 四项打勾，另加一项（用户会话中追加，关键决定 32）也已完成。`public.tunnelMode`（token / quick）和 `public.tunnelProtocol`（http2 默认 / quic），settings v5 迁移（旧配置 → token + http2）、normalize 回落、`applyPublic` 校验、`cleanWizard` 接受 `path: 'quick'`、一键完成写回 token。`TunnelManager`：`Launch`（模式 / token / 端口 / 协议）决定是否重启；临时模式不要 token、环境里删掉 TUNNEL_TOKEN；参数 `tunnel --no-autoupdate --protocol <p> --config data/runtime/cloudflared/quick-tunnel.yml --url http://127.0.0.1:端口`；`TunnelInfo` 新增 `mode`、`quickHost`（启动、重启、进程退出、停止时都清空）。`publicAddresses(pub, tunnel)` 和 `/api/public/check` 在临时模式下只用 `quickHost`。用户确认阶段 6 关口的方式：直接发起了 7-1。
 - 验证：`bun test` 693 pass / 0 fail；类型检查 `node node_modules/vue-tsc/bin/vue-tsc.js -b --noEmit` 通过（**`bun run typecheck` 被 GameGuard 弄崩**，本机开着 GameMon；用故意写错的文件确认过 vue-tsc 确实在检查）。实测（用户同意，临时目录，没碰仓库 data/ 和 ~/.cloudflared，cloudflared 2026.5.0）：① 临时 HOME 里放带 tunnel + ingress 的 config.yml：不带 `--config` 时隧道照样连上，但 `GET /` 返回 **404**（被那份 ingress 接管）；带上我们的 `--config` 后返回 502（路由到了空端口 9，正确）→ `--config` 是必要的，已写进决定 31。② 用 TunnelManager 临时模式 + 真实 llama-server（只绑 127.0.0.1，随机 --api-key，一个已配置模型，200 token）跑 HTTP/2、QUIC 各一次：都是不带 key 返回 401、非流式 200、流式 200 个事件分 198 / 199 次读到，首条 0.18 / 0.13 秒（本机直连 0.11 秒）→ 流式正常，和决定 31 一致；cloudflared 的 Registered 行确认 protocol=http2 / quic；关闭后 cloudflared 进程退出、pids.json 为空，没有残留进程。

@@ -305,10 +305,12 @@ export function ingressHostnames(line: string, port: number): string[] | null {
  * The quick tunnel's host name in a cloudflared output line (`|  https://a-b-c.trycloudflare.com  |`),
  * or null. Only a single label under trycloudflare.com counts, never the API host
  * (`api.trycloudflare.com`, which shows up in error lines), and never in an error / warning line.
+ * The level comes from the log prefix (`<time> ERR …`) or an `error=` field, not from words
+ * anywhere in the line: a random address such as `some-error-words` is still an address.
  */
 export function quickTunnelHost(line: string): string | null {
-  if (/\b(?:ERR|WRN|error)\b/i.test(line)) return null
-  const m = /\bhttps:\/\/([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)\.trycloudflare\.com(?![a-z0-9.-])/i.exec(line)
+  if (/^\s*(?:\S+\s+)?(?:WRN|ERR|FTL|PNC)\b/.test(line) || /\berror=/i.test(line)) return null
+  const m = /\bhttps:\/\/([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)\.trycloudflare\.com(?![a-z0-9./-])/i.exec(line)
   const label = m?.[1]?.toLowerCase()
   return label && label !== 'api' ? `${label}.trycloudflare.com` : null
 }
@@ -368,6 +370,19 @@ interface Launch {
   protocol: TunnelProtocol
 }
 
+/**
+ * cloudflared's environment: llama-web's own without any `TUNNEL_*` variable, in any letter case
+ * (Windows reads `tunnel_token` as TUNNEL_TOKEN). They select a named tunnel (TUNNEL_NAME), a token,
+ * host names, the log level and more, so an inherited one could turn a quick tunnel into something
+ * else or hide the lines we parse. Token mode gets back only the saved token.
+ */
+export function cloudflaredEnv(base: Record<string, string | undefined>, token: string | null): Record<string, string | undefined> {
+  const env: Record<string, string | undefined> = {}
+  for (const [k, v] of Object.entries(base)) if (!k.toUpperCase().startsWith('TUNNEL_')) env[k] = v
+  if (token) env.TUNNEL_TOKEN = token
+  return env
+}
+
 /** Token mode follows the token (the port is in the remote configuration); quick mode its port. Both the protocol. */
 const launchKey = (l: Launch) => `${l.protocol}:${l.mode === 'quick' ? `quick:${l.port}` : `token:${l.token}`}`
 
@@ -412,6 +427,8 @@ export class TunnelManager {
   private info: TunnelInfo = { status: { state: 'off', reason: 'disabled' }, mode: null, cloudflared: null, hostnames: null, quickHost: null }
   private lastKey = ''
   private hostsToken: string | null = null
+  /** The last configuration line cloudflared received (token mode), filtered again on a port change. */
+  private ingressLine: string | null = null
   /** The running preparation (find / download cloudflared) and the way to cancel it. */
   private preparing: Promise<unknown> | null = null
   private prepareAbort: AbortController | null = null
@@ -475,7 +492,19 @@ export class TunnelManager {
     const launch: Launch = cfg.mode === 'quick'
       ? { mode: 'quick', token: '', port: cfg.port, protocol }
       : { mode: 'token', token: cfg.token, port: cfg.port, protocol }
-    if (this.active && launchKey(this.active) === launchKey(launch)) return
+    if (this.active && launchKey(this.active) === launchKey(launch)) {
+      // Token mode keeps running on a port change (the remote configuration names the port), but
+      // the host names routed to the new port are filtered again.
+      if (this.active.port !== launch.port) {
+        this.active.port = launch.port
+        const hosts = this.ingressLine ? ingressHostnames(this.ingressLine, launch.port) : null
+        if (hosts) {
+          this.info = { ...this.info, hostnames: hosts }
+          this.set(this.info.status)
+        }
+      }
+      return
+    }
     await this.teardown()
     this.active = launch
     // Host names belong to a tunnel: a different token may be a different tunnel. A quick tunnel
@@ -562,9 +591,7 @@ export class TunnelManager {
     const token = launch.token || null
     const args = this.opts.buildArgs?.({ mode, port, protocol }) ?? tunnelArgs(mode, port, configFile, protocol)
     // Quick mode: no token at all, not even one inherited from llama-web's own environment.
-    const env: Record<string, string | undefined> = { ...process.env }
-    delete env.TUNNEL_TOKEN
-    if (mode === 'token' && token) env.TUNNEL_TOKEN = token
+    const env = cloudflaredEnv(process.env, mode === 'token' ? token : null)
     // Every start (and restart) gets a new quick address: the old one is gone.
     this.info = { ...this.info, quickHost: null }
     let child: ChildProcess
@@ -630,8 +657,9 @@ export class TunnelManager {
           this.set(this.info.status)
         }
       } else if (BAD_TOKEN.test(line)) badToken = true
-      const hosts = mode === 'token' ? ingressHostnames(line, port) : null
+      const hosts = mode === 'token' ? ingressHostnames(line, this.active?.port ?? port) : null
       if (hosts) {
+        this.ingressLine = line
         this.info = { ...this.info, hostnames: hosts }
         this.set(this.info.status)
       }
@@ -705,6 +733,7 @@ export class TunnelManager {
 
   private forgetHosts(): void {
     this.hostsToken = null
+    this.ingressLine = null
     this.info = { ...this.info, hostnames: null }
   }
 

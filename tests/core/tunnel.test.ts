@@ -3,9 +3,10 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { spawn } from 'node:child_process'
 import { isAlive, PidRegistry } from '../../server/core/runner'
 import {
-  candidatePaths, cloudflaredPath, ensureQuickConfig, extractToken, ingressHostnames, tunnelIdOf, findCloudflared, maskToken, prepareCloudflared,
+  candidatePaths, cloudflaredEnv, cloudflaredPath, ensureQuickConfig, extractToken, ingressHostnames, tunnelIdOf, findCloudflared, maskToken, prepareCloudflared,
   quickConfigPath, quickTunnelHost, redact, releaseAssetName, tunnelArgs, TunnelError, TunnelManager, type PrepareOptions, type TunnelConfig, type TunnelInfo, type TunnelStatus,
 } from '../../server/core/tunnel'
 
@@ -232,18 +233,34 @@ describe('quick tunnel helpers', () => {
     expect(quickTunnelHost('https://abc-1.trycloudflare.com')).toBe('abc-1.trycloudflare.com')
   })
 
+  test('words in the address are not log levels', () => {
+    for (const label of ['some-error-words', 'some-err-words', 'some-wrn-words', 'ftl-warning-x'])
+      expect(quickTunnelHost(at(`|  https://${label}.trycloudflare.com  |`))).toBe(`${label}.trycloudflare.com`)
+  })
+
   test('not an address: the API host, error / warning lines, deeper or longer names, other text', () => {
     for (const line of [
       at('Requesting new quick Tunnel on trycloudflare.com...'),
       at('POST https://api.trycloudflare.com/tunnel'),
       '2026-10-01T00:00:00Z ERR failed to request quick Tunnel: Post "https://abc.trycloudflare.com/tunnel"',
       '2026-10-01T00:00:00Z WRN https://abc.trycloudflare.com is slow',
+      '2026-10-01T00:00:00Z FTL https://abc.trycloudflare.com',
+      'ERR https://abc.trycloudflare.com',
+      at('request failed error="https://abc.trycloudflare.com"'),
+      at('POST https://abc.trycloudflare.com/tunnel'),
       at('https://a.b.trycloudflare.com'),
       at('https://abc.trycloudflare.com.example.com'),
       at('https://-abc.trycloudflare.com'),
       at('http://abc.trycloudflare.com'),
       at('Registered tunnel connection connIndex=0'),
     ]) expect(quickTunnelHost(line)).toBeNull()
+  })
+
+  test('the environment has no inherited TUNNEL_* variable in any letter case; token mode gets only the saved one', () => {
+    const base = { PATH: 'X:\bin', TUNNEL_NAME: 'n', tunnel_token: 'a', Tunnel_Hostname: 'h.example.com', TUNNEL_LOGLEVEL: 'error', HTTPS_PROXY: 'http://proxy.example.com' }
+    expect(cloudflaredEnv(base, null)).toEqual({ PATH: 'X:\bin', HTTPS_PROXY: 'http://proxy.example.com' })
+    expect(cloudflaredEnv(base, 'saved')).toEqual({ PATH: 'X:\bin', HTTPS_PROXY: 'http://proxy.example.com', TUNNEL_TOKEN: 'saved' })
+    expect(base.tunnel_token).toBe('a')
   })
 
   test('arguments are an array: quick points at the loopback entry port with our own config file; both carry the protocol', () => {
@@ -274,15 +291,22 @@ describe('TunnelManager quick mode', () => {
 
   test('needs no token, never passes one (not even an inherited one), and reads the address from the output', async () => {
     const inherited = process.env.TUNNEL_TOKEN
+    const inheritedName = process.env.TUNNEL_NAME
     process.env.TUNNEL_TOKEN = TOKEN
+    process.env.TUNNEL_NAME = 'someone-elses-tunnel'
     try {
-      const { m, registry, launches } = makeManager(() => 'quick')
+      const envs: Array<NodeJS.ProcessEnv | undefined> = []
+      const { m, registry, launches } = makeManager(() => 'quick', {
+        spawn: ((exe: string, args: string[], o: Parameters<typeof spawn>[2]) => { envs.push(o?.env); return spawn(exe, args, o) }) as typeof spawn,
+      })
       m.apply(quickCfg({ token: '' }))
       await until(() => m.status().status.state === 'connected' && hostOf(m))
       expect(m.status()).toMatchObject({ mode: 'quick', hostnames: null, status: { state: 'connected', connections: 1 } })
       expect(hostOf(m)).toMatch(/^fake-words-\d+\.trycloudflare\.com$/)
       expect(launches).toEqual([{ mode: 'quick', port: 8080, protocol: 'http2' }])
       expect(m.tail(50).join('\n')).toContain('token-length=0')
+      expect(envs).toHaveLength(1)
+      expect(Object.keys(envs[0]!).filter(k => k.toUpperCase().startsWith('TUNNEL_'))).toEqual([])
       const rec = registry.list()
       expect(rec).toHaveLength(1)
       expect(rec[0]).toMatchObject({ tag: 'tunnel', port: 8080 })
@@ -301,6 +325,8 @@ describe('TunnelManager quick mode', () => {
     } finally {
       if (inherited === undefined) delete process.env.TUNNEL_TOKEN
       else process.env.TUNNEL_TOKEN = inherited
+      if (inheritedName === undefined) delete process.env.TUNNEL_NAME
+      else process.env.TUNNEL_NAME = inheritedName
     }
   })
 
@@ -397,6 +423,21 @@ describe('TunnelManager', () => {
     m.apply(baseCfg({ token: '' }))
     await new Promise(r => setTimeout(r, 50))
     expect(m.status().hostnames).toBeNull()
+    await m.shutdown()
+  })
+
+  test('a port change in token mode keeps the process and filters the received host names for the new port', async () => {
+    const { m, spawns } = makeManager(() => 'config')
+    m.apply(baseCfg())
+    await until(() => m.status().hostnames?.length)
+    m.apply(baseCfg({ port: 3000 }))
+    await until(() => m.status().hostnames?.[0] === 'other.example.com')
+    expect(m.status().hostnames).toEqual(['other.example.com'])
+    m.apply(baseCfg({ port: 8099 }))
+    await until(() => m.status().hostnames?.length === 0)
+    m.apply(baseCfg())
+    await until(() => m.status().hostnames?.length === 2)
+    expect(spawns()).toBe(1)
     await m.shutdown()
   })
 
