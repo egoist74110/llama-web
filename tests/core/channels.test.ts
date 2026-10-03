@@ -47,17 +47,21 @@ describe('settings version 6', () => {
     expect(DEFAULT_LAUNCH_DEFAULTS.extraArgs).toContain('mlock') // the GPU defaults are exactly as before
   })
 
-  test('migration 5 -> 6 only adds what is missing; the old CUDA runtime stays as the override', () => {
+  test('migration 5 -> 6 only adds what is missing; the old default CUDA runtime 13.3 becomes automatic', () => {
     const old = {
       version: 5, defaults: { ctxSize: 4096, extraArgs: '--x' }, llamacpp: { cudaRuntime: '13.3', current: 'b300', keepVersions: 3, autoUpdate: false, acceleration: 'cuda' },
     }
     const next = SETTINGS_MIGRATIONS[5]!(structuredClone(old))
     expect(next.defaults).toEqual(old.defaults)
-    expect(next.llamacpp).toEqual({ ...old.llamacpp, currentCpu: '' })
+    expect(next.llamacpp).toEqual({ ...old.llamacpp, cudaRuntime: '', currentCpu: '' })
     expect(next.defaultsCpu).toEqual(DEFAULT_CPU_DEFAULTS)
     const doc = normalizeSettings({ ...defaultSettings(), ...next })
-    expect(doc.llamacpp).toMatchObject({ cudaRuntime: '13.3', current: 'b300', currentCpu: '', keepVersions: 3, autoUpdate: false })
+    expect(doc.llamacpp).toMatchObject({ cudaRuntime: '', current: 'b300', currentCpu: '', keepVersions: 3, autoUpdate: false })
     expect(doc.defaults).toMatchObject({ ctxSize: 4096, extraArgs: '--x' })
+  })
+
+  test('a CUDA runtime typed by hand (anything but the old default) stays as the override', () => {
+    expect(SETTINGS_MIGRATIONS[5]!({ llamacpp: { cudaRuntime: '12.4' } }).llamacpp.cudaRuntime).toBe('12.4')
   })
 
   test('a CPU-only installation keeps its version as the CPU channel one; existing values are never overwritten', () => {

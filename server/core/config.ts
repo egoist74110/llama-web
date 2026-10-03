@@ -199,11 +199,13 @@ export const SETTINGS_MIGRATIONS: Record<number, (old: any) => any> = {
     return old
   },
   // 6: separate CPU defaults and CPU channel version (decision 36). Only missing values are added;
-  // a CPU-only installation (acceleration cpu) keeps its version as the CPU channel's. The old
-  // `cudaRuntime` (default or hand-edited) stays: it now acts as the override of the automatic choice.
+  // a CPU-only installation (acceleration cpu) keeps its version as the CPU channel's. `cudaRuntime`
+  // is now the override of the automatic choice: the old default 13.3 (user's decision 2026-10-03)
+  // becomes '' = automatic; any other value was typed by hand and stays.
   5: (old) => {
     if (!isObj(old.llamacpp)) old.llamacpp = {}
     old.llamacpp.currentCpu ??= old.llamacpp.acceleration === 'cpu' && typeof old.llamacpp.current === 'string' ? old.llamacpp.current : ''
+    if (old.llamacpp.cudaRuntime === '13.3') old.llamacpp.cudaRuntime = ''
     old.defaultsCpu ??= { ...DEFAULT_CPU_DEFAULTS }
     return old
   },
