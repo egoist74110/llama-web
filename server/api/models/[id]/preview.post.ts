@@ -23,7 +23,7 @@ export default defineEventHandler(async (event) => {
   const ctx = getContext()
   try {
     const form = body?.form === undefined
-      ? { overrides: saved.overrides, extraArgs: saved.extraArgs, chatTemplate: saved.chatTemplate ?? null }
+      ? { overrides: saved.overrides, extraArgs: saved.extraArgs, chatTemplate: saved.chatTemplate ?? null, runtime: saved.runtime ?? null }
       : sanitizeForm(body.form)
     const files = body?.files ?? {}
     const shown: ModelConfig = {
@@ -33,7 +33,8 @@ export default defineEventHandler(async (event) => {
       draft: refOrNull(files.draft, model.draft),
     }
     return previewLaunch({
-      dataDir: ctx.dataDir, settings: ctx.getSettings(), model: shown, form, host: ctx.runner.host, target: ctx.runtimeTarget,
+      dataDir: ctx.dataDir, settings: ctx.getSettings(), model: shown, host: ctx.runner.host, target: ctx.runtimeTarget, runtimeEnv: ctx.runtimes.env(),
+      form: { ...form, runtime: form.runtime === undefined ? saved.runtime ?? null : form.runtime },
     })
   } catch (e) {
     if (e instanceof ProfileError) editError(e)

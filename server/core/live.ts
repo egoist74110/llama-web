@@ -74,6 +74,8 @@ export type ActivityEvent =
   | { id: number, at: number, kind: 'drain-timeout', modelId: string, profile: string, inflight: number }
   | { id: number, at: number, kind: 'runtime', state: RuntimeStatus['state'], tag: string | null, code: string | null, note?: string | null, from?: string | null }
   | { id: number, at: number, kind: 'tunnel', state: 'connected' | 'error', code: string | null }
+  /** A model asked for a llama.cpp build that cannot be used; the newest official build of the channel runs instead (the saved choice is unchanged). */
+  | { id: number, at: number, kind: 'runtime-fallback', modelId: string, profile: string, from: string, to: string, reason: 'missing' | 'other-platform' | 'invalid' }
 
 /** Activity event without the id / time the hub assigns. */
 export type ActivityInput =
@@ -81,6 +83,7 @@ export type ActivityInput =
   | { kind: 'drain-timeout', modelId: string, profile: string, inflight: number }
   | { kind: 'runtime', state: RuntimeStatus['state'], tag: string | null, code: string | null, note?: string | null, from?: string | null }
   | { kind: 'tunnel', state: 'connected' | 'error', code: string | null }
+  | { kind: 'runtime-fallback', modelId: string, profile: string, from: string, to: string, reason: 'missing' | 'other-platform' | 'invalid' }
 
 /** Short reason key (the diagnosed kind when the output was recognised) or message; null when none. */
 export function errorText(e: unknown): string | null {
@@ -196,6 +199,10 @@ export class LiveHub {
 
   metricsNow(): MetricsDoc | null {
     return this.opts.metrics?.() ?? null
+  }
+
+  onRuntimeFallback(modelId: string, profile: string, from: string, to: string, reason: 'missing' | 'other-platform' | 'invalid'): void {
+    this.record({ kind: 'runtime-fallback', modelId, profile, from, to, reason })
   }
 
   onRuntimeStatus(s: RuntimeStatus): void {

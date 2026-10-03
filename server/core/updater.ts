@@ -7,6 +7,7 @@
 import { mkdirSync, renameSync, rmSync } from 'node:fs'
 import { join, posix, win32 } from 'node:path'
 import { isInsideDir } from './residue'
+import type { RuntimeListing } from './runtime-manager'
 import {
   clearLeftovers, installBuild, installedDir, listInstalled, resolveLatest, RuntimeError, versionsDir,
   type InstallOptions, type NetOptions, type RuntimeStatus,
@@ -29,6 +30,8 @@ export interface LlamacppDoc {
   rollback: string | null
   autoUpdate: boolean
   keepVersions: number
+  /** Official and hand-added builds of this computer (decisions 34 / 35); other platforms are hidden. */
+  runtimes?: RuntimeListing
 }
 
 export class UpdateError extends Error {
@@ -48,6 +51,8 @@ export interface UpdaterOptions extends Pick<InstallOptions, 'fetch' | 'extract'
   setCurrent(tag: string): void
   /** Executable paths of running / starting llama-server processes. */
   usedExes(): string[]
+  /** Tags a model or profile picked by hand: pruning keeps them (decision 35). */
+  protect?(): ReadonlySet<string>
   onStatus?(s: RuntimeStatus): void
   /** Version directories removed by pruning, and the ones that could not be removed. */
   onPrune?(r: PruneResult): void
@@ -144,6 +149,7 @@ export class Updater {
     const { current, keepVersions } = this.opts.llamacpp()
     const protect = this.inUse()
     if (current) protect.add(current)
+    for (const t of this.opts.protect?.() ?? []) protect.add(t)
     const result: PruneResult = { removed: [], failed: [] }
     const base = versionsDir(this.opts.dataDir, this.opts.target)
     mkdirSync(base, { recursive: true })

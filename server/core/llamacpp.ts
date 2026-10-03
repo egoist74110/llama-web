@@ -60,6 +60,8 @@ export interface ReleaseAsset {
   browser_download_url: string
   /** `sha256:<hex>` as published by GitHub. */
   digest?: string | null
+  /** Size in bytes as published by GitHub (absent in test fixtures). */
+  size?: number
 }
 
 export interface LatestBuild {
@@ -215,16 +217,20 @@ export function pickCudaVersion(names: string[], tag: string, os: string, wanted
   return same[0]?.v ?? null
 }
 
-async function sha256File(file: string): Promise<string> {
+export async function sha256File(file: string): Promise<string> {
   const h = createHash('sha256')
   await pipeline(createReadStream(file), h)
   return h.digest('hex')
 }
 
-/** Download one asset to `file` and check its SHA-256. A stalled connection or a shutdown ends it as `network`. */
-export async function download(fetchFn: FetchFn, asset: ReleaseAsset, file: string, net: NetOptions = {}): Promise<void> {
+/**
+ * Download one asset to `file` and check its SHA-256; returns the SHA-256 of the file. A stalled
+ * connection or a shutdown ends it as `network`. Without a published digest it fails (`no-digest`)
+ * unless `allowMissingDigest` is set (hand-added sources: the caller shows the value and asks).
+ */
+export async function download(fetchFn: FetchFn, asset: ReleaseAsset, file: string, net: NetOptions = {}, allowMissingDigest = false): Promise<string> {
   const expected = /^sha256:([0-9a-f]{64})$/i.exec(asset.digest ?? '')?.[1]?.toLowerCase()
-  if (!expected) throw new RuntimeError('no-digest', 'Release asset has no SHA-256 digest', asset.name)
+  if (!expected && !allowMissingDigest) throw new RuntimeError('no-digest', 'Release asset has no SHA-256 digest', asset.name)
   const stall = net.stallMs ?? DEFAULT_STALL_MS
   const g = guard(net.signal, stall)
   try {
@@ -249,7 +255,8 @@ export async function download(fetchFn: FetchFn, asset: ReleaseAsset, file: stri
     g.done()
   }
   const actual = await sha256File(file)
-  if (actual !== expected) throw new RuntimeError('digest-mismatch', `SHA-256 mismatch: ${asset.name}`)
+  if (expected && actual !== expected) throw new RuntimeError('digest-mismatch', `SHA-256 mismatch: ${asset.name}`)
+  return actual
 }
 
 /** Compatibility alias for the bounded system archive installer. */

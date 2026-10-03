@@ -79,6 +79,8 @@ export interface Profile {
   chatTemplate?: string | null
   /** Per-profile preprocess overrides, e.g. `{ image: { maxEdge: 1280 } }`. */
   preprocess?: { image?: Partial<ImagePreprocess> }
+  /** llama.cpp build: `cuda:b11146` / `cpu:b11146` / `metal:b11146` / `custom:<id>`; empty = follow the model, then the global version. */
+  runtime?: string | null
 }
 
 export interface ModelConfig {
@@ -96,6 +98,8 @@ export interface ModelConfig {
    * been answered yet. Missing = an existing or imported model: never asked.
    */
   confirmed?: boolean
+  /** llama.cpp build for this model (see Profile.runtime); a profile's own choice wins. Empty = follow the global version. */
+  runtime?: string | null
   /** Placeholder, not used yet. */
   reserved?: { pinned: boolean, idleUnloadMin: number }
 }
@@ -217,6 +221,9 @@ export function normalizeModels(doc: ModelsDoc): ModelsDoc {
     m.mmproj ??= null
     m.draft ??= null
     m.backend ??= 'llama-server'
+    // A runtime reference is a string or nothing (a wrong type is dropped; a stale value falls back at launch).
+    if (typeof m.runtime !== 'string') delete m.runtime
+    for (const p of Object.values(m.profiles)) if (isObj(p) && typeof p.runtime !== 'string') delete p.runtime
   }
   return doc
 }

@@ -59,7 +59,7 @@ const publicUrl = computed(() => {
 const recentEvents = computed(() => events.value.slice(0, 6))
 function eventDot(e: ActivityEvent): string {
   if (e.kind === 'state') return e.error || e.to === 'crashed' || e.to === 'failed' ? 'lw-dot-err' : e.to === 'ready' ? 'lw-dot-ok' : 'lw-dot-dim'
-  if (e.kind === 'drain-timeout') return 'lw-dot-warn'
+  if (e.kind === 'drain-timeout' || e.kind === 'runtime-fallback') return 'lw-dot-warn'
   if (e.kind === 'tunnel') return e.state === 'connected' ? 'lw-dot-ok' : 'lw-dot-err'
   if (e.state === 'error') return 'lw-dot-err'
   return e.state === 'ready' && e.note === 'updated' ? 'lw-dot-acc' : 'lw-dot-dim'

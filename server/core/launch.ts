@@ -9,6 +9,7 @@ import type { RuntimeTarget } from './platform'
 import type { ModelConfig, ModelsDoc, Settings } from './config'
 import type { Target } from './scheduler'
 import { resolveFileRef } from './scanner'
+import { resolveRuntimeRef, RuntimeResolveError, type FallbackReason, type RuntimeEnv } from './runtimes'
 
 export type LaunchConfigErrorCode = 'model-missing' | 'profile-missing' | 'file-missing' | 'no-runtime' | 'bad-args'
 
@@ -19,8 +20,17 @@ export class LaunchConfigError extends Error {
   }
 }
 
+/** The llama.cpp build a launch uses and, when the requested one was unusable, what was asked and why it was replaced. */
+export interface RuntimeUse {
+  /** The reference that runs (null = the global current version). */
+  ref: string | null
+  label: string
+  fallback: null | { from: string, reason: FallbackReason, to: string }
+}
+
 export interface LaunchPlan {
   exe: string
+  runtime: RuntimeUse
   /** Argument array (without the executable) for an allocated port. */
   args: (port: number) => string[]
   tag: string
@@ -38,6 +48,27 @@ export interface PlanInput {
   exists?: (path: string) => boolean
   platform?: NodeJS.Platform
   target?: RuntimeTarget
+  /** Registered builds and installed official versions, needed to follow a `runtime` reference of a model / profile. */
+  runtimeEnv?: RuntimeEnv
+}
+
+/** The reference a launch asks for: the profile's own choice, else the model's, else none (= global version). */
+export const requestedRuntime = (model: Pick<ModelConfig, 'runtime'>, profileRuntime: string | null | undefined): string =>
+  (profileRuntime || model.runtime || '').trim()
+
+/**
+ * Executable for a launch: follows the profile / model reference when there is one (falling back to
+ * the newest official build of the same channel when it cannot be used), else the global version.
+ */
+function chooseExe(
+  ref: string, input: { dataDir: string, settings: Settings, platform?: NodeJS.Platform, target?: RuntimeTarget, runtimeEnv?: RuntimeEnv, exists?: (p: string) => boolean },
+): { exe: string | null, runtime: RuntimeUse } {
+  if (ref && input.runtimeEnv) {
+    const r = resolveRuntimeRef(ref, { ...input.runtimeEnv, exists: input.runtimeEnv.exists ?? input.exists })
+    return { exe: r.exe, runtime: { ref: r.ref, label: r.label, fallback: r.fallback } }
+  }
+  const cur = input.settings.llamacpp.current
+  return { exe: llamaServerExe(input.dataDir, input.settings, input.platform, input.target), runtime: { ref: null, label: cur, fallback: null } }
 }
 
 /** `data/runtime/llama.cpp/<current>/llama-server(.exe)`, or null when no version is set. */
@@ -52,14 +83,17 @@ export interface PreviewInput {
   settings: Settings
   model: ModelConfig
   /** Form values to preview (may be unsaved). */
-  form: { overrides: ParamOverrides, extraArgs: string, chatTemplate: string | null }
+  form: { overrides: ParamOverrides, extraArgs: string, chatTemplate: string | null, runtime?: string | null }
   host: string
   exists?: (path: string) => boolean
   platform?: NodeJS.Platform
   target?: RuntimeTarget
+  runtimeEnv?: RuntimeEnv
 }
 
 export interface LaunchPreview {
+  /** The build the command runs, and the fallback when the chosen one is unusable. */
+  runtime: RuntimeUse
   /**
    * Full command line as the UI shows it; the same arguments planLaunch would pass. On Windows
    * it is written for cmd.exe (quoting and ^ escapes), elsewhere in the project's own syntax.
@@ -84,7 +118,14 @@ export function previewLaunch(input: PreviewInput): LaunchPreview {
   const exists = input.exists ?? existsSync
   const { settings, model, form } = input
   const missing: LaunchPreview['missing'] = []
-  const exe = llamaServerExe(input.dataDir, settings, input.platform, input.target)
+  let exe: string | null, runtime: RuntimeUse
+  try {
+    ;({ exe, runtime } = chooseExe(requestedRuntime(model, form.runtime), input))
+  } catch (e) {
+    if (!(e instanceof RuntimeResolveError)) throw e
+    exe = null
+    runtime = { ref: null, label: '', fallback: null }
+  }
   if (!exe || !exists(exe)) missing.push('runtime')
 
   const resolve = (kind: 'model' | 'mmproj' | 'draft', ref: ModelConfig['file'] | null) => {
@@ -117,7 +158,7 @@ export function previewLaunch(input: PreviewInput): LaunchPreview {
   return {
     command: win ? formatCmdCommand(program, built.args) : formatPosixCommand(program, built.args),
     shell: win ? 'cmd' : 'posix',
-    ok: built.ok, warnings, effective: built.effective, missing, port,
+    ok: built.ok, warnings, effective: built.effective, missing, port, runtime,
   }
 }
 
@@ -129,7 +170,13 @@ export function planLaunch(target: Target, input: PlanInput): LaunchPlan {
   const profile = model.profiles[target.profile]
   if (!profile) throw new LaunchConfigError('profile-missing', `No profile "${target.profile}" in "${model.id}"`)
 
-  const exe = llamaServerExe(input.dataDir, settings, input.platform, input.target)
+  let exe: string | null, runtime: RuntimeUse
+  try {
+    ;({ exe, runtime } = chooseExe(requestedRuntime(model, profile.runtime), input))
+  } catch (e) {
+    if (e instanceof RuntimeResolveError) throw new LaunchConfigError('no-runtime', `No official llama.cpp build installed for the ${e.channel} channel`)
+    throw e
+  }
   if (!exe || !exists(exe)) throw new LaunchConfigError('no-runtime', `llama-server not found: ${exe ?? '(no current version)'}`)
 
   const resolve = (what: string, ref: typeof model.file | null) => {
@@ -164,6 +211,7 @@ export function planLaunch(target: Target, input: PlanInput): LaunchPlan {
   }
   return {
     exe,
+    runtime,
     args: port => build(port).args,
     tag: `${model.id}:${target.profile}`,
     loadTimeoutMs: settings.scheduler.loadTimeoutSec * 1000,

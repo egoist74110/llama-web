@@ -379,7 +379,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
     <tr><td><code>/api/logs</code></td><td>历史日志列表与读取</td></tr>
     <tr><td><code>/api/llamacpp</code></td><td><code>GET</code> 版本列表、更新状态、回退建议；<code>POST /api/llamacpp/current</code> <code>{ tag }</code> 切换 / 回退到已安装的版本</td></tr>
     <tr><td><code>/api/import</code></td><td>从旧 <code>swap-config.json</code> 导入</td></tr>
-    <tr><td><code>/api/llamacpp/*</code>（阶段 8 扩展）</td><td><code>POST add</code>（<code>{ kind: 'dir' | 'archive' | 'github', … }</code>，先 <code>preview</code> 再确认）、<code>DELETE :ref</code>（拒绝最新官方版 / 在用版本）、<code>POST current</code> 增加通道参数；只返回与本机平台一致的版本</td></tr>
+    <tr><td><code>/api/llamacpp/*</code>（阶段 8 扩展）</td><td><code>POST add/preview</code>（<code>{ kind: 'dir' | 'archive' | 'github', path | url }</code>，暂存并运行 <code>--version</code>）→ <code>POST add/confirm</code>（<code>{ stageId, label?, acceptUnverified? }</code>）/ <code>POST add/cancel</code>、<code>GET delete-plan?ref=</code>（受影响模型、是否当前版本）、<code>DELETE /api/llamacpp/:ref?confirm=1</code>（拒绝最新官方版 / 在用版本）；<code>GET</code> 多返回 <code>runtimes</code>，只含与本机平台一致的版本；<code>POST /api/models/:id/runtime</code> 设模型级版本，方案级走 <code>profiles save</code> 的 <code>form.runtime</code>。<code>POST current</code> 的通道参数随 8-2 的 <code>currentCpu</code> 一起做</td></tr>
     <tr><td><code>GET /api/system</code>（阶段 8）</td><td>本机检测结果与推荐 / 警告；Mac 不含任何 GPU 字段</td></tr>
     <tr><td><code>GET /api/devices</code>（阶段 8）</td><td>某运行库的设备列表；Mac 返回空并标记不适用</td></tr>
     <tr><td><code>GET /api/usage</code>（阶段 8）</td><td>用量汇总（日期范围 + 分组）与 CSV 导出</td></tr>
@@ -673,11 +673,11 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 
   <h3>8-1 · 运行库登记、添加、删除与按模型选择（Opus 5.5）</h3>
   <ul class="tasks">
-    <li class="task" data-done="false"><span class="t">登记与平台隔离（决定 34）：<code>data/runtimes.json</code>（版本字段、原子写 + 备份）；条目带 <code>os</code> / <code>arch</code> / <code>accel</code> / <code>tag</code>；列表与解析只暴露本机平台的版本；按文件头（PE / Mach-O / ELF + 架构）校验，Mac 上拒绝 Windows 版本，Windows 上拒绝 Mac 版本</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">添加三种来源：本机目录（复制，核对含 llama-server 与同目录依赖库、路径与链接边界、大小上限）、本机压缩包（复用 <code>archive.ts</code> 检查）、GitHub 仓库 / Release 地址（只允许 <code>https://github.com/</code>，API 取 Release，按本机 <code>os-arch</code> 选资产，SHA-256 摘要校验；无摘要时显示算出的值并要求确认）。先 <code>preview</code>（来源、大小、版本号 <code>llama-server --version</code>、类型）再确认；运行 <code>--version</code> 要限时。失败不留半成品（先下载到临时目录再改名）</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">删除与保护（决定 35）：每个通道最新的官方版本、正在运行 / 启动中的版本拒绝删除；被模型 / 方案选中的版本列出受影响模型，确认后引用清空；当前版本被删则落到该通道最新官方版；自动清理的保护集加入被选中的版本；手动添加的版本永不自动清理</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">引用与兜底：<code>ModelConfig.runtime</code> / <code>Profile.runtime</code>（引用串，空 = 跟随），<code>launch.ts</code> 按 配置方案 ← 模型 ← 全局 解析；版本不存在 / 属于别的平台 → 兜底到同通道最新官方版，写事件日志，保存的配置不改；通道无官方版才失败。命令预览显示实际使用的版本与是否兜底。无需迁移（缺省 = 跟随）</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">测试：登记读写与损坏恢复、三种来源（假 Release 夹具 / 小 zip / tar.gz）、平台隔离（构造 PE 与 Mach-O 文件头）、删除保护各分支、兜底、残留清理仍只处理 <code>data/runtime/</code> 下的进程（包括 <code>custom/</code>）</span><span class="when"></span></li>
+    <li class="task" data-done="true"><span class="t">登记与平台隔离（决定 34）：<code>data/runtimes.json</code>（版本字段、原子写 + 备份）；条目带 <code>os</code> / <code>arch</code> / <code>accel</code> / <code>tag</code>；列表与解析只暴露本机平台的版本；按文件头（PE / Mach-O / ELF + 架构）校验，Mac 上拒绝 Windows 版本，Windows 上拒绝 Mac 版本</span><span class="when">2026-10-03</span></li>
+    <li class="task" data-done="true"><span class="t">添加三种来源：本机目录（复制，核对含 llama-server 与同目录依赖库、路径与链接边界、大小上限）、本机压缩包（复用 <code>archive.ts</code> 检查）、GitHub 仓库 / Release 地址（只允许 <code>https://github.com/</code>，API 取 Release，按本机 <code>os-arch</code> 选资产，SHA-256 摘要校验；无摘要时显示算出的值并要求确认）。先 <code>preview</code>（来源、大小、版本号 <code>llama-server --version</code>、类型）再确认；运行 <code>--version</code> 要限时。失败不留半成品（先下载到临时目录再改名）</span><span class="when">2026-10-03</span></li>
+    <li class="task" data-done="true"><span class="t">删除与保护（决定 35）：每个通道最新的官方版本、正在运行 / 启动中的版本拒绝删除；被模型 / 方案选中的版本列出受影响模型，确认后引用清空；当前版本被删则落到该通道最新官方版；自动清理的保护集加入被选中的版本；手动添加的版本永不自动清理</span><span class="when">2026-10-03</span></li>
+    <li class="task" data-done="true"><span class="t">引用与兜底：<code>ModelConfig.runtime</code> / <code>Profile.runtime</code>（引用串，空 = 跟随），<code>launch.ts</code> 按 配置方案 ← 模型 ← 全局 解析；版本不存在 / 属于别的平台 → 兜底到同通道最新官方版，写事件日志，保存的配置不改；通道无官方版才失败。命令预览显示实际使用的版本与是否兜底。无需迁移（缺省 = 跟随）</span><span class="when">2026-10-03</span></li>
+    <li class="task" data-done="true"><span class="t">测试：登记读写与损坏恢复、三种来源（假 Release 夹具 / 小 zip / tar.gz）、平台隔离（构造 PE 与 Mach-O 文件头）、删除保护各分支、兜底、残留清理仍只处理 <code>data/runtime/</code> 下的进程（包括 <code>custom/</code>）</span><span class="when">2026-10-03</span></li>
   </ul>
 
   <h3>8-2 · 本机检测与全局 GPU / CPU 默认（Opus 5.5）</h3>
@@ -859,6 +859,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 <section id="changelog">
   <h2>变更记录</h2>
   <table>
+    <tr><td>2026-10-03</td><td>工作包 8-1：运行库登记（<code>runtimes.json</code>，只存 id / 平台 / 加速类型 / 版本号，可执行文件路径永远由 id 推出）、三种添加来源（先暂存预览、确认才登记）、删除保护、模型 / 方案 <code>runtime</code> 引用与兜底。实现中定下：<code>--version</code> 在预览阶段运行（界面要在调用预览前先弹「这会运行你选的程序」）；同一时刻只暂存一个预览、30 分钟过期；GitHub 资产只认 <code>https://github.com/</code>；Mac 要求同架构（不走 Rosetta）。接口见「接口」表。没有改界面（8-5）</td></tr>
     <tr><td>2026-10-03</td><td>新增阶段 9「多模型并行与显存保护」（仅规划）和关键决定 41–44：用户要求放开单开限制（升级后默认仍为 1）、多开前做显存检测并提示风险、保存模型设置时按权重 / KV / 计算缓冲 / mmproj / 草稿 / 系统内存等多方面检查、外部请求触发的多开放不下时要拦住（503）。决定 9 标注由阶段 9 放开；这会改核心行为规则，9-3 开始前须用户确认规则文字。阶段 9 依赖阶段 8 的设备选择</td></tr>
     <tr><td>2026-10-03</td><td>新增阶段 8「运行库、设备与用量」（仅规划，未改代码）和关键决定 34–40：手动添加 / 删除 llama.cpp 版本（目录、压缩包、GitHub 地址；平台隔离；最新官方版不可删）、模型 / 配置方案选版本、全局默认 GPU / CPU 两份、本机检测（CUDA 驱动 / 算力、CPU 指令集 / 内存）、设备选择（单设备）、用量日志（30 天）、模型页添加目录、Mac 专项。关键决定 14「只用官方最新版」放宽。待用户确认的问题见阶段 8 开头</td></tr>
     <tr><td>2026-10-03</td><td>用户要求审查首次使用全流程并补引导（关键决定 33）：向导重写（选择文件夹 / 粘贴路径，不做拖拽，原因见决定）、从扫描启用的模型第一次启动时弹确认框（思考 / 视觉 / MTP 倍数）。向导里去掉旧配置导入。新增 <code>confirmed</code> 字段（无需迁移：缺省视为已确认）</td></tr>

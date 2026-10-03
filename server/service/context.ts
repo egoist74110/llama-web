@@ -25,6 +25,9 @@ import { JsonStore, resolveDataDir, type VersionedDoc } from '../core/store'
 import { TunnelManager, type TunnelInfo } from '../core/tunnel'
 import { CloudflareSetup } from '../core/cloudflare'
 import { Updater } from '../core/updater'
+import { RuntimeInstaller } from '../core/runtime-add'
+import { RuntimeManager } from '../core/runtime-manager'
+import { RuntimeRegistry } from '../core/runtimes'
 import { APP_REPO, APP_VERSION } from '../core/app-info'
 import { AppUpdater } from '../core/app-update'
 import { Hold } from '../core/write-pair'
@@ -52,6 +55,9 @@ export interface AppContext {
   getRuntimeStatus(): RuntimeStatus
   /** llama.cpp versions: list, switch (rollback), pruning. */
   updater: Updater
+  /** Hand-added llama.cpp builds: list, delete (with protection), and the add flow (preview, then confirm). */
+  runtimes: RuntimeManager
+  runtimeAdd: RuntimeInstaller
   /** Updates of llama-web itself (check / download / desktop install hand-off). */
   appUpdate: AppUpdater
   runner: Runner
@@ -206,10 +212,26 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
   // Executables between planLaunch and runner.start: their version directory must not be pruned yet.
   const launching = new Map<number, string>()
   let launchSeq = 0
+  const registry = new RuntimeRegistry(dataDir)
+  startupClose.push(() => registry.close())
+  if (registry.unavailable) logError('runtimes.json is unavailable, hand-added llama.cpp builds are off:', registry.unavailable)
+  if (registry.recovered) log(`runtimes.json was unreadable (kept as ${registry.recovered.movedTo})${registry.recovered.fromBackup ? `; restored ${registry.recovered.fromBackup}` : '; starting with no hand-added builds'}`)
+  const runtimes: RuntimeManager = new RuntimeManager({
+    dataDir, target: selectedTarget, registry,
+    getSettings, getModels,
+    usedExes: () => [...runner.list().map(p => p.spec.exe), ...launching.values()],
+    setCurrent: tag => settingsRef.update((s) => { s.llamacpp.current = tag }),
+    updateModels: fn => { modelsRef.update(fn) },
+    onChanged: () => { updater.refresh(); live.notify() },
+  })
+  const runtimeAdd = new RuntimeInstaller({ dataDir, target: selectedTarget, registry })
+  runtimeAdd.clearLeftovers()
+  startupClose.push(() => runtimeAdd.dispose())
   const updater = new Updater({
     dataDir,
     target: selectedTarget, selectionError,
     llamacpp: () => getSettings().llamacpp,
+    protect: () => runtimes.protectedTags(),
     setCurrent: tag => settingsRef.update((s) => { s.llamacpp.current = tag }),
     usedExes: () => [...runner.list().map(p => p.spec.exe), ...launching.values()],
     onStatus: (s) => {
@@ -263,7 +285,12 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     isPrecondition: e => e instanceof LaunchConfigError && e.code === 'no-runtime',
     launch: async (target) => {
       await cleanupDone
-      const plan = planLaunch(target, { dataDir, settings: getSettings(), models: getModels(), host: runner.host, target: selectedTarget })
+      const plan = planLaunch(target, { dataDir, settings: getSettings(), models: getModels(), host: runner.host, target: selectedTarget, runtimeEnv: runtimes.env() })
+      if (plan.runtime.fallback) {
+        const f = plan.runtime.fallback
+        log(`runtime ${plan.tag}: ${f.from} is ${f.reason}, using ${f.to}`)
+        live.onRuntimeFallback(target.modelId, target.profile, f.from, f.to, f.reason)
+      }
       for (const w of plan.warnings) log(`args ${plan.tag}: ${w.code} ${w.flag ?? ''} ${w.layer ?? ''}`.trim())
       log(`starting ${plan.tag}: ${plan.exe}`)
       const launchId = ++launchSeq
@@ -376,13 +403,15 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     platform, runtimeTarget: selectedTarget,
     getSecrets: secretsRef.get, updateSecrets: secretsRef.update, tunnel, applyTunnel, cloudflare,
     refresh: () => { settingsRef.refresh(); modelsRef.refresh() },
-    getRuntimeStatus: () => updater.getStatus(), updater, appUpdate, runner, scheduler, ops, proxy, publicEntry, applyPublic, live, logs, cleanupDone,
+    getRuntimeStatus: () => updater.getStatus(), updater, runtimes, runtimeAdd, appUpdate, runner, scheduler, ops, proxy, publicEntry, applyPublic, live, logs, cleanupDone,
     shutdown() {
       closing ??= (async () => {
         await cleanupDone
         publicEntry.close()
         await tunnel.shutdown()
         await updater.stop()
+        runtimeAdd.dispose()
+        registry.close()
         appUpdate.stop()
         settingsStore.close()
         modelsStore.close()

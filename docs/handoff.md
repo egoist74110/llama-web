@@ -1,5 +1,15 @@
 # 交接记录
 
+## 2026-10-03 · 工作包 8-1 · Sonnet 5.5
+- 完成：plan 8-1 五项打勾。`server/core/runtimes.ts`（引用串 `cuda:b123` / `cpu:` / `metal:` / `custom:<id>`、`runtimes.json` 登记含损坏恢复、PE / Mach-O / ELF 文件头识别、`resolveRuntimeRef` 与兜底、`refOfExe`）、`runtime-add.ts`（目录 / 压缩包 / GitHub 三种来源：先暂存预览再确认）、`runtime-manager.ts`（列表、删除保护、`protectedTags`）；`launch.ts` 按 方案 ← 模型 ← 全局 解析并在 plan / preview 里带 `runtime`；`models-admin` 加 `runtime` 字段校验（只能选本机平台的版本）；`Updater` 自动清理的保护集加入被选中的版本；兜底时写 `runtime-fallback` 事件（总览「最近事件」和日志事件页能看到）。接口：`/api/llamacpp/add/{preview,confirm,cancel}`、`delete-plan`、`DELETE /api/llamacpp/:ref?confirm=1`、`POST /api/models/:id/runtime`，GET 多返回 `runtimes`。
+- 验证：`bun test` 779 pass / 0 fail（新增约 76 个）；`bun run typecheck` 通过（故意写错确认它真的在检查）。真机：用本机已装的 b11146 目录跑了一次真实「目录 → 暂存 → 运行真实 `--version` → 登记」（4.5 秒、740 MB、识别为 CUDA / b11146），Mac 目标识别不到 `llama-server` 而拒绝；临时数据目录，已清理。
+- 没测：真实 GitHub Release 下载（只有假 fetch）；macOS（Mach-O 头、`.tar.gz` 在 Mac 上的解压、quarantine / 可执行权限用注入函数测，真实行为留给 8-6 的 macOS runner）；从界面走一遍（8-5 才做界面）；`custom/` 里的真实进程被残留清理（用注入的进程表测）。
+- 决定 / 坑：① `--version` 在**预览**阶段就会运行所选程序，8-5 的界面必须在调用预览前先弹「这会运行你选的程序」。② 同一时刻只暂存一个预览，新预览替换旧的，30 分钟过期，启动时清 `.stage-*` / `.del-*`。③ GitHub 来源只认 `https://github.com/`（含资产下载地址），Windows 取 CUDA（有 cudart 就一起装）或 CPU，Mac 只认与本机架构一致的资产；没有公布 SHA-256 时预览返回算出的值，确认要 `acceptUnverified: true`。④ 删除是同步的（改名 → 改模型引用 / 登记 / 当前版本 → 删目录），中途失败会把目录改回去。⑤ 全局「当前版本」仍是 `settings.llamacpp.current`（只管 `acceleration` 选中的那个通道）；`POST current` 的通道参数和 `currentCpu` 留给 8-2。⑥ 全局没有引用时的行为完全没变（旧测试没改）。⑦ 兜底只针对**有引用**的情况；全局 current 缺失仍走原来的 `no-runtime` 前置条件。
+- 剩余：无（8-1 范围内）。`/api/llamacpp` 的界面、兜底提示条在 8-5。
+- 下一步：8-2（Opus 5.5，指南 #p8-2）。
+
+---
+
 ## 2026-10-03 · llama.cpp 多 GPU 调研 · Codex
 - 完成：只调研并新增 `docs/research/multi-gpu.md`；梳理官方多 GPU 参数、当前主线 `tensor` 实验限制、CUDA Release 及与阶段 8/9 的接入关系。未改代码或 `plan.html`。
 - 验证：本机 `llama-server --version` = `0.5.0-dev` build 11146 / commit `7fe450e19`；`--list-devices` 只列出 1 张 RTX 5090（32579 MiB 总量、30991 MiB 空闲），没有加载模型；浏览官方文档和 Release，并引用一份公开 V100 实测。未跑测试；没有多卡性能实测。

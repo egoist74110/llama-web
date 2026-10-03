@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { ArgsSyntaxError, PARAM_DEFS, splitArgs, type ParamOverrides, type ParamValue } from './args'
 import type { ModelConfig, ModelsDoc, Profile } from './config'
 import { aliasOf } from './importer'
+import { parseRuntimeRef } from './runtimes'
 import { resolveFileRef, type ScanEntry } from './scanner'
 import type { FileRef, ModelDir } from './types'
 
@@ -23,7 +24,7 @@ export class EnableError extends Error {
 
 export type ProfileErrorCode =
   | 'model-not-found' | 'profile-not-found' | 'profile-exists' | 'name-invalid' | 'last-profile'
-  | 'bad-overrides' | 'bad-extra-args' | 'template-not-found' | 'in-use' | 'bad-setup'
+  | 'bad-overrides' | 'bad-extra-args' | 'template-not-found' | 'in-use' | 'bad-setup' | 'runtime-invalid'
 
 export class ProfileError extends Error {
   constructor(public code: ProfileErrorCode, message: string = code, public detail?: string) {
@@ -254,6 +255,15 @@ export interface ProfileForm {
   overrides: ParamOverrides
   extraArgs: string
   chatTemplate: string | null
+  /** llama.cpp build reference; undefined = leave the saved choice, null = follow the model / global version. */
+  runtime?: string | null
+}
+
+/** A runtime reference from the client: empty / null clears it; anything else must look like one (`cuda:b123`, `custom:<id>`). */
+export function sanitizeRuntimeRef(raw: unknown): string | null {
+  if (raw === null || raw === '') return null
+  if (typeof raw !== 'string' || !parseRuntimeRef(raw)) throw new ProfileError('runtime-invalid')
+  return raw
 }
 
 /** Shape-check form input from the client (values only; saveProfile checks the template and extra args). */
@@ -264,11 +274,14 @@ export function sanitizeForm(raw: unknown): ProfileForm {
   if (typeof extraArgs !== 'string' || extraArgs.length > 10_000) throw new ProfileError('bad-extra-args')
   const chatTemplate = r.chatTemplate === undefined || r.chatTemplate === '' ? null : r.chatTemplate
   if (chatTemplate !== null && typeof chatTemplate !== 'string') throw new ProfileError('template-not-found')
-  return { overrides: sanitizeOverrides(r.overrides), extraArgs, chatTemplate }
+  return {
+    overrides: sanitizeOverrides(r.overrides), extraArgs, chatTemplate,
+    ...(r.runtime === undefined ? {} : { runtime: sanitizeRuntimeRef(r.runtime) }),
+  }
 }
 
 /** Save the form into a profile. Extra args must parse and the template must exist. */
-export function saveProfile(doc: ModelsDoc, modelId: string, name: string, form: ProfileForm, templates: string[]): Profile {
+export function saveProfile(doc: ModelsDoc, modelId: string, name: string, form: ProfileForm, templates: string[], runtimeOk?: (ref: string) => boolean): Profile {
   const model = findModel(doc, modelId)
   if (!Object.hasOwn(model.profiles, name)) throw new ProfileError('profile-not-found')
   try {
@@ -280,12 +293,25 @@ export function saveProfile(doc: ModelsDoc, modelId: string, name: string, form:
   if (form.chatTemplate !== null && !templates.includes(form.chatTemplate)) {
     throw new ProfileError('template-not-found', 'template-not-found', form.chatTemplate)
   }
+  if (form.runtime && runtimeOk && !runtimeOk(form.runtime)) throw new ProfileError('runtime-invalid')
   const profile = model.profiles[name]!
   // Other fields (per-profile preprocess overrides) are kept.
   profile.overrides = form.overrides
   profile.extraArgs = form.extraArgs
   profile.chatTemplate = form.chatTemplate
+  if (form.runtime !== undefined) {
+    if (form.runtime) profile.runtime = form.runtime
+    else delete profile.runtime
+  }
   return profile
+}
+
+/** The model's own llama.cpp build (profiles can still choose their own); null follows the global version. */
+export function setModelRuntime(doc: ModelsDoc, modelId: string, ref: string | null, runtimeOk?: (ref: string) => boolean): void {
+  const model = findModel(doc, modelId)
+  if (ref && runtimeOk && !runtimeOk(ref)) throw new ProfileError('runtime-invalid')
+  if (ref) model.runtime = ref
+  else delete model.runtime
 }
 
 /** New profile: empty, or a copy of `from`. Returns the (trimmed) name. */

@@ -80,6 +80,9 @@ export function eventText(e: ActivityEvent, modelName: (id: string) => string): 
   if (e.kind === 'tunnel') {
     return e.state === 'connected' ? t.events.tunnel.connected : fmt(t.events.tunnel.error, { reason: tunnelErrorText(e.code ?? '') })
   }
+  if (e.kind === 'runtime-fallback') {
+    return fmt(t.events.runtimeFallback[e.reason], { model: modelName(e.modelId), profile: e.profile, from: e.from, to: e.to })
+  }
   const rt = t.events.runtime
   const vars = { tag: e.tag ?? '', code: e.code ?? '', from: e.from ?? '' }
   if (e.state === 'ready' && e.note === 'updated') return fmt(e.from ? rt.updated : rt.updatedFirst, vars)

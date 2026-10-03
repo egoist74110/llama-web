@@ -10,6 +10,7 @@ import {
   createProfile, deleteProfile, listTemplates, ProfileError, renameProfile, sanitizeForm, saveProfile,
 } from '../../../core/models-admin'
 import { t } from '../../../core/i18n'
+import { selectableHere } from '../../../core/runtimes'
 import { getContext } from '../../../service/context'
 import { assertProfileFree, editError, requireModel, requireProfile, restartIfUp } from '../../../service/models-api'
 
@@ -48,7 +49,8 @@ export default defineEventHandler(async (event) => {
         const name = requireProfile(model, body.name)
         const form = sanitizeForm(body.form)
         const templates = listTemplates(ctx.dataDir)
-        ctx.updateModels((doc) => { saveProfile(doc, model.id, name, form, templates) })
+        const env = ctx.runtimes.env()
+        ctx.updateModels((doc) => { saveProfile(doc, model.id, name, form, templates, r => selectableHere(r, env)) })
         const restarted = body.restart === true && restartIfUp(model.id, name)
         return { ok: true, restarted }
       }
