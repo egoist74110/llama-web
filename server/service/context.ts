@@ -10,6 +10,7 @@ import { authenticate, defaultSecrets, normalizeSecrets, SECRETS_MIGRATIONS, SEC
 import { describeDevices, DeviceProbe, deviceMissing, type DevicesView } from '../core/devices'
 import { LaunchConfigError, llamaServerExe, planLaunch } from '../core/launch'
 import { LogStore } from '../core/logs'
+import { UsageStore } from '../core/usage'
 import type { RuntimeStatus } from '../core/llamacpp'
 import { GpuSampler, parseNvidiaSmi, runNvidiaSmi } from '../core/gpu'
 import { describeModels, LiveHub } from '../core/live'
@@ -93,6 +94,8 @@ export interface AppContext {
   live: LiveHub
   /** Log files under data/logs (model output, events, request records). */
   logs: LogStore
+  /** Usage aggregates under data/logs/usage (decision 40). */
+  usage: UsageStore
   /** Resolves once startup residue cleanup has finished. */
   cleanupDone: Promise<void>
   shutdown(): Promise<void>
@@ -213,6 +216,10 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
   const logs = new LogStore({ dir: join(dataDir, 'logs'), retention: () => getSettings().logs })
   startupClose.push(() => logs.closeAll())
   try { logs.prune() } catch (e) { logError('log retention failed', e) }
+  const usage = new UsageStore({ dir: join(dataDir, 'logs', 'usage'), keepDays: () => getSettings().logs.usageKeepDays })
+  startupClose.push(() => usage.close())
+  try { usage.prune() } catch (e) { logError('usage retention failed', e) }
+  usage.start()
 
   const cleanupDone = runStartupCleanup(dataDir).then((r) => {
     if (r.killed.length || r.skipped.length) log(`residue cleanup: killed ${r.killed.length}, skipped ${r.skipped.length}`)
@@ -386,7 +393,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
   const ops = new ModelOps(scheduler)
   const proxy = createProxy({
     scheduler, getModels, getSettings, onEvent: logProxyEvent,
-    onRequest: (r) => { logs.appendRequest(r); live.onRequest(r) },
+    onRequest: (r) => { logs.appendRequest(r); usage.record(r); live.onRequest(r) },
     speed,
     progressOf: t => live.progressOf(t.modelId, t.profile),
   })
@@ -484,7 +491,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
       const list = exe ? await deviceProbe.list(exe, { refresh: opts?.refresh === true }) : { source: 'unavailable' as const, gpus: [] }
       const info = await detect(opts?.refresh === true)
       return describeDevices(ref, list, info.cpu, info.nvidia?.gpus ?? [])
-    }, runtimes, runtimeAdd, appUpdate, runner, scheduler, ops, proxy, publicEntry, applyPublic, live, logs, cleanupDone,
+    }, runtimes, runtimeAdd, appUpdate, runner, scheduler, ops, proxy, publicEntry, applyPublic, live, logs, usage, cleanupDone,
     shutdown() {
       closing ??= (async () => {
         networkProbe.abort()
@@ -502,6 +509,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
         gpu.stop()
         await scheduler.shutdown()
         await runner.stopAll()
+        usage.close()
         logs.closeAll()
         dataLock.release()
       })()

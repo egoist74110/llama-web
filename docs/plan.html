@@ -706,9 +706,9 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 
   <h3>8-4 · 用量日志（Sonnet 5.5）</h3>
   <ul class="tasks">
-    <li class="task" data-done="false"><span class="t">用量存储（决定 40）：请求结束时累加到「小时 × 模型 × 方案 × 来源 × key 名」，内存累加、定时原子写 <code>data/logs/usage/YYYY-MM-DD.json</code>，退出时落盘；不含对话内容与参数</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">保留与清理：<code>logs.usageKeepDays</code>（7 / 14 / 30，上限 30），启动时和每日清理，只删 <code>data/logs/usage/</code> 下符合命名且超期的文件；损坏文件跳过不中断</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t"><code>GET /api/usage</code>（范围 + 分组 + CSV）和日志页「用量」标签：每日 token 柱图、按模型 / 来源 / key 汇总表、导出 CSV；文案进 <code>i18n/zh-CN.ts</code>；测试覆盖聚合、跨日、清理边界、崩溃后读取半写文件</span><span class="when"></span></li>
+    <li class="task" data-done="true"><span class="t">用量存储（决定 40）：请求结束时累加到「小时 × 模型 × 方案 × 来源 × key 名」，内存累加、定时原子写 <code>data/logs/usage/YYYY-MM-DD.json</code>，退出时落盘；不含对话内容与参数</span><span class="when">2026-10-03</span></li>
+    <li class="task" data-done="true"><span class="t">保留与清理：<code>logs.usageKeepDays</code>（7 / 14 / 30，上限 30），启动时和每日清理，只删 <code>data/logs/usage/</code> 下符合命名且超期的文件；损坏文件跳过不中断</span><span class="when">2026-10-03</span></li>
+    <li class="task" data-done="true"><span class="t"><code>GET /api/usage</code>（范围 + 分组 + CSV）和日志页「用量」标签：每日 token 柱图、按模型 / 来源 / key 汇总表、导出 CSV；文案进 <code>i18n/zh-CN.ts</code>；测试覆盖聚合、跨日、清理边界、崩溃后读取半写文件</span><span class="when">2026-10-03</span></li>
   </ul>
 
   <h3>8-5 · 运行库、设备与检测界面（Sonnet 5.5）</h3>

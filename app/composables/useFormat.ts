@@ -134,3 +134,8 @@ export function requestTokensText(r: Pick<RequestRecord, 'promptTokens' | 'compl
 export function formatMs(ms: number): string {
   return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)} s`
 }
+
+/** 1234 -> `1,234`; used for token and request counts. */
+export function formatCount(n: number): string {
+  return Math.round(n).toLocaleString('zh-CN')
+}

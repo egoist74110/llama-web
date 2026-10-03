@@ -1030,7 +1030,7 @@ export default {
   logs: {
     title: '日志',
     subtitle: '模型输出、事件和请求。页面里只保留最近的内容，完整记录保存在 data/logs，重启后仍可查看。',
-    tabs: { model: '模型输出', events: '事件', requests: '请求' },
+    tabs: { model: '模型输出', events: '事件', requests: '请求', usage: '用量' },
     filters: {
       model: '模型',
       allModels: '全部模型',
@@ -1069,6 +1069,29 @@ export default {
     errors: {
       badRequest: '日志文件名或类型不正确。',
       notFound: '找不到这个日志文件，可能已按保留策略清理。',
+    },
+  },
+  // Usage log tab (decision 40): per-day counters, no conversation content.
+  usage: {
+    note: '用量只统计次数、token、耗时和图片张数，不含对话内容和请求参数，最多保留 {days} 天。',
+    range: { label: '时间范围', d7: '近 7 天', d14: '近 14 天', d30: '近 30 天' },
+    export: '导出 CSV',
+    refresh: '刷新',
+    loadFailed: '读取用量失败',
+    empty: '这段时间还没有用量记录。',
+    cards: { requests: '请求', tokens: 'token', prompt: '输入', completion: '输出', failed: '失败 / 中断', avg: '平均耗时' },
+    chart: {
+      title: '每日 token',
+      prompt: '输入',
+      completion: '输出',
+      tip: '{day}：输入 {prompt}，输出 {completion}，{requests} 次请求',
+    },
+    groups: { model: '按模型', source: '按来源', key: '按 key', profile: '按配置方案' },
+    columns: { name: '名称', requests: '请求', ok: '成功', failed: '失败 / 中断', prompt: '输入 token', completion: '输出 token', avg: '平均耗时', images: '图片' },
+    names: { none: '（无）', unknownModel: '（未匹配到模型）', noKey: '（无 key）', noProfile: '（无方案）' },
+    errors: {
+      badRequest: '分组方式不正确。',
+      badRange: '日期范围不正确（格式 YYYY-MM-DD，最多 62 天，开始不能晚于结束）。',
     },
   },
   // Import of the old swap-config.json.

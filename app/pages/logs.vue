@@ -6,7 +6,7 @@ import type { ActivityEvent } from '~~/server/core/live'
 import type { LogFileInfo, LogRead } from '~~/server/core/logs'
 import type { RequestRecord } from '~~/server/core/request-log'
 
-type Tab = 'model' | 'events' | 'requests'
+type Tab = 'model' | 'events' | 'requests' | 'usage'
 const LIVE = '__live__'
 
 const { state, events, requests, logLines, serverNow } = useLive()
@@ -14,11 +14,12 @@ const toast = useToast()
 
 // /logs?tab=events|requests (the overview's "all" links) opens that tab.
 const initialTab = useRoute().query.tab
-const tab = ref<Tab>(initialTab === 'events' || initialTab === 'requests' ? initialTab : 'model')
+const tab = ref<Tab>(initialTab === 'events' || initialTab === 'requests' || initialTab === 'usage' ? initialTab : 'model')
 const tabs: Array<{ value: Tab, label: string }> = [
   { value: 'model', label: t.logs.tabs.model },
   { value: 'events', label: t.logs.tabs.events },
   { value: 'requests', label: t.logs.tabs.requests },
+  { value: 'usage', label: t.logs.tabs.usage },
 ]
 // Sentinel = all models; /logs?model=<id> (the failure card's link) preselects one.
 const model = ref(toSelectValue(typeof useRoute().query.model === 'string' ? useRoute().query.model as string : ''))
@@ -186,7 +187,7 @@ watch([shownCount, tab, range], async () => {
 watch([tab, range, model], () => { stick = true })
 
 const isEmpty = computed(() => (tab.value === 'requests' ? !requestRows.value.length : !(tab.value === 'model' ? modelRows.value : eventRows.value).length))
-const emptyText = computed(() => (needle.value && !isEmpty.value ? t.logs.empty.noMatch : t.logs.empty[tab.value]))
+const emptyText = computed(() => (needle.value && !isEmpty.value || tab.value === 'usage' ? t.logs.empty.noMatch : t.logs.empty[tab.value]))
 const durationAgo = (at: number) => formatDuration(serverNow.value - at)
 
 // Terminal colouring by level, judged from the line text (llama-server has no level field).
@@ -216,7 +217,8 @@ function lineClass(text: string): string {
           {{ x.label }}
         </button>
       </div>
-      <USelect v-model="model" :items="modelItems" class="w-44" :aria-label="t.logs.filters.model" />
+      <template v-if="tab !== 'usage'">
+        <USelect v-model="model" :items="modelItems" class="w-44" :aria-label="t.logs.filters.model" />
       <USelect v-model="range" :items="rangeItems" class="w-52" :aria-label="t.logs.filters.range" />
       <UInput v-model="search" class="min-w-48 flex-1 basis-52" icon="i-lucide-search" :placeholder="t.logs.filters.searchPlaceholder" :aria-label="t.logs.filters.search" />
       <UButton
@@ -229,7 +231,11 @@ function lineClass(text: string): string {
         {{ paused ? t.logs.filters.resume : t.logs.filters.pause }}
       </UButton>
       <UButton color="neutral" variant="outline" icon="i-lucide-refresh-cw" :aria-label="t.logs.filters.refresh" :title="t.logs.filters.refresh" @click="loadListing" />
+      </template>
     </div>
+
+    <UsagePanel v-if="tab === 'usage'" />
+    <template v-else>
 
     <p v-if="tab === 'requests'" class="m-0 text-xs text-dimmed">
       {{ t.logs.requests.noContentNote }}
@@ -317,5 +323,6 @@ function lineClass(text: string): string {
         </table>
       </div>
     </section>
+    </template>
   </div>
 </template>

@@ -1,5 +1,12 @@
 # 交接记录
 
+## 2026-10-03 · 工作包 8-4 · Sonnet 5.5
+- 完成：plan 8-4 三项打勾。`server/core/usage.ts`（`UsageStore`：按「小时 × 模型 × 方案 × 来源 × key」内存累加，30 秒定时 + 退出时原子写 `data/logs/usage/YYYY-MM-DD.json`，同一天重启会接着旧文件；只存计数；半写 / 损坏 / 非法行读取时跳过；`prune()` 只删符合 `YYYY-MM-DD.json` 的超期文件，启动时和跨日时清理；报表与 CSV）；`logs.usageKeepDays`（默认 30，规整为 7 / 14 / 30，旧配置自动补，无需迁移）；`GET /api/usage?from&to[&format=csv&groupBy=]`（范围最多 62 天；CSV 加 BOM，以 `= + - @` 开头的单元格加 `'` 防公式注入）；日志页「用量」标签（`UsagePanel.vue`：汇总卡、每日 token 柱图、按模型 / 来源 / key / 方案表、导出 CSV）；`context.ts` 里和请求日志共用同一条记录（`onRequest`），退出时 `usage.close()`。文案在 `i18n/zh-CN.ts` 的 `usage`。
+- 验证：`bun test` 923 通过 0 失败（新增 `tests/core/usage.test.ts` 23 个：聚合、跨日、清理边界、半写文件、CSV、设置规整）；`bun run typecheck` 通过。没有运行：界面（浏览器里看过柱图 / 窄屏 / 深色）、经 HTTP 的 `/api/usage`、真机。
+- 决定 / 坑：① 保留「含今天共 N 天」（日志的 keepDays 是 N+1 天，这里按「近 30 天」口径）。② 没有解析出模型的失败请求也计入（模型为空）；`GET /v1/models` 本来就不产生记录，不计。③ 请求按到达时间归日 / 小时（本地时区）。④ 设置里还没有 `usageKeepDays` 的界面（接口也不开放），只能改 settings.json；要不要放进设置页由 8-5 / 用户定。⑤ 用量页提示文案里的「30 天」是写死的，没读设置值。
+- 剩余：无（8-4 范围内）。
+- 下一步：8-5（Sonnet 5.5，指南 #p8-5）。
+
 ## 2026-10-03 · 阶段 8 审查意见处理（8-1 至 8-3）· Sonnet 5.5
 - 范围：处理 `docs/reviews/stage-8-codex.md` 的 7 条意见（S8-001 至 S8-007）。逐条对照代码核实，全部成立，已修复并补测试；每条的处理结果写在审查文件该条的「缺失测试」之后，文件头有汇总。没有「不成立」，没有需要用户决定的项。本次不打勾，不改计划（没有新增或变更的决定）。
 - 修复：S8-001 解压前按 `tar -tv` 列表预检展开大小 / 条目数 / 可用空间，解压中每 100 毫秒复核实际写出量（`archive.ts`，新错误码 `extract-too-large`）；S8-002 `context.ts` 在 `planLaunch` 之后、设备探测之前登记运行库保护，`try/finally` 释放；S8-003 `runtime-manager.ts` 删除时后续写入失败，依次还原登记、模型 / 方案引用、目录；S8-004 缺失的自定义运行库按登记条目的类型兜底（`resolveRuntimeRef`）；S8-005 迁移 5→6 对 `acceleration: 'cpu'` 的安装用旧 `defaults` 初始化 `defaultsCpu`；S8-006 `buildLaunchArgs` 返回额外参数覆盖后的有效设备（`extraDevice`），`planLaunch` / `previewLaunch` 的 `device` 用它；S8-007 每次预览独立 `AbortController`，`cancel()` 中止进行中的导入（下载 / 解压 / `--version`），新错误码 `cancelled`（接口 409，文案「已取消添加。」）。

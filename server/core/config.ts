@@ -3,6 +3,7 @@
 import { DEFAULT_LAUNCH_DEFAULTS, normalizeDevice, type LaunchDefaults, type ParamOverrides } from './args'
 import type { FileRef, ModelDir } from './types'
 import type { Acceleration, PlatformInfo } from './platform'
+import { normalizeUsageKeepDays } from './usage'
 
 /** Name of the built-in profile created when a model is enabled or imported. */
 export const DEFAULT_PROFILE = '默认'
@@ -82,7 +83,7 @@ export interface Settings {
   /** Launch defaults for a CPU build on Windows (decision 36); chosen by the runtime a launch ends up using. */
   defaultsCpu: LaunchDefaults
   preprocess: { image: ImagePreprocess }
-  logs: { keepRunsPerModel: number, keepDays: number }
+  logs: { keepRunsPerModel: number, keepDays: number, usageKeepDays: number }
   gpu: { sampleSec: number }
   /** First-run wizard: `done` is set when it is finished or skipped. */
   setup: { done: boolean }
@@ -172,7 +173,7 @@ export function defaultSettings(platform?: PlatformInfo): Settings {
     },
     defaultsCpu: { ...DEFAULT_CPU_DEFAULTS },
     preprocess: { image: { enabled: true, maxEdge: 896, format: 'jpeg', quality: 90 } },
-    logs: { keepRunsPerModel: 20, keepDays: 14 },
+    logs: { keepRunsPerModel: 20, keepDays: 14, usageKeepDays: 30 },
     gpu: { sampleSec: 2 },
     setup: { done: false },
   }
@@ -261,6 +262,8 @@ export function normalizeSettings(doc: Settings): Settings {
     if (dev !== undefined && !normalizeDevice(dev)) delete out[key].device
     else if (dev !== undefined) out[key].device = normalizeDevice(dev)
   }
+  // Usage log retention: 7 / 14 / 30 only, never above 30 (decision 40).
+  out.logs.usageKeepDays = normalizeUsageKeepDays(out.logs.usageKeepDays)
   // Placeholder (decision 9): the field exists but the online limit stays fixed at 1.
   out.scheduler.maxLoaded = 1
   return out as Settings
