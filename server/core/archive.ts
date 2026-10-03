@@ -5,7 +5,14 @@ import { isAbsolute, join, relative, win32 } from 'node:path'
 import { killTree } from './runner'
 import { RuntimeError, type NetOptions } from './llamacpp'
 
-export interface ArchiveOptions extends NetOptions { extractTimeoutMs?: number }
+export interface ArchiveOptions extends NetOptions {
+  extractTimeoutMs?: number
+  /** Budget for the whole destination tree (bytes / entries), counting what is already in it. */
+  maxBytes?: number
+  maxEntries?: number
+  /** Free bytes on the destination volume; the listed expanded size must fit. */
+  freeBytes?: number | null
+}
 export function safeArchivePath(name: string): boolean {
   const p = name.replace(/\\/g, '/')
   return !!p && !/[\x00-\x1f\x7f:]/.test(p) && !isAbsolute(p) && !win32.isAbsolute(p)
@@ -71,6 +78,38 @@ export async function archiveCommand(cmd: string, args: string[], opts: ArchiveO
     })
   })
 }
+/** Expanded size and entry count announced by a `tar -tv` listing (sizes it cannot parse count as 0). */
+export function listingTotals(verbose: string): { bytes: number, entries: number } {
+  let bytes = 0, entries = 0
+  for (const line of verbose.trim().split(/\r?\n/)) {
+    if (!line) continue
+    entries++
+    if (line[0] === '-') bytes += Number(/^\S+\s+\d+\s+\S+\s+\S+\s+(\d+)\s/.exec(line)?.[1] ?? 0)
+  }
+  return { bytes, entries }
+}
+/** Size and entry count of what is on disk under `dir`; stops walking once a budget is passed. */
+function treeUsage(dir: string, maxBytes: number, maxEntries: number): { bytes: number, entries: number } {
+  let bytes = 0, entries = 0
+  const walk = (d: string): boolean => {
+    let names: string[]
+    try { names = readdirSync(d) } catch { return false }
+    for (const n of names) {
+      const f = join(d, n)
+      let st
+      try { st = lstatSync(f) } catch { continue }
+      entries++
+      if (st.isDirectory()) { if (walk(f)) return true }
+      else if (st.isFile()) bytes += st.size
+      if (bytes > maxBytes || entries > maxEntries) return true
+    }
+    return false
+  }
+  walk(dir)
+  return { bytes, entries }
+}
+const tooLarge = (detail?: string) => new RuntimeError('extract-too-large', 'The archive expands beyond the allowed size', detail)
+
 export async function extractArchive(file: string, dest: string, opts: ArchiveOptions = {}): Promise<void> {
   if (!/\.(zip|tar\.gz|tgz)$/i.test(file)) throw new RuntimeError('extract-failed', 'Unsupported archive format')
   mkdirSync(dest, { recursive: true })
@@ -79,6 +118,31 @@ export async function extractArchive(file: string, dest: string, opts: ArchiveOp
   const names = await archiveCommand(cmd, ['-tf', file], opts)
   const types = await archiveCommand(cmd, ['-tvf', file], opts)
   validateArchive(names, types)
-  await archiveCommand(cmd, ['-xf', file, '-C', dest], opts)
+
+  const maxBytes = opts.maxBytes ?? Infinity, maxEntries = opts.maxEntries ?? Infinity
+  const announced = listingTotals(types)
+  const have = treeUsage(dest, maxBytes, maxEntries)
+  if (announced.bytes + have.bytes > maxBytes || announced.entries + have.entries > maxEntries) throw tooLarge()
+  if (opts.freeBytes != null && announced.bytes > opts.freeBytes) throw tooLarge(`space:${announced.bytes}`)
+
+  // The listing is only what the archive claims: also watch what is really written and stop at the budget.
+  const ac = new AbortController()
+  const onOuter = () => ac.abort()
+  opts.signal?.addEventListener('abort', onOuter, { once: true })
+  let exceeded = false
+  const timer = setInterval(() => {
+    const u = treeUsage(dest, maxBytes, maxEntries)
+    if (u.bytes > maxBytes || u.entries > maxEntries) { exceeded = true; ac.abort() }
+  }, 100)
+  try {
+    await archiveCommand(cmd, ['-xf', file, '-C', dest], { ...opts, signal: ac.signal })
+  } catch (e) {
+    if (exceeded) throw tooLarge()
+    throw e
+  } finally {
+    clearInterval(timer)
+    opts.signal?.removeEventListener('abort', onOuter)
+  }
+  if (exceeded) throw tooLarge()
   checkExtractedTree(dest)
 }

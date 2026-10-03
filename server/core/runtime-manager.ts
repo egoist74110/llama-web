@@ -188,20 +188,42 @@ export class RuntimeManager {
     } catch (e) {
       throw new DeleteError('locked', 'The version is in use by a program and cannot be removed', (e as Error).message)
     }
+    // Three writes (models, registry, settings) are not one transaction: undo each committed one when a later one fails.
+    const clearedRefs: Array<{ modelId: string, model: boolean, profiles: string[] }> = []
+    const entry = p.kind === 'custom' ? this.o.registry.list().find(x => x.id === p.id) : undefined
+    let registryRemoved = false
     try {
       if (plan.affected.length) {
         this.o.updateModels((doc) => {
+          clearedRefs.length = 0
           for (const m of doc.models) {
-            if (m.runtime === ref) delete m.runtime
-            for (const pr of Object.values(m.profiles)) if (pr.runtime === ref) delete pr.runtime
+            const c = { modelId: m.id, model: m.runtime === ref, profiles: [] as string[] }
+            if (c.model) delete m.runtime
+            for (const [name, pr] of Object.entries(m.profiles)) if (pr.runtime === ref) { delete pr.runtime; c.profiles.push(name) }
+            if (c.model || c.profiles.length) clearedRefs.push(c)
           }
         })
       }
-      if (p.kind === 'custom') this.o.registry.remove(p.id)
+      if (p.kind === 'custom') { this.o.registry.remove(p.id); registryRemoved = true }
       if (plan.isCurrent && plan.becomesCurrent) this.o.setCurrent(plan.becomesCurrent, p.kind === 'official' ? p.accel : this.o.target.acceleration)
     } catch (e) {
-      try { rename(trash, dir) } catch { /* the directory stays in the trash name; cleared at startup */ }
-      throw new DeleteError('failed', 'Could not update the configuration', (e as Error).message)
+      const undone: string[] = []
+      if (registryRemoved && entry) { try { this.o.registry.add(entry) } catch { undone.push('registry') } }
+      if (clearedRefs.length) {
+        try {
+          this.o.updateModels((doc) => {
+            for (const c of clearedRefs) {
+              const m = doc.models.find(x => x.id === c.modelId)
+              if (!m) continue
+              if (c.model) m.runtime = ref
+              for (const name of c.profiles) if (m.profiles[name]) m.profiles[name]!.runtime = ref
+            }
+          })
+        } catch { undone.push('models') }
+      }
+      try { rename(trash, dir) } catch { undone.push('directory') /* stays in the trash name; cleared at startup */ }
+      const detail = (e as Error).message + (undone.length ? ` (could not restore: ${undone.join(', ')})` : '')
+      throw new DeleteError('failed', 'Could not update the configuration', detail)
     }
     try { rmSync(trash, { recursive: true, force: true }) } catch { /* cleared at the next start */ }
     this.o.onChanged?.()

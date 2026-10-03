@@ -71,6 +71,13 @@ describe('settings version 6', () => {
     expect(keep.llamacpp.currentCpu).toBe('b9')
     expect(keep.defaultsCpu).toEqual({ ctxSize: 1 })
     expect(SETTINGS_MIGRATIONS[5]!({}).llamacpp.currentCpu).toBe('') // no llamacpp section at all
+    // a CPU-only installation keeps the launch parameters it had; the others get the built-in CPU set
+    const custom = { ...DEFAULT_LAUNCH_DEFAULTS, ctxSize: 4096, threads: 8, extraArgs: '--jinja --no-warmup' }
+    const cpuUser = normalizeSettings(SETTINGS_MIGRATIONS[5]!({ llamacpp: { acceleration: 'cpu', current: 'b200' }, defaults: custom }))
+    expect(defaultsFor(cpuUser, { os: 'win32' }, 'cpu')).toMatchObject({ ctxSize: 4096, threads: 8, extraArgs: '--jinja --no-warmup' })
+    const cudaUser = normalizeSettings(SETTINGS_MIGRATIONS[5]!({ llamacpp: { acceleration: 'cuda' }, defaults: custom }))
+    expect(defaultsFor(cudaUser, { os: 'win32' }, 'cpu')).toMatchObject({ ctxSize: DEFAULT_CPU_DEFAULTS.ctxSize, extraArgs: DEFAULT_CPU_DEFAULTS.extraArgs })
+    expect(defaultsFor(cudaUser, { os: 'win32' }, 'cuda')).toMatchObject({ ctxSize: 4096 })
   })
 
   test('the whole chain from version 1 reaches 6 and normalizes', () => {

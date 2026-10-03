@@ -331,50 +331,55 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     launch: async (target) => {
       await cleanupDone
       const plan = planLaunch(target, { dataDir, settings: getSettings(), models: getModels(), host: runner.host, target: selectedTarget, runtimeEnv: runtimes.env() })
-      // The chosen device must be on the list of the build that runs; there is no silent switch to another one (decision 39).
-      if (plan.device !== 'auto' && plan.device !== 'cpu') {
-        const devices = await deviceProbe.list(plan.exe)
-        if (deviceMissing(plan.device, devices)) throw new LaunchConfigError('device-missing', `Device ${plan.device} is not on the device list of ${plan.runtime.label}`)
-      }
-      if (plan.runtime.fallback) {
-        const f = plan.runtime.fallback
-        log(`runtime ${plan.tag}: ${f.from} is ${f.reason}, using ${f.to}`)
-        live.onRuntimeFallback(target.modelId, target.profile, f.from, f.to, f.reason)
-      }
-      for (const w of plan.warnings) log(`args ${plan.tag}: ${w.code} ${w.flag ?? ''} ${w.layer ?? ''}`.trim())
-      log(`starting ${plan.tag}: ${plan.exe}`)
+      // Protect the build from deletion from here on (before the first await) until it runs or the start fails.
       const launchId = ++launchSeq
       launching.set(launchId, plan.exe)
-      const progress = new LoadProgress()
-      const report = (p: number | null) => { if (p !== null) live.onLoadProgress(target.modelId, target.profile, p) }
-      const stopTracking = trackWeightLoad({ files: plan.weightFiles, progress, report, usedMiB: totalUsedMiB })
-      // One output file per start; lines also go to the live feed of the log page.
-      const run = logs.startRun(target.modelId)
-      run.append(`# llama-web: starting ${plan.tag} at ${new Date().toISOString()}`)
       try {
-        const rp = await runner.start({
-          exe: plan.exe, args: plan.args, tag: plan.tag, loadTimeoutMs: plan.loadTimeoutMs,
-          onLine: (stream, line) => {
-            run.append(line)
-            live.onLogLine(target.modelId, target.profile, stream, line)
-            report(progress.line(line))
-          },
-          onPartial: (_stream, partial) => report(progress.partial(partial)),
-        })
-        launching.delete(launchId) // runner.list() covers it from here on
-        void rp.ready.then(stopTracking, stopTracking)
-        void rp.exited.then((x) => {
+        // The chosen device must be on the list of the build that runs; there is no silent switch to another one (decision 39).
+        if (plan.device !== 'auto' && plan.device !== 'cpu') {
+          const devices = await deviceProbe.list(plan.exe)
+          if (deviceMissing(plan.device, devices)) throw new LaunchConfigError('device-missing', `Device ${plan.device} is not on the device list of ${plan.runtime.label}`)
+        }
+        if (plan.runtime.fallback) {
+          const f = plan.runtime.fallback
+          log(`runtime ${plan.tag}: ${f.from} is ${f.reason}, using ${f.to}`)
+          live.onRuntimeFallback(target.modelId, target.profile, f.from, f.to, f.reason)
+        }
+        for (const w of plan.warnings) log(`args ${plan.tag}: ${w.code} ${w.flag ?? ''} ${w.layer ?? ''}`.trim())
+        log(`starting ${plan.tag}: ${plan.exe}`)
+        const progress = new LoadProgress()
+        const report = (p: number | null) => { if (p !== null) live.onLoadProgress(target.modelId, target.profile, p) }
+        const stopTracking = trackWeightLoad({ files: plan.weightFiles, progress, report, usedMiB: totalUsedMiB })
+        // One output file per start; lines also go to the live feed of the log page.
+        const run = logs.startRun(target.modelId)
+        run.append(`# llama-web: starting ${plan.tag} at ${new Date().toISOString()}`)
+        try {
+          const rp = await runner.start({
+            exe: plan.exe, args: plan.args, tag: plan.tag, loadTimeoutMs: plan.loadTimeoutMs,
+            onLine: (stream, line) => {
+              run.append(line)
+              live.onLogLine(target.modelId, target.profile, stream, line)
+              report(progress.line(line))
+            },
+            onPartial: (_stream, partial) => report(progress.partial(partial)),
+          })
+          launching.delete(launchId) // runner.list() covers it from here on
+          void rp.ready.then(stopTracking, stopTracking)
+          void rp.exited.then((x) => {
+            stopTracking()
+            run.append(`# llama-web: exited code=${x.code ?? '-'} signal=${x.signal ?? '-'}${x.requested ? ' (stopped by llama-web)' : ''}`)
+            run.close()
+          })
+          return rp
+        } catch (e) {
+          launching.delete(launchId)
           stopTracking()
-          run.append(`# llama-web: exited code=${x.code ?? '-'} signal=${x.signal ?? '-'}${x.requested ? ' (stopped by llama-web)' : ''}`)
+          run.append(`# llama-web: could not start: ${(e as Error).message}`)
           run.close()
-        })
-        return rp
-      } catch (e) {
+          throw e
+        }
+      } finally {
         launching.delete(launchId)
-        stopTracking()
-        run.append(`# llama-web: could not start: ${(e as Error).message}`)
-        run.close()
-        throw e
       }
     },
   })

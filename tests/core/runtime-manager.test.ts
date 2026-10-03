@@ -195,6 +195,32 @@ describe('delete protection', () => {
     expect(listInstalled(data, 'win32', win)).toEqual(['b300', 'b100'])
     expect(readdirSync(join(versionsDir(data), 'win32-x64-cuda')).filter(n => n.startsWith('.del-'))).toEqual([])
   })
+  test('a registry write failing after the models were saved restores the model and profile references', () => {
+    const doc = normalizeModels({ version: 1, models: [model('a', 'custom:r1', { default: undefined, fast: 'custom:r1' }), model('b', 'custom:r2')] })
+    const s = setup({ models: doc })
+    addCustom(s.registry, entry('r1')); addCustom(s.registry, entry('r2'))
+    s.registry.remove = () => { throw new Error('runtimes.json is read-only') }
+    expect(codeOf(() => s.mgr.remove('custom:r1', { confirm: true }))).toBe('failed')
+    expect(s.models.models[0]!.runtime).toBe('custom:r1')
+    expect(s.models.models[0]!.profiles.fast!.runtime).toBe('custom:r1')
+    expect(s.models.models[1]!.runtime).toBe('custom:r2')
+    expect(s.registry.list().map(e => e.id).sort()).toEqual(['r1', 'r2'])
+    expect(existsSync(join(customDir(data, 'r1'), 'llama-server.exe'))).toBe(true)
+    expect(readdirSync(join(versionsDir(data), 'custom')).filter(n => n.startsWith('.del-'))).toEqual([])
+  })
+  test('a settings write failing after models and registry were saved undoes both', () => {
+    install(win, 'b100'); install(win, 'b300')
+    let models = normalizeModels({ version: 1, models: [model('a', 'cuda:b100')] })
+    const registry = new RuntimeRegistry(data)
+    const mgr = new RuntimeManager({
+      dataDir: data, target: win, registry, getSettings: () => ({ ...defaultSettings(), llamacpp: { ...defaultSettings().llamacpp, current: 'b100' } }), getModels: () => models, usedExes: () => [],
+      setCurrent: () => { throw new Error('settings.json is read-only') },
+      updateModels: (fn) => { const d = structuredClone(models); fn(d); models = normalizeModels(d) },
+    })
+    expect(codeOf(() => mgr.remove('cuda:b100', { confirm: true }))).toBe('failed')
+    expect(models.models[0]!.runtime).toBe('cuda:b100')
+    expect(listInstalled(data, 'win32', win)).toEqual(['b300', 'b100'])
+  })
   test('the old flat Windows layout can be deleted too', () => {
     const flat = join(versionsDir(data), 'b50')
     mkdirSync(flat, { recursive: true })

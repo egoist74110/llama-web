@@ -181,7 +181,7 @@ export function previewLaunch(input: PreviewInput): LaunchPreview {
   return {
     command: win ? formatCmdCommand(program, built.args) : formatPosixCommand(program, built.args),
     shell: win ? 'cmd' : 'posix',
-    ok: built.ok, warnings, effective: built.effective, missing, port, runtime, device,
+    ok: built.ok, warnings, effective: built.effective, missing, port, runtime, device: built.device,
   }
 }
 
@@ -239,7 +239,7 @@ export function planLaunch(target: Target, input: PlanInput): LaunchPlan {
   return {
     exe,
     runtime,
-    device,
+    device: probe.device,
     args: port => build(port).args,
     tag: `${model.id}:${target.profile}`,
     loadTimeoutMs: settings.scheduler.loadTimeoutSec * 1000,

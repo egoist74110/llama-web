@@ -290,8 +290,12 @@ export function resolveRuntimeRef(ref: string, env: RuntimeEnv): ResolvedRuntime
   const exists = env.exists ?? existsSync
   const p = parseRuntimeRef(ref)
   const host = env.target
+  // The channel the reference belongs to (decision 35: same channel): an official reference names it,
+  // a registered build knows its type; anything else follows the global channel.
+  const entry = p?.kind === 'custom' ? env.entries.find(x => x.id === p.id) : undefined
+  const wanted = p?.kind === 'official' ? p.accel : entry?.accel
   const fallback = (reason: FallbackReason): ResolvedRuntime => {
-    const channel = p?.kind === 'official' && channelsFor(host).includes(p.accel) ? p.accel : host.acceleration
+    const channel = wanted && channelsFor(host).includes(wanted) ? wanted : host.acceleration
     const tag = installedOfficial(env, channel)[0]
     if (!tag) throw new RuntimeResolveError('no-official', channel)
     const to = officialRef(channel, tag)

@@ -213,6 +213,48 @@ describe('local archive', () => {
     await expect(installer({ extract: fakeExtract(machoArm64(), win) }).inst.preview({ kind: 'archive', path: zip })).rejects.toMatchObject({ code: 'wrong-platform' })
     expect(leftovers()).toEqual([])
   })
+  test('cancel while extracting aborts it: no preview, no leftovers, nothing to confirm, and the next add works', async () => {
+    const zip = join(work, 'a.zip')
+    writeFileSync(zip, 'ZIPDATA')
+    let calls = 0, sawAbort = false
+    const { inst } = installer({
+      extract: async (_f, dest, o) => {
+        if (++calls === 1) {
+          await new Promise<void>(r => o?.signal?.addEventListener('abort', () => { sawAbort = true; r() }, { once: true }))
+        }
+        mkdirSync(dest, { recursive: true }); writeFileSync(join(dest, exeName(win)), peX64())
+      },
+    })
+    const settled = inst.preview({ kind: 'archive', path: zip }).then(() => 'ok', (e: AddError) => e.code)
+    await new Promise(r => setTimeout(r, 30))
+    inst.cancel()
+    expect(await settled).toBe('cancelled')
+    expect(sawAbort).toBe(true)
+    expect(leftovers()).toEqual([])
+    expect(() => inst.confirm('anything')).toThrow()
+    const p = await inst.preview({ kind: 'archive', path: zip }) // the same installer is usable again
+    expect(p.version).toContain('11146')
+    expect(inst.confirm(p.stageId).id).toBeTruthy()
+  })
+  test('cancel while the version probe runs: the probe is told to stop and its result is not published', async () => {
+    const dir = buildDir('cancelprobe')
+    let calls = 0, probeSignal: AbortSignal | undefined, release: () => void = () => {}
+    const { inst } = installer({
+      runVersion: async (_e, _c, _t, signal) => {
+        if (++calls === 1) { probeSignal = signal; await new Promise<void>((r) => { release = r }) }
+        return VERSION
+      },
+    })
+    const settled = inst.preview({ kind: 'dir', path: dir }).then(() => 'ok', (e: AddError) => e.code)
+    await new Promise(r => setTimeout(r, 30))
+    inst.cancel()
+    expect(probeSignal?.aborted).toBe(true)
+    release() // a probe that ignores the signal and still returns a version
+    expect(await settled).toBe('cancelled')
+    expect(leftovers()).toEqual([])
+    const p = await inst.preview({ kind: 'dir', path: dir })
+    expect(p.version).toContain('11146')
+  })
   test('too little free disk space (3x the archive) is refused before extracting', async () => {
     const zip = join(work, 'a.zip')
     writeFileSync(zip, '0123456789')

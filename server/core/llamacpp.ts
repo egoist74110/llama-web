@@ -16,7 +16,7 @@ const REPO = 'ggml-org/llama.cpp'
 const TAG_RE = /^b\d+$/
 
 export type RuntimeErrorCode =
-  | 'network' | 'no-nightly-tag' | 'bad-tag' | 'asset-missing' | 'no-digest' | 'digest-mismatch' | 'extract-failed' | 'no-server-exe' | 'no-compatible-cuda'
+  | 'network' | 'no-nightly-tag' | 'bad-tag' | 'asset-missing' | 'no-digest' | 'digest-mismatch' | 'extract-failed' | 'extract-too-large' | 'no-server-exe' | 'no-compatible-cuda'
 
 export class RuntimeError extends Error {
   constructor(public code: RuntimeErrorCode, message: string, public detail?: string) {

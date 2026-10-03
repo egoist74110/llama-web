@@ -216,7 +216,10 @@ export const SETTINGS_MIGRATIONS: Record<number, (old: any) => any> = {
     if (!isObj(old.llamacpp)) old.llamacpp = {}
     old.llamacpp.currentCpu ??= old.llamacpp.acceleration === 'cpu' && typeof old.llamacpp.current === 'string' ? old.llamacpp.current : ''
     if (old.llamacpp.cudaRuntime === '13.3') old.llamacpp.cudaRuntime = ''
-    old.defaultsCpu ??= { ...DEFAULT_CPU_DEFAULTS }
+    // A CPU-only installation has been launching with `defaults`: its CPU set starts from them so the same
+    // launch keeps the same parameters (other installations get the built-in CPU defaults).
+    const cpuOnly = old.llamacpp.acceleration === 'cpu' && isObj(old.defaults)
+    old.defaultsCpu ??= cpuOnly ? { ...DEFAULT_CPU_DEFAULTS, ...old.defaults } : { ...DEFAULT_CPU_DEFAULTS }
     return old
   },
 }

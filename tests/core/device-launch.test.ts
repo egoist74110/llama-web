@@ -6,6 +6,7 @@ import {
   buildLaunchArgs, deviceArgs, DEFAULT_LAUNCH_DEFAULTS, normalizeDevice, paramValueOk, resolveDevice, type BuildInput, type LaunchDefaults,
 } from '../../server/core/args'
 import { DEFAULT_CPU_DEFAULTS, defaultSettings, hasDeviceSelection, normalizeModels, normalizeSettings, type ModelsDoc, type Settings } from '../../server/core/config'
+import { deviceMissing } from '../../server/core/devices'
 import { classify, diagnose } from '../../server/core/errors'
 import { LaunchConfigError, planLaunch, previewLaunch } from '../../server/core/launch'
 import { ProfileError, sanitizeDevice, sanitizeForm, sanitizeOverrides, saveProfile, setModelDevice } from '../../server/core/models-admin'
@@ -187,6 +188,22 @@ describe('planLaunch device', () => {
     expect(hasDeviceSelection({ os: 'darwin' })).toBe(false)
     expect(hasDeviceSelection({ os: 'win32' })).toBe(true)
   })
+  test('the device of the final command is the one the extra args set, so the launch check looks at that', () => {
+    const withExtra = (extraArgs: string, device = 'CUDA7') => {
+      const m = models(); m.models[0]!.profiles.a = { overrides: {}, extraArgs, device }
+      return plan('a', settings(), m)
+    }
+    for (const [extra, want] of [
+      ['--device CUDA0', 'CUDA0'], ['-dev CUDA0', 'CUDA0'], ['--device=CUDA0', 'CUDA0'],
+      ['--device none', 'cpu'], ['--device=none', 'cpu'], ['--device CUDA0,CUDA1', 'auto'],
+    ] as const) {
+      const p = withExtra(extra)
+      expect(p.device).toBe(want)
+      expect(p.args(7100)).not.toContain('CUDA7')
+    }
+    expect(withExtra('--ctx-size 4096').device).toBe('CUDA7') // nothing about the device: the form's choice stays
+    expect(deviceMissing(withExtra('--device CUDA0').device, { source: 'list-devices', gpus: [{ id: 'CUDA0', name: 'x', totalMiB: 1, freeMiB: 1 }] })).toBe(false)
+  })
   test('LaunchConfigError carries the device-missing code', () => {
     const e = new LaunchConfigError('device-missing', 'x')
     expect(diagnose(e)?.kind).toBe('device-missing')
@@ -206,6 +223,11 @@ describe('previewLaunch device', () => {
     expect(r.command).toContain('--split-mode none')
     expect(previewLaunch(input('cpu')).command).toContain('--device none')
     expect(previewLaunch(input(null)).device).toBe('auto')
+  })
+  test('the preview names the device of the final command when the extra args override it', () => {
+    const r = previewLaunch({ ...input('CUDA7'), form: { overrides: {}, extraArgs: '--device CUDA0', chatTemplate: null, device: 'CUDA7' } })
+    expect(r.device).toBe('CUDA0')
+    expect(r.command).not.toContain('CUDA7')
   })
   test('on a Mac the preview has no device', () => {
     const r = previewLaunch(input('CUDA0', 'darwin'))

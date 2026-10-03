@@ -271,6 +271,21 @@ export interface BuildResult {
   warnings: ArgWarning[]
   /** Merged form values (before extra-args replacement). */
   effective: LaunchParams
+  /**
+   * The device the final command asks for in launch-plan terms (`auto`, `cpu` or one id): the form's choice,
+   * unless the extra args carry their own `--device` / `-dev` (then that value; several devices count as `auto`).
+   */
+  device: string
+}
+
+/** Device choice of the last `--device` / `-dev` in the extra args (`--device X`, `-dev X`, `--device=X`), or null when absent. */
+export function extraDevice(extra: ArgGroup[]): string | null {
+  const g = [...extra].reverse().find(x => x.canon === '--device')
+  if (!g) return null
+  const first = g.tokens[0] ?? ''
+  const raw = first.includes('=') && first.startsWith('--') ? first.slice(first.indexOf('=') + 1) : (g.tokens[1] ?? '')
+  const v = raw.trim().toLowerCase() === 'none' ? 'cpu' : normalizeDevice(raw)
+  return v || 'auto'
 }
 
 /** Merge form values: defaults <- each override layer (undefined inherits, null/'' clears). */
@@ -375,7 +390,7 @@ export function buildLaunchArgs(input: BuildInput): BuildResult {
   }
   args.push('--host', input.host, '--port', String(input.port))
 
-  return { ok: !warnings.some(w => w.severity === 'error'), args, warnings, effective }
+  return { ok: !warnings.some(w => w.severity === 'error'), args, warnings, effective, device: extraDevice(extra) ?? device }
 }
 
 /** Quote one argument for display (Windows / POSIX-ish double quotes). */

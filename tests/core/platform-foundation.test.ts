@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { archiveCommand, extractArchive, safeArchivePath, validateArchive } from '../../server/core/archive'
+import { archiveCommand, extractArchive, listingTotals, safeArchivePath, validateArchive } from '../../server/core/archive'
 import { defaultSettings, normalizeSettings, SETTINGS_MIGRATIONS, SETTINGS_VERSION } from '../../server/core/config'
 import { acquireDataLock } from '../../server/core/data-lock'
 import { installedDir, installLatest, listInstalled, versionsDir } from '../../server/core/llamacpp'
@@ -147,6 +147,36 @@ for (const ext of ['zip', 'tar.gz', 'tgz']) test(`real system extractor accepts 
   expect(packed.status).toBe(0)
   await extractArchive(file, join(data, 'out'))
   expect(readFileSync(join(data, 'out', 'file.txt'), 'utf8')).toBe('fixture')
+}, 30000)
+test('archive listing totals add up announced sizes and entries', () => {
+  const v = '-rw-r--r--  0 user group     100 Jan  1  2024 a.bin\ndrwxr-xr-x  0 user group       0 Jan  1  2024 d/\n-rw-r--r--  0 user group      50 Jan  1  2024 d/b.bin'
+  expect(listingTotals(v)).toEqual({ bytes: 150, entries: 3 })
+})
+test('extraction refuses an archive that expands past the budget before writing anything', async () => {
+  const src = join(data, 'src'); mkdirSync(src); writeFileSync(join(src, 'padding.bin'), Buffer.alloc(8192))
+  const file = join(data, 'bomb.tar.gz')
+  const tar = process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : '/usr/bin/tar'
+  expect(spawnSync(tar, ['-czf', file, '-C', src, 'padding.bin']).status).toBe(0)
+  const out = join(data, 'out')
+  await expect(extractArchive(file, out, { maxBytes: 1024 })).rejects.toMatchObject({ code: 'extract-too-large' })
+  expect(existsSync(join(out, 'padding.bin'))).toBe(false)
+  // not enough free space for the announced size
+  await expect(extractArchive(file, out, { maxBytes: 1 << 20, freeBytes: 4096 })).rejects.toMatchObject({ code: 'extract-too-large', detail: 'space:8192' })
+  expect(existsSync(join(out, 'padding.bin'))).toBe(false)
+  // entry count
+  await expect(extractArchive(file, out, { maxEntries: 0 })).rejects.toMatchObject({ code: 'extract-too-large' })
+  // within the budget it still extracts
+  await extractArchive(file, out, { maxBytes: 1 << 20, maxEntries: 10, freeBytes: 1 << 30 })
+  expect(readFileSync(join(out, 'padding.bin')).length).toBe(8192)
+}, 30000)
+test('extraction budget counts what the destination already holds (overlay)', async () => {
+  const src = join(data, 'src'); mkdirSync(src); writeFileSync(join(src, 'b.bin'), Buffer.alloc(600))
+  const file = join(data, 'b.tar.gz')
+  const tar = process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : '/usr/bin/tar'
+  expect(spawnSync(tar, ['-czf', file, '-C', src, 'b.bin']).status).toBe(0)
+  const out = join(data, 'out'); mkdirSync(out); writeFileSync(join(out, 'a.bin'), Buffer.alloc(600))
+  await expect(extractArchive(file, out, { maxBytes: 1000 })).rejects.toMatchObject({ code: 'extract-too-large' })
+  expect(existsSync(join(out, 'b.bin'))).toBe(false)
 }, 30000)
 test('archive command timeout and cancellation wait for the extractor to close', async () => {
   await expect(archiveCommand(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { extractTimeoutMs: 50 })).rejects.toThrow('timed out')

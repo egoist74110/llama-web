@@ -25,7 +25,7 @@ import {
 
 export type AddErrorCode =
   | 'bad-source' | 'not-found' | 'bad-url' | 'network' | 'no-asset' | 'no-server-exe' | 'wrong-platform' | 'unsafe'
-  | 'too-large' | 'disk-space' | 'run-failed' | 'digest-mismatch' | 'needs-digest-confirm' | 'stale-stage' | 'busy' | 'unavailable' | 'failed'
+  | 'too-large' | 'disk-space' | 'run-failed' | 'digest-mismatch' | 'needs-digest-confirm' | 'stale-stage' | 'busy' | 'unavailable' | 'cancelled' | 'failed'
 
 export class AddError extends Error {
   constructor(public code: AddErrorCode, message: string, public detail?: string) {
@@ -92,7 +92,7 @@ export interface InstallerOptions {
   fetch?: FetchFn
   extract?: (file: string, dest: string, options?: ArchiveOptions) => Promise<void>
   /** Run `llama-server --version`; returns the combined output. Tests replace it. */
-  runVersion?: (exe: string, cwd: string, timeoutMs: number) => Promise<string>
+  runVersion?: (exe: string, cwd: string, timeoutMs: number, signal?: AbortSignal) => Promise<string>
   /** Free bytes on the volume of `dir`, or null when unknown (then the check is skipped). */
   freeBytes?: (dir: string) => number | null
   /** HTTP / extraction limits (tests). */
@@ -110,15 +110,15 @@ export function parseVersionOutput(out: string): { line: string, tag: string } {
   return { line, tag: num ? `b${num}` : '' }
 }
 
-export function defaultRunVersion(exe: string, cwd: string, timeoutMs: number): Promise<string> {
+export function defaultRunVersion(exe: string, cwd: string, timeoutMs: number, signal?: AbortSignal): Promise<string> {
   return new Promise((res, rej) => {
     const child = spawn(exe, ['--version'], { cwd, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, detached: process.platform !== 'win32', shell: false })
     let out = '', done = false, timedOut = false
-    const finish = (fn: () => void) => { if (!done) { done = true; clearTimeout(timer); fn() } }
-    const timer = setTimeout(() => {
-      timedOut = true
-      if (child.pid) killTree(child.pid).catch(() => {}).finally(() => child.kill('SIGKILL'))
-    }, timeoutMs)
+    const finish = (fn: () => void) => { if (!done) { done = true; clearTimeout(timer); signal?.removeEventListener('abort', stop); fn() } }
+    const stop = () => { if (child.pid) killTree(child.pid).catch(() => {}).finally(() => child.kill('SIGKILL')) }
+    const timer = setTimeout(() => { timedOut = true; stop() }, timeoutMs)
+    signal?.addEventListener('abort', stop, { once: true })
+    if (signal?.aborted) stop()
     const take = (d: Buffer) => { if (out.length < 64_000) out += d.toString('utf8') }
     child.stdout.on('data', take)
     child.stderr.on('data', take)
@@ -254,6 +254,7 @@ export class RuntimeInstaller {
   private stage: Stage | null = null
   private working = false
   private readonly limits: typeof ADD_LIMITS
+  /** Aborted by cancel() / dispose(); a new one per preview, so a cancelled add does not block the next one. */
   private abort = new AbortController()
 
   constructor(private readonly opts: InstallerOptions) {
@@ -274,9 +275,15 @@ export class RuntimeInstaller {
     }
   }
 
-  /** Drop the staged preview (if any) and stop a running download. */
+  /** Drop the staged preview (if any) and stop the add that is running (download, extraction, version probe). */
   cancel(stageId?: string): void {
+    if (this.working && !stageId) this.abort.abort(new Error('cancelled'))
     if (this.stage && (!stageId || this.stage.id === stageId)) this.discard()
+  }
+
+  /** An add that was cancelled must not publish a preview, whichever step it was in. */
+  private checkCancelled(): void {
+    if (this.abort.signal.aborted) throw new AddError('cancelled', 'The add was cancelled')
   }
 
   dispose(): void {
@@ -309,6 +316,7 @@ export class RuntimeInstaller {
     if (this.working) throw new AddError('busy', 'Another add is in progress')
     this.working = true
     this.discard()
+    this.abort = new AbortController()
     const dir = join(this.baseDirExisting(), `.stage-${process.pid}-${this.now}`)
     try {
       mkdirSync(join(dir, 'out'), { recursive: true })
@@ -328,6 +336,7 @@ export class RuntimeInstaller {
         needCheck = r.digests.some(d => !d.verified)
       } else throw new AddError('bad-source', 'Unknown source kind')
 
+      this.checkCancelled()
       const out = join(dir, 'out')
       const exe = serverExeName(this.opts.target.os)
       const root = findRoot(out, exe)
@@ -346,7 +355,9 @@ export class RuntimeInstaller {
       }
       const warnings: string[] = []
       if (measured.libs === 0) warnings.push('no-shared-libs')
-      const out2 = await (this.opts.runVersion ?? defaultRunVersion)(join(root, exe), root, this.limits.versionTimeoutMs)
+      this.checkCancelled()
+      const out2 = await (this.opts.runVersion ?? defaultRunVersion)(join(root, exe), root, this.limits.versionTimeoutMs, this.abort.signal)
+      this.checkCancelled()
       const { line, tag } = parseVersionOutput(out2)
       if (!line) throw new AddError('run-failed', 'llama-server --version printed no version')
 
@@ -363,6 +374,7 @@ export class RuntimeInstaller {
       return preview
     } catch (e) {
       try { rmSync(dir, { recursive: true, force: true }) } catch { /* cleared at the next start */ }
+      if (this.abort.signal.aborted) throw new AddError('cancelled', 'The add was cancelled')
       if (e instanceof AddError) throw e
       if (e instanceof RuntimeError) throw new AddError(e.code === 'extract-failed' ? 'unsafe' : e.code === 'network' ? 'network' : e.code === 'digest-mismatch' ? 'digest-mismatch' : 'failed', e.message, e.detail)
       throw new AddError('failed', 'Adding the build failed', (e as Error)?.message)
@@ -400,8 +412,15 @@ export class RuntimeInstaller {
   private async extractInto(file: string, dest: string): Promise<void> {
     const extract = this.opts.extract ?? extractArchive
     try {
-      await extract(file, dest, { ...this.opts.net, signal: this.abort.signal })
+      const free = (this.opts.freeBytes ?? defaultFreeBytes)(this.baseDirExisting())
+      await extract(file, dest, {
+        ...this.opts.net, signal: this.abort.signal,
+        maxBytes: this.limits.maxTreeBytes, maxEntries: this.limits.maxFiles, freeBytes: free,
+      })
     } catch (e) {
+      if (e instanceof RuntimeError && e.code === 'extract-too-large') {
+        throw e.detail?.startsWith('space:') ? new AddError('disk-space', 'Not enough free disk space', e.detail.slice(6)) : new AddError('too-large', 'The build is too large')
+      }
       if (e instanceof RuntimeError) throw new AddError(e.code === 'extract-failed' ? 'unsafe' : 'failed', e.message, e.detail)
       throw e
     }

@@ -169,6 +169,19 @@ describe('resolveRuntimeRef', () => {
     expect(resolveRuntimeRef('custom:r3', e).fallback?.reason).toBe('missing')
     expect(resolveRuntimeRef('custom:zzz', e).fallback?.reason).toBe('missing')
   })
+  test('a registered build whose files are gone falls back inside its own channel, not the global one', () => {
+    install({ ...win, acceleration: 'cpu' }, 'b200'); install(win, 'b300')
+    const cpuGone = entry('r1', { accel: 'cpu' })
+    const cudaGone = entry('r2', { accel: 'cuda' })
+    // global CUDA, CPU entry missing -> newest official CPU build
+    const r = resolveRuntimeRef('custom:r1', env(win, [cpuGone, cudaGone]))
+    expect(r.fallback).toEqual({ from: 'custom:r1', reason: 'missing', to: 'cpu:b200' })
+    expect(r.ref).toBe('cpu:b200')
+    // global CPU, CUDA entry missing -> newest official CUDA build
+    expect(resolveRuntimeRef('custom:r2', env({ ...win, acceleration: 'cpu' }, [cpuGone, cudaGone])).fallback?.to).toBe('cuda:b300')
+    // the entry's channel has no official build: that is reported (not silently another channel)
+    expect(() => resolveRuntimeRef('custom:r1', { ...env(win, [cpuGone]), installed: a => (a === 'cuda' ? ['b300'] : []) })).toThrow(RuntimeResolveError)
+  })
   test('the channel has no official build at all: the only failure', () => {
     expect(() => resolveRuntimeRef('cuda:b1', env())).toThrow(RuntimeResolveError)
     expect(() => resolveRuntimeRef('custom:r9', env())).toThrow(RuntimeResolveError)

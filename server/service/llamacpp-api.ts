@@ -35,7 +35,7 @@ export function runtimeError(e: unknown): never {
   const msgs = t.llamacpp.runtimes
   if (e instanceof AddError) {
     const status = e.code === 'not-found' ? 404 : e.code === 'network' ? 502
-      : ['busy', 'stale-stage', 'needs-digest-confirm'].includes(e.code) ? 409 : 400
+      : ['busy', 'stale-stage', 'needs-digest-confirm', 'cancelled'].includes(e.code) ? 409 : 400
     throw createError({ statusCode: status, message: fmt((msgs.add as Record<string, string>)[e.code] ?? e.code, { detail: e.detail ?? '' }) })
   }
   if (e instanceof DeleteError) {

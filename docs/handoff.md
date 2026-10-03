@@ -1,5 +1,13 @@
 # 交接记录
 
+## 2026-10-03 · 阶段 8 审查意见处理（8-1 至 8-3）· Sonnet 5.5
+- 范围：处理 `docs/reviews/stage-8-codex.md` 的 7 条意见（S8-001 至 S8-007）。逐条对照代码核实，全部成立，已修复并补测试；每条的处理结果写在审查文件该条的「缺失测试」之后，文件头有汇总。没有「不成立」，没有需要用户决定的项。本次不打勾，不改计划（没有新增或变更的决定）。
+- 修复：S8-001 解压前按 `tar -tv` 列表预检展开大小 / 条目数 / 可用空间，解压中每 100 毫秒复核实际写出量（`archive.ts`，新错误码 `extract-too-large`）；S8-002 `context.ts` 在 `planLaunch` 之后、设备探测之前登记运行库保护，`try/finally` 释放；S8-003 `runtime-manager.ts` 删除时后续写入失败，依次还原登记、模型 / 方案引用、目录；S8-004 缺失的自定义运行库按登记条目的类型兜底（`resolveRuntimeRef`）；S8-005 迁移 5→6 对 `acceleration: 'cpu'` 的安装用旧 `defaults` 初始化 `defaultsCpu`；S8-006 `buildLaunchArgs` 返回额外参数覆盖后的有效设备（`extraDevice`），`planLaunch` / `previewLaunch` 的 `device` 用它；S8-007 每次预览独立 `AbortController`，`cancel()` 中止进行中的导入（下载 / 解压 / `--version`），新错误码 `cancelled`（接口 409，文案「已取消添加。」）。
+- 验证：`bun test` 900 通过 0 失败（58 个文件）；`bun run typecheck` 通过。S8-002 的测试已确认在没有修复时失败。没有运行：真机 / GPU、HTTP 端到端、界面、macOS。
+- 已知边界：① S8-001 的写盘监视是 100 毫秒轮询，间隔内仍可能多写一小段。② S8-003 没有跨重启的持久化操作记录，进程在三次写入之间被杀仍可能留下中间状态。③ S8-005 对 `acceleration: 'auto'` 的 v5 用户不复制旧 defaults（迁移时无法知道本机实际用 CPU 还是 GPU）。④ `launch-protection.test.ts` 只在 Windows 运行。⑤ 8-5 界面要处理新错误码 `cancelled`（文案已在 `i18n/zh-CN.ts` 的 `add`），取消按钮现在对进行中的导入也有效；调用 preview 前仍须先弹「会运行你选的程序」确认（审查文件「执行确认的已知边界」）。
+- 提交说明：开始时工作树里另有别人（Codex）未提交 / 已暂存的改动（局域网地址相关：`network.ts`、`live.ts`、`overview` 等，以及 `docs/plan.html`、`context.ts` 里的对应片段）。本次只提交了自己的文件和 `context.ts` 里自己的那一段，其余原样保留。
+- 阶段 8 剩余：8-4（用量）、8-5（界面）、8-6（Mac 联调）、8-7（多 GPU）仍按 `docs/plan.html`；下一个工作包按 `docs/claude-guide.html` 的阶段 8 卡片。
+
 ## 2026-10-03 · 总览局域网 API 地址 · Codex
 - 完成：本机打开总览时，API 地址用服务端主网卡 IPv4 + 页面实际端口；局域网地址 / 公网域名继续使用原地址，隧道展示不变。`network.lanHost` 经 LiveHub 的 snapshot 推送，页面不新增请求或轮询。默认路由通过不发送数据的 UDP connect 探测，失败时优先物理网卡、排除回环 / 链路本地地址；找不到可用 IPv4 保留原地址。Nuxt 开发监听改为 `0.0.0.0`，匹配正式主入口。同步决定 20、接口说明和阶段 2 完成项。
 - 验证：专项 `bun test tests/core/network.test.ts tests/core/live.test.ts tests/app/overview.test.ts` 38 pass；最终 `bun test` 849 pass / 0 fail / 51 skip（包含同时进行的运行库修正）；`bun run typecheck`、`git diff --check` 通过。真实默认路由探测选中主网卡；`/api/state` 有 LAN 地址，本机通过该 IP 请求 `/v1/models` 返回 200 / JSON / 3 个模型，IPv4 回环也返回 200，监听确认为 `0.0.0.0:3000`。公网域名保留规则通过构造测试。

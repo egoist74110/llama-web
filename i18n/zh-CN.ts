@@ -938,6 +938,7 @@ export default {
         'needs-digest-confirm': '这个文件没有公布 SHA-256，需要你确认后才能添加。',
         'stale-stage': '预览已经失效，请重新选择来源。',
         'busy': '正在添加另一个版本，请稍候。',
+        'cancelled': '已取消添加。',
         'unavailable': 'data/runtimes.json 不能使用：{detail}',
         'failed': '添加失败：{detail}',
       },
