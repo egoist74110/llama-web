@@ -1,0 +1,858 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>llama-web 控制台</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:inherit}a:hover{color:inherit}
+.lw{font-family:'Geist','Microsoft YaHei UI','PingFang SC',system-ui,sans-serif;-webkit-font-smoothing:antialiased;font-size:14px;line-height:1.5}
+.lw *{box-sizing:border-box}
+.lw.light{--bg:#f3f4f6;--surface:#ffffff;--surface-2:#f7f8fa;--sunken:#eceef1;--border:#e3e5ea;--border-strong:#d2d5db;--text:#16181c;--muted:#575e69;--dim:#6b727e;--term:#f8f9fb;--ok:#15803d;--warn:#b45309;--err:#c81e1e;--accent-ink:var(--accent);--accent-soft:color-mix(in oklab,var(--accent) 11%,transparent);--shadow:0 1px 2px rgba(16,18,22,.05),0 0 0 1px rgba(16,18,22,.02);--overlay:rgba(20,22,26,.28)}
+.lw.dark{--bg:#17181b;--surface:#1f2125;--surface-2:#26282d;--sunken:#1b1c20;--border:#2d3036;--border-strong:#3b3f46;--text:#e4e6ea;--muted:#a0a7b1;--dim:#878e99;--term:#1a1b1f;--ok:#4ade80;--warn:#fbbf24;--err:#f87171;--accent-ink:color-mix(in oklab,var(--accent) 62%,#ffffff);--accent-soft:color-mix(in oklab,var(--accent) 22%,transparent);--shadow:0 1px 2px rgba(0,0,0,.25);--overlay:rgba(0,0,0,.45)}
+.mono{font-family:'Geist Mono',ui-monospace,Consolas,monospace}
+.num{font-variant-numeric:tabular-nums}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow)}
+.nav-item{display:flex;align-items:center;gap:10px;width:100%;min-height:40px;padding:8px 10px;border:1px solid transparent;border-radius:9px;background:transparent;color:var(--muted);font:inherit;font-size:14px;text-align:left;cursor:pointer}
+.nav-item:hover{background:var(--surface-2);color:var(--text)}
+.nav-item.is-active{background:var(--surface);border-color:var(--border);color:var(--text);font-weight:500;box-shadow:var(--shadow)}
+.nav-item.is-active svg{color:var(--accent-ink)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:34px;padding:0 12px;border:1px solid var(--border-strong);border-radius:8px;background:var(--surface);color:var(--text);font:inherit;font-size:13px;font-weight:500;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn:hover{background:var(--surface-2)}
+.btn-primary{background:var(--accent);border-color:transparent;color:#ffffff}
+.btn-primary:hover{background:color-mix(in oklab,var(--accent) 88%,#000000)}
+.btn-ghost{background:transparent;border-color:transparent;color:var(--muted)}
+.btn-ghost:hover{background:var(--surface-2);color:var(--text)}
+.btn-icon{width:34px;padding:0}
+.btn-sm{height:28px;padding:0 10px;font-size:12px}
+.chip{display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--muted);font-size:12px;white-space:nowrap}
+.chip-accent{border-color:transparent;background:var(--accent-soft);color:var(--accent-ink)}
+.st{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 9px;border-radius:999px;font-size:12px;font-weight:500;white-space:nowrap}
+.st::before{content:'';width:7px;height:7px;border-radius:50%;background:currentColor}
+.st-ready{color:var(--ok);background:color-mix(in oklab,var(--ok) 12%,transparent)}
+.st-loading{color:var(--warn);background:color-mix(in oklab,var(--warn) 13%,transparent)}
+.st-loading::before{animation:lwpulse 1.2s ease-in-out infinite}
+.st-failed{color:var(--err);background:color-mix(in oklab,var(--err) 12%,transparent)}
+.st-stopped{color:var(--dim);background:var(--sunken)}
+@keyframes lwpulse{50%{opacity:.25}}
+.live-dot{width:7px;height:7px;border-radius:50%;background:var(--ok);animation:lwpulse 1.6s ease-in-out infinite}
+.seg{display:inline-flex;gap:2px;padding:3px;border:1px solid var(--border);border-radius:10px;background:var(--sunken)}
+.seg button{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;border:0;border-radius:7px;background:transparent;color:var(--muted);font:inherit;font-size:13px;cursor:pointer;white-space:nowrap}
+.seg button:hover{color:var(--text)}
+.seg button.on{background:var(--surface);color:var(--text);font-weight:500;box-shadow:var(--shadow)}
+.seg .count{font-size:11px;color:var(--dim)}
+.input{height:34px;width:100%;padding:0 10px;border:1px solid var(--border-strong);border-radius:8px;background:var(--surface);color:var(--text);font:inherit;font-size:13px}
+.input:focus{outline:3px solid var(--accent-soft);border-color:var(--accent)}
+.field{display:flex;flex-direction:column;gap:6px;min-width:0}
+.field label{font-size:12px;font-weight:500;color:var(--muted)}
+.field .flag{font-size:11px;color:var(--dim)}
+.row{border-top:1px solid var(--border)}
+.row:first-child{border-top:0}
+.rowh:hover{background:var(--surface-2)}
+.switch{position:relative;flex:none;width:38px;height:22px;padding:0;border:0;border-radius:999px;background:var(--border-strong);cursor:pointer}
+.switch::after{content:'';position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fafafa;box-shadow:0 1px 2px rgba(0,0,0,.2)}
+.switch.on{background:var(--accent)}
+.switch.on::after{left:19px}
+.bar{height:6px;border-radius:999px;background:var(--sunken);overflow:hidden}
+.bar > span{display:block;height:100%;border-radius:999px;background:var(--accent)}
+.bar.warn > span{background:var(--warn)}
+.term-line{display:grid;grid-template-columns:86px 1fr;gap:12px;padding:1px 16px}
+.term-line:hover{background:var(--surface-2)}
+.lv-info{color:var(--text)}
+.lv-dim{color:var(--dim)}
+.lv-warn{color:var(--warn)}
+.lv-err{color:var(--err)}
+.lv-acc{color:var(--accent-ink)}
+.lv-ok{color:var(--ok)}
+.tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tbl th{text-align:left;font-weight:500;font-size:12px;color:var(--dim);padding:8px 12px;border-bottom:1px solid var(--border);white-space:nowrap}
+.tbl td{padding:9px 12px;border-bottom:1px solid var(--border);white-space:nowrap}
+.tbl tr:last-child td{border-bottom:0}
+.sub-link{display:block;padding:7px 10px;border-radius:7px;color:var(--muted);font-size:13px;text-decoration:none}
+.sub-link:hover{background:var(--surface-2);color:var(--text)}
+.radio{width:16px;height:16px;border-radius:50%;border:1.5px solid var(--border-strong);flex:none}
+.radio.on{border:5px solid var(--accent)}
+@media (min-width: 820px){.lw-shell{height:100vh;overflow:hidden;flex-wrap:nowrap}.lw-side,.lw-main{height:100vh}.lw-side{flex:0 0 236px !important;overflow:hidden}.lw-main{overflow-y:auto;overscroll-behavior:contain}}
+.kbd{display:inline-flex;align-items:center;height:20px;padding:0 6px;border:1px solid var(--border);border-bottom-width:2px;border-radius:5px;font-size:11px;color:var(--dim);background:var(--surface)}
+</style>
+</helmet>
+<div class="lw lw-shell {{themeClass}}" style="--accent: {{accent}}; display: flex; flex-wrap: wrap; min-height: 100vh; background: var(--bg); color: var(--text)">
+
+<!-- Sidebar -->
+<aside class="lw-side" style="flex: 1 0 236px; max-width: 100%; display: flex; flex-direction: column; gap: 20px; padding: 18px 14px; border-right: 1px solid var(--border); background: var(--bg)">
+<div style="display: flex; align-items: center; gap: 10px; padding: 2px 8px">
+<span style="display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 9px; background: var(--accent); color: #ffffff">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13h3.5l2.2-6 3.6 11 2.3-5H20"/></svg>
+</span>
+<div style="display: flex; flex-direction: column; line-height: 1.2">
+<span style="font-weight: 600; font-size: 15px">llama-web</span>
+<span style="font-size: 12px; color: var(--dim)">本地 LLM 控制台</span>
+</div>
+</div>
+
+<nav aria-label="主导航" style="display: flex; flex-direction: column; gap: 2px">
+<button type="button" class="{{navOverview}}" onClick="{{goOverview}}">
+<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
+<span>总览</span>
+</button>
+<button type="button" class="{{navModels}}" onClick="{{goModels}}">
+<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5"/><path d="M12 12v9"/></svg>
+<span style="flex: 1">模型</span>
+<span class="num" style="font-size: 12px; color: var(--dim)">4</span>
+</button>
+<button type="button" class="{{navLogs}}" onClick="{{goLogs}}">
+<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h10M4 18h13"/></svg>
+<span>日志</span>
+</button>
+<button type="button" class="{{navSettings}}" onClick="{{goSettings}}">
+<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h9M19 6h1M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="16" cy="6" r="2.2"/><circle cx="9" cy="12" r="2.2"/><circle cx="17" cy="18" r="2.2"/></svg>
+<span>设置</span>
+</button>
+</nav>
+
+<div style="flex: 1"></div>
+
+<!-- Now serving: visible on every page, replaces the old top bar -->
+<div class="card" style="padding: 12px 12px 10px; display: flex; flex-direction: column; gap: 8px">
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 8px">
+<span style="font-size: 12px; color: var(--dim)">正在服务</span>
+<span class="{{sideState.cls}}">{{sideState.label}}</span>
+</div>
+<span style="font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{sideModel}}</span>
+<div style="display: flex; align-items: baseline; gap: 6px">
+<span class="num mono" style="font-size: 20px; font-weight: 500; color: var(--accent-ink)">{{sideSpeed}}</span>
+<span style="font-size: 12px; color: var(--dim)">{{sideSpeedUnit}}</span>
+</div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 10px; padding: 0 6px">
+<div style="display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: var(--dim)">
+<span style="display: inline-flex; align-items: center; gap: 7px"><span class="live-dot"></span>实时连接正常</span>
+<span class="mono">llama.cpp b11146</span>
+</div>
+<div class="seg" role="group" aria-label="深浅色" style="width: 100%">
+<button type="button" class="{{themeSys}}" style="flex: 1; justify-content: center" onClick="{{setSys}}">系统</button>
+<button type="button" class="{{themeLight}}" style="flex: 1; justify-content: center" onClick="{{setLight}}">浅色</button>
+<button type="button" class="{{themeDark}}" style="flex: 1; justify-content: center" onClick="{{setDark}}">深色</button>
+</div>
+</div>
+</aside>
+
+<!-- Main -->
+<main class="lw-main" style="flex: 999 1 560px; min-width: 0; padding: 28px clamp(16px, 3.2vw, 44px) 48px">
+<div style="max-width: 1120px; margin: 0 auto; display: flex; flex-direction: column; gap: 22px">
+
+<sc-if value="{{showBanner}}" hint-placeholder-val="{{ true }}">
+<div class="card" style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 10px 12px 10px 16px">
+<span class="chip chip-accent">新版本</span>
+<span style="flex: 1; min-width: 200px; font-size: 13px">llama-web <span class="mono">0.1.0-beta.2</span> 已发布，配置与模型不受影响。</span>
+<button type="button" class="btn btn-sm">查看更新说明</button>
+<button type="button" class="btn btn-sm btn-primary">更新并重启</button>
+<button type="button" class="btn btn-sm btn-ghost btn-icon" aria-label="稍后提醒" onClick="{{hideBanner}}">
+<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+</button>
+</div>
+</sc-if>
+
+<!-- ========== OVERVIEW ========== -->
+<sc-if value="{{isOverview}}" hint-placeholder-val="{{ true }}">
+<div style="display: flex; flex-direction: column; gap: 22px">
+<header style="display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px">
+<div>
+<h1 style="margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.01em">总览</h1>
+<p style="margin: 4px 0 0; color: var(--muted); font-size: 13px">请求到来时自动加载对应模型；这里看它现在在做什么。</p>
+</div>
+<div style="display: flex; align-items: center; gap: 8px; padding: 4px 4px 4px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface)">
+<span style="font-size: 12px; color: var(--dim)">API</span>
+<span class="mono" style="font-size: 13px">http://127.0.0.1:5001/v1</span>
+<button type="button" class="btn btn-sm btn-ghost btn-icon" aria-label="复制 API 地址">
+<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg>
+</button>
+</div>
+</header>
+
+<!-- Hero: now serving -->
+<section class="card" style="padding: 22px 24px; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); gap: 24px 36px">
+<sc-if value="{{hero.ready}}" hint-placeholder-val="{{ true }}">
+<div style="display: flex; flex-direction: column; gap: 14px; min-width: 0">
+<div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap">
+<span class="st st-ready">运行中</span>
+<span class="num" style="font-size: 12px; color: var(--dim)">已运行 1 小时 12 分 · 在途请求 {{hero.inflight}}</span>
+</div>
+<div>
+<h2 style="margin: 0; font-size: 28px; font-weight: 600; letter-spacing: -0.02em">{{hero.name}}</h2>
+<p class="mono" style="margin: 6px 0 0; font-size: 12px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{hero.file}}</p>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 6px">
+<span class="chip">方案 · 默认</span>
+<span class="chip mono">ctx {{hero.ctx}}</span>
+<span class="chip mono">{{hero.quant}}</span>
+<span class="chip">草稿模型</span>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px">
+<button type="button" class="btn" onClick="{{hero.stop}}">
+<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>停止
+</button>
+<button type="button" class="btn" onClick="{{goLogs}}">查看输出</button>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; justify-content: space-between; gap: 10px; min-width: 0">
+<div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap">
+<div>
+<div style="font-size: 12px; color: var(--dim)">{{speedLabel}}</div>
+<div style="display: flex; align-items: baseline; gap: 6px">
+<span class="num mono" style="font-size: 48px; font-weight: 500; line-height: 1.05; letter-spacing: -0.03em; color: var(--accent-ink)">{{speedNow}}</span>
+<span style="font-size: 14px; color: var(--muted)">tokens/s</span>
+</div>
+</div>
+<div style="text-align: right">
+<div style="font-size: 12px; color: var(--dim)">提示处理</div>
+<div class="num mono" style="font-size: 18px">1,822 <span style="font-size: 12px; color: var(--dim)">t/s</span></div>
+</div>
+</div>
+<svg viewBox="0 0 320 64" preserveAspectRatio="none" style="width: 100%; height: 72px; display: block" aria-label="最近 40 秒的生成速度">
+<polygon points="{{sparkArea}}" style="fill: var(--accent-soft)"/>
+<polyline points="{{sparkLine}}" fill="none" style="stroke: var(--accent)" stroke-width="2" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+</svg>
+<div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--dim)"><span>40 秒前</span><span>现在</span></div>
+</div>
+</sc-if>
+<sc-if value="{{hero.loading}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 14px; grid-column: 1 / -1">
+<div style="display: flex; align-items: center; gap: 10px"><span class="st st-loading">加载中</span><span style="font-size: 12px; color: var(--dim)">大模型可能需要一分钟以上</span></div>
+<h2 style="margin: 0; font-size: 28px; font-weight: 600; letter-spacing: -0.02em">{{hero.name}}</h2>
+<div class="bar warn" style="height: 8px"><span style="width: {{hero.pct}}%"></span></div>
+<div class="num" style="font-size: 13px; color: var(--muted)">加载进度约 {{hero.pct}}%</div>
+</div>
+</sc-if>
+<sc-if value="{{hero.empty}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 8px; grid-column: 1 / -1; padding: 14px 0">
+<h2 style="margin: 0; font-size: 20px; font-weight: 600">没有正在运行的模型</h2>
+<p style="margin: 0; color: var(--muted); font-size: 13px">已启用 4 个模型。酒馆或其他客户端发来请求时，会自动加载对应的模型；也可以在「模型」页手动启动。</p>
+<div style="margin-top: 6px"><button type="button" class="btn" onClick="{{goModels}}">去模型页</button></div>
+</div>
+</sc-if>
+</section>
+
+<!-- Stat tiles -->
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr)); gap: 14px">
+<section class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; justify-content: space-between; font-size: 12px; color: var(--dim)"><span>显存</span><span>RTX 4090</span></div>
+<div class="num" style="display: flex; align-items: baseline; gap: 4px"><span class="mono" style="font-size: 22px; font-weight: 500">{{vram.used}}</span><span style="color: var(--dim); font-size: 13px">/ 24.0 GB</span></div>
+<div class="bar"><span style="width: {{vram.pct}}%"></span></div>
+<div class="num" style="font-size: 12px; color: var(--dim)">核心占用 {{vram.util}}%</div>
+</section>
+<section class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 10px">
+<div style="font-size: 12px; color: var(--dim)">请求</div>
+<div style="display: flex; gap: 22px">
+<div><div class="mono num" style="font-size: 22px; font-weight: 500">{{hero.inflight}}</div><div style="font-size: 12px; color: var(--dim)">在途</div></div>
+<div><div class="mono num" style="font-size: 22px; font-weight: 500">0</div><div style="font-size: 12px; color: var(--dim)">排队切换</div></div>
+</div>
+</section>
+<section class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 10px">
+<div style="font-size: 12px; color: var(--dim)">llama.cpp</div>
+<div class="mono" style="font-size: 22px; font-weight: 500">b11146</div>
+<div style="display: flex; gap: 6px; flex-wrap: wrap"><span class="chip">CUDA</span><span class="chip">已是最新</span></div>
+</section>
+<section class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 10px">
+<div style="font-size: 12px; color: var(--dim)">公网访问</div>
+<div style="display: flex; align-items: center; gap: 8px"><span class="st st-ready">隧道已连通</span></div>
+<div class="mono" style="font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap">https://llm.example.com/v1</div>
+</section>
+</div>
+
+<!-- Events + requests -->
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); gap: 14px">
+<section class="card" style="display: flex; flex-direction: column; min-width: 0">
+<header style="display: flex; justify-content: space-between; align-items: center; padding: 14px 18px 10px">
+<h3 style="margin: 0; font-size: 14px; font-weight: 600">最近事件</h3>
+<button type="button" class="btn btn-sm btn-ghost" onClick="{{goLogs}}">全部</button>
+</header>
+<ol style="list-style: none; margin: 0; padding: 0 18px 14px; display: flex; flex-direction: column">
+<sc-for list="{{events}}" as="e" hint-placeholder-count="5">
+<li style="display: grid; grid-template-columns: 14px 1fr auto; gap: 10px; align-items: start; padding: 7px 0">
+<span class="{{e.dot}}" style="margin-top: 6px; width: 8px; height: 8px; border-radius: 50%; background: currentColor"></span>
+<span style="font-size: 13px; min-width: 0">{{e.text}}</span>
+<time class="mono num" style="font-size: 12px; color: var(--dim)">{{e.t}}</time>
+</li>
+</sc-for>
+</ol>
+</section>
+<section class="card" style="display: flex; flex-direction: column; min-width: 0">
+<header style="display: flex; justify-content: space-between; align-items: center; padding: 14px 18px 4px">
+<h3 style="margin: 0; font-size: 14px; font-weight: 600">最近请求</h3>
+<button type="button" class="btn btn-sm btn-ghost" onClick="{{goLogs}}">全部</button>
+</header>
+<div style="overflow-x: auto; padding: 0 6px 8px">
+<table class="tbl num">
+<thead><tr><th>时间</th><th>来源</th><th>模型</th><th style="text-align: right">输入 / 输出</th><th style="text-align: right">速度</th></tr></thead>
+<tbody>
+<sc-for list="{{requests}}" as="r" hint-placeholder-count="5">
+<tr>
+<td class="mono" style="color: var(--dim)">{{r.t}}</td>
+<td><span class="{{r.srcCls}}">{{r.src}}</span></td>
+<td>{{r.model}}</td>
+<td class="mono" style="text-align: right">{{r.io}}</td>
+<td class="mono" style="text-align: right">{{r.speed}}</td>
+</tr>
+</sc-for>
+</tbody>
+</table>
+</div>
+</section>
+</div>
+</div>
+</sc-if>
+
+<!-- ========== MODELS ========== -->
+<sc-if value="{{isModels}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 18px">
+<header style="display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px">
+<div>
+<h1 style="margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.01em">模型</h1>
+<p style="margin: 4px 0 0; color: var(--muted); font-size: 13px">客户端用模型名（或「名字:方案」）调用，第一个请求到来时自动加载。</p>
+</div>
+<button type="button" class="btn">
+<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>重新扫描
+</button>
+</header>
+
+<div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between">
+<div class="seg" role="tablist" aria-label="模型分组">
+<button type="button" role="tab" class="{{tabEnabled}}" onClick="{{showEnabled}}">已启用 <span class="count">4</span></button>
+<button type="button" role="tab" class="{{tabDiscover}}" onClick="{{showDiscover}}">扫描发现 <span class="count">3</span></button>
+</div>
+<div style="position: relative; width: min(280px, 100%)">
+<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" style="position: absolute; left: 10px; top: 10px; color: var(--dim)"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></svg>
+<input class="input" aria-label="筛选模型" placeholder="筛选模型" style="padding-left: 32px">
+</div>
+</div>
+
+<sc-if value="{{modelsEnabledTab}}" hint-placeholder-val="{{ true }}">
+<section class="card" style="overflow: hidden">
+<sc-for list="{{models}}" as="m" hint-placeholder-count="4">
+<div class="row" style="padding: 16px 20px; display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px">
+<div style="flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 6px">
+<div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap">
+<span style="font-size: 15px; font-weight: 600">{{m.name}}</span>
+<span class="{{m.stCls}}">{{m.stLabel}}</span>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center">
+<span class="chip mono">{{m.quant}}</span>
+<span class="chip mono">{{m.size}}</span>
+<span class="chip mono">ctx {{m.ctx}}</span>
+<sc-if value="{{m.vision}}" hint-placeholder-val="{{ false }}">
+<span class="chip chip-accent">
+<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M21 16l-5-5-8 8"/></svg>视觉</span>
+</sc-if>
+<sc-if value="{{m.draft}}" hint-placeholder-val="{{ false }}"><span class="chip">草稿模型</span></sc-if>
+</div>
+</div>
+<div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap">
+<label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--dim)">方案
+<select class="input" style="width: 130px; height: 32px"><option>默认</option><option>长上下文</option></select>
+</label>
+<button type="button" class="btn btn-icon" aria-label="编辑模型" onClick="{{m.edit}}">
+<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg>
+</button>
+<sc-if value="{{m.canStart}}" hint-placeholder-val="{{ true }}">
+<button type="button" class="btn btn-primary" style="min-width: 76px" onClick="{{m.start}}">
+<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M7 5v14l11-7z"/></svg>启动
+</button>
+</sc-if>
+<sc-if value="{{m.canRetry}}" hint-placeholder-val="{{ false }}">
+<button type="button" class="btn btn-primary" style="min-width: 76px" onClick="{{m.start}}">
+<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>重试
+</button>
+</sc-if>
+<sc-if value="{{m.canStop}}" hint-placeholder-val="{{ false }}">
+<button type="button" class="btn" style="min-width: 76px" onClick="{{m.stop}}">
+<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>停止
+</button>
+</sc-if>
+</div>
+</div>
+<sc-if value="{{m.isLoading}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; align-items: center; gap: 12px">
+<div class="bar warn" style="flex: 1"><span style="width: {{m.pct}}%"></span></div>
+<span class="num mono" style="font-size: 12px; color: var(--muted); width: 40px; text-align: right">{{m.pct}}%</span>
+</div>
+</sc-if>
+<sc-if value="{{m.isFailed}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; padding: 10px 14px; border-radius: 10px; background: color-mix(in oklab, var(--err) 9%, transparent)">
+<div style="display: flex; flex-direction: column; gap: 2px; min-width: 0">
+<span style="font-size: 13px; font-weight: 500; color: var(--err)">加载失败：显存不足</span>
+<span style="font-size: 12px; color: var(--muted)">需要约 18.1 GB，当时可用 3.4 GB。先停止其他模型，或在方案里减少 GPU 层数。</span>
+</div>
+<button type="button" class="btn btn-sm" onClick="{{goLogs}}">查看日志</button>
+</div>
+</sc-if>
+</div>
+</sc-for>
+</section>
+</sc-if>
+
+<sc-if value="{{modelsDiscoverTab}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 10px">
+<p style="margin: 0; font-size: 12px; color: var(--dim)">模型目录里还没启用的 .gguf 文件。只读取文件头，不会加载模型。上次扫描 14:02。</p>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 14px">
+<sc-for list="{{discover}}" as="d" hint-placeholder-count="3">
+<section class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; flex-direction: column; gap: 4px; min-width: 0">
+<span style="font-weight: 600; font-size: 14px; overflow-wrap: anywhere">{{d.name}}</span>
+<span class="mono" style="font-size: 12px; color: var(--dim); overflow-wrap: anywhere">{{d.dir}}</span>
+</div>
+<dl style="margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; font-size: 12px">
+<div><dt style="color: var(--dim)">架构 · 参数量</dt><dd class="mono" style="margin: 0">{{d.arch}}</dd></div>
+<div><dt style="color: var(--dim)">量化 · 大小</dt><dd class="mono" style="margin: 0">{{d.quant}}</dd></div>
+</dl>
+<sc-if value="{{d.bad}}" hint-placeholder-val="{{ false }}">
+<div style="font-size: 12px; color: var(--warn)">分片不完整：缺少 2 / 3，无法启用。</div>
+</sc-if>
+<div style="display: flex; justify-content: flex-end">
+<sc-if value="{{d.canEnable}}" hint-placeholder-val="{{ true }}"><button type="button" class="btn btn-sm btn-primary" onClick="{{d.enable}}">启用</button></sc-if>
+<sc-if value="{{d.enabled}}" hint-placeholder-val="{{ false }}"><span class="st st-ready">已启用</span></sc-if>
+</div>
+</section>
+</sc-for>
+</div>
+</div>
+</sc-if>
+</div>
+</sc-if>
+
+<!-- ========== LOGS ========== -->
+<sc-if value="{{isLogs}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 16px">
+<header>
+<h1 style="margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.01em">日志</h1>
+<p style="margin: 4px 0 0; color: var(--muted); font-size: 13px">页面只保留最近的内容；完整记录在 data/logs，重启后仍可查看。</p>
+</header>
+<div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center">
+<div class="seg" role="tablist" aria-label="日志类型">
+<button type="button" role="tab" class="{{logTabModel}}" onClick="{{logModel}}">模型输出</button>
+<button type="button" role="tab" class="{{logTabEvents}}" onClick="{{logEvents}}">事件</button>
+<button type="button" role="tab" class="{{logTabReq}}" onClick="{{logReq}}">请求</button>
+</div>
+<select class="input" aria-label="模型" style="width: 170px"><option>Qwen3-32B</option><option>全部模型</option></select>
+<select class="input" aria-label="时间范围" style="width: 190px"><option>实时</option><option>2026-10-03 · 2.1 MB</option></select>
+<div style="position: relative; flex: 1 1 200px">
+<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" style="position: absolute; left: 10px; top: 10px; color: var(--dim)"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></svg>
+<input class="input" aria-label="搜索日志" placeholder="搜索，例如 eval time" value="{{q}}" onInput="{{onQ}}" style="padding-left: 32px">
+</div>
+<button type="button" class="btn" onClick="{{togglePause}}">{{pauseLabel}}</button>
+<button type="button" class="btn btn-icon" aria-label="下载日志文件">
+<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>
+</button>
+</div>
+
+<sc-if value="{{logIsModel}}" hint-placeholder-val="{{ true }}">
+<section class="card" style="overflow: hidden">
+<div style="display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--dim)">
+<span style="display: inline-flex; align-items: center; gap: 8px"><span class="{{liveDotCls}}"></span>{{liveText}}</span>
+<span class="num">{{logCount}} 行</span>
+</div>
+<div class="mono" style="background: var(--term); padding: 10px 0; font-size: 12.5px; line-height: 1.7; max-height: 560px; overflow: auto">
+<sc-for list="{{logLines}}" as="l" hint-placeholder-count="12">
+<div class="term-line"><span class="num lv-dim">{{l.t}}</span><span class="{{l.cls}}" style="white-space: pre-wrap; overflow-wrap: anywhere">{{l.text}}</span></div>
+</sc-for>
+</div>
+</section>
+</sc-if>
+<sc-if value="{{logIsEvents}}" hint-placeholder-val="{{ false }}">
+<section class="card" style="padding: 8px 20px">
+<sc-for list="{{events}}" as="e" hint-placeholder-count="6">
+<div class="row" style="display: grid; grid-template-columns: 76px 14px 1fr; gap: 10px; align-items: start; padding: 10px 0">
+<time class="mono num" style="font-size: 12px; color: var(--dim); padding-top: 1px">{{e.t}}</time>
+<span class="{{e.dot}}" style="margin-top: 6px; width: 8px; height: 8px; border-radius: 50%; background: currentColor"></span>
+<span style="font-size: 13px">{{e.text}}</span>
+</div>
+</sc-for>
+</section>
+</sc-if>
+<sc-if value="{{logIsReq}}" hint-placeholder-val="{{ false }}">
+<section class="card" style="overflow-x: auto; padding: 4px 6px">
+<table class="tbl num">
+<thead><tr><th>时间</th><th>来源</th><th>模型</th><th>接口</th><th style="text-align: right">输入 / 输出</th><th style="text-align: right">速度</th><th style="text-align: right">耗时</th><th>状态</th></tr></thead>
+<tbody>
+<sc-for list="{{requests}}" as="r" hint-placeholder-count="6">
+<tr class="rowh">
+<td class="mono" style="color: var(--dim)">{{r.t}}</td>
+<td><span class="{{r.srcCls}}">{{r.src}}</span></td>
+<td>{{r.model}}</td>
+<td class="mono" style="color: var(--muted)">/v1/chat/completions</td>
+<td class="mono" style="text-align: right">{{r.io}}</td>
+<td class="mono" style="text-align: right">{{r.speed}}</td>
+<td class="mono" style="text-align: right">{{r.dur}}</td>
+<td><span class="{{r.stCls}}">{{r.st}}</span></td>
+</tr>
+</sc-for>
+</tbody>
+</table>
+</section>
+</sc-if>
+</div>
+</sc-if>
+
+<!-- ========== SETTINGS ========== -->
+<sc-if value="{{isSettings}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 18px">
+<header>
+<h1 style="margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.01em">设置</h1>
+<p style="margin: 4px 0 0; color: var(--muted); font-size: 13px">修改即保存；需要重启模型的项会单独提示。</p>
+</header>
+<div style="display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start">
+<nav aria-label="设置分区" style="flex: 1 0 180px; max-width: 100%; display: flex; flex-direction: column; gap: 1px">
+<a class="sub-link" href="#s-dirs">模型目录</a>
+<a class="sub-link" href="#s-llama">llama.cpp 版本</a>
+<a class="sub-link" href="#s-defaults">默认参数</a>
+<a class="sub-link" href="#s-image">图片预处理</a>
+<a class="sub-link" href="#s-server">端口与调度</a>
+<a class="sub-link" href="#s-public">公网访问</a>
+<a class="sub-link" href="#s-about">关于与更新</a>
+</nav>
+<div style="flex: 999 1 520px; min-width: 0; display: flex; flex-direction: column; gap: 16px">
+
+<section id="s-dirs" class="card">
+<header style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 18px 20px 6px">
+<div><h2 style="margin: 0; font-size: 15px; font-weight: 600">模型目录</h2><p style="margin: 3px 0 0; font-size: 12px; color: var(--dim)">递归扫描子目录里的 .gguf 文件。</p></div>
+<button type="button" class="btn btn-sm"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>添加目录</button>
+</header>
+<div style="padding: 6px 20px 14px">
+<div class="row" style="display: flex; align-items: center; gap: 12px; padding: 10px 0">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" style="color: var(--dim); flex: none"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+<span class="mono" style="flex: 1; font-size: 13px; min-width: 0; overflow-wrap: anywhere">X:\models</span>
+<span style="font-size: 12px; color: var(--dim)">深度 3 · 7 个文件</span>
+<button type="button" class="switch on" aria-pressed="true" aria-label="启用此目录"></button>
+</div>
+<div class="row" style="display: flex; align-items: center; gap: 12px; padding: 10px 0">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" style="color: var(--dim); flex: none"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+<span class="mono" style="flex: 1; font-size: 13px; color: var(--dim); min-width: 0; overflow-wrap: anywhere">Y:\gguf-archive</span>
+<span style="font-size: 12px; color: var(--dim)">已停用</span>
+<button type="button" class="switch" aria-pressed="false" aria-label="启用此目录"></button>
+</div>
+</div>
+</section>
+
+<section id="s-llama" class="card">
+<header style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 18px 20px 6px">
+<div><h2 style="margin: 0; font-size: 15px; font-weight: 600">llama.cpp 版本</h2><p style="margin: 3px 0 0; font-size: 12px; color: var(--dim)">每次打开时检查官方最新版；保留最近 3 个版本，可以随时回退。</p></div>
+<label style="display: flex; align-items: center; gap: 8px; font-size: 13px; white-space: nowrap">自动更新<button type="button" class="switch on" aria-pressed="true" aria-label="自动更新"></button></label>
+</header>
+<div style="padding: 6px 20px 14px">
+<div class="row" style="display: flex; align-items: center; gap: 12px; padding: 11px 0"><span class="radio on"></span><span class="mono" style="font-size: 13px">b11146</span><span class="chip chip-accent">当前</span><span class="chip">最新</span><span style="flex: 1"></span><span style="font-size: 12px; color: var(--dim)">CUDA 12.4 · 2026-10-02</span></div>
+<div class="row" style="display: flex; align-items: center; gap: 12px; padding: 11px 0"><span class="radio"></span><span class="mono" style="font-size: 13px">b11120</span><span style="flex: 1"></span><span style="font-size: 12px; color: var(--dim)">CUDA 12.4 · 2026-09-27</span><button type="button" class="btn btn-sm">切换</button></div>
+<div class="row" style="display: flex; align-items: center; gap: 12px; padding: 11px 0"><span class="radio"></span><span class="mono" style="font-size: 13px">b11098</span><span style="flex: 1"></span><span style="font-size: 12px; color: var(--dim)">CUDA 12.4 · 2026-09-19</span><button type="button" class="btn btn-sm">切换</button></div>
+</div>
+</section>
+
+<section id="s-defaults" class="card">
+<header style="padding: 18px 20px 6px"><h2 style="margin: 0; font-size: 15px; font-weight: 600">默认参数</h2><p style="margin: 3px 0 0; font-size: 12px; color: var(--dim)">所有模型的起点；每个模型的方案可以单独覆盖。</p></header>
+<div style="padding: 10px 20px 18px; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr)); gap: 14px 16px">
+<div class="field"><label for="d-ctx">上下文长度</label><input id="d-ctx" class="input mono" value="32768"><span class="flag mono">-c</span></div>
+<div class="field"><label for="d-ngl">GPU 层数</label><input id="d-ngl" class="input mono" value="999"><span class="flag mono">-ngl</span></div>
+<div class="field"><label for="d-np">并发槽位</label><input id="d-np" class="input mono" value="1"><span class="flag mono">-np</span></div>
+<div class="field"><label for="d-kv">KV 缓存类型</label><select id="d-kv" class="input mono"><option>q8_0</option><option>f16</option></select><span class="flag mono">-ctk / -ctv</span></div>
+</div>
+</section>
+
+<section id="s-image" class="card">
+<header style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 18px 20px 6px">
+<div><h2 style="margin: 0; font-size: 15px; font-weight: 600">图片预处理</h2><p style="margin: 3px 0 0; font-size: 12px; color: var(--dim)">请求里的图片先压缩再交给模型，省显存也省时间。</p></div>
+<button type="button" class="switch on" aria-pressed="true" aria-label="启用图片压缩"></button>
+</header>
+<div style="padding: 10px 20px 18px; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr)); gap: 14px 16px">
+<div class="field"><label for="i-edge">最长边</label><input id="i-edge" class="input mono" value="1536"><span class="flag">像素</span></div>
+<div class="field"><label for="i-q">JPEG 质量</label><input id="i-q" class="input mono" value="85"><span class="flag">1–100</span></div>
+</div>
+</section>
+
+<section id="s-server" class="card">
+<header style="padding: 18px 20px 6px"><h2 style="margin: 0; font-size: 15px; font-weight: 600">端口与调度</h2><p style="margin: 3px 0 0; font-size: 12px; color: var(--dim)">界面和 API 的端口、llama-server 子进程端口范围、加载与切换超时。</p></header>
+<div style="padding: 10px 20px 18px; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr)); gap: 14px 16px">
+<div class="field"><label for="v-port">界面与 API 端口</label><input id="v-port" class="input mono" value="5001"></div>
+<div class="field"><label for="v-range">子进程端口范围</label><input id="v-range" class="input mono" value="39100–39199"></div>
+<div class="field"><label for="v-load">加载超时</label><input id="v-load" class="input mono" value="300"><span class="flag">秒</span></div>
+<div class="field"><label for="v-drain">等待请求结束</label><input id="v-drain" class="input mono" value="60"><span class="flag">秒，超时强制卸载</span></div>
+</div>
+</section>
+
+<section id="s-public" class="card">
+<header style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 18px 20px 6px">
+<div><h2 style="margin: 0; font-size: 15px; font-weight: 600">公网访问</h2><p style="margin: 3px 0 0; font-size: 12px; color: var(--dim)">经 Cloudflare 隧道只开放 /v1/*，每个请求都要带 API key。</p></div>
+<span class="st st-ready">已连通</span>
+</header>
+<div style="padding: 6px 20px 14px">
+<div class="row" style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 11px 0"><span style="font-size: 12px; color: var(--dim); width: 72px">地址</span><span class="mono" style="font-size: 13px; flex: 1">https://llm.example.com/v1</span><button type="button" class="btn btn-sm">复制</button></div>
+<div class="row" style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 11px 0"><span style="font-size: 12px; color: var(--dim); width: 72px">手机</span><span class="mono" style="font-size: 13px; flex: 1">sk-••••••••••••a91f</span><span style="font-size: 12px; color: var(--dim)">最近使用 10 分钟前</span><button type="button" class="btn btn-sm">吊销</button></div>
+<div class="row" style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 11px 0"><span style="font-size: 12px; color: var(--dim); width: 72px">笔记本</span><span class="mono" style="font-size: 13px; flex: 1">sk-••••••••••••07c2</span><span style="font-size: 12px; color: var(--dim)">最近使用 3 天前</span><button type="button" class="btn btn-sm">吊销</button></div>
+<div style="padding-top: 10px"><button type="button" class="btn btn-sm"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>新建 key</button></div>
+</div>
+</section>
+
+<section id="s-about" class="card" style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 18px 20px">
+<div style="flex: 1; min-width: 200px"><h2 style="margin: 0; font-size: 15px; font-weight: 600">关于与更新</h2><p style="margin: 3px 0 0; font-size: 12px; color: var(--dim)">当前 <span class="mono">0.1.0-beta.1</span> · 更新只替换程序文件，配置和 key 保留。</p></div>
+<button type="button" class="btn">检查更新</button>
+</section>
+</div>
+</div>
+</div>
+</sc-if>
+
+</div>
+</main>
+
+<!-- Model editor drawer -->
+<sc-if value="{{editing}}" hint-placeholder-val="{{ false }}">
+<div style="position: fixed; inset: 0; z-index: 30; display: flex; justify-content: flex-end; background: var(--overlay)">
+<button type="button" aria-label="关闭编辑" onClick="{{closeEdit}}" style="flex: 1; border: 0; background: transparent; cursor: default"></button>
+<aside role="dialog" aria-label="编辑模型" style="width: min(520px, 100%); height: 100%; display: flex; flex-direction: column; background: var(--surface); border-left: 1px solid var(--border); box-shadow: -12px 0 32px rgba(0,0,0,.12)">
+<header style="display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 20px 22px 14px; border-bottom: 1px solid var(--border)">
+<div><h2 style="margin: 0; font-size: 18px; font-weight: 600">{{editName}}</h2><p style="margin: 4px 0 0; font-size: 12px; color: var(--dim)">保存后下次加载生效；正在运行的模型需要重启。</p></div>
+<button type="button" class="btn btn-ghost btn-icon" aria-label="关闭" onClick="{{closeEdit}}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+</header>
+<div style="padding: 14px 22px 0">
+<div class="seg" role="tablist" aria-label="编辑分区">
+<button type="button" role="tab" class="{{etFiles}}" onClick="{{toFiles}}">文件</button>
+<button type="button" role="tab" class="{{etProfiles}}" onClick="{{toProfiles}}">配置方案</button>
+<button type="button" role="tab" class="{{etParams}}" onClick="{{toParams}}">参数</button>
+</div>
+</div>
+<div style="flex: 1; overflow: auto; padding: 18px 22px; display: flex; flex-direction: column; gap: 16px">
+<sc-if value="{{editFiles}}" hint-placeholder-val="{{ true }}">
+<div style="display: flex; flex-direction: column; gap: 16px">
+<div class="field"><label for="f-main">主模型</label><select id="f-main" class="input mono"><option>{{editFile}}</option></select></div>
+<div class="field"><label for="f-mm">mmproj（视觉）</label><select id="f-mm" class="input mono"><option>不使用</option><option>mmproj-F16.gguf · 同目录</option></select><span class="flag">让模型能看图。同目录的文件排在前面，不会自动选中。</span></div>
+<div class="field"><label for="f-dr">草稿模型</label><select id="f-dr" class="input mono"><option>Qwen3-0.6B-Q8_0.gguf · 同目录</option><option>不使用</option></select><span class="flag">用于推测解码，加快生成。</span></div>
+</div>
+</sc-if>
+<sc-if value="{{editProfiles}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 10px">
+<div class="card" style="padding: 12px 14px; display: flex; align-items: center; gap: 10px; box-shadow: none"><span class="radio on"></span><span style="font-weight: 500; flex: 1">默认</span><span class="chip chip-accent">当前</span><button type="button" class="btn btn-sm btn-ghost">复制</button></div>
+<div class="card" style="padding: 12px 14px; display: flex; align-items: center; gap: 10px; box-shadow: none"><span class="radio"></span><span style="font-weight: 500; flex: 1">长上下文</span><span class="mono" style="font-size: 12px; color: var(--dim)">-c 131072</span><button type="button" class="btn btn-sm btn-ghost">设为当前</button></div>
+<p style="margin: 4px 0 0; font-size: 12px; color: var(--dim)">客户端可以用 <span class="mono">Qwen3-32B:长上下文</span> 直接调用某个方案。</p>
+</div>
+</sc-if>
+<sc-if value="{{editParams}}" hint-placeholder-val="{{ false }}">
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px">
+<div class="field"><label for="p-ctx">上下文长度</label><input id="p-ctx" class="input mono" placeholder="继承默认 32768"><span class="flag mono">-c</span></div>
+<div class="field"><label for="p-ngl">GPU 层数</label><input id="p-ngl" class="input mono" placeholder="继承默认 999"><span class="flag mono">-ngl</span></div>
+<div class="field"><label for="p-temp">温度</label><input id="p-temp" class="input mono" value="0.7"><span class="flag mono">--temp</span></div>
+<div class="field"><label for="p-np">并发槽位</label><input id="p-np" class="input mono" placeholder="继承默认 1"><span class="flag mono">-np</span></div>
+<div class="field" style="grid-column: 1 / -1"><label for="p-extra">额外参数</label><textarea id="p-extra" class="input mono" style="height: 72px; padding: 8px 10px; resize: vertical">--jinja --flash-attn on</textarea><span class="flag">--host / --port 由 llama-web 分配，这里填写会被忽略。</span></div>
+</div>
+</sc-if>
+</div>
+<footer style="display: flex; justify-content: flex-end; gap: 8px; padding: 14px 22px; border-top: 1px solid var(--border)">
+<button type="button" class="btn" onClick="{{closeEdit}}">取消</button>
+<button type="button" class="btn btn-primary" onClick="{{closeEdit}}">保存</button>
+</footer>
+</aside>
+</div>
+</sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["system","light","dark"],"default":"system","section":"外观"},"accent":{"editor":"color","options":["#4f5bd5","#2563eb","#0f8a7e","#c2410c"],"default":"#4f5bd5","section":"外观"},"$preview":{"width":1440,"height":1180}}'>
+class Component extends DCLogic {
+  base() {
+    return {
+      page: 'overview', theme: null, modelsTab: 'enabled', editing: null, editTab: 'files',
+      banner: true, tick: 0, logTab: 'model', paused: false, q: '',
+      st: { qwen32: 'ready', gemma27: 'failed', mistral24: 'stopped', qwen8: 'stopped' },
+      pct: {}, enabledFiles: {}
+    };
+  }
+  cur() { return Object.assign(this.base(), this.state || {}); }
+  componentDidMount() { this.timer = setInterval(() => this.onTick(), 1000); }
+  componentWillUnmount() { clearInterval(this.timer); }
+  onTick() {
+    const s = this.cur();
+    const st = Object.assign({}, s.st);
+    const pct = Object.assign({}, s.pct);
+    Object.keys(st).forEach((id) => {
+      if (st[id] === 'loading') {
+        pct[id] = Math.min(100, (pct[id] || 0) + 9);
+        if (pct[id] >= 100) { st[id] = 'ready'; delete pct[id]; }
+      }
+    });
+    this.setState({ tick: s.paused ? s.tick : s.tick + 1, st, pct });
+  }
+  start(id) {
+    const s = this.cur();
+    const st = Object.assign({}, s.st);
+    // One GPU: loading a model unloads whatever is serving.
+    Object.keys(st).forEach((k) => { if (st[k] === 'ready' || st[k] === 'loading') st[k] = 'stopped'; });
+    st[id] = 'loading';
+    this.setState({ st, pct: Object.assign({}, s.pct, { [id]: 0 }) });
+  }
+  stop(id) {
+    const s = this.cur();
+    this.setState({ st: Object.assign({}, s.st, { [id]: 'stopped' }) });
+  }
+  wave(i) { return 41 + 3.6 * Math.sin(i * 0.55) + 2 * Math.sin(i * 1.7 + 1); }
+  renderVals() {
+    const s = this.cur();
+    const props = this.props || {};
+    const pref = s.theme || props.theme || 'system';
+    const sysDark = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const dark = pref === 'dark' || (pref === 'system' && sysDark);
+    const go = (p) => () => this.setState({ page: p });
+    const nav = (p) => 'nav-item' + (s.page === p ? ' is-active' : '');
+    const on = (a, b) => (a === b ? 'on' : '');
+
+    const catalog = [
+      { id: 'qwen32', name: 'Qwen3-32B', file: 'X:\\models\\Qwen3-32B\\Qwen3-32B-Q4_K_M.gguf', quant: 'Q4_K_M', size: '19.8 GB', ctx: '32K', vision: false, draft: true, vram: 20.6 },
+      { id: 'gemma27', name: 'Gemma-3-27B-it', file: 'X:\\models\\gemma-3-27b\\gemma-3-27b-it-Q4_K_M.gguf', quant: 'Q4_K_M', size: '16.5 GB', ctx: '128K', vision: true, draft: false, vram: 18.1 },
+      { id: 'mistral24', name: 'Mistral-Small-3.2-24B', file: 'X:\\models\\mistral\\Mistral-Small-3.2-24B-Q5_K_M.gguf', quant: 'Q5_K_M', size: '16.8 GB', ctx: '128K', vision: true, draft: false, vram: 17.6 },
+      { id: 'qwen8', name: 'Qwen3-8B', file: 'X:\\models\\Qwen3-8B\\Qwen3-8B-Q8_0.gguf', quant: 'Q8_0', size: '8.7 GB', ctx: '32K', vision: false, draft: false, vram: 9.6 }
+    ];
+    const labels = { ready: '运行中', loading: '加载中', failed: '加载失败', stopped: '已停止' };
+    const models = catalog.map((m) => {
+      const state = s.st[m.id];
+      return Object.assign({}, m, {
+        stLabel: labels[state], stCls: 'st st-' + state,
+        canStart: state === 'stopped', canRetry: state === 'failed', canStop: state === 'ready' || state === 'loading',
+        isLoading: state === 'loading', isFailed: state === 'failed', pct: s.pct[m.id] || 0,
+        start: () => this.start(m.id), stop: () => this.stop(m.id),
+        edit: () => this.setState({ editing: m.id, editTab: 'files' })
+      });
+    });
+    const ready = models.find((m) => m.canStop && !m.isLoading);
+    const loading = models.find((m) => m.isLoading);
+
+    const t = s.tick;
+    const pts = [];
+    for (let i = 0; i < 40; i++) {
+      const x = (i / 39) * 320;
+      const y = 60 - ((this.wave(t + i) - 32) / 16) * 52;
+      pts.push(x.toFixed(1) + ',' + y.toFixed(1));
+    }
+    const generating = t % 12 < 8;
+    const speed = this.wave(t + 39).toFixed(1);
+
+    let vramUsed = 0.9;
+    models.forEach((m) => {
+      if (s.st[m.id] === 'ready') vramUsed += m.vram;
+      if (s.st[m.id] === 'loading') vramUsed += m.vram * (m.pct / 100);
+    });
+
+    const evs = [
+      { t: '14:21:07', text: 'Qwen3-32B（默认）：加载中 → 运行中', dot: 'lv-ok' },
+      { t: '14:20:31', text: 'Qwen3-32B（默认）：已停止 → 加载中', dot: 'lv-dim' },
+      { t: '14:18:52', text: 'Gemma-3-27B-it（默认）：加载中 → 加载失败，原因：显存不足', dot: 'lv-err' },
+      { t: '14:02:10', text: '隧道：已连通', dot: 'lv-ok' },
+      { t: '14:01:58', text: 'llama.cpp：已就绪 b11146', dot: 'lv-dim' },
+      { t: '14:01:55', text: 'llama.cpp：已从 b11120 更新到 b11146', dot: 'lv-acc' }
+    ];
+    const events = evs;
+
+    const reqs = [
+      { t: '14:26:41', src: '本地', model: 'Qwen3-32B', io: '2,148 / 386', speed: '41.9 t/s', dur: '10.4 s', ok: true },
+      { t: '14:25:12', src: '公网', model: 'Qwen3-32B', io: '1,904 / 512', speed: '42.3 t/s', dur: '13.1 s', ok: true },
+      { t: '14:23:58', src: '本地', model: 'Qwen3-32B', io: '1,480 / 412', speed: '42.1 t/s', dur: '10.6 s', ok: true },
+      { t: '14:19:03', src: '本地', model: 'Gemma-3-27B-it', io: '3,210 / –', speed: '–', dur: '–', ok: false },
+      { t: '14:12:40', src: '公网', model: 'Qwen3-8B', io: '620 / 288', speed: '96.4 t/s', dur: '3.2 s', ok: true }
+    ];
+    const requests = reqs.map((r) => Object.assign({}, r, {
+      srcCls: r.src === '公网' ? 'chip chip-accent' : 'chip',
+      st: r.ok ? '200' : '503', stCls: r.ok ? 'st st-ready' : 'st st-failed'
+    }));
+
+    const lines = [
+      ['14:20:31', 'lv-dim', 'main: build b11146 · CUDA 12.4 · 1 device'],
+      ['14:20:31', 'lv-info', "llama_model_loader: loaded meta data with 32 key-value pairs from X:\\models\\Qwen3-32B\\Qwen3-32B-Q4_K_M.gguf"],
+      ['14:20:32', 'lv-dim', 'llm_load_tensors: offloading 65/65 layers to GPU'],
+      ['14:20:58', 'lv-info', 'llama_context: n_ctx = 32768, flash_attn = 1, type_k = q8_0'],
+      ['14:21:04', 'lv-warn', 'common_init: setting dry_penalty_last_n to ctx_size'],
+      ['14:21:07', 'lv-acc', 'main: server is listening on 127.0.0.1:39101 — ready'],
+      ['14:23:47', 'lv-info', 'slot launch_slot_: id 0 | task 1 | processing task'],
+      ['14:23:48', 'lv-dim', 'prompt eval time =   812.4 ms /  1480 tokens (1822.0 t/s)'],
+      ['14:23:58', 'lv-dim', '       eval time =  9784.1 ms /   412 tokens (  42.1 t/s)'],
+      ['14:23:58', 'lv-info', 'slot release: id 0 | task 1 | stop processing: n_past = 1892'],
+      ['14:25:00', 'lv-info', 'slot launch_slot_: id 0 | task 3 | processing task'],
+      ['14:25:12', 'lv-dim', '       eval time = 12104.6 ms /   512 tokens (  42.3 t/s)'],
+      ['14:26:31', 'lv-info', 'slot launch_slot_: id 0 | task 5 | processing task'],
+      ['14:26:41', 'lv-dim', '       eval time =  9212.0 ms /   386 tokens (  41.9 t/s)']
+    ];
+    const q = (s.q || '').toLowerCase();
+    const logLines = lines.filter((l) => !q || l[2].toLowerCase().indexOf(q) >= 0).map((l) => ({ t: l[0], cls: l[1], text: l[2] }));
+
+    const disc = [
+      { id: 'd1', name: 'Llama-3.3-70B-Instruct-Q3_K_M.gguf', dir: 'X:\\models\\llama-3.3-70b', arch: 'llama · 70B', quant: 'Q3_K_M · 34.3 GB', bad: false },
+      { id: 'd2', name: 'Phi-4-mini-instruct-Q8_0.gguf', dir: 'X:\\models\\phi-4-mini', arch: 'phi3 · 3.8B', quant: 'Q8_0 · 4.1 GB', bad: false },
+      { id: 'd3', name: 'DeepSeek-R1-Distill-Qwen-32B-Q6_K-00001-of-00003.gguf', dir: 'X:\\models\\downloads', arch: 'qwen2 · 32B', quant: 'Q6_K · 3 个分片', bad: true }
+    ];
+    const discover = disc.map((d) => {
+      const en = !!s.enabledFiles[d.id];
+      return Object.assign({}, d, {
+        canEnable: !d.bad && !en, enabled: en,
+        enable: () => this.setState({ enabledFiles: Object.assign({}, this.cur().enabledFiles, { [d.id]: true }) })
+      });
+    });
+
+    const editM = catalog.find((m) => m.id === s.editing);
+    const sideServing = ready || loading;
+
+    return {
+      accent: props.accent || '#4f5bd5',
+      themeClass: dark ? 'dark' : 'light',
+      themeSys: on(pref, 'system'), themeLight: on(pref, 'light'), themeDark: on(pref, 'dark'),
+      setSys: () => this.setState({ theme: 'system' }), setLight: () => this.setState({ theme: 'light' }), setDark: () => this.setState({ theme: 'dark' }),
+      navOverview: nav('overview'), navModels: nav('models'), navLogs: nav('logs'), navSettings: nav('settings'),
+      goOverview: go('overview'), goModels: go('models'), goLogs: go('logs'), goSettings: go('settings'),
+      isOverview: s.page === 'overview', isModels: s.page === 'models', isLogs: s.page === 'logs', isSettings: s.page === 'settings',
+      showBanner: s.banner, hideBanner: () => this.setState({ banner: false }),
+
+      sideModel: sideServing ? sideServing.name : '没有运行的模型',
+      sideState: ready ? { cls: 'st st-ready', label: '运行中' } : loading ? { cls: 'st st-loading', label: '加载中' } : { cls: 'st st-stopped', label: '空闲' },
+      sideSpeed: ready ? (generating ? speed : '41.9') : loading ? (loading.pct + '%') : '–',
+      sideSpeedUnit: ready ? (generating ? 't/s 生成中' : 't/s 上次') : loading ? '加载进度' : '等待请求',
+
+      hero: {
+        ready: !!ready, loading: !ready && !!loading, empty: !ready && !loading,
+        name: (ready || loading || {}).name || '', file: (ready || {}).file || '',
+        ctx: (ready || {}).ctx || '', quant: (ready || {}).quant || '',
+        pct: loading ? loading.pct : 0, inflight: ready && generating ? 1 : 0,
+        stop: ready ? ready.stop : null
+      },
+      speedLabel: generating ? '正在生成' : '空闲 · 上次请求',
+      speedNow: generating ? speed : '41.9',
+      sparkLine: pts.join(' '), sparkArea: '0,64 ' + pts.join(' ') + ' 320,64',
+      vram: { used: vramUsed.toFixed(1), pct: Math.round(vramUsed / 24 * 100), util: ready && generating ? 94 : 3 },
+      events, requests,
+
+      tabEnabled: on(s.modelsTab, 'enabled'), tabDiscover: on(s.modelsTab, 'discover'),
+      showEnabled: () => this.setState({ modelsTab: 'enabled' }), showDiscover: () => this.setState({ modelsTab: 'discover' }),
+      modelsEnabledTab: s.modelsTab === 'enabled', modelsDiscoverTab: s.modelsTab === 'discover',
+      models, discover,
+
+      logTabModel: on(s.logTab, 'model'), logTabEvents: on(s.logTab, 'events'), logTabReq: on(s.logTab, 'req'),
+      logModel: () => this.setState({ logTab: 'model' }), logEvents: () => this.setState({ logTab: 'events' }), logReq: () => this.setState({ logTab: 'req' }),
+      logIsModel: s.logTab === 'model', logIsEvents: s.logTab === 'events', logIsReq: s.logTab === 'req',
+      logLines, logCount: logLines.length, q: s.q,
+      onQ: (ev) => this.setState({ q: ev && ev.target ? ev.target.value : '' }),
+      togglePause: () => this.setState({ paused: !s.paused }),
+      pauseLabel: s.paused ? '继续' : '暂停',
+      liveText: s.paused ? '已暂停 · 新内容在后台继续记录' : '实时 · 跟随最新输出',
+      liveDotCls: s.paused ? '' : 'live-dot',
+
+      editing: !!editM, editName: editM ? '编辑「' + editM.name + '」' : '', editFile: editM ? editM.file.split('\\').pop() : '',
+      closeEdit: () => this.setState({ editing: null }),
+      etFiles: on(s.editTab, 'files'), etProfiles: on(s.editTab, 'profiles'), etParams: on(s.editTab, 'params'),
+      toFiles: () => this.setState({ editTab: 'files' }), toProfiles: () => this.setState({ editTab: 'profiles' }), toParams: () => this.setState({ editTab: 'params' }),
+      editFiles: s.editTab === 'files', editProfiles: s.editTab === 'profiles', editParams: s.editTab === 'params'
+    };
+  }
+}
+</script>
+</body>
+</html>

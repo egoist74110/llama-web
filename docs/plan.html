@@ -105,6 +105,7 @@ li.task .when{color:var(--ok);font-size:12px;white-space:nowrap}
   <a href="#s3">阶段 3 · 可观测性</a>
   <a href="#s4">阶段 4 · 公网与更新</a>
   <a href="#s5">阶段 5 · 兼容与 Windows 桌面版</a>
+  <a href="#s6">阶段 6 · 界面重设计</a>
   <a href="#verify">验收方式</a>
   <a href="#slots">坑位（暂不实现）</a>
   <a href="#risks">风险与待验证</a>
@@ -251,6 +252,7 @@ li.task .when{color:var(--ok);font-size:12px;white-space:nowrap}
     <tr><td>27</td><td>跨平台与首发</td><td>5-1 已实现 OS / arch / 推理加速与运行库隔离；用户确认 settings v4：旧配置迁移为 CUDA，新配置 auto，另有 CPU / Metal。旧 Windows runtime 原地保留供加载与回退，PID v2 迁移先备份。Windows 本机回归通过；macOS arm64 / x64 分支仅构造验证，真实安装包、进程、sharp 和推理后续验收。接口与迁移见 <a href="platform-foundation.md">5-1 设计记录</a></td></tr>
     <tr><td>28</td><td>桌面运行资源（本地测试）</td><td>5-2 本地包内置 Bun 1.3.14、Nuxt 产物、Windows sharp 原生资源和第三方许可；不带模型、用户数据和 llama.cpp / cudart。推理运行库继续按需下载并校验。按完整摘要区分的运行缓存位于应用本地数据目录的 rc（0.0.1 起；0.0.0 包在 data/run/desktop，深数据目录会使 sharp DLL 路径超限），与自定义数据目录无关，旧缓存保留供回退，不随数据导入复制；短目录名仍核对完整身份。0.0.0 → 0.0.1 升级、安装中断后回装旧版、卸载保留数据与断网启动已通过；干净机尚待验收。应用更新仍与 llama.cpp 自动更新分开</td></tr>
     <tr><td>29</td><td>首个 Windows Release 与应用更新（5-3）</td><td>用户确认：版本 <code>0.1.0-beta.1</code>（SemVer 预发布，GitHub 标 prerelease），项目许可 MIT，安装包未签名（无证书，发布说明写明 SmartScreen 提示）。版本号只写在 <code>package.json</code>（tauri.conf 引用它）。Release 由手动触发的 Windows workflow 生成<b>草稿</b>，从草稿下载验收后由维护者确认再发布（发布时才建 tag）。用户要求应用内现代更新：设置页「关于与更新」显示版本、手动检查、自动检查开关（默认开，启动约 15 秒后和每天一次，只读 GitHub Releases）；发现新版时顶部提示并弹出更新说明（Release 正文按纯文本显示），可跳过此版本。桌面版应用内下载，GitHub 资产摘要与 SHA256SUMS 一致才可安装；确认后服务经私有管道请求，壳停止服务后重新计算 SHA-256、限定 <code>data/run/app-update</code> 内的预期文件名，再以被动模式（<code>/P /R /UPDATE</code>）启动安装程序并退出，装完自动重开。源码版只提示和打开发布页。预发布用户接收更新的预发布和正式版，正式版用户只接收正式版。偏好存 <code>data/app-update.json</code>（不改 settings 结构）。不使用 Tauri updater 签名包（无需额外密钥），后台静默更新仍为坑位</td></tr>
+    <tr><td>30</td><td>界面重设计（阶段 6）</td><td>用户 2026-10-03 确认交互稿 <code>docs/design/ui-v2-prototype.dc.html</code>。取消顶栏，只留左侧栏：导航 + 底部「正在服务」小卡（模型、实时 t/s）+ 连接状态 / llama.cpp 版本 / 深浅色三段切换。<b>桌面宽度下侧栏固定不滚动，只有右侧内容区滚动，整页不滚动</b>；窄屏侧栏叠在上方、整页滚动。总览改仪表盘（当前模型大卡 + 速度曲线、显存 / 请求 / llama.cpp / 公网四个小卡、最近事件 + 最近请求，标题旁显示本机 API 地址可复制）；模型页改列表行，加载进度和失败原因在行内；编辑改右侧抽屉（文件 / 配置方案 / 参数）；日志改终端风格；设置页加分区目录。字体 Geist / Geist Mono（中文回落微软雅黑），须随包本地提供、不连 Google；强调色仍只有一种（靛蓝 #4f5bd5），深色仍用灰底。继续用 Nuxt UI，不换组件库，行为规则不变</td></tr>
   </table>
 </section>
 
@@ -364,6 +366,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 
 <section id="ui">
   <h2>界面</h2>
+  <div class="note"><b>阶段 6 起改用新版界面（关键决定 30）</b>：交互稿 <code>docs/design/ui-v2-prototype.dc.html</code>（设计画布源文件，视觉数值以它为准；示例数据都是假的）。下面的线框是阶段 2 的旧版，阶段 6 完成后替换。</div>
 <pre>┌ 顶栏：llama-web │ Qwen3.8-27B [默认] ● 运行中 · 42.3 t/s │ llama.cpp b10809 │ 更新/告警提示
 ├ 侧栏
 │  总览   当前模型卡片（状态、加载进度、prompt/生成速度）、显存条、排队情况、最近事件
@@ -573,6 +576,34 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
   </ul>
 </section>
 
+<section id="s6" class="stage">
+  <div class="stage-head"><h2>阶段 6 · 界面重设计</h2><div class="stage-meta"><span class="count"></span><div class="bar"><i></i></div></div></div>
+  <div class="stage-goal">用户要求（2026-10-03）：第一版界面是临时凑合的，按交互稿重做成现代控制台风格（关键决定 30）。只改界面，不改行为规则、接口和配置结构。</div>
+  <div class="note">交互稿：<code>docs/design/ui-v2-prototype.dc.html</code>（设计画布格式，不能直接在浏览器打开；读源码取颜色变量、间距、圆角、字号）。稿里的模型名、数字、版本号、地址都是示例；实现时一律用 <code>useLive()</code> 和现有接口的真实数据，稿里有、现有数据没有的内容不要编造（例如 GPU 型号缺失就不显示）。</div>
+
+  <h3>6-1 · 骨架、设计变量与总览</h3>
+  <ul class="tasks">
+    <li class="task" data-done="false"><span class="t">设计变量与字体：按交互稿改 <code>main.css</code> 的浅 / 深两套颜色变量（深色灰底，不用纯黑纯白）、圆角、阴影，强调色一种；Geist / Geist Mono 随包本地提供（新增依赖前先问用户），桌面版断网也能正常显示，中文回落微软雅黑</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">布局：取消顶栏；左侧栏 = 品牌、导航、底部「正在服务」小卡（实时 t/s / 加载进度 / 空闲）、连接状态、llama.cpp 版本、深浅色三段切换。桌面宽度侧栏固定不滚动，只有内容区滚动，整页不滚动；窄屏侧栏在上、整页滚动。应用更新提示条、断线提示移入内容区顶部</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">总览：当前模型大卡（状态、已运行时长、在途请求、方案 / 上下文 / 量化标签、大号生成速度 + 提示处理速度、最近约 40 秒速度曲线，前端从实时速度采样，不加接口）；加载中显示进度；无模型时的空状态。显存 / 请求（在途、排队）/ llama.cpp / 公网四个小卡；最近事件 + 最近请求两栏；标题旁显示本机 API 地址并可复制</span><span class="when"></span></li>
+  </ul>
+
+  <h3>6-2 · 模型、日志、设置页</h3>
+  <ul class="tasks">
+    <li class="task" data-done="false"><span class="t">模型页：已启用改为列表行（状态胶囊、量化 / 大小 / 上下文 / 视觉 / 草稿标签、方案下拉、编辑、启动 / 停止 / 重试），加载进度和失败原因在行内；扫描发现改卡片网格；编辑改右侧抽屉（文件 / 配置方案 / 参数三栏，保留现有命令预览与重复参数警告）</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">日志页：一行工具栏（类型分段、模型、时间范围、搜索、暂停、下载）；模型输出改终端风格（等宽、时间列、按级别着色），事件为时间线，请求为表格</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">设置页与其余页面：左侧分区目录 + 分区卡片，开关 / 单选 / 表单样式统一；首次向导、公网向导、各类对话框套用新样式。删掉不再使用的旧组件</span><span class="when"></span></li>
+  </ul>
+  <div class="accept"><h3>验收标准</h3>
+    <ul>
+      <li>四个页面和首次向导在浅色、深色、窄屏（约 390px）下都能正常使用；桌面宽度侧栏不随内容滚动。</li>
+      <li>所有文案仍在 <code>i18n/zh-CN.ts</code>；<code>useLive()</code> 仍是唯一实时数据来源；<code>bun test</code> 与 typecheck 通过。</li>
+      <li>源码版和桌面安装包里实际打开看过（截图记录在交接里）；断网时字体正常。</li>
+    </ul>
+  </div>
+  <div class="note"><b>阶段关口 6</b>：6-2 完成后停下，等用户试用确认。</div>
+</section>
+
 <section id="verify">
   <h2>验收方式</h2>
   <ul>
@@ -628,6 +659,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
   <h2>变更记录</h2>
   <table>
     <tr><th>日期</th><th>内容</th></tr>
+    <tr><td>2026-10-03</td><td>新增阶段 6「界面重设计」（工作包 6-1、6-2）和关键决定 30：用户确认交互稿 <code>docs/design/ui-v2-prototype.dc.html</code>，要求侧栏固定不滚动、只有内容区滚动。「界面」一节的旧线框保留到阶段 6 完成</td></tr>
     <tr><td>2026-10-03</td><td>用户确认后发布 v0.1.0-beta.1（prerelease，tag 指向 dba2238）。匿名从公开 Release 下载的安装包与草稿逐字节一致、SHA256SUMS 校验通过；公开 Releases API 上应用自身的选择逻辑：0.1.0-beta.0 会收到 beta.1（安装包带摘要、SHA256SUMS 齐全），beta.1 无更新，正式版用户不收到预发布。仓库已是公开状态，无需更改</td></tr>
     <tr><td>2026-10-03</td><td>工作包 5-3：用户确认版本 0.1.0-beta.1、MIT、未签名，并要求现代化应用更新（新增关键决定 29，「应用自动更新」坑位缩小为后台静默 / 签名增量更新）。实现应用内检查 / 提示 / 更新说明 / 跳过 / 下载双重校验 / 壳复核后被动安装；手动触发的 Windows 草稿 Release workflow、包内容 allowlist 检查、发布说明。被动更新曾被 NSIS 语言选择框阻塞，已关闭该选择框。草稿已生成并从下载包验收，等待用户确认发布</td></tr>
     <tr><td>2026-10-02</td><td>5-2 第三次接续：用 WebView2 调试端口与窗口消息在安装版完成窗口 / GUI 验收（页面、深浅色、SSE、长流式、原生命令隔离、端口冲突重试 / 退出、导入对话框、从备份恢复）、真实下载 / 解压 / GPU 加载中关窗、0.0.0 → 0.0.1 升级 / 中断安装回装、断网与深数据目录。修复：端口冲突经私有管道报告原因码并显示中文原因；运行缓存移到应用本地短目录 rc（深数据目录 sharp DLL 路径超限）；首次下载失败提示重新打开会重试；测试包版本 0.0.1。653 项 Bun 测试、类型检查、5 项 Rust 测试通过。第一项打勾；第二项缺干净 Windows / 无 NVIDIA 验证不打勾。清理上两轮残留。未进入 Release 或 Mac。</td></tr>

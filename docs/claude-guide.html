@@ -96,6 +96,7 @@ ol.steps li{margin:4px 0}
   <a href="#st3">阶段 3 · 可观测性</a>
   <a href="#st4">阶段 4 · 公网与更新</a>
   <a href="#st5">阶段 5 · 兼容与 Windows 桌面版</a>
+  <a href="#st6">阶段 6 · 界面重设计</a>
   <div class="grp">其他提示词</div>
   <a href="#cont">接续未完成的工作包</a>
   <a href="#review">阶段审查（Codex）</a>
@@ -442,6 +443,38 @@ ol.steps li{margin:4px 0}
   </div>
 
   <div class="gatebox"><span class="m gate">阶段关口 5</span> 首个 Windows Release 经实际安装验收并发布后停下。Mac 的 .app / DMG、签名 / 公证、Metal 与 Intel 真机测试需用户另行要求启动。</div>
+</section>
+
+<!-- ============================ 阶段 6 ============================ -->
+<section id="st6">
+  <h2>阶段 6 · 界面重设计</h2>
+  <p class="lead">用户 2026-10-03 确认交互稿 <code>docs/design/ui-v2-prototype.dc.html</code>（关键决定 30）。只改界面，不改行为规则、接口和配置结构。</p>
+
+  <div class="pkg" id="p6-1">
+    <div class="pkg-head"><b>6-1 骨架、设计变量与总览</b><span class="m opus">Opus 5.5</span></div>
+    <ul class="scope">
+      <li>范围以 plan 阶段 6「6-1」三项为准：颜色 / 圆角 / 阴影变量与本地字体、取消顶栏改左侧栏（桌面侧栏固定不滚动，只有内容区滚动）、总览仪表盘。</li>
+      <li>先读交互稿源码取精确数值；稿里的数据是示例，实现只用 <code>useLive()</code> 和现有接口，没有的数据不显示、不编造。新增字体依赖前先问用户。</li>
+      <li>文案进 i18n；源码版和桌面版都要实际打开看（浅色 / 深色 / 窄屏），截图记录。只做 6-1，模型 / 日志 / 设置页留给 6-2。</li>
+    </ul>
+    <div class="prompt"><button type="button">复制</button><pre>执行工作包 6-1：界面重设计的骨架、设计变量与总览。
+按 AGENTS.md 的规则开始：读 docs/claude-guide.html 中 6-1 卡片与会话规则、docs/handoff.md 最新交接、docs/plan.html 阶段 6 和关键决定 30，以及交互稿 docs/design/ui-v2-prototype.dc.html。
+按交互稿实现设计变量、本地字体、左侧栏布局（桌面侧栏不滚动，只有内容区滚动）和总览页；只用真实数据。新增依赖前先问我。做完按会话收尾流程结束。</pre></div>
+  </div>
+
+  <div class="pkg" id="p6-2">
+    <div class="pkg-head"><b>6-2 模型、日志、设置页</b><span class="m sonnet">Sonnet 5.5</span></div>
+    <ul class="scope">
+      <li>仅在 6-1 完成后执行，沿用 6-1 建好的变量和组件，不另起样式。</li>
+      <li>范围以 plan 阶段 6「6-2」三项为准：模型列表行 + 编辑抽屉、日志终端风格、设置分区目录，以及向导和对话框套新样式；删除不再使用的旧组件。</li>
+      <li>编辑抽屉保留现有命令预览和重复参数警告；行为不变。做完是阶段关口，停下等用户试用。</li>
+    </ul>
+    <div class="prompt"><button type="button">复制</button><pre>执行工作包 6-2：界面重设计的模型、日志、设置页。
+按 AGENTS.md 的规则开始：读 docs/claude-guide.html 中 6-2 卡片、docs/handoff.md 最新交接、docs/plan.html 阶段 6，以及交互稿 docs/design/ui-v2-prototype.dc.html。
+沿用 6-1 的设计变量和组件完成其余页面，只改界面不改行为。做完按会话收尾流程结束，然后停下等我试用。</pre></div>
+  </div>
+
+  <div class="gatebox"><span class="m gate">阶段关口 6</span> 6-2 完成后停下，用户试用新界面并确认。</div>
 </section>
 
 <!-- ============================ 其他提示词 ============================ -->
