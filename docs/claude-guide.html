@@ -97,6 +97,7 @@ ol.steps li{margin:4px 0}
   <a href="#st4">阶段 4 · 公网与更新</a>
   <a href="#st5">阶段 5 · 兼容与 Windows 桌面版</a>
   <a href="#st6">阶段 6 · 界面重设计</a>
+  <a href="#st7">阶段 7 · 免域名临时隧道</a>
   <div class="grp">其他提示词</div>
   <a href="#cont">接续未完成的工作包</a>
   <a href="#review">阶段审查（Codex）</a>
@@ -475,6 +476,45 @@ ol.steps li{margin:4px 0}
   </div>
 
   <div class="gatebox"><span class="m gate">阶段关口 6</span> 6-2 完成后停下，用户试用新界面并确认。</div>
+</section>
+
+<!-- ============================ 阶段 7 ============================ -->
+<section id="st7">
+  <h2>阶段 7 · 免域名临时隧道</h2>
+  <p class="lead">用户 2026-10-03 要求（关键决定 31）：没有域名也能公网访问，用 Cloudflare 临时隧道；cloudflared 本地解决，卸载清理干净。阶段 6 的关口还没确认，开始前先问用户是否可以进入阶段 7。</p>
+
+  <div class="pkg" id="p7-1">
+    <div class="pkg-head"><b>7-1 临时隧道核心</b><span class="m opus">Opus 5.5</span></div>
+    <ul class="scope">
+      <li>范围以 plan 阶段 7「7-1」四项为准：<code>tunnelMode</code> 设置与 v5 迁移、<code>TunnelManager</code> 临时模式、地址与自检、实测 SSE。</li>
+      <li>启动参数必须是数组；子进程仍记录在 <code>pids.json</code>，停止时结束整个进程树；不要削弱公网入口的鉴权和 <code>/v1/*</code> 限制，修改相关代码要补测试。</li>
+      <li>实测会连一次 Cloudflare：开始前先告诉用户。实测结果如实写进交接，与关键决定 31 不符就改决定和文案。不做界面，留给 7-2。</li>
+    </ul>
+    <div class="prompt"><button type="button">复制</button><pre>执行工作包 7-1：免域名临时隧道的核心。
+按 AGENTS.md 的规则开始：读 docs/claude-guide.html 中 7-1 卡片与会话规则、docs/handoff.md 最新交接、docs/plan.html 阶段 7 和关键决定 31，以及 server/core/tunnel.ts。
+实现 tunnelMode 设置（settings v5 迁移）、TunnelManager 临时模式、地址与自检的过滤，补测试。实测前先告诉我。做完按会话收尾流程结束。</pre></div>
+  </div>
+
+  <div class="pkg" id="p7-review">
+    <div class="pkg-head"><b>7-1 审查</b><span class="m other">gpt-6.1sol</span></div>
+    <ul class="scope">
+      <li>重点：子进程生命周期与残留清理、配置迁移、公网入口鉴权没有被削弱。用「阶段审查」提示词，范围限定在 7-1 的改动；意见按「处理审查意见」处理。模型也可由用户指定。</li>
+    </ul>
+  </div>
+
+  <div class="pkg" id="p7-2">
+    <div class="pkg-head"><b>7-2 界面与收尾</b><span class="m sonnet">Sonnet 5.5</span></div>
+    <ul class="scope">
+      <li>仅在 7-1 和审查处理完成后执行。范围以 plan 阶段 7「7-2」三项为准：向导第三个选项、总览 / 高级的模式切换、卸载与清理核对、文档。</li>
+      <li>临时地址的限制（每次启动会变、流式可能一次性返回、仅适合试用）要在选择方式和连接页明说，文案按 7-1 的实测结果写。</li>
+      <li>真机冒烟前先告诉用户。做完是阶段关口，停下等用户试用，不自动发版。</li>
+    </ul>
+    <div class="prompt"><button type="button">复制</button><pre>执行工作包 7-2：免域名临时隧道的界面与收尾。
+按 AGENTS.md 的规则开始：读 docs/claude-guide.html 中 7-2 卡片、docs/handoff.md 最新交接、docs/plan.html 阶段 7 和关键决定 31。
+实现向导第三个选项、模式切换和卸载清理核对，文案放 i18n。真机冒烟前先告诉我。做完按会话收尾流程结束，然后停下等我试用。</pre></div>
+  </div>
+
+  <div class="gatebox"><span class="m gate">阶段关口 7</span> 7-2 完成后停下，用户试用并确认。不自动发版。</div>
 </section>
 
 <!-- ============================ 其他提示词 ============================ -->

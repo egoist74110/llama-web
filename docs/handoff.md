@@ -16,6 +16,15 @@
 
 ---
 
+## 2026-10-03 · 阶段 7 规划（免域名临时隧道） · Sonnet 5.5
+- 完成：用户要求公网向导新增「没有域名，用 Cloudflare 临时隧道」，cloudflared 本地解决、卸载清理干净。新增关键决定 31、plan 阶段 7（7-1、审查、7-2）、指南阶段 7 卡片（含各包推荐模型：7-1 Opus 5.5、审查 gpt-6.1sol、7-2 Sonnet 5.5）。
+- 验证：只改了文档（plan.html、claude-guide.html、handoff.md），没改代码，没跑 `bun test` / typecheck。
+- 剩余：7-1、7-2 都没开始。
+- 决定 / 坑：现有 `server/core/tunnel.ts` 已经会把 cloudflared 复制或下载到 `data/runtime/cloudflared/`，临时模式直接复用。方案草稿：`public.tunnelMode`（settings v5）、`TunnelManager` 的 `--url` 模式、地址取自输出里的 `*.trycloudflare.com`。**评估性实测（临时脚本，已清理，cloudflared 2026.5.0，假 SSE 服务每秒一个事件）：GET 被缓冲（8.7 秒后一次性到达），POST 逐条到达（首条 1.0 秒）。LLM 流式是 POST，所以值得做；还没用真实 llama-server 测，7-1 复测。** `~/.cloudflared/config.yml` 可能影响临时隧道，也要实测。阶段 6 关口还没得到用户确认，7-1 开始前先问用户。
+- 下一步：7-1（Opus 5.5，提示词在指南 #p7-1）。
+
+---
+
 ## 2026-10-03 · 发布 v0.1.0-beta.2 · Sonnet 5.5
 - 完成：应用户要求发布 v0.1.0-beta.2（prerelease，tag → 273945a）。版本号我定的（用户没指定）：package.json、Cargo.toml、Cargo.lock 各改一行，写了 `docs/release-notes/v0.1.0-beta.2.md`，手动触发草稿 workflow，CI 全部步骤通过。
 - 验证：从草稿下载安装包，SHA256 与 SHA256SUMS 一致，`bun desktop/check-package.ts` 通过（338 个文件），确认后 `gh release edit --draft=false`。没有安装运行安装包，没测 beta.1 → beta.2 的应用内升级，没有在干净机 / 无 NVIDIA 机器上试用；发布说明里已写明。
