@@ -6,6 +6,7 @@ import type { ScanEntry, ScanWarning } from '~~/server/core/scanner'
 type Entry = ScanEntry & { enabledAs: string | null }
 interface ScanDoc { scannedAt: number, dirs: number, warnings: ScanWarning[], entries: Entry[] }
 
+const props = defineProps<{ filter?: string }>()
 const { busy, enable } = useModelActions()
 const toast = useToast()
 // Kept across page visits so switching tabs does not rescan.
@@ -27,7 +28,8 @@ async function rescan() {
 onMounted(() => { if (!scan.value) void rescan() })
 
 const models = computed(() => scan.value?.entries.filter(e => e.kind === 'model' || e.kind === 'invalid') ?? [])
-const fresh = computed(() => models.value.filter(e => !e.enabledAs))
+const fresh = computed(() => models.value.filter(e => !e.enabledAs && (!props.filter || `${e.fileName} ${e.ref.dirId}/${e.ref.rel}`.toLowerCase().includes(props.filter))))
+const freshAll = computed(() => models.value.filter(e => !e.enabledAs))
 const helpers = computed(() => ({
   mmproj: scan.value?.entries.filter(e => e.kind === 'mmproj').length ?? 0,
   draft: scan.value?.entries.filter(e => e.kind === 'draft').length ?? 0,
@@ -45,101 +47,94 @@ async function doEnable(e: Entry) {
 </script>
 
 <template>
-  <AppCard :title="t.models.discover.title" :hint="t.models.discover.hint">
-    <template #actions>
-      <div class="flex shrink-0 items-center gap-3">
-        <span v-if="scan" class="hidden text-xs text-muted sm:inline">{{ fmt(t.models.discover.scannedAt, { time: scannedAt }) }}</span>
-        <UButton class="shrink-0 whitespace-nowrap" size="sm" color="neutral" variant="outline" icon="i-lucide-refresh-cw" :loading="scanning" @click="rescan">
-          {{ scanning ? t.models.discover.scanning : t.models.discover.scan }}
-        </UButton>
-      </div>
-    </template>
+  <div class="flex flex-col gap-2.5">
+    <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+      <p class="m-0 min-w-0 flex-1 basis-64 text-xs text-dimmed">
+        {{ t.models.discover.hint }}
+        <span v-if="scan">{{ fmt(t.models.discover.scannedAt, { time: scannedAt }) }}</span>
+      </p>
+      <UButton class="shrink-0 whitespace-nowrap" size="sm" color="neutral" variant="outline" icon="i-lucide-refresh-cw" :loading="scanning" @click="rescan">
+        {{ scanning ? t.models.discover.scanning : t.models.discover.scan }}
+      </UButton>
+    </div>
 
-    <div v-if="!scan" class="space-y-3">
-      <USkeleton class="h-16 w-full" />
-      <USkeleton class="h-16 w-full" />
+    <div v-if="!scan" class="grid grid-cols-[repeat(auto-fit,minmax(min(320px,100%),1fr))] gap-3.5">
+      <USkeleton class="h-32 w-full rounded-[14px]" />
+      <USkeleton class="h-32 w-full rounded-[14px]" />
     </div>
 
     <template v-else>
-      <ul v-if="scan.warnings.length" class="mb-3 space-y-0.5 text-xs text-warning">
+      <ul v-if="scan.warnings.length" class="m-0 list-none space-y-0.5 p-0 text-xs text-warning">
         <li v-for="(w, i) in scan.warnings" :key="i">
           {{ fmt(t.models.discover.warnings[w.code], { dir: dirLabel(w) }) }}
         </li>
       </ul>
 
-      <div v-if="!scan.dirs" class="py-4 text-center">
-        <p class="text-sm text-highlighted">
+      <section v-if="!scan.dirs" class="lw-card px-5 py-6 text-center">
+        <p class="m-0 text-sm font-medium">
           {{ t.models.discover.noDirs }}
         </p>
         <p class="mt-1 text-sm text-muted">
           {{ t.models.discover.noDirsHint }}
         </p>
-      </div>
-      <div v-else-if="!models.length" class="py-4 text-center">
-        <p class="text-sm text-highlighted">
+      </section>
+      <section v-else-if="!models.length" class="lw-card px-5 py-6 text-center">
+        <p class="m-0 text-sm font-medium">
           {{ t.models.discover.nothing }}
         </p>
         <p class="mt-1 text-sm text-muted">
           {{ t.models.discover.nothingHint }}
         </p>
-      </div>
-      <p v-else-if="!fresh.length" class="py-2 text-sm text-muted">
+      </section>
+      <p v-else-if="!freshAll.length" class="py-2 text-sm text-muted">
         {{ t.models.discover.allEnabled }}
       </p>
+      <p v-else-if="!fresh.length" class="py-6 text-center text-sm text-muted">
+        {{ t.models.filter.none }}
+      </p>
 
-      <ul v-if="fresh.length" class="divide-y divide-default">
-        <li v-for="e in fresh" :key="e.ref.dirId + '/' + e.ref.rel" class="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 py-3 first:pt-0 last:pb-0">
-          <div class="min-w-0 flex-1 space-y-1">
-            <div class="flex flex-wrap items-center gap-2">
-              <span class="text-sm font-medium text-highlighted">{{ e.fileName }}</span>
-              <UBadge v-if="e.kind === 'invalid'" color="error" variant="subtle" size="sm">
-                {{ t.models.discover.invalid }}
-              </UBadge>
-              <UBadge v-else-if="!e.complete" color="warning" variant="subtle" size="sm">
-                {{ t.models.discover.incomplete }}
-              </UBadge>
-              <UBadge v-if="e.shards" color="neutral" variant="outline" size="sm">
-                {{ fmt(t.models.discover.shards, { count: e.shards.length }) }}
-              </UBadge>
-              <UBadge v-if="e.meta?.hasChatTemplate" color="neutral" variant="outline" size="sm">
-                {{ t.models.discover.template }}
-              </UBadge>
+      <div v-if="fresh.length" class="grid grid-cols-[repeat(auto-fit,minmax(min(320px,100%),1fr))] gap-3.5">
+        <section v-for="e in fresh" :key="e.ref.dirId + '/' + e.ref.rel" class="lw-card flex flex-col gap-3 px-[18px] py-4">
+          <div class="flex min-w-0 flex-col gap-1">
+            <div class="flex flex-wrap items-center gap-1.5">
+              <span class="break-words text-sm font-semibold [overflow-wrap:anywhere]">{{ e.fileName }}</span>
+              <span v-if="e.kind === 'invalid'" class="lw-st lw-st-failed">{{ t.models.discover.invalid }}</span>
+              <span v-else-if="!e.complete" class="lw-st lw-st-loading">{{ t.models.discover.incomplete }}</span>
+              <span v-if="e.shards" class="lw-chip">{{ fmt(t.models.discover.shards, { count: e.shards.length }) }}</span>
+              <span v-if="e.meta?.hasChatTemplate" class="lw-chip">{{ t.models.discover.template }}</span>
             </div>
-            <p class="break-all text-xs text-muted">
-              {{ e.ref.dirId }}/{{ e.ref.rel }}
-            </p>
-            <dl v-if="e.meta" class="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted">
-              <div><dt class="mr-1 inline">{{ t.models.discover.meta.arch }} </dt><dd class="inline text-default">{{ e.meta.architecture ?? t.models.discover.unknown }}</dd></div>
-              <div><dt class="mr-1 inline">{{ t.models.discover.meta.params }} </dt><dd class="inline text-default">{{ formatParams(e.meta.parameterCount) }}</dd></div>
-              <div><dt class="mr-1 inline">{{ t.models.discover.meta.quant }} </dt><dd class="inline text-default">{{ e.meta.quantization ?? t.models.discover.unknown }}</dd></div>
-              <div><dt class="mr-1 inline">{{ t.models.discover.meta.ctx }} </dt><dd class="inline text-default">{{ formatContext(e.meta.contextLength) }}</dd></div>
-              <div><dt class="mr-1 inline">{{ t.models.discover.meta.size }} </dt><dd class="inline text-default">{{ formatBytes(e.size) }}</dd></div>
-            </dl>
-            <p v-if="e.kind === 'invalid'" class="text-xs text-error">
-              {{ fmt(t.models.discover.invalidHint, { error: e.error ?? '' }) }}
-            </p>
-            <p v-else-if="!e.complete" class="text-xs text-warning">
-              {{ t.models.discover.incompleteHint }}
-            </p>
-            <p v-else-if="e.candidates.mmproj.length || e.candidates.draft.length" class="text-xs text-muted">
-              {{ fmt(t.models.discover.candidates, { mmproj: e.candidates.mmproj.length, draft: e.candidates.draft.length }) }}
-            </p>
+            <span class="font-mono text-xs text-dimmed [overflow-wrap:anywhere]">{{ e.ref.dirId }}/{{ e.ref.rel }}</span>
           </div>
-          <UButton
-            v-if="e.kind === 'model' && e.complete"
-            size="sm"
-            icon="i-lucide-plus"
-            :loading="!!busy[`enable:${e.ref.dirId}/${e.ref.rel}`]"
-            @click="doEnable(e)"
-          >
-            {{ t.models.discover.enable }}
-          </UButton>
-        </li>
-      </ul>
+          <dl v-if="e.meta" class="m-0 grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+            <div><dt class="text-dimmed">{{ t.models.discover.meta.arch }} · {{ t.models.discover.meta.params }}</dt><dd class="m-0 font-mono">{{ e.meta.architecture ?? t.models.discover.unknown }} · {{ formatParams(e.meta.parameterCount) }}</dd></div>
+            <div><dt class="text-dimmed">{{ t.models.discover.meta.quant }} · {{ t.models.discover.meta.size }}</dt><dd class="m-0 font-mono">{{ e.meta.quantization ?? t.models.discover.unknown }} · {{ formatBytes(e.size) }}</dd></div>
+            <div><dt class="text-dimmed">{{ t.models.discover.meta.ctx }}</dt><dd class="m-0 font-mono">{{ formatContext(e.meta.contextLength) }}</dd></div>
+          </dl>
+          <p v-if="e.kind === 'invalid'" class="m-0 text-xs text-error">
+            {{ fmt(t.models.discover.invalidHint, { error: e.error ?? '' }) }}
+          </p>
+          <p v-else-if="!e.complete" class="m-0 text-xs text-warning">
+            {{ t.models.discover.incompleteHint }}
+          </p>
+          <p v-else-if="e.candidates.mmproj.length || e.candidates.draft.length" class="m-0 text-xs text-muted">
+            {{ fmt(t.models.discover.candidates, { mmproj: e.candidates.mmproj.length, draft: e.candidates.draft.length }) }}
+          </p>
+          <div v-if="e.kind === 'model' && e.complete" class="flex justify-end">
+            <UButton
+              size="sm"
+              icon="i-lucide-plus"
+              :loading="!!busy[`enable:${e.ref.dirId}/${e.ref.rel}`]"
+              @click="doEnable(e)"
+            >
+              {{ t.models.discover.enable }}
+            </UButton>
+          </div>
+        </section>
+      </div>
 
-      <p v-if="scan.dirs && (helpers.mmproj || helpers.draft)" class="mt-3 text-xs text-dimmed">
+      <p v-if="scan.dirs && (helpers.mmproj || helpers.draft)" class="m-0 text-xs text-dimmed">
         {{ fmt(t.models.discover.helpers, helpers) }}
       </p>
     </template>
-  </AppCard>
+  </div>
 </template>

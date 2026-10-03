@@ -16,6 +16,16 @@
 
 ---
 
+## 2026-10-03 · 工作包 6-2 · Sonnet 5.5
+- 完成：plan 6-2 三项打勾。模型页：已启用改为列表行（`ModelCard`，状态胶囊 `StatusPill`、量化 / 视觉 / 草稿标签、方案下拉、编辑图标、启动 / 停止 / 重试，加载进度条和失败卡在行内）、扫描发现改卡片网格（`DiscoverPanel`）、新增筛选框与分段切换；编辑抽屉改文件 / 配置方案 / 参数三栏（`ModelEditor`，逻辑不变，所有 ProfileForm 仍保持挂载，命令预览与重复参数警告还在参数栏里）。日志页：一行工具栏，模型输出终端风格（按行文本判断 err / warn / eval 着色），事件时间线，请求表格。设置页：左侧分区目录（滚动跟随高亮）+ 分区卡片，llama.cpp 版本改单选行。`AppCard` / `PageHeader` 改成新样式（向导和设置、导入、公网向导都用它们），公网向导里的小方框圆角统一 10px。删除 `StateDot` / `StateBadge`。文案新增在 `i18n/zh-CN.ts`（models.filter、models.edit.tabs / paramsFor、logs.view、settings.toc）。
+- 与交互稿差异（数据里没有或会新增功能的没做，已写进变更记录）：模型行没有大小 / 上下文标签（实时数据没有；量化取文件名）；日志页没有「下载」按钮（没有接口，没新增）；日志的「时间范围」仍是原来的「实时 / 文件」选择。
+- 验证：`bun test` 675 pass / 0 fail，`bun run typecheck` 通过（改完后各跑了一次）。源码版（`bun run dev`，临时数据目录 + 假 llama-server）在浏览器面板看了：模型页启动 / 运行中、编辑抽屉三栏、扫描发现卡片、日志（模型输出 / 请求）、设置页（深色，目录跳转），深浅色切换，390 宽下四个页面 + 向导无横向溢出（只用脚本量了 scrollWidth，模型页窄屏截图看过；日志 / 设置窄屏、事件标签页、加载中 / 失败行、首次向导、公网向导和各对话框的新样式**没有逐一截图看**）。**桌面安装包没有重新构建验证**，验收标准里的「桌面安装包实际打开看过、断网字体」本轮没做，用户试用时请用 `start.bat build` 或 `bun run desktop:build` 看。
+- 坑：`bun run dev` 会按 `LLAMA_WEB_DATA` 指定的目录初始化；目录里没有 settings 时会触发 llama.cpp 自动下载（约 700 MB），要先用 `.cache/6-1/setup.ts` 那种方式播种配置（autoUpdate 关）。本轮第一次启动就踩了：数据目录是 `.cache/` 下的临时目录，没碰仓库 `data/`，已删。
+- 剩余：阶段关口 6，等用户试用确认；上面「没有逐一截图」的页面请重点看。
+- 下一步：无（阶段 6 到此）。用户确认后才有新工作。
+
+---
+
 ## 2026-10-03 · 工作包 6-1 · Opus 5.5
 - 完成：plan 6-1 三项打勾。设计变量（main.css，浅 / 深两套映射到 Nuxt UI 变量，primary indigo / neutral gray）、本地 Geist 字体（新依赖 `@fontsource-variable/geist`、`geist-mono`，用户同意；`ui.fonts: false` 关掉 @nuxt/fonts）、左侧栏 `AppSidebar`（≥820px 侧栏固定、只有 `.lw-main` 滚动；窄屏侧栏在上、导航横排）、总览 `pages/index.vue` + `OverviewHero`。新组件用 `lw-*` 类（`lw-card` / `lw-chip` / `lw-st-*` / `lw-seg` / `lw-bar` / `lw-tbl`），6-2 沿用。纯逻辑在 `app/utils/overview.ts`（有测试），速度曲线由 `useSpeedTrend`（布局里启动，每秒从 useLive 采样）。日志页支持 `?tab=events|requests`。
 - 与交互稿差异（数据里没有的不显示，已写进变更记录）：最近请求的「速度」列改「耗时」；llama.cpp 小卡无 CUDA 标签；无 nvidia-smi 时显存卡隐藏；更新提示条只留「查看更新」+ 本次关闭；ctx 取命令预览接口（实例变化时取一次），量化取文件名。

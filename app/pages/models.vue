@@ -8,52 +8,63 @@ const tabs = [
   { value: 'discover' as const, label: t.models.tabs.discover },
 ]
 const list = computed(() => state.value?.models ?? [])
+const filter = ref('')
+const needle = computed(() => filter.value.trim().toLowerCase())
+const shown = computed(() => (needle.value ? list.value.filter(m => m.name.toLowerCase().includes(needle.value) || m.files.model.toLowerCase().includes(needle.value)) : list.value))
 </script>
 
 <template>
-  <div class="space-y-5">
-    <PageHeader :title="t.models.title" :subtitle="t.models.subtitle" />
+  <div class="flex flex-col gap-[18px]">
+    <PageHeader :title="t.models.title" :subtitle="t.models.enabled.hint" />
 
-    <div class="inline-flex gap-1 rounded-lg border border-default bg-elevated p-1" role="tablist">
-      <button
-        v-for="x in tabs"
-        :key="x.value"
-        type="button"
-        role="tab"
-        :aria-selected="tab === x.value"
-        class="rounded-md px-3 py-1 text-sm transition-colors"
-        :class="tab === x.value ? 'bg-primary/10 font-medium text-primary' : 'text-muted hover:text-highlighted'"
-        @click="tab = x.value"
-      >
-        {{ x.label }}
-        <span v-if="x.value === 'enabled' && list.length" class="ml-1 text-xs opacity-70">{{ list.length }}</span>
-      </button>
+    <div class="flex flex-wrap items-center justify-between gap-2.5">
+      <div class="lw-seg" role="tablist">
+        <button
+          v-for="x in tabs"
+          :key="x.value"
+          type="button"
+          role="tab"
+          :aria-selected="tab === x.value"
+          :class="{ on: tab === x.value }"
+          @click="tab = x.value"
+        >
+          {{ x.label }}
+          <span v-if="x.value === 'enabled' && list.length" class="lw-num text-[11px] text-dimmed">{{ list.length }}</span>
+        </button>
+      </div>
+      <UInput
+        v-model="filter"
+        class="w-[min(280px,100%)]"
+        icon="i-lucide-search"
+        :placeholder="t.models.filter.placeholder"
+        :aria-label="t.models.filter.label"
+      />
     </div>
 
     <template v-if="tab === 'enabled'">
-      <div v-if="!state" class="space-y-4">
-        <USkeleton class="h-24 w-full" />
-        <USkeleton class="h-24 w-full" />
+      <div v-if="!state" class="flex flex-col gap-3.5">
+        <USkeleton class="h-24 w-full rounded-[14px]" />
+        <USkeleton class="h-24 w-full rounded-[14px]" />
       </div>
-      <AppCard v-else-if="!list.length" :title="t.models.enabled.title" :hint="t.models.enabled.hint">
-        <p class="text-sm text-highlighted">
+      <section v-else-if="!list.length" class="lw-card px-5 py-[18px]">
+        <h2 class="m-0 text-[15px] font-semibold">
           {{ t.models.enabled.empty }}
-        </p>
-        <p class="mt-1 text-sm text-muted">
+        </h2>
+        <p class="mt-1 text-[13px] text-muted">
           {{ t.models.enabled.emptyHint }}
         </p>
-        <UButton class="mt-3" size="sm" @click="tab = 'discover'">
+        <UButton class="mt-3" size="sm" color="neutral" variant="outline" @click="tab = 'discover'">
           {{ t.models.enabled.goDiscover }}
         </UButton>
-      </AppCard>
-      <div v-else class="space-y-4">
-        <p class="text-xs text-muted">
-          {{ t.models.enabled.hint }}
-        </p>
-        <ModelCard v-for="m in list" :key="m.id" :model="m" />
-      </div>
+      </section>
+      <p v-else-if="!shown.length" class="py-6 text-center text-sm text-muted">
+        {{ t.models.filter.none }}
+      </p>
+      <section v-else class="lw-card overflow-hidden">
+        <ModelCard v-for="m in shown" :key="m.id" :model="m" />
+      </section>
     </template>
 
-    <DiscoverPanel v-else />
+    <DiscoverPanel v-else :filter="needle" />
   </div>
 </template>

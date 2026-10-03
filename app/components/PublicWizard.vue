@@ -226,7 +226,7 @@ const ingress = computed(() => `127.0.0.1:${pub.value.port}`)
     <div v-else-if="w.step === 'key'" class="space-y-3">
       <USkeleton v-if="!keys" class="h-12 w-full" />
       <template v-else>
-        <div v-if="created" class="space-y-2 rounded-[var(--ui-radius)] border border-default p-3">
+        <div v-if="created" class="space-y-2 rounded-[10px] border border-default p-3">
           <p class="text-sm text-success">
             {{ fmt(p.key.created, { name: created.name }) }}
           </p>
@@ -276,7 +276,7 @@ const ingress = computed(() => `127.0.0.1:${pub.value.port}`)
       <div class="grid gap-2 sm:grid-cols-2">
         <button
           v-for="opt in (['api', 'manual'] as const)" :key="opt" type="button"
-          class="rounded-[var(--ui-radius)] border p-3 text-left transition-colors"
+          class="rounded-[10px] border p-3 text-left transition-colors"
           :class="w.path === opt ? 'border-primary bg-primary/5' : 'border-default hover:bg-elevated'"
           :aria-pressed="w.path === opt" @click="choosePath(opt)"
         >

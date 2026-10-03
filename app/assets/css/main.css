@@ -161,3 +161,34 @@ html, body {
 .lw-dot-warn { color: var(--lw-warn); }
 .lw-dot-acc { color: var(--lw-accent-ink); }
 .lw-dot-dim { color: var(--lw-dim); }
+
+/* ---------------------------------------------------------------------------------------
+ * Added in 6-2 (models / logs / settings).
+ */
+.lw-row { border-top: 1px solid var(--lw-border); }
+.lw-row:first-child { border-top: 0; }
+.lw-rowh:hover { background: var(--lw-surface-2); }
+
+.lw-tbl tbody tr.lw-rowh:hover td { background: var(--lw-surface-2); }
+
+/* Terminal-style log: monospace, time column, level colours. */
+.lw-term { background: var(--lw-term); padding: 10px 0; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.7; overflow: auto; }
+.lw-term-line { display: grid; grid-template-columns: 86px 1fr; gap: 12px; padding: 1px 16px; }
+.lw-term-line.no-time { grid-template-columns: 1fr; }
+.lw-term-line:hover { background: var(--lw-surface-2); }
+.lw-lv-dim { color: var(--lw-dim); }
+.lw-lv-warn { color: var(--lw-warn); }
+.lw-lv-err { color: var(--lw-err); }
+.lw-lv-acc { color: var(--lw-accent-ink); }
+.lw-lv-ok { color: var(--lw-ok); }
+
+/* Radio-style marker for profile / version lists. */
+.lw-radio { flex: none; width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--lw-border-strong); }
+.lw-radio.on { border: 5px solid var(--lw-accent); }
+
+/* Settings table of contents. */
+.lw-sub-link { display: block; padding: 7px 10px; border-radius: 7px; color: var(--lw-muted); font-size: 13px; text-decoration: none; }
+.lw-sub-link:hover { background: var(--lw-surface-2); color: var(--lw-text); }
+.lw-sub-link.is-active { background: var(--lw-surface); color: var(--lw-text); font-weight: 500; box-shadow: var(--lw-shadow); }
+html { scroll-behavior: smooth; }
+.lw-anchor { scroll-margin-top: 20px; }

@@ -26,7 +26,7 @@ async function start(mode: 'setup' | 'add') {
 
 <template>
   <AppCard :title="p.title" :hint="p.hint">
-    <p v-if="pub?.status.state === 'unavailable'" class="mb-4 flex gap-2 rounded-[var(--ui-radius)] border border-warning/40 bg-warning/10 p-3 text-sm text-warning">
+    <p v-if="pub?.status.state === 'unavailable'" class="mb-4 flex gap-2 rounded-[10px] border border-warning/40 bg-warning/10 p-3 text-sm text-warning">
       <UIcon name="i-lucide-triangle-alert" class="mt-0.5 size-4 shrink-0" />
       <span>{{ p.devMode }}</span>
     </p>

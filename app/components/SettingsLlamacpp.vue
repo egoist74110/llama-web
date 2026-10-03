@@ -34,20 +34,14 @@ const currentIndex = computed(() => info.value?.versions.findIndex(v => v.curren
       <p v-if="!info.versions.length" class="text-sm text-muted">
         {{ s.empty }}
       </p>
-      <ul v-else class="divide-y divide-default rounded-lg border border-default">
-        <li v-for="(v, i) in info.versions" :key="v.tag" class="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
-          <div class="flex flex-wrap items-center gap-2 text-sm">
-            <span class="font-mono text-highlighted">{{ v.tag }}</span>
-            <UBadge v-if="v.current" color="primary" variant="subtle" size="sm">
-              {{ s.current }}
-            </UBadge>
-            <UBadge v-if="i === 0 && !v.current" color="neutral" variant="subtle" size="sm">
-              {{ s.newest }}
-            </UBadge>
-            <UBadge v-if="v.inUse" color="success" variant="subtle" size="sm">
-              {{ s.inUse }}
-            </UBadge>
-          </div>
+      <ul v-else class="m-0 list-none p-0">
+        <li v-for="(v, i) in info.versions" :key="v.tag" class="lw-row flex flex-wrap items-center gap-x-3 gap-y-2 py-[11px]">
+          <span class="lw-radio" :class="{ on: v.current }" />
+          <span class="font-mono text-[13px]">{{ v.tag }}</span>
+          <span v-if="v.current" class="lw-chip lw-chip-accent">{{ s.current }}</span>
+          <span v-if="i === 0 && !v.current" class="lw-chip">{{ s.newest }}</span>
+          <span v-if="v.inUse" class="lw-st lw-st-ready">{{ s.inUse }}</span>
+          <span class="flex-1" />
           <UButton
             v-if="!v.current"
             size="xs"

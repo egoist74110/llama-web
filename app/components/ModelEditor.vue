@@ -22,6 +22,13 @@ const scan = ref<ScanDoc | null>(null)
 const scanFailed = ref(false)
 const loadError = ref('')
 const selected = ref('')
+type EditTab = 'files' | 'profiles' | 'params'
+const editTab = ref<EditTab>('files')
+const editTabs: Array<{ value: EditTab, label: string }> = [
+  { value: 'files', label: edit.tabs.files },
+  { value: 'profiles', label: edit.tabs.profiles },
+  { value: 'params', label: edit.tabs.params },
+]
 
 const url = computed(() => `/api/models/${encodeURIComponent(props.modelId)}`)
 
@@ -52,6 +59,7 @@ watch(open, (o) => {
   detail.value = null
   scan.value = null
   selected.value = ''
+  editTab.value = 'files'
   void loadDetail()
   void loadScan()
 }, { immediate: true })
@@ -145,6 +153,7 @@ const previewFiles = computed(() => ({
 type Pending = { kind: 'create' | 'duplicate' | 'rename', name: string } | { kind: 'remove' } | null
 const pending = ref<Pending>(null)
 const dirty = reactive<Record<string, boolean>>({})
+const anyDirty = computed(() => Object.values(dirty).some(Boolean))
 
 function startOp(kind: 'create' | 'duplicate' | 'rename') {
   const name = kind === 'rename' ? selected.value : kind === 'duplicate' ? `${selected.value}-${edit.profiles.copySuffix}` : ''
@@ -197,7 +206,7 @@ const pendingTitle = computed(() => {
     v-model:open="open"
     :title="fmt(edit.title, { name: model?.name ?? '' })"
     :description="edit.subtitle"
-    :ui="{ content: 'w-full max-w-2xl', body: 'space-y-4' }"
+    :ui="{ content: 'w-full max-w-xl', body: 'space-y-4' }"
   >
     <template #body>
       <p v-if="loadError" class="text-sm text-error">
@@ -209,26 +218,45 @@ const pendingTitle = computed(() => {
       </div>
 
       <template v-else>
-        <AppCard :title="edit.files.title" :hint="edit.files.hint">
-          <p v-if="!scan && !scanFailed" class="mb-2 text-xs text-muted">
+        <div class="lw-seg" role="tablist" :aria-label="edit.open">
+          <button
+            v-for="x in editTabs"
+            :key="x.value"
+            type="button"
+            role="tab"
+            :aria-selected="editTab === x.value"
+            :class="{ on: editTab === x.value }"
+            @click="editTab = x.value"
+          >
+            {{ x.label }}
+            <span v-if="x.value === 'files' && filesDirty" class="text-warning">*</span>
+            <span v-if="x.value === 'params' && anyDirty" class="text-warning">*</span>
+          </button>
+        </div>
+
+        <div v-show="editTab === 'files'" class="flex flex-col gap-4">
+          <p class="m-0 text-xs text-dimmed">
+            {{ edit.files.hint }}
+          </p>
+          <p v-if="!scan && !scanFailed" class="m-0 text-xs text-muted">
             {{ edit.files.scanning }}
           </p>
-          <p v-if="scanFailed" class="mb-2 text-xs text-warning">
+          <p v-if="scanFailed" class="m-0 text-xs text-warning">
             {{ edit.files.scanFailed }}
           </p>
-          <div class="space-y-3">
-            <div v-for="row in fileRows" :key="row.kind" class="space-y-1">
-              <label class="text-sm text-default">{{ row.label }}</label>
+          <div class="space-y-4">
+            <div v-for="row in fileRows" :key="row.kind" class="flex flex-col gap-1.5">
+              <label class="text-xs font-medium text-muted">{{ row.label }}</label>
               <USelect
                 :model-value="toSelectValue(picked[row.kind])"
                 :items="itemsFor[row.kind]"
-                class="w-full"
+                class="w-full font-mono"
                 :aria-label="row.label"
                 @update:model-value="(v: unknown) => { picked[row.kind] = fromSelectValue(v) }"
               />
             </div>
           </div>
-          <div class="mt-4 flex flex-wrap items-center gap-2">
+          <div class="flex flex-wrap items-center gap-2">
             <UButton size="sm" icon="i-lucide-save" :disabled="!filesDirty" :loading="!!busy[`files:${modelId}`]" @click="doSaveFiles(false)">
               {{ edit.files.save }}
             </UButton>
@@ -246,25 +274,35 @@ const pendingTitle = computed(() => {
             </UButton>
             <span v-if="filesDirty" class="text-xs text-warning">{{ edit.form.dirty }}</span>
           </div>
-        </AppCard>
+        </div>
 
-        <AppCard :title="edit.profiles.title" :hint="edit.profiles.hint">
+        <div v-show="editTab === 'profiles'" class="flex flex-col gap-3">
+          <p class="m-0 text-xs text-dimmed">
+            {{ edit.profiles.hint }}
+          </p>
+          <ul class="m-0 flex list-none flex-col gap-2.5 p-0" role="radiogroup" :aria-label="edit.profiles.title">
+            <li
+              v-for="n in profileNames"
+              :key="n"
+              class="lw-card flex cursor-pointer items-center gap-2.5 px-3.5 py-3 !shadow-none"
+              role="radio"
+              tabindex="0"
+              :aria-checked="selected === n"
+              :class="selected === n ? '!border-[var(--lw-accent)]' : ''"
+              @click="selected = n"
+              @keydown.enter.prevent="selected = n"
+              @keydown.space.prevent="selected = n"
+            >
+              <span class="lw-radio" :class="{ on: selected === n }" />
+              <span class="flex-1 font-medium">{{ n }}{{ dirty[n] ? ' *' : '' }}</span>
+              <span v-if="n === model.activeProfile" class="lw-chip lw-chip-accent">{{ edit.profiles.isCurrent }}</span>
+              <span v-if="isUp(n)" class="lw-st lw-st-ready">{{ edit.profiles.running }}</span>
+            </li>
+          </ul>
           <div class="flex flex-wrap items-center gap-2">
-            <USelect
-              v-model="selected"
-              :items="profileNames.map(n => ({ label: `${n}${n === model!.activeProfile ? `（${edit.profiles.isCurrent}）` : ''}${dirty[n] ? ' *' : ''}`, value: n }))"
-              size="sm"
-              class="w-44"
-              :aria-label="edit.profiles.title"
-            />
-            <UBadge v-if="isUp(selected)" color="success" variant="subtle" size="sm">
-              {{ edit.profiles.running }}
-            </UBadge>
             <UButton v-if="selected !== model.activeProfile" size="sm" color="neutral" variant="outline" icon="i-lucide-check" @click="setCurrent">
               {{ edit.profiles.setCurrent }}
             </UButton>
-          </div>
-          <div class="mt-3 flex flex-wrap items-center gap-2">
             <UButton size="xs" color="neutral" variant="outline" icon="i-lucide-plus" @click="startOp('create')">
               {{ edit.profiles.create }}
             </UButton>
@@ -287,11 +325,11 @@ const pendingTitle = computed(() => {
             </UButton>
           </div>
 
-          <div v-if="pending" class="mt-3 rounded-lg border border-default bg-muted px-3 py-3">
-            <p class="text-sm font-medium text-highlighted">
+          <div v-if="pending" class="rounded-[10px] border border-default bg-muted px-3.5 py-3">
+            <p class="m-0 text-sm font-medium">
               {{ pendingTitle }}
             </p>
-            <p v-if="pending.kind === 'remove'" class="mt-0.5 text-xs text-muted">
+            <p v-if="pending.kind === 'remove'" class="m-0 mt-0.5 text-xs text-muted">
               {{ edit.profiles.removeBody }}
             </p>
             <form class="mt-2 flex flex-wrap items-center gap-2" @submit.prevent="confirmOp">
@@ -304,26 +342,38 @@ const pendingTitle = computed(() => {
               </UButton>
             </form>
           </div>
+        </div>
 
-          <div class="mt-4 border-t border-default pt-4">
-            <ProfileForm
-              v-for="name in profileNames"
-              v-show="name === selected"
-              :key="name"
-              :model-id="modelId"
-              :name="name"
-              :profile="model.profiles[name]!"
-              :defaults="detail.defaults"
-              :templates="detail.templates"
-              :running="isUp(name)"
-              :active="open && name === selected"
-              :files="previewFiles"
-              :busy="opBusy"
-              @dirty="(d: boolean) => { dirty[name] = d }"
-              @save="(form: object, restart: boolean) => saveForm(name, form, restart)"
+        <!-- All profile forms stay mounted so unsaved edits survive switching profiles / tabs. -->
+        <div v-show="editTab === 'params'" class="flex flex-col gap-4">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="text-xs text-dimmed">{{ edit.paramsFor }}</span>
+            <USelect
+              v-model="selected"
+              :items="profileNames.map(n => ({ label: `${n}${n === model!.activeProfile ? `（${edit.profiles.isCurrent}）` : ''}${dirty[n] ? ' *' : ''}`, value: n }))"
+              size="sm"
+              class="w-48"
+              :aria-label="edit.paramsFor"
             />
+            <span v-if="isUp(selected)" class="lw-st lw-st-ready">{{ edit.profiles.running }}</span>
           </div>
-        </AppCard>
+          <ProfileForm
+            v-for="name in profileNames"
+            v-show="name === selected"
+            :key="name"
+            :model-id="modelId"
+            :name="name"
+            :profile="model.profiles[name]!"
+            :defaults="detail.defaults"
+            :templates="detail.templates"
+            :running="isUp(name)"
+            :active="open && editTab === 'params' && name === selected"
+            :files="previewFiles"
+            :busy="opBusy"
+            @dirty="(d: boolean) => { dirty[name] = d }"
+            @save="(form: object, restart: boolean) => saveForm(name, form, restart)"
+          />
+        </div>
       </template>
     </template>
   </USlideover>

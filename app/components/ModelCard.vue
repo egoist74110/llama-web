@@ -2,6 +2,7 @@
 // One enabled model: state, start / stop / retry, profile dropdown, missing-file warning.
 import t from '~~/i18n/zh-CN'
 import type { StateDoc } from '~~/server/core/live'
+import { quantFromFile } from '~/utils/overview'
 
 const props = defineProps<{ model: StateDoc['models'][number] }>()
 const { busy, start, stop, retry, setProfile } = useModelActions()
@@ -17,42 +18,36 @@ const missing = computed(() => props.model.missing)
 const failed = computed(() => state.value === 'failed' || state.value === 'crashed')
 const winding = computed(() => state.value === 'draining' || state.value === 'unloading')
 const editing = ref(false)
+const quant = computed(() => quantFromFile(props.model.files.model))
+const progress = computed(() => shown.value?.progress ?? null)
 const working = computed(() => !!(busy.value[`start:${props.model.id}`] || busy.value[`stop:${props.model.id}`] || busy.value[`retry:${props.model.id}`]))
 </script>
 
 <template>
-  <section
-    class="rounded-[var(--ui-radius)] border bg-elevated px-5 py-4"
-    :class="missing.length ? 'border-error/60' : 'border-default'"
-  >
-    <div class="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
-      <div class="min-w-0 space-y-1">
-        <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-          <StateDot :state="state" />
-          <h3 class="text-base font-medium text-highlighted">
-            {{ model.name }}
-          </h3>
-          <UBadge v-if="queued" color="warning" variant="subtle" size="sm">
-            {{ t.models.card.queued }}
-          </UBadge>
-          <StateBadge v-else :state="state" />
+  <div class="lw-row flex flex-col gap-3 px-5 py-4">
+    <div class="flex flex-wrap items-center gap-x-5 gap-y-3">
+      <div class="flex min-w-0 flex-[1_1_320px] flex-col gap-1.5">
+        <div class="flex flex-wrap items-center gap-2.5">
+          <span class="text-[15px] font-semibold">{{ model.name }}</span>
+          <span v-if="queued" class="lw-st lw-st-loading">{{ t.models.card.queued }}</span>
+          <StatusPill v-else :state="state" />
         </div>
-        <p class="break-all text-xs text-muted" :title="model.files.model">
+        <div class="flex flex-wrap items-center gap-1.5">
+          <span v-if="quant" class="lw-chip font-mono">{{ quant }}</span>
+          <span v-if="model.hasMmproj" class="lw-chip lw-chip-accent">
+            <UIcon name="i-lucide-image" class="size-3" />{{ t.models.card.mmproj }}
+          </span>
+          <span v-else class="lw-chip">{{ t.models.card.mmprojNone }}</span>
+          <span v-if="model.files.draft" class="lw-chip">{{ t.models.card.draft }}</span>
+        </div>
+        <p class="m-0 break-all font-mono text-xs text-dimmed" :title="model.files.model">
           {{ model.files.model }}
         </p>
-        <div class="flex flex-wrap items-center gap-1.5 pt-0.5">
-          <UBadge :color="model.hasMmproj ? 'primary' : 'neutral'" variant="subtle" size="sm" icon="i-lucide-image">
-            {{ model.hasMmproj ? t.models.card.mmproj : t.models.card.mmprojNone }}
-          </UBadge>
-          <UBadge v-if="model.files.draft" color="neutral" variant="subtle" size="sm">
-            {{ t.models.card.draft }}
-          </UBadge>
-        </div>
       </div>
 
       <div class="flex flex-wrap items-center gap-2">
         <div class="flex items-center gap-2" :title="t.models.card.profileHint">
-          <span class="text-xs text-muted">{{ t.models.card.profile }}</span>
+          <span class="text-xs text-dimmed">{{ t.models.card.profile }}</span>
           <USelect
             :model-value="model.activeProfile"
             :items="model.profiles"
@@ -63,13 +58,12 @@ const working = computed(() => !!(busy.value[`start:${props.model.id}`] || busy.
             @update:model-value="(p: string) => setProfile(model.id, p)"
           />
         </div>
-        <UButton size="sm" color="neutral" variant="outline" icon="i-lucide-settings-2" @click="editing = true">
-          {{ t.models.edit.open }}
-        </UButton>
+        <UButton size="sm" color="neutral" variant="outline" icon="i-lucide-pencil" :aria-label="t.models.edit.open" :title="t.models.edit.open" @click="editing = true" />
         <UButton
           v-if="state === 'stopped' && !queued"
           size="sm"
           icon="i-lucide-play"
+          class="min-w-[76px] justify-center"
           :disabled="missing.length > 0"
           :loading="working"
           @click="start(model.id)"
@@ -80,6 +74,7 @@ const working = computed(() => !!(busy.value[`start:${props.model.id}`] || busy.
           v-if="failed"
           size="sm"
           icon="i-lucide-rotate-cw"
+          class="min-w-[76px] justify-center"
           :disabled="missing.length > 0"
           :loading="working"
           @click="retry(model.id, shown?.profile)"
@@ -92,6 +87,7 @@ const working = computed(() => !!(busy.value[`start:${props.model.id}`] || busy.
           color="neutral"
           variant="outline"
           icon="i-lucide-square"
+          class="min-w-[76px] justify-center"
           :disabled="winding"
           :loading="working || winding"
           @click="stop(model.id)"
@@ -101,34 +97,36 @@ const working = computed(() => !!(busy.value[`start:${props.model.id}`] || busy.
       </div>
     </div>
 
-    <UProgress v-if="state === 'loading'" size="xs" class="mt-3" />
-    <p v-if="otherProfile" class="mt-2 text-xs text-muted">
+    <div v-if="state === 'loading'" class="flex items-center gap-3">
+      <div class="lw-bar warn flex-1"><span :style="{ width: `${progress ?? 0}%` }" /></div>
+      <span v-if="progress !== null" class="lw-num w-10 text-right font-mono text-xs text-muted">{{ progress }}%</span>
+    </div>
+    <p v-if="otherProfile" class="m-0 text-xs text-muted">
       {{ fmt(t.models.card.runningProfile, { profile: otherProfile }) }}
     </p>
     <FailureCard
       v-if="shown?.failure && failed"
-      class="mt-3"
       :model-id="model.id"
       :profile="shown.profile"
       :state="shown.state"
       :failure="shown.failure"
     />
-    <p v-else-if="shown?.error" class="mt-2 text-sm text-error">
+    <p v-else-if="shown?.error" class="m-0 text-sm text-error">
       {{ reasonText(shown.error) }}
     </p>
-    <div v-if="missing.length" class="mt-3 rounded-lg bg-error/10 px-3 py-2 text-sm text-error">
-      <p class="font-medium">
+    <div v-if="missing.length" class="rounded-[10px] bg-error/10 px-3.5 py-2.5 text-sm text-error">
+      <p class="m-0 font-medium">
         {{ t.models.card.missingTitle }}
       </p>
-      <ul class="mt-0.5 list-disc pl-5">
+      <ul class="m-0 mt-0.5 list-disc pl-5">
         <li v-for="m in missing" :key="m">
           {{ t.models.card.missing[m] }}
         </li>
       </ul>
-      <p class="mt-1 text-xs opacity-80">
+      <p class="m-0 mt-1 text-xs opacity-80">
         {{ t.models.card.missingHint }}
       </p>
     </div>
     <ModelEditor v-model:open="editing" :model-id="model.id" />
-  </section>
+  </div>
 </template>

@@ -119,7 +119,7 @@ const stepIcon = (state: string) => ({ done: 'i-lucide-check', skipped: 'i-lucid
     <USkeleton v-else-if="!plan" class="h-24 w-full" />
 
     <!-- Preview -->
-    <div v-else class="space-y-3 rounded-[var(--ui-radius)] border border-default p-3">
+    <div v-else class="space-y-3 rounded-[10px] border border-default p-3">
       <p class="break-all text-sm font-medium text-default">
         {{ s.previewTitle }} · <span class="font-mono">{{ plan.hostname }}</span>
       </p>

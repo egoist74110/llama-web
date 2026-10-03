@@ -212,6 +212,7 @@ export default {
     title: '模型',
     subtitle: '已启用的模型，以及模型目录里还没启用的文件',
     tabs: { enabled: '已启用', discover: '扫描发现' },
+    filter: { placeholder: '筛选模型', label: '筛选模型', none: '没有匹配的模型。' },
     enabled: {
       title: '已启用的模型',
       hint: '客户端用模型名（或「名字:方案」）调用；第一个请求到来时会自动加载。',
@@ -294,6 +295,8 @@ export default {
       loading: '正在读取……',
       loadFailed: '读取模型配置失败',
       close: '关闭',
+      tabs: { files: '文件', profiles: '配置方案', params: '参数' },
+      paramsFor: '正在编辑的方案',
       files: {
         title: '文件',
         hint: '主模型必填。mmproj 让模型能看图，草稿模型用于推测解码。同目录的文件会排在前面，但不会自动选中。',
@@ -413,6 +416,7 @@ export default {
   },
   settings: {
     title: '设置',
+    toc: '设置分区',
     subtitle: '模型目录、全局默认参数、图片预处理、端口和调度、公网入口与 API key',
     save: '保存',
     saved: '已保存',
@@ -920,6 +924,7 @@ export default {
       refresh: '刷新文件列表',
       historyNeedsModel: '选择一个模型后才能查看它的历史输出文件。',
     },
+    view: { live: '实时', file: '文件内容', lines: '{n} 行' },
     file: {
       truncated: '文件较大，只显示结尾的部分内容。',
       loading: '正在读取……',

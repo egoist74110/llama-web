@@ -76,7 +76,7 @@ async function retry() {
       <summary class="cursor-pointer text-muted">
         {{ s.tail }}
       </summary>
-      <pre class="mt-1 max-h-48 overflow-auto rounded-[var(--ui-radius)] bg-muted p-2 font-mono text-[11px] leading-snug text-default">{{ errorState.tail.join('\n') }}</pre>
+      <pre class="mt-1 max-h-48 overflow-auto rounded-[10px] bg-muted p-2 font-mono text-[11px] leading-snug text-default">{{ errorState.tail.join('\n') }}</pre>
     </details>
   </div>
 </template>

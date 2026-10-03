@@ -188,115 +188,134 @@ watch([tab, range, model], () => { stick = true })
 const isEmpty = computed(() => (tab.value === 'requests' ? !requestRows.value.length : !(tab.value === 'model' ? modelRows.value : eventRows.value).length))
 const emptyText = computed(() => (needle.value && !isEmpty.value ? t.logs.empty.noMatch : t.logs.empty[tab.value]))
 const durationAgo = (at: number) => formatDuration(serverNow.value - at)
+
+// Terminal colouring by level, judged from the line text (llama-server has no level field).
+function lineClass(text: string): string {
+  if (/(error|fatal|failed|abort)|cuda error|out of memory/i.test(text)) return 'lw-lv-err'
+  if (/warn(ing)?/i.test(text)) return 'lw-lv-warn'
+  if (/eval time|tokens per second|server is listening/i.test(text)) return 'lw-lv-acc'
+  return ''
+}
 </script>
 
 <template>
-  <div class="space-y-5">
+  <div class="flex flex-col gap-4">
     <PageHeader :title="t.logs.title" :subtitle="t.logs.subtitle" />
 
-    <div class="inline-flex gap-1 rounded-lg border border-default bg-elevated p-1" role="tablist">
-      <button
-        v-for="x in tabs"
-        :key="x.value"
-        type="button"
-        role="tab"
-        :aria-selected="tab === x.value"
-        class="rounded-md px-3 py-1 text-sm transition-colors"
-        :class="tab === x.value ? 'bg-primary/10 font-medium text-primary' : 'text-muted hover:text-highlighted'"
-        @click="tab = x.value"
+    <div class="flex flex-wrap items-center gap-2.5">
+      <div class="lw-seg" role="tablist">
+        <button
+          v-for="x in tabs"
+          :key="x.value"
+          type="button"
+          role="tab"
+          :aria-selected="tab === x.value"
+          :class="{ on: tab === x.value }"
+          @click="tab = x.value"
+        >
+          {{ x.label }}
+        </button>
+      </div>
+      <USelect v-model="model" :items="modelItems" class="w-44" :aria-label="t.logs.filters.model" />
+      <USelect v-model="range" :items="rangeItems" class="w-52" :aria-label="t.logs.filters.range" />
+      <UInput v-model="search" class="min-w-48 flex-1 basis-52" icon="i-lucide-search" :placeholder="t.logs.filters.searchPlaceholder" :aria-label="t.logs.filters.search" />
+      <UButton
+        v-if="!inFile"
+        color="neutral"
+        variant="outline"
+        :icon="paused ? 'i-lucide-play' : 'i-lucide-pause'"
+        @click="togglePause"
       >
-        {{ x.label }}
-      </button>
+        {{ paused ? t.logs.filters.resume : t.logs.filters.pause }}
+      </UButton>
+      <UButton color="neutral" variant="outline" icon="i-lucide-refresh-cw" :aria-label="t.logs.filters.refresh" :title="t.logs.filters.refresh" @click="loadListing" />
     </div>
 
-    <AppCard :title="t.logs.tabs[tab]" :hint="tab === 'requests' ? t.logs.requests.noContentNote : undefined">
-      <template #actions>
-        <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
-          <USelect v-model="model" :items="modelItems" size="sm" class="w-40" :aria-label="t.logs.filters.model" />
-          <USelect v-model="range" :items="rangeItems" size="sm" class="w-52" :aria-label="t.logs.filters.range" />
-          <UButton size="sm" color="neutral" variant="ghost" icon="i-lucide-refresh-cw" :aria-label="t.logs.filters.refresh" :title="t.logs.filters.refresh" @click="loadListing" />
-        </div>
-      </template>
+    <p v-if="tab === 'requests'" class="m-0 text-xs text-dimmed">
+      {{ t.logs.requests.noContentNote }}
+    </p>
+    <p v-if="needsModel" class="m-0 text-xs text-muted">
+      {{ t.logs.filters.historyNeedsModel }}
+    </p>
+    <p v-if="inFile && file?.truncated" class="m-0 text-xs text-muted">
+      {{ t.logs.file.truncated }}
+    </p>
 
-      <div class="mb-3 flex flex-wrap items-center gap-2">
-        <UInput v-model="search" size="sm" class="min-w-48 flex-1" icon="i-lucide-search" :placeholder="t.logs.filters.searchPlaceholder" :aria-label="t.logs.filters.search" />
-        <UButton
-          v-if="!inFile"
-          size="sm"
-          color="neutral"
-          variant="outline"
-          :icon="paused ? 'i-lucide-play' : 'i-lucide-pause'"
-          @click="togglePause"
-        >
-          {{ paused ? t.logs.filters.resume : t.logs.filters.pause }}
-        </UButton>
+    <section class="lw-card overflow-hidden">
+      <div class="flex items-center justify-between gap-3 border-b border-default px-4 py-2.5 text-xs text-dimmed">
+        <span class="inline-flex items-center gap-2">
+          <span class="lw-live-dot" :class="{ 'is-off': paused || inFile }" />
+          {{ paused ? t.logs.filters.pausedHint : inFile ? t.logs.view.file : t.logs.view.live }}
+        </span>
+        <span class="lw-num">{{ fmt(t.logs.view.lines, { n: shownCount }) }}</span>
       </div>
-      <p v-if="paused" class="mb-2 text-xs text-warning">
-        {{ t.logs.filters.pausedHint }}
-      </p>
-      <p v-if="needsModel" class="mb-2 text-xs text-muted">
-        {{ t.logs.filters.historyNeedsModel }}
-      </p>
-      <p v-if="inFile && file?.truncated" class="mb-2 text-xs text-muted">
-        {{ t.logs.file.truncated }}
-      </p>
 
-      <p v-if="fileLoading" class="py-6 text-center text-sm text-muted">
+      <p v-if="fileLoading" class="m-0 px-4 py-8 text-center text-sm text-muted">
         {{ t.logs.file.loading }}
       </p>
-      <p v-else-if="isEmpty || !shownCount" class="py-6 text-center text-sm text-muted">
+      <p v-else-if="isEmpty || !shownCount" class="m-0 px-4 py-8 text-center text-sm text-muted">
         {{ emptyText }}
       </p>
 
-      <div v-else ref="box" class="max-h-[60vh] overflow-auto rounded-md border border-default bg-default" @scroll="onScroll">
-        <ul v-if="tab !== 'requests'" class="p-2 font-mono text-xs leading-5">
-          <li v-for="r in shownText" :key="r.key" class="flex gap-2 whitespace-pre-wrap break-all" :class="r.error ? 'text-error' : 'text-default'">
-            <time v-if="r.at !== null" class="shrink-0 tabular-nums text-dimmed" :title="durationAgo(r.at)">{{ formatClock(r.at) }}</time>
-            <span v-if="r.tag" class="shrink-0 text-muted">{{ r.tag }}</span>
-            <span class="min-w-0">{{ r.text }}</span>
-          </li>
-        </ul>
+      <div v-else ref="box" class="max-h-[calc(100dvh-300px)] min-h-64 overflow-auto" :class="{ 'lw-term': tab === 'model' }" @scroll="onScroll">
+        <template v-if="tab === 'model'">
+          <div v-for="r in shownText" :key="r.key" class="lw-term-line" :class="{ 'no-time': r.at === null }">
+            <time v-if="r.at !== null" class="lw-num lw-lv-dim" :title="durationAgo(r.at)">{{ formatClock(r.at) }}</time>
+            <span class="whitespace-pre-wrap [overflow-wrap:anywhere]" :class="lineClass(r.text)">
+              <span v-if="r.tag" class="lw-lv-dim mr-2">{{ r.tag }}</span>{{ r.text }}
+            </span>
+          </div>
+        </template>
 
-        <table v-else class="w-full min-w-[56rem] text-left text-xs">
-          <thead class="sticky top-0 bg-elevated text-muted">
+        <ol v-else-if="tab === 'events'" class="m-0 list-none px-5 py-2">
+          <li v-for="r in shownText" :key="r.key" class="lw-row grid grid-cols-[76px_14px_1fr] items-start gap-2.5 py-2.5">
+            <time v-if="r.at !== null" class="lw-num pt-px font-mono text-xs text-dimmed" :title="durationAgo(r.at)">{{ formatClock(r.at) }}</time>
+            <span v-else />
+            <span class="mt-1.5 size-2 rounded-full bg-current" :class="r.error ? 'lw-dot-err' : 'lw-dot-dim'" />
+            <span class="text-[13px]" :class="{ 'text-error': r.error }">{{ r.text }}</span>
+          </li>
+        </ol>
+
+        <table v-else class="lw-tbl min-w-[56rem]">
+          <thead class="sticky top-0 bg-elevated">
             <tr>
-              <th v-for="(label, k) in t.logs.requests.columns" :key="k" class="whitespace-nowrap px-3 py-2 font-medium">
+              <th v-for="(label, k) in t.logs.requests.columns" :key="k">
                 {{ label }}
               </th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-default">
-            <tr v-for="(r, i) in shownReq" :key="requestKey(r, i)" class="align-top">
-              <td class="whitespace-nowrap px-3 py-1.5 tabular-nums text-dimmed">
+          <tbody>
+            <tr v-for="(r, i) in shownReq" :key="requestKey(r, i)" class="lw-rowh align-top">
+              <td class="font-mono text-dimmed">
                 {{ formatClock(r.at) }}
               </td>
-              <td class="whitespace-nowrap px-3 py-1.5">
+              <td>
                 {{ requestSourceText(r) }}
               </td>
-              <td class="px-3 py-1.5">
-                <span class="text-highlighted">{{ r.modelName ?? '—' }}</span>
+              <td class="!whitespace-normal">
+                <span class="font-medium">{{ r.modelName ?? '—' }}</span>
                 <span v-if="r.profile" class="text-muted"> · {{ r.profile }}</span>
                 <span v-if="r.stream" class="ml-1 text-dimmed">{{ t.logs.requests.stream }}</span>
               </td>
-              <td class="whitespace-nowrap px-3 py-1.5" :class="r.outcome === 'ok' ? 'text-default' : r.outcome === 'error' ? 'text-error' : 'text-warning'">
+              <td :class="r.outcome === 'ok' ? '' : r.outcome === 'error' ? 'text-error' : 'text-warning'">
                 {{ r.status }} {{ t.logs.requests.outcome[r.outcome] }}<span v-if="r.error" class="text-dimmed"> · {{ r.error }}</span>
               </td>
-              <td class="whitespace-nowrap px-3 py-1.5 tabular-nums">
+              <td class="font-mono">
                 {{ formatMs(r.durationMs) }}
               </td>
-              <td class="whitespace-nowrap px-3 py-1.5 tabular-nums">
+              <td class="font-mono">
                 {{ requestTokensText(r) }}
               </td>
-              <td class="px-3 py-1.5">
+              <td class="!whitespace-normal">
                 {{ requestImagesText(r.images) }}
               </td>
-              <td class="break-all px-3 py-1.5 font-mono text-dimmed">
+              <td class="!whitespace-normal break-all font-mono text-dimmed">
                 {{ requestParamsText(r.params) }}
               </td>
             </tr>
           </tbody>
         </table>
       </div>
-    </AppCard>
+    </section>
   </div>
 </template>
