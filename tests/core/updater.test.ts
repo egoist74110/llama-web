@@ -20,14 +20,14 @@ function install(...tags: string[]) {
 }
 const entries = () => readdirSync(versionsDir(data)).sort()
 
-function setup(o: { current?: string, autoUpdate?: boolean, keep?: number, used?: string[], gh?: FakeOpts } = {}) {
+function setup(o: { current?: string, autoUpdate?: boolean, keep?: number, used?: string[], gh?: FakeOpts, now?: () => number } = {}) {
   const cfg = { cudaRuntime: '13.3', current: o.current ?? '', keepVersions: o.keep ?? 2, autoUpdate: o.autoUpdate ?? true }
   const gh = fakeGithub(o.gh)
   const statuses: RuntimeStatus[] = []
   const prunes: PruneResult[] = []
   const used = { exes: (o.used ?? []).map(t => join(dirOf(t), EXE)) }
   const u = new Updater({
-    dataDir: data, platform: 'win32', fetch: gh.fetchFn, extract: fakeExtract(),
+    dataDir: data, platform: 'win32', fetch: gh.fetchFn, extract: fakeExtract(), now: o.now,
     llamacpp: () => cfg,
     setCurrent: (t) => { cfg.current = t },
     usedExes: () => used.exes,
@@ -41,6 +41,37 @@ test('nothing installed, auto update off: disabled, no network', async () => {
   const { u, gh } = setup({ autoUpdate: false })
   expect(await u.run()).toEqual({ state: 'disabled' })
   expect(gh.calls).toEqual([])
+})
+
+test('automatic checks survive restart and wait 24 hours, including failed attempts', async () => {
+  install('b100')
+  let now = Date.UTC(2026, 9, 3, 12)
+  const first = setup({ current: 'b100', gh: { fail: 'api.github.com' }, now: () => now })
+  await first.u.run()
+  await first.u.stop()
+  now += 60_000
+  const restarted = setup({ current: 'b100', gh: { tag: 'b100' }, now: () => now })
+  await restarted.u.run()
+  expect(restarted.gh.calls).toEqual([])
+  now += 24 * 60 * 60 * 1000
+  await restarted.u.run()
+  expect(restarted.gh.calls.length).toBeGreaterThan(0)
+  await restarted.u.stop()
+})
+
+test('a successful runtime check skips another startup while preserving rollback; force checks immediately', async () => {
+  install('b100', 'b200')
+  const now = () => Date.UTC(2026, 9, 3, 12)
+  const first = setup({ current: 'b200', gh: { tag: 'b200' }, now })
+  await first.u.run()
+  await first.u.stop()
+  const restarted = setup({ current: 'b100', gh: { tag: 'b200' }, now })
+  expect(await restarted.u.run()).toMatchObject({ state: 'ready', tag: 'b100', note: 'cached' })
+  expect(restarted.gh.calls).toEqual([])
+  await restarted.u.run({ force: true })
+  expect(restarted.gh.calls).toHaveLength(3)
+  expect(restarted.cfg.current).toBe('b100')
+  await restarted.u.stop()
 })
 
 test('auto update off keeps / adopts an installed version without checking', async () => {

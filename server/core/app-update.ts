@@ -10,6 +10,7 @@ import { join } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import { download, getBody, RuntimeError, type FetchFn, type ReleaseAsset } from './llamacpp'
 import { JsonStore } from './store'
+import { UpdateCheckStore } from './update-check'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?$/
 /** Installer name produced by the Tauri NSIS bundler. */
@@ -112,7 +113,7 @@ export function sumFor(text: string, name: string): string | null {
 }
 
 export type AppUpdateErrorCode =
-  | 'network' | 'bad-response' | 'no-installer' | 'no-digest' | 'digest-mismatch' | 'busy'
+  | 'network' | 'rate-limited' | 'http' | 'bad-response' | 'no-installer' | 'no-digest' | 'digest-mismatch' | 'busy'
   | 'not-desktop' | 'not-ready' | 'nothing-new' | 'cancelled' | 'failed'
 
 export class AppUpdateError extends Error {
@@ -203,6 +204,7 @@ export class AppUpdater {
   private installer: ((r: InstallRequest) => void) | null = null
   private abort: AbortController | null = null
   private checking: Promise<void> | null = null
+  private readonly checkAbort = new AbortController()
   private timer: ReturnType<typeof setTimeout> | null = null
   private stopped = false
   private readonly prefs: JsonStore<AppUpdatePrefs>
@@ -211,6 +213,8 @@ export class AppUpdater {
   private readonly assetOk: (url: string) => boolean
   private readonly fetchFn: FetchFn
   private readonly now: () => number
+  private readonly checks: UpdateCheckStore
+  private readonly checkKey: string
   readonly dir: string
 
   constructor(private readonly opts: AppUpdaterOptions) {
@@ -221,6 +225,8 @@ export class AppUpdater {
     this.assetOk = this.feed === official ? url => url.startsWith(releasePrefix) : isLoopback
     this.fetchFn = opts.fetch ?? ((url, init) => fetch(url, init))
     this.now = opts.now ?? Date.now
+    this.checks = new UpdateCheckStore(opts.dataDir)
+    this.checkKey = `app:${this.feed}`
     this.dir = join(opts.dataDir, 'run', 'app-update')
     this.prefs = new JsonStore<AppUpdatePrefs>({
       dataDir: opts.dataDir, name: 'app-update.json', version: APP_UPDATE_PREFS_VERSION, keepBackups: 3,
@@ -228,12 +234,22 @@ export class AppUpdater {
     })
     try { this.prefsValue = this.prefs.load() }
     catch { this.prefsValue = { version: APP_UPDATE_PREFS_VERSION, autoCheck: true, skipped: null } }
+    const cached = this.checks.get(this.checkKey)
+    if (cached?.result) {
+      try {
+        const r = cached.result as { current?: string, list?: GithubRelease[], error?: AppUpdateErrorCode }
+        if (r.current === opts.current && Array.isArray(r.list)) this.applyReleaseList(r.list, cached.at)
+        else if (r.error === 'network' || r.error === 'rate-limited' || r.error === 'http' || r.error === 'bad-response') {
+          this.checkState = { state: 'error', at: cached.at, code: r.error }
+        }
+      } catch { /* Ignore malformed cached results; the throttle still applies. */ }
+    }
   }
 
   /** Remove installers of earlier runs (best effort: a running installer keeps its file) and schedule checks. */
   start(): void {
     try { rmSync(this.dir, { recursive: true, force: true }) } catch { /* in use by the installer that started us */ }
-    this.schedule(this.opts.firstCheckMs ?? FIRST_CHECK_MS)
+    this.schedule(Math.max(this.opts.firstCheckMs ?? FIRST_CHECK_MS, this.checks.remaining(this.checkKey, this.now(), this.opts.everyMs ?? CHECK_EVERY_MS)))
   }
 
   /** The desktop entry attaches the private-channel hand-off; without it there is no in-app install. */
@@ -259,7 +275,7 @@ export class AppUpdater {
       if (p.autoCheck !== undefined) d.autoCheck = p.autoCheck
       if (p.skipped !== undefined) d.skipped = p.skipped
     })
-    this.schedule(this.opts.everyMs ?? CHECK_EVERY_MS)
+    this.schedule(Math.max(this.opts.firstCheckMs ?? FIRST_CHECK_MS, this.checks.remaining(this.checkKey, this.now(), this.opts.everyMs ?? CHECK_EVERY_MS)))
     this.changed()
     return this.view()
   }
@@ -278,25 +294,37 @@ export class AppUpdater {
   private async runCheck() {
     this.checkState = { state: 'checking' }
     this.changed()
+    const attemptedAt = this.now()
     try {
-      const list = await getBody(this.fetchFn, `${this.feed}?per_page=30`, 'json')
+      this.checks.save(this.checkKey, attemptedAt)
+      const list = await getBody(this.fetchFn, `${this.feed}?per_page=30`, 'json', { signal: this.checkAbort.signal })
       if (!Array.isArray(list)) throw new AppUpdateError('bad-response', 'Release list is not an array')
-      const found = pickUpdate(list as GithubRelease[], this.opts.current, this.assetOk)
       if (this.stopped) return
-      // A different version than a finished download: that file is no longer what the page offers.
-      if (found?.version !== this.candidate?.version && this.downloadState.state !== 'none') this.dropDownload()
-      this.candidate = found
-      const at = this.now()
-      if (!found) this.checkState = { state: 'latest', at }
-      else {
-        const { installer: _i, sums: _s, ...release } = found
-        this.checkState = { state: 'available', at, release }
-      }
+      this.applyReleaseList(list as GithubRelease[], this.now())
+      // Cache only the selected release, with bounded notes and the two relevant assets.
+      const c = this.candidate
+      const selected: GithubRelease[] = c ? [{ tag_name: `v${c.version}`, name: c.name, body: c.notes, html_url: c.url, published_at: c.publishedAt, prerelease: c.prerelease, assets: [c.installer, c.sums].filter((a): a is ReleaseAsset => a !== null) }] : []
+      this.checks.save(this.checkKey, attemptedAt, { current: this.opts.current, list: selected })
     } catch (e) {
       if (this.stopped) return
-      this.checkState = { state: 'error', at: this.now(), code: e instanceof AppUpdateError ? e.code : e instanceof RuntimeError && e.code === 'network' ? 'network' : 'bad-response' }
+      const code: AppUpdateErrorCode = e instanceof AppUpdateError ? e.code
+        : e instanceof RuntimeError && (e.code === 'network' || e.code === 'rate-limited' || e.code === 'http') ? e.code : 'bad-response'
+      this.checkState = { state: 'error', at: this.now(), code }
+      try { this.checks.save(this.checkKey, attemptedAt, { error: code }) } catch { /* Keep the reported failure. */ }
     }
     this.changed()
+  }
+
+  private applyReleaseList(list: GithubRelease[], at: number): void {
+    const found = pickUpdate(list, this.opts.current, this.assetOk)
+    // A different version than a finished download: that file is no longer what the page offers.
+    if (found?.version !== this.candidate?.version && this.downloadState.state !== 'none') this.dropDownload()
+    this.candidate = found
+    if (!found) this.checkState = { state: 'latest', at }
+    else {
+      const { installer: _i, sums: _s, ...release } = found
+      this.checkState = { state: 'available', at, release }
+    }
   }
 
   /** Throws when a download cannot start now; returns the release to download. */
@@ -359,7 +387,7 @@ export class AppUpdater {
       if (this.stopped) return
       const code: AppUpdateErrorCode = abort.signal.aborted ? 'cancelled'
         : e instanceof AppUpdateError ? e.code
-          : e instanceof RuntimeError ? (e.code === 'digest-mismatch' ? 'digest-mismatch' : e.code === 'no-digest' ? 'no-digest' : 'network')
+          : e instanceof RuntimeError ? (e.code === 'digest-mismatch' ? 'digest-mismatch' : e.code === 'no-digest' ? 'no-digest' : e.code === 'rate-limited' || e.code === 'http' ? e.code : 'network')
             : 'failed'
       throw fail(code)
     } finally {
@@ -391,6 +419,7 @@ export class AppUpdater {
 
   stop(): void {
     this.stopped = true
+    this.checkAbort.abort(new Error('shutdown'))
     if (this.timer) clearTimeout(this.timer)
     this.timer = null
     this.cancel()
@@ -410,6 +439,8 @@ export class AppUpdater {
     if (this.stopped || !this.prefsValue.autoCheck) return
     this.timer = setTimeout(() => {
       this.timer = null
+      const remaining = this.checks.remaining(this.checkKey, this.now(), this.opts.everyMs ?? CHECK_EVERY_MS)
+      if (remaining > 0) { this.schedule(remaining); return }
       this.check().catch(() => this.schedule(this.opts.everyMs ?? CHECK_EVERY_MS)) // busy: try again next interval
     }, ms)
     ;(this.timer as { unref?: () => void }).unref?.()

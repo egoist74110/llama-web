@@ -1,5 +1,6 @@
 // llama.cpp update and rollback on top of llamacpp.ts. At startup (in the background, never
-// during normal running) it adopts an installed version, checks the official latest Release,
+// during normal running) it adopts an installed version, checks the official latest Release at
+// most once per 24 hours across restarts,
 // downloads it when it is not installed yet and makes it the current version, then removes
 // old version directories beyond `keepVersions` (at least 2). A version directory that a
 // running or starting llama-server uses, and the current version, are never removed.
@@ -9,6 +10,8 @@ import { join, posix, win32 } from 'node:path'
 import type { CudaLimits } from './cuda'
 import { isInsideDir } from './residue'
 import type { RuntimeListing } from './runtime-manager'
+import { targetKey } from './platform'
+import { UpdateCheckStore } from './update-check'
 import {
   clearLeftovers, installBuild, installedDir, listInstalled, resolveLatest, RuntimeError, versionsDir,
   type InstallOptions, type NetOptions, type RuntimeStatus,
@@ -49,6 +52,7 @@ export interface UpdaterOptions extends Pick<InstallOptions, 'fetch' | 'extract'
   /** HTTP time limits (tests); the shutdown signal is added by the updater. */
   net?: Omit<NetOptions, 'signal'>
   dataDir: string
+  now?(): number
   /** settings.llamacpp of this updater's channel (`current` is that channel's version), read fresh each time. */
   llamacpp(): { cudaRuntime: string, current: string, keepVersions: number, autoUpdate: boolean }
   setCurrent(tag: string): void
@@ -95,9 +99,13 @@ export class Updater {
   private installed: string[] = []
   private running: Promise<RuntimeStatus> | null = null
   private abort = new AbortController()
+  private readonly checks: UpdateCheckStore
+  private readonly checkKey: string
 
   constructor(private readonly opts: UpdaterOptions) {
     this.installed = listInstalled(opts.dataDir, opts.platform, opts.target)
+    this.checks = new UpdateCheckStore(opts.dataDir)
+    this.checkKey = `llamacpp:${opts.target ? targetKey(opts.target) : opts.platform ?? process.platform}`
   }
 
   getStatus(): RuntimeStatus {
@@ -194,7 +202,7 @@ export class Updater {
     await this.running?.catch(() => {})
   }
 
-  /** `force`: the user asked for this download (the CPU channel's first one), so `autoUpdate: false` does not stop it. */
+  /** `force`: an explicit download bypasses the automatic-check cooldown and autoUpdate switch. */
   private async check(force: boolean): Promise<RuntimeStatus> {
     const { dataDir, platform } = this.opts
     clearLeftovers(dataDir, this.opts.target)
@@ -213,6 +221,16 @@ export class Updater {
 
     const before = current
     try {
+      const at = (this.opts.now ?? Date.now)()
+      if (!force && this.checks.remaining(this.checkKey, at) > 0) {
+        this.safePrune()
+        const result = this.checks.get(this.checkKey)?.result as Partial<RuntimeStatus> | null
+        if (!current && result?.state === 'error' && typeof result.code === 'string' && typeof result.detail === 'string') {
+          return this.set({ state: 'error', code: result.code, detail: result.detail, using: current || null })
+        }
+        return this.set(current ? { state: 'ready', tag: current, note: 'cached' } : { state: 'idle' })
+      }
+      this.checks.save(this.checkKey, at)
       if (this.opts.selectionError) throw new RuntimeError('asset-missing', 'Choose runtime acceleration in settings.json and restart', this.opts.selectionError)
       this.set({ state: 'working', step: 'resolve', detail: '' })
       const fetchFn = this.opts.fetch ?? fetch
@@ -243,6 +261,10 @@ export class Updater {
       const usable = this.refresh().includes(using) ? using : null
       const code = e instanceof RuntimeError ? e.code : 'unknown'
       const detail = e instanceof RuntimeError ? (e.detail ?? e.message) : (e as Error).message
+      try {
+        const at = this.checks.get(this.checkKey)?.at ?? (this.opts.now ?? Date.now)()
+        this.checks.save(this.checkKey, at, { state: 'error', code, detail })
+      } catch { /* Preserve the original failure if saving its result also fails. */ }
       return this.set({ state: 'error', code, detail, using: usable })
     }
   }

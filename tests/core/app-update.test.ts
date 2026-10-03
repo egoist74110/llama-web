@@ -213,3 +213,86 @@ test('start removes installers left by an earlier run', () => {
   expect(existsSync(u.dir)).toBe(false)
   u.stop()
 })
+
+test('automatic application checks survive restart; manual checks can bypass the daily limit', async () => {
+  const feed = fakeFeed([release('0.1.0-beta.2')])
+  let now = Date.UTC(2026, 9, 3, 12)
+  const make = () => new AppUpdater({ current: '0.1.0-beta.1', repo: REPO, dataDir: data, fetch: feed.fetchFn, now: () => now, firstCheckMs: 5 })
+  const first = make()
+  await first.check()
+  first.stop()
+  now += 60_000
+  const restarted = make()
+  try {
+    restarted.start()
+    await new Promise(r => setTimeout(r, 30))
+    expect(feed.calls).toHaveLength(1)
+    expect(restarted.view().check).toMatchObject({ state: 'available', release: { version: '0.1.0-beta.2' } })
+    await restarted.check()
+    expect(feed.calls).toHaveLength(2)
+  } finally { restarted.stop() }
+})
+
+test('failed application checks count for the daily limit and retry after it expires', async () => {
+  const offline = fakeFeed([], {}, { offline: true })
+  let now = Date.UTC(2026, 9, 3, 12)
+  const opts = { current: '0.1.0', repo: REPO, dataDir: data, now: () => now, firstCheckMs: 5 }
+  const first = new AppUpdater({ ...opts, fetch: offline.fetchFn })
+  await first.check()
+  first.stop()
+  now += 60_000
+  const feed = fakeFeed([])
+  const restarted = new AppUpdater({ ...opts, fetch: feed.fetchFn })
+  try {
+    restarted.start()
+    await new Promise(r => setTimeout(r, 30))
+    expect(feed.calls).toEqual([])
+    expect(restarted.view().check).toMatchObject({ state: 'error', code: 'network' })
+    now += 24 * 60 * 60 * 1000
+    restarted.start()
+    await new Promise(r => setTimeout(r, 30))
+    expect(feed.calls).toHaveLength(1)
+    expect(restarted.view().check.state).toBe('latest')
+  } finally { restarted.stop() }
+})
+
+test('cached application release remains downloadable with checksum verification after restart', async () => {
+  const feed = fakeFeed([release('0.1.0-beta.2')])
+  const first = updater('0.1.0-beta.1', feed)
+  await first.u.check()
+  first.u.stop()
+  const restarted = updater('0.1.0-beta.1', feed)
+  try {
+    await restarted.u.download()
+    expect(restarted.u.view().download).toEqual({ state: 'ready', version: '0.1.0-beta.2' })
+    expect(feed.calls.filter(u => u.includes('/releases?'))).toHaveLength(1)
+  } finally { restarted.u.stop() }
+})
+
+test('application checks distinguish GitHub rate limits from other HTTP failures', async () => {
+  for (const [status, code] of [[429, 'rate-limited'], [503, 'http']] as const) {
+    const u = new AppUpdater({ current: '0.1.0', repo: REPO, dataDir: data, fetch: async () => new Response('', { status }) })
+    try {
+      await u.check()
+      expect(u.view().check).toMatchObject({ state: 'error', code })
+    } finally { u.stop() }
+  }
+})
+
+test('stopping a concurrent application check cancels its request and releases its single flight', async () => {
+  let calls = 0
+  let signal: AbortSignal | undefined
+  const u = new AppUpdater({ current: '0.1.0', repo: REPO, dataDir: data, fetch: async (_url, init) => {
+    calls++
+    signal = init?.signal ?? undefined
+    return new Promise<Response>(() => {})
+  } })
+  const first = u.check()
+  expect(u.check()).toBe(first)
+  u.stop()
+  await first
+  expect(calls).toBe(1)
+  expect(signal?.aborted).toBe(true)
+  await u.check()
+  expect(calls).toBe(1)
+})

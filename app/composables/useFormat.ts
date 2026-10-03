@@ -45,7 +45,7 @@ export function runtimeText(r: StateDoc['llamacpp']['runtime'] | undefined): str
       if (r.note === 'updated') return fmt(r.from ? rt.notes.updated : rt.notes.updatedFirst, vars)
       return r.note ? fmt(rt.notes[r.note], vars) : fmt(rt.ready, vars)
     }
-    case 'error': return fmt(r.using ? rt.errorUsing : rt.error, { code: r.code, detail: r.detail, using: r.using ?? '' })
+    case 'error': return fmt(r.using ? rt.errorUsing : rt.error, { code: (rt.errors as Record<string, string>)[r.code] ?? r.code, detail: r.detail, using: r.using ?? '' })
     case 'disabled': return rt.disabled
     default: return rt.idle
   }
@@ -84,7 +84,7 @@ export function eventText(e: ActivityEvent, modelName: (id: string) => string): 
     return fmt(t.events.runtimeFallback[e.reason], { model: modelName(e.modelId), profile: e.profile, from: e.from, to: e.to })
   }
   const rt = t.events.runtime
-  const vars = { tag: e.tag ?? '', code: e.code ?? '', from: e.from ?? '' }
+  const vars = { tag: e.tag ?? '', code: (t.status.runtime.errors as Record<string, string>)[e.code ?? ''] ?? e.code ?? '', from: e.from ?? '' }
   if (e.state === 'ready' && e.note === 'updated') return fmt(e.from ? rt.updated : rt.updatedFirst, vars)
   if (e.state === 'ready' && e.note === 'switched') return fmt(rt.switched, vars)
   if (e.state === 'error' && e.tag) return fmt(rt.errorUsing, vars)

@@ -1,5 +1,16 @@
 # 交接记录
 
+## 2026-10-03 · 更新检查修正 · Codex
+- 完成：按用户要求更新决定 15 / 29。llama.cpp 各官方通道与应用自身自动检查每 24 小时最多一次；新文件 `data/update-checks.json`（v1）经 JsonStore 原子写入、保留 3 份备份，在请求之前记录尝试时间，失败 / 中断也计入，重启不重复检查。应用保持每天的运行期间检查；llama.cpp 保持只在启动时检查。手动应用检查 / 显式运行库下载绕过间隔。已有回退选择与运行中的模型保持原有行为。
+- 原因：用本机 Node fetch 请求日志所列 GitHub API，实际返回 HTTP 403、`x-ratelimit-remaining: 0`；原代码把所有 HTTP 错误归为 network，细节只留下 URL。现在区分 network / rate-limited / http；支持主要限流响应头、429 和 403 的 secondary rate limit 消息，不输出响应正文。中文提示同步更新。
+- 缓存：应用只保存选中的发布说明与相关资产，重启可保留更新提示和下载所需校验信息；应用版本改变时不复用上个版本的检查结论。CPU / GPU / 应用通过各自的 key 分开节流，同步更新前读盘，避免彼此覆盖。
+- 验证：先运行专项测试复现 3 fail；修复后专项 `bun test tests/core/update-check.test.ts tests/core/updater.test.ts tests/core/app-update.test.ts tests/core/llamacpp.test.ts` 56 pass / 0 fail。最终 `bun test` 888 pass / 51 skip / 0 fail（61 文件，74.44 秒），`bun run typecheck`、`git diff --check` 通过。覆盖重启、失败计入、24 小时到期、回退保持、显式检查、跨通道写入、时钟回拨、缓存下载校验、限流识别与退出取消。
+- 没测：真实大文件更新下载 / GPU / 安装包 / 浏览器；没有 build。GitHub 当前限流仍需等待配额恢复；本次修正检查频率与错误提示，不改变 GitHub 配额。没有修改真实配置、读取 secrets、引入 token / 镜像或安装依赖。
+- 工作区：并行的 8-4 已提交，8-5 界面正在改；只提交本轮更新文件与公共文案中的对应片段，保留其余界面改动。测试临时目录由测试清理，未启动长驻服务。
+- 下一步：继续原工作包 8-5（Sonnet 5.5，指南 #p8-5），本轮只做更新修正，不启动后续工作包。
+
+---
+
 ## 2026-10-03 · 工作包 8-4 · Sonnet 5.5
 - 完成：plan 8-4 三项打勾。`server/core/usage.ts`（`UsageStore`：按「小时 × 模型 × 方案 × 来源 × key」内存累加，30 秒定时 + 退出时原子写 `data/logs/usage/YYYY-MM-DD.json`，同一天重启会接着旧文件；只存计数；半写 / 损坏 / 非法行读取时跳过；`prune()` 只删符合 `YYYY-MM-DD.json` 的超期文件，启动时和跨日时清理；报表与 CSV）；`logs.usageKeepDays`（默认 30，规整为 7 / 14 / 30，旧配置自动补，无需迁移）；`GET /api/usage?from&to[&format=csv&groupBy=]`（范围最多 62 天；CSV 加 BOM，以 `= + - @` 开头的单元格加 `'` 防公式注入）；日志页「用量」标签（`UsagePanel.vue`：汇总卡、每日 token 柱图、按模型 / 来源 / key / 方案表、导出 CSV）；`context.ts` 里和请求日志共用同一条记录（`onRequest`），退出时 `usage.close()`。文案在 `i18n/zh-CN.ts` 的 `usage`。
 - 验证：`bun test` 923 通过 0 失败（新增 `tests/core/usage.test.ts` 23 个：聚合、跨日、清理边界、半写文件、CSV、设置规整）；`bun run typecheck` 通过。没有运行：界面（浏览器里看过柱图 / 窄屏 / 深色）、经 HTTP 的 `/api/usage`、真机。

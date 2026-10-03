@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { extractZip, installLatest, listInstalled, pickCudaVersion, RuntimeError, versionsDir } from '../../server/core/llamacpp'
+import { extractZip, getBody, installLatest, listInstalled, pickCudaVersion, RuntimeError, versionsDir } from '../../server/core/llamacpp'
 import { EXE, fakeExtract, fakeGithub, sha } from '../fixtures/fake-github'
 
 let data: string
@@ -12,6 +12,16 @@ afterEach(() => { rmSync(data, { recursive: true, force: true }) })
 
 const opts = (f: ReturnType<typeof fakeGithub>, extra = {}) => ({
   dataDir: data, cudaRuntime: '13.3', fetch: f.fetchFn, extract: fakeExtract(), platform: 'win32' as const, ...extra,
+})
+
+test('GitHub rate limits are distinguished from offline errors and other HTTP failures', async () => {
+  const url = 'https://api.github.com/repos/ggml-org/llama.cpp/releases/latest'
+  const limited = async () => Response.json({ message: 'API rate limit exceeded' }, { status: 403, headers: { 'x-ratelimit-remaining': '0' } })
+  await expect(getBody(limited, url, 'json')).rejects.toMatchObject({ code: 'rate-limited' })
+  await expect(getBody(async () => new Response('', { status: 429 }), url, 'json')).rejects.toMatchObject({ code: 'rate-limited' })
+  await expect(getBody(async () => Response.json({ message: 'You have exceeded a secondary rate limit' }, { status: 403 }), url, 'json')).rejects.toMatchObject({ code: 'rate-limited' })
+  await expect(getBody(async () => Response.json({ message: 'Forbidden' }, { status: 403 }), url, 'json')).rejects.toMatchObject({ code: 'http' })
+  await expect(getBody(async () => new Response('', { status: 404 }), url, 'json')).rejects.toMatchObject({ code: 'http', detail: expect.stringContaining('404') })
 })
 
 test('listInstalled: only bNNNN directories that contain the exe, newest first', () => {

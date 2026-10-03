@@ -16,7 +16,7 @@ const REPO = 'ggml-org/llama.cpp'
 const TAG_RE = /^b\d+$/
 
 export type RuntimeErrorCode =
-  | 'network' | 'no-nightly-tag' | 'bad-tag' | 'asset-missing' | 'no-digest' | 'digest-mismatch' | 'extract-failed' | 'extract-too-large' | 'no-server-exe' | 'no-compatible-cuda'
+  | 'network' | 'rate-limited' | 'http' | 'no-nightly-tag' | 'bad-tag' | 'asset-missing' | 'no-digest' | 'digest-mismatch' | 'extract-failed' | 'extract-too-large' | 'no-server-exe' | 'no-compatible-cuda'
 
 export class RuntimeError extends Error {
   constructor(public code: RuntimeErrorCode, message: string, public detail?: string) {
@@ -138,7 +138,17 @@ async function fetchChecked(fetchFn: FetchFn, url: string, signal: AbortSignal):
   } catch (e) {
     throw new RuntimeError('network', `Cannot reach ${new URL(url).host}`, (e as Error)?.message ?? String(e))
   }
-  if (!res.ok) throw new RuntimeError('network', `${new URL(url).host} answered ${res.status}`, url)
+  if (!res.ok) {
+    let limited = res.status === 429 || (res.status === 403 && (res.headers.get('x-ratelimit-remaining') === '0' || res.headers.has('retry-after')))
+    if (res.status === 403 && !limited) {
+      // Secondary limits may only be identified by the response message. Never log the body:
+      // GitHub includes the client's IP in some errors.
+      try { limited = /rate limit/i.test(await abortable(res.text(), signal)) } catch { /* Keep the HTTP error. */ }
+    } else {
+      await abortable(res.body?.cancel().catch(() => {}) ?? Promise.resolve(), signal).catch(() => {})
+    }
+    throw new RuntimeError(limited ? 'rate-limited' : 'http', `${new URL(url).host} answered ${res.status}`, `HTTP ${res.status} ${new URL(url).host}`)
+  }
   return res
 }
 
@@ -365,5 +375,5 @@ export type RuntimeStatus =
   | { state: 'idle' }
   | { state: 'disabled' }
   | { state: 'working', step: 'resolve' | 'download' | 'extract', detail: string, tag?: string }
-  | { state: 'ready', tag: string, note?: 'latest' | 'updated' | 'pinned' | 'auto-off' | 'switched', from?: string | null, latest?: string }
+  | { state: 'ready', tag: string, note?: 'latest' | 'updated' | 'pinned' | 'auto-off' | 'switched' | 'cached', from?: string | null, latest?: string }
   | { state: 'error', code: string, detail: string, using?: string | null }
