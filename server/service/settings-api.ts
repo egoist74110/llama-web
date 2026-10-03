@@ -1,5 +1,6 @@
 // Shared by the settings routes: the document the settings page works with.
 import { DEFAULT_LAUNCH_DEFAULTS } from '../core/args'
+import { DEFAULT_CPU_DEFAULTS, hasCpuChannel } from '../core/config'
 import { fmt, t } from '../core/i18n'
 import { StoreError } from '../core/store'
 import { existsSync } from 'node:fs'
@@ -26,6 +27,7 @@ export function describeSettings(): SettingsDoc {
     modelDirs: s.modelDirs.map(d => ({ ...d, ...dirStatus(d) })),
     defaults: s.defaults,
     builtinDefaults: DEFAULT_LAUNCH_DEFAULTS,
+    ...(hasCpuChannel(ctx.platform) ? { defaultsCpu: s.defaultsCpu, builtinDefaultsCpu: DEFAULT_CPU_DEFAULTS } : {}),
     image: s.preprocess.image,
     server: {
       port: s.server.port,

@@ -3,7 +3,7 @@
 // and shared by the custom Bun entry, the Nitro plugin and the dev-mode routes.
 import { join } from 'node:path'
 import {
-  defaultModels, defaultSettings, MODELS_VERSION, normalizeModels, normalizeSettings, SETTINGS_MIGRATIONS, SETTINGS_VERSION,
+  currentTagFor, defaultModels, defaultSettings, hasCpuChannel, MODELS_VERSION, normalizeModels, normalizeSettings, SETTINGS_MIGRATIONS, SETTINGS_VERSION,
   type ModelsDoc, type Settings,
 } from '../core/config'
 import { authenticate, defaultSecrets, normalizeSecrets, SECRETS_MIGRATIONS, SECRETS_VERSION, type SecretsDoc } from '../core/keys'
@@ -27,7 +27,8 @@ import { CloudflareSetup } from '../core/cloudflare'
 import { Updater } from '../core/updater'
 import { RuntimeInstaller } from '../core/runtime-add'
 import { RuntimeManager } from '../core/runtime-manager'
-import { RuntimeRegistry } from '../core/runtimes'
+import { channelsFor, RuntimeRegistry, type RuntimeAccel } from '../core/runtimes'
+import { cudaLimitsFor, detectSystem, systemWarnings, type SystemInfo } from '../core/system'
 import { APP_REPO, APP_VERSION } from '../core/app-info'
 import { AppUpdater } from '../core/app-update'
 import { Hold } from '../core/write-pair'
@@ -55,6 +56,15 @@ export interface AppContext {
   getRuntimeStatus(): RuntimeStatus
   /** llama.cpp versions: list, switch (rollback), pruning. */
   updater: Updater
+  /**
+   * The other official channel of a Windows host (CPU next to CUDA, or the reverse): updated only
+   * after the user downloaded it once. Null on a Mac (one channel only) and while there is none.
+   */
+  secondary: { accel: RuntimeAccel, updater: Updater, current(): string } | null
+  /** Download the secondary channel (the user's first download; later updates follow automatically). */
+  downloadSecondary(): Promise<void>
+  /** Detected facts about this machine, with recommendations and warnings (cached for a minute; `refresh` re-detects). */
+  getSystem(opts?: { refresh?: boolean }): Promise<SystemInfo>
   /** Hand-added llama.cpp builds: list, delete (with protection), and the add flow (preview, then confirm). */
   runtimes: RuntimeManager
   runtimeAdd: RuntimeInstaller
@@ -220,26 +230,42 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     dataDir, target: selectedTarget, registry,
     getSettings, getModels,
     usedExes: () => [...runner.list().map(p => p.spec.exe), ...launching.values()],
-    setCurrent: tag => settingsRef.update((s) => { s.llamacpp.current = tag }),
+    setCurrent: (tag, accel) => setCurrentTag(tag, accel),
     updateModels: fn => { modelsRef.update(fn) },
-    onChanged: () => { updater.refresh(); live.notify() },
+    onChanged: () => { updater.refresh(); secondary?.updater.refresh(); live.notify() },
   })
   const runtimeAdd = new RuntimeInstaller({ dataDir, target: selectedTarget, registry })
   runtimeAdd.clearLeftovers()
   startupClose.push(() => runtimeAdd.dispose())
-  const updater = new Updater({
+  const setCurrentTag = (tag: string, accel: RuntimeAccel) => settingsRef.update((s) => {
+    if (hasCpuChannel(platform) && accel === 'cpu') s.llamacpp.currentCpu = tag
+    else s.llamacpp.current = tag
+  })
+  // Hardware facts for the automatic CUDA runtime choice and /api/system: detected once at start (the
+  // update check waits for it), then at most once a minute.
+  let systemCache: { at: number, info: Omit<SystemInfo, 'warnings'> } | null = null
+  let systemRun: Promise<Omit<SystemInfo, 'warnings'>> | null = null
+  const detect = (refresh = false): Promise<Omit<SystemInfo, 'warnings'>> => {
+    if (!refresh && systemCache && Date.now() - systemCache.at < 60_000) return Promise.resolve(systemCache.info)
+    systemRun ??= detectSystem().then((info) => { systemCache = { at: Date.now(), info }; return info }).finally(() => { systemRun = null })
+    return systemRun
+  }
+  const channelUpdater = (target: RuntimeTarget, withSelectionError: boolean) => new Updater({
     dataDir,
-    target: selectedTarget, selectionError,
-    llamacpp: () => getSettings().llamacpp,
-    protect: () => runtimes.protectedTags(),
-    setCurrent: tag => settingsRef.update((s) => { s.llamacpp.current = tag }),
+    target, selectionError: withSelectionError ? selectionError : undefined,
+    llamacpp: () => ({ ...getSettings().llamacpp, current: currentTagFor(getSettings(), platform, target.acceleration) }),
+    cudaLimits: () => (systemCache ? cudaLimitsFor(systemCache.info) : null),
+    protect: () => runtimes.protectedTags(target.acceleration),
+    setCurrent: tag => setCurrentTag(tag, target.acceleration),
     usedExes: () => [...runner.list().map(p => p.spec.exe), ...launching.values()],
     onStatus: (s) => {
-      live.onRuntimeStatus(s)
-      if (s.state === 'working') log(`llama.cpp: ${s.step} ${s.detail}`.trim())
-      else if (s.state === 'ready') log(`llama.cpp: using ${s.tag}${s.note === 'updated' ? ` (updated from ${s.from ?? 'none'})` : ''}${s.note === 'pinned' ? ` (latest ${s.latest} installed, kept the chosen version)` : ''}`)
-      else if (s.state === 'error') logError(`llama.cpp update failed: ${s.code} ${s.detail}${s.using ? ` (still using ${s.using})` : ''}`)
-      else if (s.state === 'disabled') log('llama.cpp: none installed and downloads are off (llamacpp.autoUpdate)')
+      if (withSelectionError || target.acceleration === selectedTarget.acceleration) live.onRuntimeStatus(s)
+      else live.notify()
+      const ch = target.acceleration === selectedTarget.acceleration ? '' : ` (${target.acceleration} channel)`
+      if (s.state === 'working') log(`llama.cpp${ch}: ${s.step} ${s.detail}`.trim())
+      else if (s.state === 'ready') log(`llama.cpp${ch}: using ${s.tag}${s.note === 'updated' ? ` (updated from ${s.from ?? 'none'})` : ''}${s.note === 'pinned' ? ` (latest ${s.latest} installed, kept the chosen version)` : ''}`)
+      else if (s.state === 'error') logError(`llama.cpp${ch} update failed: ${s.code} ${s.detail}${s.using ? ` (still using ${s.using})` : ''}`)
+      else if (s.state === 'disabled') log(`llama.cpp${ch}: none installed and downloads are off (llamacpp.autoUpdate)`)
     },
     onPrune: (r) => {
       if (r.removed.length) log(`llama.cpp: removed old versions ${r.removed.join(', ')}`)
@@ -247,6 +273,12 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
       live.notify()
     },
   })
+  const updater = channelUpdater(selectedTarget, true)
+  const otherAccel = channelsFor(selectedTarget).find(a => a !== selectedTarget.acceleration)
+  const secondaryTarget: RuntimeTarget | null = hasCpuChannel(platform) && !selectionError && otherAccel ? { ...selectedTarget, acceleration: otherAccel } : null
+  const secondary = secondaryTarget
+    ? { accel: secondaryTarget.acceleration as RuntimeAccel, updater: channelUpdater(secondaryTarget, false), current: () => currentTagFor(getSettings(), platform, secondaryTarget.acceleration) }
+    : null
   // LLAMA_WEB_UPDATE_FEED: loopback release list for local acceptance tests only (checked by AppUpdater).
   const appUpdateOpts = { current: APP_VERSION, repo: APP_REPO, dataDir, onChange: () => live.notify() }
   let appUpdate: AppUpdater
@@ -269,7 +301,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
       scheduler: scheduler.snapshot(),
       models: describeModels(getModels(), { dirs: getSettings().modelDirs }),
       queue: scheduler.snapshot().queue.map(q => ({ modelId: q.modelId, profile: q.profile, started: q.started, waiting: q.waiting })),
-      llamacpp: { current: getSettings().llamacpp.current, runtime: updater.getStatus(), versions: updater.versions(), rollback: updater.rollbackTarget() },
+      llamacpp: { current: currentTagFor(getSettings(), platform, selectedTarget.acceleration), runtime: updater.getStatus(), versions: updater.versions(), rollback: updater.rollbackTarget() },
       tunnel: tunnel.status(),
       appUpdate: appUpdate.view(),
       // Job and its version from one view: the page orders snapshots and HTTP responses by it.
@@ -391,7 +423,11 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
   // Background, once per start (plan 关键决定 15): adopt an installed llama.cpp, download a newer
   // release and make it current, prune old versions. Loads meanwhile use the current version.
   // After residue cleanup, so leftovers of the last run do not hold a version directory.
-  void cleanupDone.then(() => updater.run())
+  void cleanupDone.then(() => detect()).then(() => {
+    void updater.run()
+    // The other channel only follows releases once the user has downloaded it.
+    if (secondary && secondary.updater.refresh().length) void secondary.updater.run()
+  })
   appUpdate.start()
 
   // Under `nuxt dev` nothing attaches the public listener; this still reports why the tunnel is off.
@@ -403,13 +439,23 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     platform, runtimeTarget: selectedTarget,
     getSecrets: secretsRef.get, updateSecrets: secretsRef.update, tunnel, applyTunnel, cloudflare,
     refresh: () => { settingsRef.refresh(); modelsRef.refresh() },
-    getRuntimeStatus: () => updater.getStatus(), updater, runtimes, runtimeAdd, appUpdate, runner, scheduler, ops, proxy, publicEntry, applyPublic, live, logs, cleanupDone,
+    getRuntimeStatus: () => updater.getStatus(), updater, secondary,
+    async downloadSecondary() {
+      if (!secondary) throw new Error('No second channel on this computer')
+      await detect()
+      await secondary.updater.run({ force: true })
+    },
+    async getSystem(opts) {
+      const info = await detect(opts?.refresh === true)
+      return { ...info, warnings: systemWarnings(info, { cudaRuntime: getSettings().llamacpp.cudaRuntime }) }
+    }, runtimes, runtimeAdd, appUpdate, runner, scheduler, ops, proxy, publicEntry, applyPublic, live, logs, cleanupDone,
     shutdown() {
       closing ??= (async () => {
         await cleanupDone
         publicEntry.close()
         await tunnel.shutdown()
         await updater.stop()
+        await secondary?.updater.stop()
         runtimeAdd.dispose()
         registry.close()
         appUpdate.stop()

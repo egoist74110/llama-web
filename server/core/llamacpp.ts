@@ -9,13 +9,14 @@ import { join } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { checkExtractedTree, extractArchive, type ArchiveOptions } from './archive'
+import { pickCuda, type CudaLimits } from './cuda'
 import { legacyWindows, targetKey, type RuntimeTarget } from './platform'
 
 const REPO = 'ggml-org/llama.cpp'
 const TAG_RE = /^b\d+$/
 
 export type RuntimeErrorCode =
-  | 'network' | 'no-nightly-tag' | 'bad-tag' | 'asset-missing' | 'no-digest' | 'digest-mismatch' | 'extract-failed' | 'no-server-exe'
+  | 'network' | 'no-nightly-tag' | 'bad-tag' | 'asset-missing' | 'no-digest' | 'digest-mismatch' | 'extract-failed' | 'no-server-exe' | 'no-compatible-cuda'
 
 export class RuntimeError extends Error {
   constructor(public code: RuntimeErrorCode, message: string, public detail?: string) {
@@ -170,7 +171,7 @@ export async function getBody(fetchFn: FetchFn, url: string, kind: 'json' | 'tex
  * The official "latest" release only carries a pointer (nightly-tag.txt) to the newest binary
  * build; resolve it, then pick that build's CUDA assets.
  */
-export async function resolveLatest(fetchFn: FetchFn, cudaRuntime: string, platform = process.platform, net: NetOptions = {}, target?: RuntimeTarget): Promise<LatestBuild> {
+export async function resolveLatest(fetchFn: FetchFn, cudaRuntime: string, platform = process.platform, net: NetOptions = {}, target?: RuntimeTarget, limits?: CudaLimits | null): Promise<LatestBuild> {
   const stable = await getBody(fetchFn, `https://api.github.com/repos/${REPO}/releases/latest`, 'json', net) as { assets?: ReleaseAsset[] }
   const pointer = stable.assets?.find(a => a.name === 'nightly-tag.txt')
   if (!pointer) throw new RuntimeError('no-nightly-tag', 'nightly-tag.txt not found in the latest release')
@@ -191,11 +192,24 @@ export async function resolveLatest(fetchFn: FetchFn, cudaRuntime: string, platf
     bin: assets.find(a => a.name === `llama-${tag}-bin-${os}-cuda-${cuda}-x64.zip`),
     cudart: assets.find(a => a.name === `cudart-llama-bin-${os}-cuda-${cuda}-x64.zip`),
   })
-  const cuda = pickCudaVersion(assets.map(a => a.name), tag, os, cudaRuntime)
+  const names = assets.map(a => a.name)
+  // Empty `cudaRuntime` = automatic: the newest runtime the driver and GPU can run (decision 37); a value is the user's override.
+  const cuda = cudaRuntime ? pickCudaVersion(names, tag, os, cudaRuntime) : pickCuda(cudaVersions(names, tag, os), limits ?? null)
   const { bin, cudart } = pair(cuda ?? cudaRuntime)
   if (!bin) throw new RuntimeError('asset-missing', 'Release asset not found', `llama-${tag}-bin-${os}-cuda-${cudaRuntime}-x64.zip`)
   if (!cudart) throw new RuntimeError('asset-missing', 'Release asset not found', `cudart-llama-bin-${os}-cuda-${cudaRuntime}-x64.zip`)
   return { tag, bin, cudart }
+}
+
+/** CUDA versions (`13.3`) a release ships with both the build and its cudart. */
+export function cudaVersions(names: string[], tag: string, os: string): string[] {
+  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const binRe = new RegExp(`^llama-${esc(tag)}-bin-${os}-cuda-(\\d+)\\.(\\d+)-x64\\.zip$`)
+  return names
+    .map(n => binRe.exec(n))
+    .filter((m): m is RegExpExecArray => !!m)
+    .filter(m => names.includes(`cudart-llama-bin-${os}-cuda-${m[1]}.${m[2]}-x64.zip`))
+    .map(m => `${m[1]}.${m[2]}`)
 }
 
 /**
@@ -204,13 +218,7 @@ export async function resolveLatest(fetchFn: FetchFn, cudaRuntime: string, platf
  * Only versions that ship both the build and the matching cudart count. Null when none fits.
  */
 export function pickCudaVersion(names: string[], tag: string, os: string, wanted: string): string | null {
-  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const binRe = new RegExp(`^llama-${esc(tag)}-bin-${os}-cuda-(\\d+)\\.(\\d+)-x64\\.zip$`)
-  const available = names
-    .map(n => binRe.exec(n))
-    .filter((m): m is RegExpExecArray => !!m)
-    .filter(m => names.includes(`cudart-llama-bin-${os}-cuda-${m[1]}.${m[2]}-x64.zip`))
-    .map(m => ({ v: `${m[1]}.${m[2]}`, major: Number(m[1]), minor: Number(m[2]) }))
+  const available = cudaVersions(names, tag, os).map(v => ({ v, major: Number(v.split('.')[0]), minor: Number(v.split('.')[1]) }))
   if (available.some(a => a.v === wanted)) return wanted
   const major = Number(wanted.split('.')[0])
   const same = available.filter(a => a.major === major).sort((a, b) => b.minor - a.minor)
@@ -264,7 +272,9 @@ export const extractZip = extractArchive
 
 export interface InstallOptions {
   dataDir: string
+  /** Empty = automatic (newest runtime the machine can run, see cuda.ts). */
   cudaRuntime: string
+  cudaLimits?: CudaLimits | null
   fetch?: FetchFn
   extract?: (zip: string, dest: string, options?: ArchiveOptions) => Promise<void>
   platform?: NodeJS.Platform
@@ -340,7 +350,7 @@ export async function installBuild(build: LatestBuild, opts: InstallOptions): Pr
 export async function installLatest(opts: InstallOptions): Promise<string> {
   clearLeftovers(opts.dataDir, opts.target)
   opts.onStep?.('resolve', '')
-  const latest = await resolveLatest(opts.fetch ?? fetch, opts.cudaRuntime, opts.platform ?? process.platform, opts.net, opts.target)
+  const latest = await resolveLatest(opts.fetch ?? fetch, opts.cudaRuntime, opts.platform ?? process.platform, opts.net, opts.target, opts.cudaLimits)
   return installBuild(latest, opts)
 }
 

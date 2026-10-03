@@ -1,4 +1,5 @@
 // Shared by the /api/llamacpp routes: the version document the settings page shows.
+import { currentTagFor } from '../core/config'
 import { fmt, t } from '../core/i18n'
 import { UpdateError, type LlamacppDoc } from '../core/updater'
 import { AddError } from '../core/runtime-add'
@@ -8,12 +9,16 @@ import { getContext } from './context'
 
 export function describeLlamacpp(): LlamacppDoc {
   const ctx = getContext()
-  const { current, autoUpdate, keepVersions } = ctx.getSettings().llamacpp
+  const { autoUpdate, keepVersions } = ctx.getSettings().llamacpp
+  const current = currentTagFor(ctx.getSettings(), ctx.platform, ctx.runtimeTarget.acceleration)
   ctx.updater.refresh()
+  const sec = ctx.secondary
+  sec?.updater.refresh()
   return {
     current, status: ctx.updater.getStatus(), versions: ctx.updater.versions(), rollback: ctx.updater.rollbackTarget(),
     autoUpdate, keepVersions: Math.max(2, Math.floor(keepVersions) || 2),
     runtimes: ctx.runtimes.list(),
+    secondary: sec ? { accel: sec.accel, current: sec.current(), status: sec.updater.getStatus(), versions: sec.updater.versions() } : null,
   }
 }
 

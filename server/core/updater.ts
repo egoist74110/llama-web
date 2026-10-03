@@ -6,6 +6,7 @@
 // Pure module (no Nitro): settings and "in use" come in as callbacks.
 import { mkdirSync, renameSync, rmSync } from 'node:fs'
 import { join, posix, win32 } from 'node:path'
+import type { CudaLimits } from './cuda'
 import { isInsideDir } from './residue'
 import type { RuntimeListing } from './runtime-manager'
 import {
@@ -30,6 +31,8 @@ export interface LlamacppDoc {
   rollback: string | null
   autoUpdate: boolean
   keepVersions: number
+  /** The other official channel of a Windows host (CPU beside CUDA, or the reverse); null when there is none. */
+  secondary?: { accel: string, current: string, status: RuntimeStatus, versions: VersionView[] } | null
   /** Official and hand-added builds of this computer (decisions 34 / 35); other platforms are hidden. */
   runtimes?: RuntimeListing
 }
@@ -46,9 +49,11 @@ export interface UpdaterOptions extends Pick<InstallOptions, 'fetch' | 'extract'
   /** HTTP time limits (tests); the shutdown signal is added by the updater. */
   net?: Omit<NetOptions, 'signal'>
   dataDir: string
-  /** settings.llamacpp, read fresh each time. */
+  /** settings.llamacpp of this updater's channel (`current` is that channel's version), read fresh each time. */
   llamacpp(): { cudaRuntime: string, current: string, keepVersions: number, autoUpdate: boolean }
   setCurrent(tag: string): void
+  /** What the driver and GPU allow, for the automatic CUDA runtime choice (null / undefined = unknown). */
+  cudaLimits?(): CudaLimits | null | undefined
   /** Executable paths of running / starting llama-server processes. */
   usedExes(): string[]
   /** Tags a model or profile picked by hand: pruning keeps them (decision 35). */
@@ -178,8 +183,8 @@ export class Updater {
   }
 
   /** Startup check (single flight). Never throws: failures end in an `error` status. */
-  run(): Promise<RuntimeStatus> {
-    this.running ??= this.check().finally(() => { this.running = null })
+  run(opts: { force?: boolean } = {}): Promise<RuntimeStatus> {
+    this.running ??= this.check(opts.force === true).finally(() => { this.running = null })
     return this.running
   }
 
@@ -189,7 +194,8 @@ export class Updater {
     await this.running?.catch(() => {})
   }
 
-  private async check(): Promise<RuntimeStatus> {
+  /** `force`: the user asked for this download (the CPU channel's first one), so `autoUpdate: false` does not stop it. */
+  private async check(force: boolean): Promise<RuntimeStatus> {
     const { dataDir, platform } = this.opts
     clearLeftovers(dataDir, this.opts.target)
     const installed = this.refresh()
@@ -200,7 +206,7 @@ export class Updater {
       if (current) this.opts.setCurrent(current)
     }
     const cfg = this.opts.llamacpp()
-    if (!cfg.autoUpdate) {
+    if (!cfg.autoUpdate && !force) {
       this.safePrune()
       return this.set(current ? { state: 'ready', tag: current, note: 'auto-off' } : { state: 'disabled' })
     }
@@ -211,7 +217,7 @@ export class Updater {
       this.set({ state: 'working', step: 'resolve', detail: '' })
       const fetchFn = this.opts.fetch ?? fetch
       const net: NetOptions = { ...this.opts.net, signal: this.abort.signal }
-      const latest = await resolveLatest(fetchFn, cfg.cudaRuntime, platform, net, this.opts.target)
+      const latest = await resolveLatest(fetchFn, cfg.cudaRuntime, platform, net, this.opts.target, this.opts.cudaLimits?.())
       if (this.refresh().includes(latest.tag)) {
         // Already installed. A version picked by hand (rollback) stays current.
         const now = this.opts.llamacpp().current
@@ -219,7 +225,7 @@ export class Updater {
         return this.set({ state: 'ready', tag: now, note: now === latest.tag ? 'latest' : 'pinned', latest: latest.tag })
       }
       await installBuild(latest, {
-        dataDir, cudaRuntime: cfg.cudaRuntime, fetch: this.opts.fetch, extract: this.opts.extract, platform, target: this.opts.target, net,
+        dataDir, cudaRuntime: cfg.cudaRuntime, cudaLimits: this.opts.cudaLimits?.(), fetch: this.opts.fetch, extract: this.opts.extract, platform, target: this.opts.target, net,
         onStep: (step, detail) => this.set({ state: 'working', step, detail, tag: latest.tag }),
       })
       const installedNow = this.refresh()

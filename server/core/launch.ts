@@ -6,10 +6,10 @@ import { join } from 'node:path'
 import { buildLaunchArgs, cmdProgramMayExpand, formatCmdCommand, formatPosixCommand, type ArgWarning, type BuildInput, type LaunchParams, type ParamOverrides } from './args'
 import { installedDir } from './llamacpp'
 import type { RuntimeTarget } from './platform'
-import type { ModelConfig, ModelsDoc, Settings } from './config'
+import { currentTagFor, defaultsFor, type ModelConfig, type ModelsDoc, type Settings } from './config'
 import type { Target } from './scheduler'
 import { resolveFileRef } from './scanner'
-import { resolveRuntimeRef, RuntimeResolveError, type FallbackReason, type RuntimeEnv } from './runtimes'
+import { parseRuntimeRef, resolveRuntimeRef, RuntimeResolveError, type FallbackReason, type RuntimeAccel, type RuntimeEnv } from './runtimes'
 
 export type LaunchConfigErrorCode = 'model-missing' | 'profile-missing' | 'file-missing' | 'no-runtime' | 'bad-args'
 
@@ -25,6 +25,8 @@ export interface RuntimeUse {
   /** The reference that runs (null = the global current version). */
   ref: string | null
   label: string
+  /** Type of the build that runs; picks the global defaults (decision 36). */
+  accel: RuntimeAccel
   fallback: null | { from: string, reason: FallbackReason, to: string }
 }
 
@@ -64,16 +66,20 @@ function chooseExe(
   ref: string, input: { dataDir: string, settings: Settings, platform?: NodeJS.Platform, target?: RuntimeTarget, runtimeEnv?: RuntimeEnv, exists?: (p: string) => boolean },
 ): { exe: string | null, runtime: RuntimeUse } {
   if (ref && input.runtimeEnv) {
-    const r = resolveRuntimeRef(ref, { ...input.runtimeEnv, exists: input.runtimeEnv.exists ?? input.exists })
-    return { exe: r.exe, runtime: { ref: r.ref, label: r.label, fallback: r.fallback } }
+    const env = { ...input.runtimeEnv, exists: input.runtimeEnv.exists ?? input.exists }
+    const r = resolveRuntimeRef(ref, env)
+    const p = parseRuntimeRef(r.ref)
+    const accel = p?.kind === 'official' ? p.accel : env.entries.find(e => p?.kind === 'custom' && e.id === p.id)?.accel ?? env.target.acceleration
+    return { exe: r.exe, runtime: { ref: r.ref, label: r.label, accel, fallback: r.fallback } }
   }
-  const cur = input.settings.llamacpp.current
-  return { exe: llamaServerExe(input.dataDir, input.settings, input.platform, input.target), runtime: { ref: null, label: cur, fallback: null } }
+  const accel = input.target?.acceleration ?? 'cuda'
+  const cur = currentTagFor(input.settings, { os: input.target?.os ?? input.platform ?? process.platform }, accel)
+  return { exe: llamaServerExe(input.dataDir, input.settings, input.platform, input.target), runtime: { ref: null, label: cur, accel, fallback: null } }
 }
 
 /** `data/runtime/llama.cpp/<current>/llama-server(.exe)`, or null when no version is set. */
 export function llamaServerExe(dataDir: string, settings: Settings, platform = process.platform, target?: RuntimeTarget): string | null {
-  const cur = settings.llamacpp.current
+  const cur = currentTagFor(settings, { os: target?.os ?? platform }, target?.acceleration ?? 'cuda')
   if (!cur || /[\\/]|\.\./.test(cur)) return null
   return join(installedDir(dataDir, cur, target), platform === 'win32' ? 'llama-server.exe' : 'llama-server')
 }
@@ -124,7 +130,7 @@ export function previewLaunch(input: PreviewInput): LaunchPreview {
   } catch (e) {
     if (!(e instanceof RuntimeResolveError)) throw e
     exe = null
-    runtime = { ref: null, label: '', fallback: null }
+    runtime = { ref: null, label: '', accel: input.target?.acceleration ?? 'cuda', fallback: null }
   }
   if (!exe || !exists(exe)) missing.push('runtime')
 
@@ -148,7 +154,7 @@ export function previewLaunch(input: PreviewInput): LaunchPreview {
   const port = settings.scheduler.portRange[0]
   const win = (input.platform ?? process.platform) === 'win32'
   const built = buildLaunchArgs({
-    paths, defaults: settings.defaults,
+    paths, defaults: defaultsFor(settings, { os: input.target?.os ?? input.platform ?? process.platform }, runtime.accel),
     profile: { overrides: form.overrides, extraArgs: form.extraArgs },
     host: input.host, port,
   })
@@ -200,7 +206,7 @@ export function planLaunch(target: Target, input: PlanInput): LaunchPlan {
 
   const build = (port: number) => buildLaunchArgs({
     paths,
-    defaults: settings.defaults,
+    defaults: defaultsFor(settings, { os: input.target?.os ?? input.platform ?? process.platform }, runtime.accel),
     profile: { overrides: profile.overrides, extraArgs: profile.extraArgs },
     host: input.host,
     port,

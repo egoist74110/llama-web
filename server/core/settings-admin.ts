@@ -4,7 +4,7 @@
 import { existsSync, statSync } from 'node:fs'
 import { isAbsolute, resolve } from 'node:path'
 import { ArgsSyntaxError, PARAM_DEFS, splitArgs, type LaunchDefaults, type ParamValue } from './args'
-import { cleanWizard, TUNNEL_MODES, TUNNEL_PROTOCOLS, type ModelsDoc, type Settings, type TunnelMode, type TunnelProtocol } from './config'
+import { cleanWizard, hasCpuChannel, TUNNEL_MODES, TUNNEL_PROTOCOLS, type ModelsDoc, type Settings, type TunnelMode, type TunnelProtocol } from './config'
 import type { PublicStatus } from './public-entry'
 import type { ModelDir } from './types'
 
@@ -94,9 +94,9 @@ export function applyModelDirs(draft: Settings, raw: unknown, models: ModelsDoc)
 }
 
 /** Global default launch parameters. Missing keys keep their value; `''` / null mean "do not pass". */
-export function applyDefaults(draft: Settings, raw: unknown): void {
+export function applyDefaults(draft: Settings, raw: unknown, key: 'defaults' | 'defaultsCpu' = 'defaults'): void {
   if (!isObj(raw)) throw new SettingsError('bad-request')
-  const next: Record<string, ParamValue | string> = { ...draft.defaults }
+  const next: Record<string, ParamValue | string> = { ...draft[key] }
   for (const d of PARAM_DEFS) {
     const v = raw[d.key]
     if (v === undefined) continue
@@ -115,7 +115,7 @@ export function applyDefaults(draft: Settings, raw: unknown): void {
     }
     next.extraArgs = raw.extraArgs
   }
-  draft.defaults = next as unknown as LaunchDefaults
+  draft[key] = next as unknown as LaunchDefaults
 }
 
 const IMAGE_FORMATS = ['jpeg', 'png', 'webp']
@@ -213,6 +213,8 @@ export function applyPublic(draft: Settings, raw: unknown): void {
 export interface SettingsPatch {
   modelDirs?: unknown
   defaults?: unknown
+  /** CPU build defaults (Windows only, decision 36). */
+  defaultsCpu?: unknown
   image?: unknown
   server?: unknown
   public?: unknown
@@ -220,14 +222,19 @@ export interface SettingsPatch {
   setupDone?: unknown
 }
 
-const SECTIONS = ['modelDirs', 'defaults', 'image', 'server', 'public', 'setupDone']
+const SECTIONS = ['modelDirs', 'defaults', 'defaultsCpu', 'image', 'server', 'public', 'setupDone']
 
 /** Apply every section present in the patch; validation of any section failing aborts the whole patch. */
-export function applySettingsPatch(draft: Settings, patch: unknown, models: ModelsDoc): void {
+export function applySettingsPatch(draft: Settings, patch: unknown, models: ModelsDoc, host: { os: NodeJS.Platform } = { os: process.platform }): void {
   if (!isObj(patch) || !SECTIONS.some(k => patch[k] !== undefined)) throw new SettingsError('bad-request')
   const p = patch as SettingsPatch
   if (p.modelDirs !== undefined) applyModelDirs(draft, p.modelDirs, models)
   if (p.defaults !== undefined) applyDefaults(draft, p.defaults)
+  if (p.defaultsCpu !== undefined) {
+    // A Mac has one channel and one set of defaults.
+    if (!hasCpuChannel(host)) throw new SettingsError('bad-request')
+    applyDefaults(draft, p.defaultsCpu, 'defaultsCpu')
+  }
   if (p.image !== undefined) applyImagePreprocess(draft, p.image)
   if (p.server !== undefined) applyServer(draft, p.server)
   if (p.public !== undefined) applyPublic(draft, p.public)
@@ -242,6 +249,9 @@ export interface SettingsDoc {
   modelDirs: Array<ModelDir & DirStatus>
   defaults: LaunchDefaults
   builtinDefaults: LaunchDefaults
+  /** Windows only (absent on a Mac): defaults of CPU builds and their built-in values. */
+  defaultsCpu?: LaunchDefaults
+  builtinDefaultsCpu?: LaunchDefaults
   image: Settings['preprocess']['image']
   server: { port: number, portRange: [number, number], loadTimeoutSec: number, drainTimeoutSec: number, maxLoaded: number }
   public: Settings['public'] & {

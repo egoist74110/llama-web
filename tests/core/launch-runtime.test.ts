@@ -56,7 +56,7 @@ describe('planLaunch follows the runtime reference', () => {
     install(win, 'b200')
     const p = plan(models())
     expect(p.exe).toBe(exe)
-    expect(p.runtime).toEqual({ ref: null, label: 'b300', fallback: null })
+    expect(p.runtime).toEqual({ ref: null, label: 'b300', accel: 'cuda', fallback: null })
   })
   test('model reference, and the profile reference wins over it', () => {
     install(win, 'b300')
@@ -64,7 +64,7 @@ describe('planLaunch follows the runtime reference', () => {
     const b100 = install(win, 'b100')
     expect(plan(models('cuda:b200')).exe).toBe(b200)
     expect(plan(models('cuda:b200', 'cuda:b100')).exe).toBe(b100)
-    expect(plan(models('cuda:b200', 'cuda:b100')).runtime).toEqual({ ref: 'cuda:b100', label: 'b100', fallback: null })
+    expect(plan(models('cuda:b200', 'cuda:b100')).runtime).toEqual({ ref: 'cuda:b100', label: 'b100', accel: 'cuda', fallback: null })
   })
   test('a hand-added build', () => {
     install(win, 'b300')
@@ -72,7 +72,7 @@ describe('planLaunch follows the runtime reference', () => {
     const exe = custom(e)
     const p = plan(models('custom:r1'), [e])
     expect(p.exe).toBe(exe)
-    expect(p.runtime).toEqual({ ref: 'custom:r1', label: 'my build', fallback: null })
+    expect(p.runtime).toEqual({ ref: 'custom:r1', label: 'my build', accel: 'cuda', fallback: null })
   })
   test('the CPU channel build is used when asked for, although the global channel is CUDA', () => {
     install(win, 'b300')
@@ -111,7 +111,7 @@ describe('previewLaunch shows the build that runs', () => {
     const b200 = install(win, 'b200')
     const m = models()
     const ok = previewLaunch({ ...input(m), model: m.models[0]!, form: form('cuda:b200') })
-    expect(ok.runtime).toEqual({ ref: 'cuda:b200', label: 'b200', fallback: null })
+    expect(ok.runtime).toEqual({ ref: 'cuda:b200', label: 'b200', accel: 'cuda', fallback: null })
     expect(ok.command).toContain(b200)
     const fb = previewLaunch({ ...input(m), model: m.models[0]!, form: form('cuda:b5') })
     expect(fb.runtime.fallback).toMatchObject({ from: 'cuda:b5', reason: 'missing', to: 'cuda:b300' })

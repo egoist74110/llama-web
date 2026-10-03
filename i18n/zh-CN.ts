@@ -912,6 +912,7 @@ export default {
     errors: {
       'not-installed': '这个版本没有安装（可能已被清理）。',
       'bad-tag': '版本号无效。',
+      'bad-channel': '这台电脑上没有这个通道。',
       'store': 'data/settings.json 有错误，没有写入。请先修正：{detail}',
     },
     runtimes: {
@@ -943,6 +944,23 @@ export default {
         'locked': '这个版本的文件正被程序占用，没有删除。',
         'failed': '删除失败：{detail}',
       },
+    },
+  },
+  /** 本机检测（GET /api/system）的推荐与警告；Mac 的文案不涉及显卡。 */
+  system: {
+    warnings: {
+      'no-nvidia': '没有检测到 NVIDIA 显卡：建议使用 CPU 版本。',
+      'other-gpu-vendor': '检测到 {vendors} 显卡：本项目目前只支持 NVIDIA（CUDA）和 CPU，这些显卡不会被用来推理。',
+      'nvidia-unknown': '没能读出显卡信息（nvidia-smi 没有响应），无法自动选择 CUDA 运行库。',
+      'driver-too-old': '显卡驱动 {driver} 太旧，装不了任何 CUDA 运行库：请升级驱动，或改用 CPU 版本。',
+      'driver-below-latest-cuda': '显卡驱动 {driver} 最高支持 CUDA {maxMajor}.x，新版 CUDA {latestMajor}.x 需要驱动 {minDriver} 或更高：已自动选用 {maxMajor}.x，也可以升级驱动。',
+      'compute-cap-unsupported': '显卡算力 {computeCap} 低于所有 CUDA 运行库的支持范围：建议使用 CPU 版本。',
+      'compute-cap-below-latest-cuda': '显卡算力 {computeCap} 不在 CUDA {latestMajor}.x 的支持范围内：已自动选用较低的主版本。',
+      'cuda-override-unsupported': '手动指定的 CUDA 运行库 {version} 在这台电脑上跑不起来（{reason}）。清空 llamacpp.cudaRuntime 可改回自动选择。',
+      'no-avx2': 'CPU 不支持 AVX2，纯 CPU 推理会非常慢。',
+      'many-logical-cores': '逻辑核心有 {logical} 个，超过 64（Windows 处理器组）：线程数请手动核对。',
+      'memory-tight': '模型和上下文约占内存的 {share}%，余量很小，可能变慢或加载失败。',
+      'memory-below-model': '可用内存小于模型文件（约占总内存的 {share}%）：锁定内存（mlock）会失败。',
     },
   },
   keys: {

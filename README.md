@@ -47,7 +47,7 @@ start.bat build    # 重新构建后运行
 | `runtime/` | 下载的 llama.cpp 版本目录，以及隧道用的 cloudflared（`runtime/cloudflared/`） |
 | `logs/` | 模型输出、事件、请求记录（请求记录不含对话内容） |
 
-绝大部分设置可以在界面「设置」页修改。`autoUpdate`、`keepVersions`、`cudaRuntime` 目前只能手改 `settings.json`。配置文件写入是原子的并保留备份（`data/backups/`）。
+绝大部分设置可以在界面「设置」页修改。`autoUpdate`、`keepVersions`、`cudaRuntime` 目前只能手改 `settings.json`（`cudaRuntime` 留空 = 按显卡驱动和算力自动选 CUDA 运行库，填版本号 = 手动指定）。配置文件写入是原子的并保留备份（`data/backups/`）。
 
 ### 客户端连接
 

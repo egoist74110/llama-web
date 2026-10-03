@@ -1,5 +1,15 @@
 # 交接记录
 
+## 2026-10-03 · 工作包 8-2 · Sonnet 5.5
+- 完成：plan 8-2 四项打勾。`server/core/cuda.ts`（驱动 ↔ CUDA 对照、算力下限、`pickCuda` 自动选取）、`system.ts`（检测：Windows 用 nvidia-smi + 一次 PowerShell 探测 CPU / AVX / NUMA / 显卡名；Mac 用 sysctl / sw_vers；解析、警告、`memoryFit` 都是纯函数，命令经 `RunCmd` 注入，带超时，失败 = unknown 不猜）、`GET /api/system`（`?refresh=1` 重测，缓存 60 秒）。settings v6：`defaultsCpu`、`llamacpp.currentCpu`；`defaultsFor` / `currentTagFor` 按最终运行库类型取默认参数与当前版本（只在 Windows 有 CPU 通道，Mac 一份）；`launch.ts` 的 `RuntimeUse` 多了 `accel`；`RuntimeManager` 每个通道各有当前版本（`useCurrent`、删除时落到本通道最新官方版）；`Updater` 支持 `cudaLimits` 和 `run({force})`；context 里另一通道（CUDA↔CPU）有自己的 updater（`ctx.secondary`），启动时只在该通道已装有版本时才自动更新；接口 `POST /api/llamacpp/download`（首次下载另一通道）、`POST current` 多 `channel` 参数、GET `llamacpp` 多 `secondary`、`/api/settings` 多 `defaultsCpu` / `builtinDefaultsCpu`（Mac 不返回，保存 `defaultsCpu` 在 Mac 上拒绝）。警告文案在 `i18n/zh-CN.ts` 的 `system.warnings`（界面 8-5 接）。
+- 验证：`bun test` 833 pass / 0 fail（新增 54 个：`system.test.ts`、`channels.test.ts`）；`bun run typecheck` 通过。真机只读检测（本机 RTX 5090、驱动 617.14）2.1 秒，不加载模型、不占 GPU：driver / banner CUDA 13.4 / 算力 12.0 / 32607 MiB / Ryzen 12 核 24 线程 / AVX512 / NUMA 1，无警告。用 `bun` 脚本在临时数据目录起真实 context（autoUpdate 关）：v5 settings 被迁移成 v6（`cudaRuntime: 13.3` 保留），`getSystem()`、`secondary`（cpu）、列表都正常；已清理。
+- 没测：经 HTTP 的新接口（`/api/system`、`download`、`current` 的 channel）只测了底层函数；真实下载 CPU 版 / 自动选取 12.x（只用假 Release）；Mac 全部走构造的 sysctl 输出，没有 macOS runner / 真机；多路 CPU 的 NUMA / 插槽只用构造数据；界面未做（8-5）。
+- 决定 / 坑：① 驱动对照来自 NVIDIA 官方发布说明（13.x ≥580、12.x ≥525、11.x ≥450；CUDA 13 起不支持算力 <7.5，12 起 ≥5.0）。较新驱动的 nvidia-smi 横幅写「CUDA UMD Version」，旧的写「CUDA Version」，两种都解析。② `cudaRuntime` 迁移不动（严格按「旧配置行为不变」）：老用户存的 `13.3` 仍是覆盖，不会自动选；新装默认空 = 自动。想让老用户也自动，需要用户决定把 `13.3` 当默认值清掉。③ 硬件未知时自动选「最低主版本里最新的」（12.x），不往上猜；一个都跑不了抛 `no-compatible-cuda`（detail 里有每个版本的原因），不静默降级。④ Windows 没有 FMA / F16C 的探测接口，这两项是 null（未知）；Apple 芯片的 x86 指令集也是 null，所以 `no-avx2` 警告只对 x86 报。⑤ AMD / Intel 显卡的提示只在没有 NVIDIA 时出现（有 N 卡时核显是噪音）。⑥ 模型编辑抽屉里「继承」显示的默认值用主通道的那份（表单还不知道方案会选哪个运行库），8-5 可改进。⑦ `memoryFit` 写好并测了但还没接入（9 阶段显存 / 内存检查用）。
+- 剩余：无（8-2 范围内）。
+- 下一步：8-3（Opus 5.5，指南 #p8-3）。实测前先告诉用户（会用真实 llama-server 占 GPU）。
+
+---
+
 ## 2026-10-03 · 工作包 8-1 · Sonnet 5.5
 - 完成：plan 8-1 五项打勾。`server/core/runtimes.ts`（引用串 `cuda:b123` / `cpu:` / `metal:` / `custom:<id>`、`runtimes.json` 登记含损坏恢复、PE / Mach-O / ELF 文件头识别、`resolveRuntimeRef` 与兜底、`refOfExe`）、`runtime-add.ts`（目录 / 压缩包 / GitHub 三种来源：先暂存预览再确认）、`runtime-manager.ts`（列表、删除保护、`protectedTags`）；`launch.ts` 按 方案 ← 模型 ← 全局 解析并在 plan / preview 里带 `runtime`；`models-admin` 加 `runtime` 字段校验（只能选本机平台的版本）；`Updater` 自动清理的保护集加入被选中的版本；兜底时写 `runtime-fallback` 事件（总览「最近事件」和日志事件页能看到）。接口：`/api/llamacpp/add/{preview,confirm,cancel}`、`delete-plan`、`DELETE /api/llamacpp/:ref?confirm=1`、`POST /api/models/:id/runtime`，GET 多返回 `runtimes`。
 - 验证：`bun test` 779 pass / 0 fail（新增约 76 个）；`bun run typecheck` 通过（故意写错确认它真的在检查）。真机：用本机已装的 b11146 目录跑了一次真实「目录 → 暂存 → 运行真实 `--version` → 登记」（4.5 秒、740 MB、识别为 CUDA / b11146），Mac 目标识别不到 `llama-server` 而拒绝；临时数据目录，已清理。

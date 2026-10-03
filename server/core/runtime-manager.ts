@@ -4,7 +4,7 @@
 // state change, so a version switch or a launch cannot slip in between.
 import { renameSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import type { ModelsDoc, Settings } from './config'
+import { currentTagFor, type ModelsDoc, type Settings } from './config'
 import { installedDir } from './llamacpp'
 import type { RuntimeTarget } from './platform'
 import {
@@ -28,7 +28,7 @@ export interface RuntimeRow {
   /** `b11146`; empty for a hand-added build whose number is unknown. */
   tag: string
   label: string
-  /** The global current version of its channel. */
+  /** The current version of its channel (each official channel has one). */
   current: boolean
   /** A running / starting llama-server uses it. */
   inUse: boolean
@@ -71,7 +71,8 @@ export interface ManagerOptions {
   getModels(): ModelsDoc
   /** Executable paths of running / starting llama-server processes. */
   usedExes(): string[]
-  setCurrent(tag: string): void
+  /** Make `tag` the current version of the channel `accel` (the GPU channel's `current` or the CPU channel's `currentCpu`). */
+  setCurrent(tag: string, accel: RuntimeAccel): void
   /** Clear runtime references in models.json (one write). */
   updateModels(fn: (draft: ModelsDoc) => void): void
   /** Called after any change of the build list (refresh caches, notify pages). */
@@ -105,15 +106,20 @@ export class RuntimeManager {
     return used
   }
 
-  private globalCurrentRef(): string | null {
-    const cur = this.o.getSettings().llamacpp.current
-    return cur ? officialRef(this.o.target.acceleration, cur) : null
+  /** Reference of each channel's current version. */
+  private currentRefs(): Set<string> {
+    const refs = new Set<string>()
+    for (const accel of channelsFor(this.o.target)) {
+      const cur = currentTagFor(this.o.getSettings(), this.o.target, accel)
+      if (cur) refs.add(officialRef(accel, cur))
+    }
+    return refs
   }
 
   list(): RuntimeListing {
     const env = this.env()
     const used = this.usedRefs()
-    const current = this.globalCurrentRef()
+    const current = this.currentRefs()
     const rows: RuntimeRow[] = []
     for (const accel of channelsFor(this.o.target)) {
       const tags = installedOfficial(env, accel)
@@ -121,7 +127,7 @@ export class RuntimeManager {
         const ref = officialRef(accel, tag)
         const inUse = used.has(ref)
         const latestOfficial = i === 0
-        rows.push({ ref, kind: 'official', accel, tag, label: tag, current: ref === current, inUse, latestOfficial, deletable: !latestOfficial && !inUse })
+        rows.push({ ref, kind: 'official', accel, tag, label: tag, current: current.has(ref), inUse, latestOfficial, deletable: !latestOfficial && !inUse })
       })
     }
     let hidden = 0
@@ -149,7 +155,7 @@ export class RuntimeManager {
       const tags = channelsFor(this.o.target).includes(p.accel) ? installedOfficial(env, p.accel) : []
       if (!tags.includes(p.tag)) throw new DeleteError('not-found', 'This version is not installed')
       if (tags[0] === p.tag) blocked = 'latest-official'
-      isCurrent = p.accel === this.o.target.acceleration && this.o.getSettings().llamacpp.current === p.tag
+      isCurrent = currentTagFor(this.o.getSettings(), this.o.target, p.accel) === p.tag
       if (isCurrent) becomes = tags[0] !== p.tag ? tags[0]! : null
     } else {
       const e = env.entries.find(x => x.id === p.id)
@@ -192,7 +198,7 @@ export class RuntimeManager {
         })
       }
       if (p.kind === 'custom') this.o.registry.remove(p.id)
-      if (plan.isCurrent && plan.becomesCurrent) this.o.setCurrent(plan.becomesCurrent)
+      if (plan.isCurrent && plan.becomesCurrent) this.o.setCurrent(plan.becomesCurrent, p.kind === 'official' ? p.accel : this.o.target.acceleration)
     } catch (e) {
       try { rename(trash, dir) } catch { /* the directory stays in the trash name; cleared at startup */ }
       throw new DeleteError('failed', 'Could not update the configuration', (e as Error).message)
@@ -200,6 +206,15 @@ export class RuntimeManager {
     try { rmSync(trash, { recursive: true, force: true }) } catch { /* cleared at the next start */ }
     this.o.onChanged?.()
     return plan
+  }
+
+  /** Make an installed official build the current version of its channel (the settings page). */
+  useCurrent(accel: RuntimeAccel, tag: unknown): string {
+    if (typeof tag !== 'string' || !/^b\d+$/.test(tag)) throw new DeleteError('bad-ref', 'Invalid version tag')
+    if (!channelsFor(this.o.target).includes(accel) || !installedOfficial(this.env(), accel).includes(tag)) throw new DeleteError('not-found', 'This version is not installed')
+    this.o.setCurrent(tag, accel)
+    this.o.onChanged?.()
+    return tag
   }
 
   /**

@@ -56,7 +56,17 @@ export interface Settings {
   server: { host: string, port: number }
   public: { enabled: boolean, port: number, domain: string, tunnelEnabled: boolean, tunnelMode: TunnelMode, tunnelProtocol: TunnelProtocol, wizard: PublicWizard | null }
   modelDirs: ModelDir[]
-  llamacpp: { cudaRuntime: string, current: string, keepVersions: number, autoUpdate: boolean, acceleration: Acceleration }
+  llamacpp: {
+    /** Empty = automatic: the newest CUDA runtime the driver and GPU can run (decision 37); a version here is the user's override. */
+    cudaRuntime: string
+    /** Current version of the GPU channel (on a Mac: of its only channel). */
+    current: string
+    /** Current version of the Windows CPU channel (decision 36); empty until the CPU build is downloaded. */
+    currentCpu: string
+    keepVersions: number
+    autoUpdate: boolean
+    acceleration: Acceleration
+  }
   scheduler: {
     maxLoaded: number
     loadTimeoutSec: number
@@ -64,7 +74,10 @@ export interface Settings {
     heartbeatSec: number
     portRange: [number, number]
   }
+  /** Launch defaults of the GPU build (and the only set on a Mac). */
   defaults: LaunchDefaults
+  /** Launch defaults for a CPU build on Windows (decision 36); chosen by the runtime a launch ends up using. */
+  defaultsCpu: LaunchDefaults
   preprocess: { image: ImagePreprocess }
   logs: { keepRunsPerModel: number, keepDays: number }
   gpu: { sampleSec: number }
@@ -109,8 +122,30 @@ export interface ModelsDoc {
   models: ModelConfig[]
 }
 
-export const SETTINGS_VERSION = 5
+export const SETTINGS_VERSION = 6
 export const MODELS_VERSION = 1
+
+/**
+ * Defaults for a CPU build: no layers on a GPU, no K/V quantisation or flash attention that
+ * assume a GPU, no `--load-mode mlock` (it fails when the model does not fit in free memory), and
+ * a smaller context (the KV cache lives in system memory).
+ */
+export const DEFAULT_CPU_DEFAULTS: LaunchDefaults = {
+  ...DEFAULT_LAUNCH_DEFAULTS,
+  ctxSize: 32768, cacheTypeK: null, cacheTypeV: null, flashAttn: null, gpuLayers: 0, batchSize: 512, ubatchSize: 512,
+  extraArgs: '--jinja --no-prefill-assistant --props --slots -cb',
+}
+
+/** Hosts with a separate CPU channel and its own defaults: Windows only (a Mac has one channel and one set of defaults). */
+export const hasCpuChannel = (host: { os: NodeJS.Platform }) => host.os === 'win32'
+
+/** Current version setting of an official channel. */
+export const currentTagFor = (s: Settings, host: { os: NodeJS.Platform }, accel: string): string =>
+  hasCpuChannel(host) && accel === 'cpu' ? s.llamacpp.currentCpu : s.llamacpp.current
+
+/** Launch defaults for a launch that ends up on a runtime of this type. */
+export const defaultsFor = (s: Settings, host: { os: NodeJS.Platform }, accel: string): LaunchDefaults =>
+  hasCpuChannel(host) && accel === 'cpu' ? s.defaultsCpu : s.defaults
 
 export function defaultSettings(platform?: PlatformInfo): Settings {
   const windowsCuda = platform ? platform.os === 'win32' && platform.acceleration === 'cuda' : process.platform === 'win32'
@@ -119,12 +154,13 @@ export function defaultSettings(platform?: PlatformInfo): Settings {
     server: { host: '0.0.0.0', port: 5001 },
     public: { enabled: false, port: 8080, domain: '', tunnelEnabled: false, tunnelMode: 'token', tunnelProtocol: 'http2', wizard: null },
     modelDirs: [],
-    llamacpp: { cudaRuntime: '13.3', current: '', keepVersions: 2, autoUpdate: true, acceleration: 'auto' },
+    llamacpp: { cudaRuntime: '', current: '', currentCpu: '', keepVersions: 2, autoUpdate: true, acceleration: 'auto' },
     scheduler: { maxLoaded: 1, loadTimeoutSec: 600, drainTimeoutSec: 300, heartbeatSec: 15, portRange: [7100, 7199] },
     defaults: windowsCuda ? { ...DEFAULT_LAUNCH_DEFAULTS } : {
       ...DEFAULT_LAUNCH_DEFAULTS, cacheTypeK: null, cacheTypeV: null, flashAttn: null,
       gpuLayers: platform?.acceleration === 'cpu' ? 0 : null, extraArgs: '--jinja --no-prefill-assistant --props --slots -cb',
     },
+    defaultsCpu: { ...DEFAULT_CPU_DEFAULTS },
     preprocess: { image: { enabled: true, maxEdge: 896, format: 'jpeg', quality: 90 } },
     logs: { keepRunsPerModel: 20, keepDays: 14 },
     gpu: { sampleSec: 2 },
@@ -160,6 +196,15 @@ export const SETTINGS_MIGRATIONS: Record<number, (old: any) => any> = {
       old.public.tunnelMode ??= 'token'
       old.public.tunnelProtocol ??= 'http2'
     }
+    return old
+  },
+  // 6: separate CPU defaults and CPU channel version (decision 36). Only missing values are added;
+  // a CPU-only installation (acceleration cpu) keeps its version as the CPU channel's. The old
+  // `cudaRuntime` (default or hand-edited) stays: it now acts as the override of the automatic choice.
+  5: (old) => {
+    if (!isObj(old.llamacpp)) old.llamacpp = {}
+    old.llamacpp.currentCpu ??= old.llamacpp.acceleration === 'cpu' && typeof old.llamacpp.current === 'string' ? old.llamacpp.current : ''
+    old.defaultsCpu ??= { ...DEFAULT_CPU_DEFAULTS }
     return old
   },
 }
