@@ -12,7 +12,9 @@ const LIVE = '__live__'
 const { state, events, requests, logLines, serverNow } = useLive()
 const toast = useToast()
 
-const tab = ref<Tab>('model')
+// /logs?tab=events|requests (the overview's "all" links) opens that tab.
+const initialTab = useRoute().query.tab
+const tab = ref<Tab>(initialTab === 'events' || initialTab === 'requests' ? initialTab : 'model')
 const tabs: Array<{ value: Tab, label: string }> = [
   { value: 'model', label: t.logs.tabs.model },
   { value: 'events', label: t.logs.tabs.events },

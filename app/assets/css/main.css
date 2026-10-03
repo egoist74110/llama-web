@@ -1,33 +1,163 @@
 @import "tailwindcss";
 @import "@nuxt/ui";
 
-/* One accent colour (blue). Status colours appear only on dots and badges. */
+/*
+ * Design tokens (plan decision 30, docs/design/ui-v2-prototype.dc.html).
+ * One accent colour (indigo #4f5bd5); status colours only on dots, pills and bars.
+ * Dark mode is grey, never pure black / white. Nuxt UI's semantic variables are mapped
+ * onto the same tokens so every component follows the new palette.
+ * Fonts are bundled (@fontsource-variable, see nuxt.config.ts): nothing is loaded from the
+ * network, Chinese text falls back to Microsoft YaHei.
+ */
 @theme static {
-  --font-sans: system-ui, 'Segoe UI', 'Microsoft YaHei UI', 'PingFang SC', sans-serif;
+  --font-sans: 'Geist Variable', 'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC', system-ui, sans-serif;
+  --font-mono: 'Geist Mono Variable', ui-monospace, Consolas, 'Microsoft YaHei UI', monospace;
 }
 
 :root {
-  --ui-radius: 0.625rem;
-  --ui-bg: #f6f7f9;
-  --ui-bg-elevated: #ffffff;
-  --ui-bg-muted: #eef0f3;
-  --ui-bg-accented: #e6e9ed;
-  --ui-border: #e3e6ea;
-  --ui-text: #1f2328;
-  --ui-text-muted: #5b6470;
-  --ui-text-dimmed: #8791a0;
+  --lw-accent: #4f5bd5;
+  --lw-bg: #f3f4f6;
+  --lw-surface: #ffffff;
+  --lw-surface-2: #f7f8fa;
+  --lw-sunken: #eceef1;
+  --lw-border: #e3e5ea;
+  --lw-border-strong: #d2d5db;
+  --lw-text: #16181c;
+  --lw-muted: #575e69;
+  --lw-dim: #6b727e;
+  --lw-term: #f8f9fb;
+  --lw-ok: #15803d;
+  --lw-warn: #b45309;
+  --lw-err: #c81e1e;
+  --lw-accent-ink: var(--lw-accent);
+  --lw-accent-soft: color-mix(in oklab, var(--lw-accent) 11%, transparent);
+  --lw-shadow: 0 1px 2px rgba(16, 18, 22, .05), 0 0 0 1px rgba(16, 18, 22, .02);
+  --lw-overlay: rgba(20, 22, 26, .28);
+
+  --ui-radius: 0.3333rem;
+  --ui-primary: var(--lw-accent);
+  --ui-success: var(--lw-ok);
+  --ui-warning: var(--lw-warn);
+  --ui-error: var(--lw-err);
+  --ui-bg: var(--lw-bg);
+  --ui-bg-elevated: var(--lw-surface);
+  --ui-bg-muted: var(--lw-surface-2);
+  --ui-bg-accented: var(--lw-sunken);
+  --ui-bg-inverted: var(--lw-text);
+  --ui-border: var(--lw-border);
+  --ui-border-muted: var(--lw-border);
+  --ui-border-accented: var(--lw-border-strong);
+  --ui-border-inverted: var(--lw-text);
+  --ui-text: var(--lw-text);
+  --ui-text-highlighted: var(--lw-text);
+  --ui-text-toned: var(--lw-text);
+  --ui-text-muted: var(--lw-muted);
+  --ui-text-dimmed: var(--lw-dim);
+  --ui-text-inverted: #ffffff;
 }
 
-/* Dark mode: grey background, soft text; never pure black / white. */
 .dark {
-  --ui-bg: #1b1d21;
-  --ui-bg-elevated: #23262b;
-  --ui-bg-muted: #2b2f35;
-  --ui-bg-accented: #33373e;
-  --ui-border: #33373e;
-  --ui-text: #d7dbe0;
-  --ui-text-muted: #8e96a1;
-  --ui-text-dimmed: #6d7580;
+  --lw-bg: #17181b;
+  --lw-surface: #1f2125;
+  --lw-surface-2: #26282d;
+  --lw-sunken: #1b1c20;
+  --lw-border: #2d3036;
+  --lw-border-strong: #3b3f46;
+  --lw-text: #e4e6ea;
+  --lw-muted: #a0a7b1;
+  --lw-dim: #878e99;
+  --lw-term: #1a1b1f;
+  --lw-ok: #4ade80;
+  --lw-warn: #fbbf24;
+  --lw-err: #f87171;
+  --lw-accent-ink: color-mix(in oklab, var(--lw-accent) 62%, #ffffff);
+  --lw-accent-soft: color-mix(in oklab, var(--lw-accent) 22%, transparent);
+  --lw-shadow: 0 1px 2px rgba(0, 0, 0, .25);
+  --lw-overlay: rgba(0, 0, 0, .45);
+
+  /* Nuxt UI pairs a light primary with dark (inverted) text on solid buttons in dark mode. */
+  --ui-primary: var(--lw-accent-ink);
+  --ui-text-inverted: var(--lw-bg);
 }
 
-html, body { background: var(--ui-bg); color: var(--ui-text); }
+html, body {
+  background: var(--lw-bg);
+  color: var(--lw-text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------------------------------------------------------------------------------------
+ * Shell: sidebar + content. From 820px the page itself never scrolls: the sidebar stays
+ * put and only the content column scrolls. Narrower, the sidebar sits on top and the
+ * whole page scrolls.
+ */
+.lw-shell { display: flex; flex-direction: column; min-height: 100dvh; background: var(--lw-bg); }
+.lw-side { display: flex; flex-direction: column; gap: 16px; padding: 14px 16px; border-bottom: 1px solid var(--lw-border); background: var(--lw-bg); }
+.lw-main { flex: 1 1 auto; min-width: 0; padding: 22px 16px 48px; }
+@media (min-width: 820px) {
+  .lw-shell { flex-direction: row; height: 100dvh; overflow: hidden; }
+  .lw-side { flex: 0 0 236px; height: 100dvh; overflow: hidden; gap: 20px; padding: 18px 14px; border-bottom: 0; border-right: 1px solid var(--lw-border); }
+  .lw-main { height: 100dvh; overflow-y: auto; overscroll-behavior: contain; padding: 28px clamp(16px, 3.2vw, 44px) 48px; }
+}
+
+/* ---------------------------------------------------------------------------------------
+ * Building blocks shared by the new pages.
+ */
+.lw-card { background: var(--lw-surface); border: 1px solid var(--lw-border); border-radius: 14px; box-shadow: var(--lw-shadow); }
+.lw-num { font-variant-numeric: tabular-nums; }
+
+.lw-nav-item {
+  display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 8px 10px;
+  border: 1px solid transparent; border-radius: 9px; color: var(--lw-muted); font-size: 14px;
+}
+.lw-nav-item:hover { background: var(--lw-surface-2); color: var(--lw-text); }
+.lw-nav-item.is-active { background: var(--lw-surface); border-color: var(--lw-border); color: var(--lw-text); font-weight: 500; box-shadow: var(--lw-shadow); }
+.lw-nav-item.is-active .lw-nav-icon { color: var(--lw-accent-ink); }
+
+.lw-chip {
+  display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px;
+  border: 1px solid var(--lw-border); border-radius: 6px; background: var(--lw-surface-2);
+  color: var(--lw-muted); font-size: 12px; white-space: nowrap;
+}
+.lw-chip-accent { border-color: transparent; background: var(--lw-accent-soft); color: var(--lw-accent-ink); }
+
+.lw-st {
+  display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px;
+  border-radius: 999px; font-size: 12px; font-weight: 500; white-space: nowrap;
+}
+.lw-st::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.lw-st-ready { color: var(--lw-ok); background: color-mix(in oklab, var(--lw-ok) 12%, transparent); }
+.lw-st-loading { color: var(--lw-warn); background: color-mix(in oklab, var(--lw-warn) 13%, transparent); }
+.lw-st-loading::before { animation: lw-pulse 1.2s ease-in-out infinite; }
+.lw-st-failed { color: var(--lw-err); background: color-mix(in oklab, var(--lw-err) 12%, transparent); }
+.lw-st-stopped { color: var(--lw-dim); background: var(--lw-sunken); }
+
+@keyframes lw-pulse { 50% { opacity: .25; } }
+.lw-live-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--lw-ok); animation: lw-pulse 1.6s ease-in-out infinite; }
+.lw-live-dot.is-off { background: var(--lw-err); }
+
+.lw-seg { display: inline-flex; gap: 2px; padding: 3px; border: 1px solid var(--lw-border); border-radius: 10px; background: var(--lw-sunken); }
+.lw-seg button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 30px; padding: 0 12px;
+  border: 0; border-radius: 7px; background: transparent; color: var(--lw-muted); font-size: 13px; cursor: pointer; white-space: nowrap;
+}
+.lw-seg button:hover { color: var(--lw-text); }
+.lw-seg button.on { background: var(--lw-surface); color: var(--lw-text); font-weight: 500; box-shadow: var(--lw-shadow); }
+
+.lw-bar { height: 6px; border-radius: 999px; background: var(--lw-sunken); overflow: hidden; }
+.lw-bar > span { display: block; height: 100%; border-radius: 999px; background: var(--lw-accent); transition: width .4s ease; }
+.lw-bar.warn > span { background: var(--lw-warn); }
+
+.lw-tbl { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+.lw-tbl th { text-align: left; font-weight: 500; font-size: 12px; color: var(--lw-dim); padding: 8px 12px; border-bottom: 1px solid var(--lw-border); white-space: nowrap; }
+.lw-tbl td { padding: 9px 12px; border-bottom: 1px solid var(--lw-border); white-space: nowrap; }
+.lw-tbl tr:last-child td { border-bottom: 0; }
+
+.lw-dot-ok { color: var(--lw-ok); }
+.lw-dot-err { color: var(--lw-err); }
+.lw-dot-warn { color: var(--lw-warn); }
+.lw-dot-acc { color: var(--lw-accent-ink); }
+.lw-dot-dim { color: var(--lw-dim); }

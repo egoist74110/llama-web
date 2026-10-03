@@ -4,7 +4,10 @@ import { fileURLToPath } from 'node:url'
 export default defineNuxtConfig({
   compatibilityDate: '2025-07-15',
   modules: ['@nuxt/ui'],
-  css: ['~/assets/css/main.css'],
+  // Geist / Geist Mono ship with the app (decision 30): no font is fetched from the network,
+  // neither at build time (@nuxt/fonts is off) nor at run time (the desktop app may be offline).
+  css: ['@fontsource-variable/geist', '@fontsource-variable/geist-mono', '~/assets/css/main.css'],
+  ui: { fonts: false },
   // Local console: a pure SPA. Live data comes from /api/stream, so SSR would add nothing.
   ssr: false,
   icon: { clientBundle: { scan: true } },
