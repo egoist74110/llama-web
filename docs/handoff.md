@@ -1,5 +1,10 @@
 # 交接记录
 
+## 2026-10-05 · 试用问题记录：Cloudflare token 权限误报、更新检查限流 · Claude
+- 问题 1：用户给 token 授予 DNS Read、DNS Write，一键配置仍提示「token 缺少权限：Zone · DNS · Edit」。记录为关键决定 52；探测在 server/core/cloudflare.ts（GET /zones/{id}/dns_records，403 判缺权限）。可能是 Zone Resources 范围或判断逻辑问题，尚未复现。
+- 问题 2：检查更新常报「GitHub API 请求已被限流」，用户希望出错时换镜像站重试。记录为关键决定 53；更新源 / 下载域名目前限定官方 GitHub 且校验 SHA-256，加镜像要先和用户确认来源与校验方式。
+- 本轮只记录（plan 决定 52 / 53、两条未完成任务、变更记录），没有排查或改代码。
+
 ## 2026-10-05 · 发布 v0.1.0-beta.5 + 记录两项后续需求 · Claude
 - 发布：v0.1.0-beta.5（提交 4db38f5）由 Windows 草稿工作流构建成功，下载的安装包 SHA-256 与 SHA256SUMS 一致、清单 commit 正确后发布为预发布版。内容：启动器窗口不再一闪而过（见上一条）。
 - 没验证：安装包实际安装 / beta.4 → beta.5 应用内更新、冷启动慢路径、真实模型 / GPU；macOS CI 仍失败（pre-commit 脚本测试，已知）。

@@ -277,6 +277,8 @@ li.task .when{color:var(--ok);font-size:12px;white-space:nowrap}
     <tr><td>49</td><td>GPU / CPU 默认配置与设备不匹配提醒（后续需求）</td><td>在全局默认参数里点击保存时检查配置类型与所选设备：GPU 版配置选择 CPU，或 CPU 版配置选择 GPU 时弹出提醒；用户仍可确认并强行保存。仅提示、不阻止保存</td></tr>
     <tr><td>50</td><td>首次启动配置进入全局与单模型配置（后续需求，先不做）</td><td>首次启用确认框里已有的配置（上下文、MTP 模式与草稿文件、思考开关与上限等）也要出现在「全局默认参数」和「单个模型 / 方案的独立配置」里，可随时修改，与首次确认共用同一套控件和存储，不另设一份。具体范围与优先级由后续 AI 核对首次确认框的全部项后向用户确认</td></tr>
     <tr><td>51</td><td>模型删除（后续需求，先不做）</td><td>模型列表 / 详情增加「删除」按钮，需二次确认弹窗。弹窗左下角放一个独立的勾选框，勾选后同时删除模型文件、MTP 草稿文件与视觉（mmproj）文件；默认不勾选，只移除 llama-web 里的模型登记与配置。永久删除磁盘文件属不可恢复操作，具体删除范围、正在使用或被其他方案共享的草稿 / 视觉文件如何处理，由后续 AI 先向用户确认</td></tr>
+    <tr><td>52</td><td>Cloudflare token 权限误报（待排查）</td><td>用户给了 DNS Read、DNS Write 后，一键配置仍提示「token 缺少权限：Zone · DNS · Edit」。检查权限的探测在 <code>server/core/cloudflare.ts</code>（对每个 active 区域 GET <code>/zones/{id}/dns_records</code>，403 即判缺 DNS 权限），可能原因：token 的 Zone Resources 没包含目标区域 / 全部区域、探测的是别的区域、或权限组名称与界面显示不同。先复现并确认真实被拒的请求，再决定是修判断还是改提示文案（应写清具体缺哪项和作用范围）</td></tr>
+    <tr><td>53</td><td>GitHub API 限流时的镜像重试（待用户确认方案）</td><td>检查更新反复出现「GitHub API 请求已被限流」，希望出错时换镜像站重试。涉及安全：llama-web 与 llama.cpp 的更新源 / 下载域名目前严格限定为官方 GitHub（<code>app-update.ts</code> 的 feed 与安装包前缀校验、<code>llamacpp.ts</code> 等），安装包还要校验 SHA-256；加入第三方镜像会放宽这一限制。实现前先向用户确认：镜像来源（固定哪个站、是否可由用户填写）、仅用于元数据还是也用于下载、下载是否仍以官方清单的校验值为准；也可先考虑不依赖 API 的方式（如 releases.atom / 网页重定向）或可选 GitHub token 提高限额</td></tr>
   </table>
 </section>
 
@@ -749,6 +751,8 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
     <li class="task" data-done="true"><span class="t">首次启用确认框的 MTP 分步选择与后续参数编辑：默认关，开启后明确选择「模型自带 MTP」或「草稿模型文件」。自带模式只填 N，生成 <code>--spec-type draft-mtp --spec-draft-n-max N</code>；文件模式选择同目录完整草稿文件并填 N，另外生成 <code>--model-draft</code>。不让用户手写原始参数，不根据候选文件推断支持情况。保存沿用方案参数与模型级共享草稿，提示共享影响与额外参数优先级。构造数据回归及隔离浏览器验证首次保存 / 后续编辑 / 启动参数，保留上下文设置与启动失败提示</span><span class="when">2026-10-04</span></li>
     <li class="task" data-done="false"><span class="t">首次启动配置加入全局默认与单个模型 / 方案配置（关键决定 50，先不做）</span><span class="when"></span></li>
     <li class="task" data-done="false"><span class="t">模型删除按钮 + 二次确认弹窗，左下角勾选框可同时删除模型文件、草稿与视觉文件（关键决定 51，先不做）</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">排查并修复 Cloudflare 一键配置的 token 权限误报：给了 DNS Read / DNS Write 仍提示缺 Zone · DNS · Edit（关键决定 52）</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">检查更新被 GitHub API 限流时的镜像 / 备用源重试（关键决定 53，先确认方案再做）</span><span class="when"></span></li>
     <li class="task" data-done="false"><span class="t">MTP 真实模型验收：用支持自带 MTP 的模型（如 Qwen）及配套草稿文件模型分别检查真实加载 / 推理、参数和后续编辑。2026-10-04 本轮只验证了构造文件、真实保存接口和启动参数数组，未运行真实模型 / GPU；真机开始前先告知用户</span><span class="when"></span></li>
     <li class="task" data-done="true"><span class="t">首次启动确认框在第一项新增上下文设置：输入完整数值，旁边显示 K 简写；提供「设为全局配置」选项，勾选后全局配置统一采用该上下文值。验证本地设置与全局设置的保存及后续编辑</span><span class="when">2026-10-04</span></li>
     <li class="task" data-done="true"><span class="t">思考开启时增加「设置」入口，只接受非负整数；默认 0 表示不限，映射 <code>--reasoning-budget -1</code>，正整数由程序拼接上限参数。关闭时隐藏入口并保留上限。首次保存与当前方案后续编辑接通，保留继承 / 自定义 / 不传、旧原始 0 语义及额外参数优先级。构造数据回归与隔离生产构建浏览器验证默认 / 自定义 / 关开保留、保存 / 启动参数数组 / 命令预览；保留 MTP、首次上下文及启动失败提示。未运行真实模型 / GPU 推理或安装包验收</span><span class="when">2026-10-04</span></li>
@@ -884,6 +888,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 <section id="changelog">
   <h2>变更记录</h2>
   <table>
+    <tr><td>2026-10-05</td><td>记录两个试用问题（未排查、未修复）：Cloudflare token 给了 DNS Read / Write 仍报缺 Zone · DNS · Edit（决定 52）；检查更新常被 GitHub API 限流，希望失败时换镜像重试（决定 53，涉及更新源与下载校验的安全限制，需先确认）</td></tr>
     <tr><td>2026-10-05</td><td>记录两项后续需求（均未实现）：首次启动配置加入全局与单模型配置（决定 50）；模型删除按钮、二次确认及可选连同模型 / 草稿 / 视觉文件一起删除（决定 51）。发布 v0.1.0-beta.5（修复启动窗口一闪而过）</td></tr>
     <tr><td>2026-10-04</td><td>修复桌面版启动双窗口：不是第二个进程或重复创建窗口，而是启动器窗口与刚创建的主窗口在主页面加载期间同时可见（实测约 0.3 秒）。主窗口改为隐藏创建，页面加载完成（或 10 秒兜底）后显示并同时隐藏启动器；二次启动只唤起可见的主窗口。不改配置、依赖或其他行为</td></tr>
     <tr><td>2026-10-04</td><td>完成阶段 8 MTP 模式与草稿文件选择工作包，补充决定 33 的用户确认：保留模型级共享草稿与方案级 MTP 参数，额外参数仍按原优先级。首次默认关闭、开启后明确选模式；参数编辑共用控件，原子保存与预览接通，校验模式 / N / 同目录完整草稿；不推断模型支持情况。23 项新回归，全量 1023 pass / 51 skip / 0 fail，typecheck / build 和隔离浏览器通过。真实模型 / GPU 验收单独保留未完成；未实现其他反馈，独立审查只准备交接</td></tr>
