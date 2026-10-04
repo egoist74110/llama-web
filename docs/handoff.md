@@ -1,5 +1,16 @@
 # 交接记录
 
+## 2026-10-04 · 阶段 8 用户反馈工作包：桌面版首次启动多余窗口 · Claude
+- 起点：main b2cc414，工作区干净。只做本工作包；上下文、MTP、思考上限、启动失败提示相关代码未碰，没有启动审查、阶段 9 或发包。
+- 根因（已复现）：不是第二个进程或重复创建。启动器窗口（tauri.conf 的 launcher，653×496）一直可见；服务 ready 后 `show_main` 新建的主窗口创建即可见，启动器要等主页面 `PageLoadEvent::Finished` 才隐藏，期间两个同名「llama-web」窗口同时可见。用 Win32 EnumWindows 每 15ms 轮询发布版 exe：修复前出现约 0.3 秒两个都 vis=True；WebView2 冷启动越慢窗口重叠越久，首次启动最明显。
+- 修复（仅 `src-tauri/src/main.rs`）：主窗口 `.visible(false)` 创建；新增 `reveal_main`，页面加载完成时先显示主窗口再隐藏启动器（仅 phase=ready 且未退出时）；加载事件不触发时 10 秒兜底也走 `reveal_main`。二次启动（single-instance）只唤起可见的主窗口，否则唤起启动器。更新 / 失败 / 退出流程不变。
+- 行为决定：无新增需要用户拍板的行为；加载期间用户继续看到启动器的「启动中」界面，而不是空白主窗口。
+- 回归：新增 tests/desktop/window-lifecycle.test.ts 4 项（静态检查 Rust 源码：隐藏创建、唯一显示入口同时隐藏启动器、页面加载 + 兜底、二次启动选择）；Rust 窗口行为无法单元测试，靠下面的实测。
+- 验证：bun test 1094 pass / 0 fail（75 文件，81s）；bun run typecheck 通过；cargo test --release 8 pass；git diff --check 通过。重新编译发布版 exe 后同样轮询两次：每次启动都先只有启动器，主窗口隐藏加载，再切换为仅主窗口可见，未再出现两个可见窗口（切换间隔在 15ms 采样内不可见）。
+- 没运行：NSIS 安装包重打 / 安装、真正的全新机器首次启动（WebView2 冷启动、首次引导「choose」阶段点击开始）、真实模型 / GPU、Mac。实测用的是预置最小 settings.json 的隔离数据目录（跳过 choose 界面），窗口生命周期代码路径与首次引导相同（都经 start → show_main）。
+- 清理：测试进程树已结束；cargo 改写的 src-tauri/Cargo.lock（去掉 pre-commit 注释）已还原；脚本与隔离数据目录在会话 scratchpad（仓库外）。
+- 下一步：用户装新包试用确认首次启动只见一个窗口；需重打安装包才能让用户拿到修复（本工作包没有打包 / 发布）。MTP 真机验收、阶段 8 试用关口仍待处理，不自动进入阶段 9 或发包。
+
 ## 2026-10-04 · 阶段 8 用户反馈工作包：思考上限快捷设置 · Codex
 - 起点：main 的 MTP 工作包提交 0e1f79e，起点干净。用户明确「跳过审查，下一个」，授权本工作包；没有启动独立审查、其他反馈或阶段 9。
 - 完成：决定 47 任务已打勾。首次确认与方案参数编辑共用 ThinkingLimit；思考开启才显示「设置」，0 = 不限 → reasoningBudget -1，正整数 → token 上限；所有新文案在 i18n。

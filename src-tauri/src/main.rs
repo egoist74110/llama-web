@@ -16,6 +16,8 @@ use std::{
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 const NO_WINDOW: u32 = 0x08000000;
+/// Longest the launcher waits for the hidden main window to report a finished page load.
+const MAIN_REVEAL_TIMEOUT: Duration = Duration::from_secs(10);
 const PREFIX: &str = "LLAMA_WEB_DESKTOP ";
 fn ready_port(line: &str, session: &str, pid: u32) -> Option<u16> {
     let msg: serde_json::Value = serde_json::from_str(line.strip_prefix(PREFIX)?).ok()?;
@@ -263,6 +265,25 @@ fn fail(app: &tauri::AppHandle, generation: u64, detail: String) {
         let _ = window.set_focus();
     }
 }
+/// Shows the main window and hides the launcher in one step, so only one window is ever visible.
+fn reveal_main(app: &tauri::AppHandle) {
+    let state = app.state::<State>();
+    let inner = state.lock().unwrap();
+    if inner.quitting || inner.status.phase != "ready" {
+        return;
+    }
+    drop(inner);
+    let Some(main) = app.get_webview_window("main") else {
+        return;
+    };
+    if !main.is_visible().unwrap_or(false) {
+        let _ = main.show();
+        let _ = main.set_focus();
+    }
+    if let Some(launcher) = app.get_webview_window("launcher") {
+        let _ = launcher.hide();
+    }
+}
 fn show_main(app: &tauri::AppHandle, port: u16, generation: u64) {
     let handle = app.clone();
     let _ = app.run_on_main_thread(move || {
@@ -278,6 +299,8 @@ fn show_main(app: &tauri::AppHandle, port: u16, generation: u64) {
         let built =
             WebviewWindowBuilder::new(&handle, "main", WebviewUrl::External(url.parse().unwrap()))
                 .title("llama-web")
+                // Stay hidden until the page has loaded so the launcher is never shown beside a blank main window.
+                .visible(false)
                 .inner_size(1200.0, 820.0)
                 .min_inner_size(760.0, 560.0)
                 .on_navigation(move |target| {
@@ -297,15 +320,20 @@ fn show_main(app: &tauri::AppHandle, port: u16, generation: u64) {
                 })
                 .on_page_load(move |_, payload| {
                     if payload.event() == tauri::webview::PageLoadEvent::Finished {
-                        if let Some(launcher) = focus.get_webview_window("launcher") {
-                            let _ = launcher.hide();
-                        }
+                        reveal_main(&focus);
                     }
                 })
                 .build();
         if let Err(error) = built {
             fail(&handle, generation, error.to_string());
+            return;
         }
+        // A page that never reports a finished load must not leave the user on the launcher forever.
+        thread::spawn(move || {
+            thread::sleep(MAIN_REVEAL_TIMEOUT);
+            let app = handle.clone();
+            let _ = handle.run_on_main_thread(move || reveal_main(&app));
+        });
     });
 }
 fn start(app: tauri::AppHandle) {
@@ -642,8 +670,10 @@ fn quit(app: tauri::AppHandle) {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+            // The main window stays hidden while it loads; only a visible one is worth raising.
             if let Some(window) = app
                 .get_webview_window("main")
+                .filter(|w| w.is_visible().unwrap_or(false))
                 .or_else(|| app.get_webview_window("launcher"))
             {
                 let _ = window.unminimize();
