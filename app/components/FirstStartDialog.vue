@@ -2,6 +2,7 @@
 // First start of a model enabled from a scan: confirm context, thinking, vision and MTP, then start it.
 import t from '~~/i18n/zh-CN'
 import { MTP_DEFAULT_N, mtpValid, type MtpInput } from '~~/server/core/mtp'
+import { validThinkingLimit } from '~~/server/core/thinking-limit'
 
 interface Ref { dirId: string, rel: string }
 interface Candidate { ref: Ref, fileName: string, size: number }
@@ -17,6 +18,8 @@ const info = ref<SetupDoc | null>(null)
 const ctxSize = ref<number | string>('')
 const setGlobalContext = ref(false)
 const thinking = ref(true)
+const thinkingLimit = ref<number | string>(0)
+const thinkingLimitOk = computed(() => thinkingLimit.value !== '' && validThinkingLimit(Number(thinkingLimit.value)))
 const vision = ref(false)
 const mmprojKey = ref('')
 const mtp = ref<MtpInput>({ enabled: false, mode: null, draft: null, n: MTP_DEFAULT_N })
@@ -46,6 +49,7 @@ watch(open, async (v) => {
     setGlobalContext.value = false
     // MTP always starts off; opening it requires an explicit mode choice.
     thinking.value = true
+    thinkingLimit.value = 0
     mtp.value = { enabled: false, mode: null, draft: null, n: r.mtpN }
     mmprojKey.value = r.candidates.mmproj[0] ? key(r.candidates.mmproj[0].ref) : ''
     vision.value = !!r.candidates.mmproj.length
@@ -56,7 +60,7 @@ watch(open, async (v) => {
 })
 
 async function confirm() {
-  if (!info.value || !mtpOk.value || !contextValid.value || saving.value) return
+  if (!info.value || !mtpOk.value || !contextValid.value || !thinkingLimitOk.value || saving.value) return
   saving.value = true
   const attempt = feedback.begin(props.modelId)
   try {
@@ -66,6 +70,7 @@ async function confirm() {
         ctxSize: ctxSize.value === '' ? null : Number(ctxSize.value),
         setGlobalContext: setGlobalContext.value,
         thinking: thinking.value,
+        thinkingLimit: Number(thinkingLimit.value),
         mmproj: vision.value ? find(info.value.candidates.mmproj, mmprojKey.value) : null,
         mtp: mtp.value.enabled,
         mtpMode: mtp.value.mode,
@@ -119,6 +124,8 @@ async function confirm() {
           <p class="m-0 text-xs text-muted">
             {{ thinking ? s.thinking.hintOn : s.thinking.hintOff }}
           </p>
+          <ThinkingLimit v-model="thinkingLimit" :enabled="thinking" id-prefix="first-start" />
+          <p v-if="!thinking && !thinkingLimitOk" class="text-xs text-error">{{ t.models.thinkingLimit.hiddenInvalid }}</p>
         </section>
 
         <section class="flex flex-col gap-1.5">
@@ -148,7 +155,7 @@ async function confirm() {
         <UButton size="sm" color="neutral" variant="ghost" @click="open = false">
           {{ s.cancel }}
         </UButton>
-        <UButton size="sm" icon="i-lucide-play" :disabled="!info || !contextValid || !mtpOk" :loading="saving || !!busy[`start:${modelId}`]" @click="confirm">
+        <UButton size="sm" icon="i-lucide-play" :disabled="!info || !contextValid || !mtpOk || !thinkingLimitOk" :loading="saving || !!busy[`start:${modelId}`]" @click="confirm">
           {{ s.confirm }}
         </UButton>
       </div>

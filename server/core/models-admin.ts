@@ -10,6 +10,7 @@ import { parseRuntimeRef } from './runtimes'
 import { resolveFileRef, type ScanEntry } from './scanner'
 import type { FileRef, ModelDir } from './types'
 import { mtpExtraArgs, mtpValid, sameDirectory, type MtpInput, type MtpMode } from './mtp'
+import { thinkingBudget, validThinkingLimit } from './thinking-limit'
 
 export { MTP_DEFAULT_N, MTP_MAX_N, stripMtpArgs } from './mtp'
 
@@ -28,7 +29,7 @@ export class EnableError extends Error {
 
 export type ProfileErrorCode =
   | 'model-not-found' | 'profile-not-found' | 'profile-exists' | 'name-invalid' | 'last-profile'
-  | 'bad-overrides' | 'bad-extra-args' | 'template-not-found' | 'in-use' | 'bad-setup' | 'bad-context' | 'runtime-invalid' | 'device-invalid'
+  | 'bad-overrides' | 'bad-extra-args' | 'template-not-found' | 'in-use' | 'bad-setup' | 'bad-context' | 'bad-thinking-limit' | 'runtime-invalid' | 'device-invalid'
 
 export class ProfileError extends Error {
   constructor(public code: ProfileErrorCode, message: string = code, public detail?: string) {
@@ -167,8 +168,10 @@ export interface FirstSetup {
   ctxSize?: number | null
   /** Also update every global defaults set; the current profile keeps its own value. */
   setGlobalContext?: boolean
-  /** Let the model think before answering (`--reasoning on`, no length limit) or not (`off`). */
+  /** Let the model think before answering (`--reasoning on`) or not (`off`). */
   thinking: boolean
+  /** Shortcut value: 0 = unlimited, positive integer = token cap. Absent preserves older clients. */
+  thinkingLimit?: number
   /** Vision projector file (must be a scanned mmproj); null = no vision. */
   mmproj: FileRef | null
   mtp: boolean
@@ -200,6 +203,7 @@ export function applyFirstSetup(doc: ModelsDoc, modelId: string, input: FirstSet
   if (input.ctxSize !== undefined && input.ctxSize !== null && (typeof input.ctxSize !== 'number' || !Number.isFinite(input.ctxSize))) throw new ProfileError('bad-context')
   if (input.setGlobalContext !== undefined && typeof input.setGlobalContext !== 'boolean') throw new ProfileError('bad-context')
   if (input.setGlobalContext && input.ctxSize === undefined) throw new ProfileError('bad-context')
+  if (input.thinkingLimit !== undefined && !validThinkingLimit(input.thinkingLimit)) throw new ProfileError('bad-thinking-limit')
   const model = findModel(doc, modelId)
   const profile = model.profiles[model.activeProfile]
   if (!profile) throw new ProfileError('profile-not-found')
@@ -208,7 +212,8 @@ export function applyFirstSetup(doc: ModelsDoc, modelId: string, input: FirstSet
   const files: FilesPatch = { mmproj: input.mmproj, draft: input.mtp ? input.draft : null }
   applyFiles(doc, modelId, files, entries)
 
-  profile.overrides = { ...profile.overrides, ...(input.ctxSize === undefined ? {} : { ctxSize: input.ctxSize }), reasoning: input.thinking ? 'on' : 'off', ...(input.thinking ? { reasoningBudget: -1 } : {}) }
+  profile.overrides = { ...profile.overrides, ...(input.ctxSize === undefined ? {} : { ctxSize: input.ctxSize }), reasoning: input.thinking ? 'on' : 'off',
+    ...(input.thinkingLimit !== undefined ? { reasoningBudget: thinkingBudget(input.thinkingLimit) } : input.thinking ? { reasoningBudget: -1 } : {}) }
   profile.extraArgs = mtpExtraArgs(profile.extraArgs, mtp)
   model.confirmed = true
   return model
@@ -295,8 +300,13 @@ export function sanitizeForm(raw: unknown): ProfileForm {
   if (typeof extraArgs !== 'string' || extraArgs.length > 10_000) throw new ProfileError('bad-extra-args')
   const chatTemplate = r.chatTemplate === undefined || r.chatTemplate === '' ? null : r.chatTemplate
   if (chatTemplate !== null && typeof chatTemplate !== 'string') throw new ProfileError('template-not-found')
+  const overrides = sanitizeOverrides(r.overrides)
+  if (r.thinkingLimit !== undefined) {
+    if (!validThinkingLimit(r.thinkingLimit)) throw new ProfileError('bad-thinking-limit')
+    overrides.reasoningBudget = thinkingBudget(r.thinkingLimit)
+  }
   return {
-    overrides: sanitizeOverrides(r.overrides), extraArgs, chatTemplate,
+    overrides, extraArgs, chatTemplate,
     ...(r.mtp === undefined ? {} : { mtp: sanitizeMtp(r.mtp) }),
     ...(r.runtime === undefined ? {} : { runtime: sanitizeRuntimeRef(r.runtime) }),
     ...(hasGpuFields(r)

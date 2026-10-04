@@ -529,8 +529,30 @@ ol.steps li{margin:4px 0}
     <ul class="scope">
       <li>范围：关键决定 33 的 MTP 反馈。先选开 / 关，开启后明确选自带或草稿文件模式；两种模式只填 N，文件模式另选同目录完整草稿。接通首次保存、启动参数和后续编辑，保留上下文设置与失败提示，不实现思考快捷上限或其他反馈。</li>
       <li>用户确认：保留模型级共享草稿 / 方案级参数；额外参数维持原优先级并提示，控件只清理当前方案对应参数。默认 N=3，沿用 1–16 整数范围，不新增配置字段或依赖。</li>
-      <li>2026-10-04 实现与构造数据 / 浏览器验证完成。真实模型 / GPU 验收仍未运行；下一步为独立审查与用户试用，交接及提示词见 <a href="reviews/mtp-mode.md">MTP 独立审查交接</a>。本工作包不自动启动审查、其他反馈、阶段 9 或发包。</li>
+      <li>2026-10-04 实现与构造数据 / 浏览器验证完成。真实模型 / GPU 验收仍未运行；交接及提示词见 <a href="reviews/mtp-mode.md">MTP 独立审查交接</a>。用户随后跳过审查，授权进入思考上限反馈；没有启动审查任务、阶段 9 或发包。</li>
     </ul>
+  </div>
+
+  <div class="pkg" id="p8-feedback-thinking-limit">
+    <div class="pkg-head"><b>8-feedback-thinking-limit 思考上限快捷设置</b><span class="m other">Codex（GPT）</span></div>
+    <ul class="scope">
+      <li>范围：决定 47。思考开启才显示「设置」，只接受非负整数，0 表示不限并映射 -1；关开保留上限。首次确认与当前方案编辑接通保存、预览和启动参数，保留 MTP、上下文和失败提示。</li>
+      <li>2026-10-04 已实现并通过构造数据与隔离浏览器验证。不新增持久化字段、迁移或依赖；保留旧原始参数及全局 / 方案额外参数规则。真实模型 / GPU 推理、安装包及 Mac 真机未测。</li>
+      <li>用户跳过独立审查，未启动任何审查任务。下一建议为下方 Windows 多余窗口反馈；需由用户启动新会话，不自动进入阶段 9 或发包。</li>
+    </ul>
+  </div>
+
+  <div class="pkg" id="p8-feedback-desktop-window">
+    <div class="pkg-head"><b>8-feedback-desktop-window Windows 首次启动多余窗口</b><span class="m opus">Opus 5.5</span></div>
+    <ul class="scope">
+      <li>仅排查并修复用户观察到的 Windows 桌面版首次启动短暂出现两个窗口的问题。先复现、核对窗口创建 / 显示 / 关闭与首次引导链路，再做最小修复；保留上下文、MTP、思考上限及模型启动失败提示。</li>
+      <li>补必要回归，运行 Bun 测试、类型检查和相关 Rust / 桌面验证；没有运行的安装包或真机验证明确说明。影响行为但计划未定的决定先问用户。占用 GPU 前先告知；不做其他反馈、阶段 9 或发包。</li>
+    </ul>
+    <div class="prompt"><button type="button">复制</button><pre>执行工作包 8-feedback-desktop-window：Windows 首次启动多余窗口。
+先遵循 AGENTS.md 和 router.md，读取 docs/claude-guide.html 的会话规则与收尾流程、docs/handoff.md 最新交接及 docs/plan.html 相关反馈。
+先复现并梳理窗口生命周期，再仅修复首次启动短暂出现两个窗口的问题；保留上下文、MTP、思考上限和模型启动失败提示。影响行为但计划未定的决定先问我。
+补必要回归，运行 bun test、bun run typecheck 及相关 Rust / 桌面验证；真实模型或 GPU 测试前先告知，未运行的验证明确说明。
+完成后更新 plan 和 handoff，提交并推送。只做这一工作包，不启动审查任务、阶段 9 或发包。</pre></div>
   </div>
 
   <div class="pkg" id="p8-1">

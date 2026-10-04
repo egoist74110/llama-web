@@ -8,10 +8,11 @@ import type { LaunchPreview } from '~~/server/core/launch'
 import type { ParamField } from '~/composables/useParamFields'
 import { MTP_DEFAULT_N, mtpValid, readMtp, type MtpInput } from '~~/server/core/mtp'
 import type { FileRef } from '~~/server/core/types'
+import { displayThinkingLimit, thinkingBudget, validThinkingLimit } from '~~/server/core/thinking-limit'
 
 type Mode = 'inherit' | 'custom' | 'omit'
 interface Row { mode: Mode, value: string }
-type FormState = { rows: Record<ParamKey, Row>, extraArgs: string, chatTemplate: string, runtime: string, gpu: GpuForm, mtp: MtpInput }
+type FormState = { rows: Record<ParamKey, Row>, extraArgs: string, chatTemplate: string, runtime: string, gpu: GpuForm, mtp: MtpInput, thinkingLimit: string | number }
 
 const props = defineProps<{
   modelId: string
@@ -48,7 +49,7 @@ function fromProfile(p: Profile): FormState {
       : v === null || v === '' ? { mode: 'omit', value: '' }
         : { mode: 'custom', value: String(v) }
   }
-  return { rows, extraArgs: p.extraArgs ?? '', chatTemplate: p.chatTemplate ?? '', runtime: p.runtime ?? '', gpu: gpuFormFrom(p), mtp: readMtp(p.extraArgs ?? '', props.draft) }
+  return { rows, extraArgs: p.extraArgs ?? '', chatTemplate: p.chatTemplate ?? '', runtime: p.runtime ?? '', gpu: gpuFormFrom(p), mtp: readMtp(p.extraArgs ?? '', props.draft), thinkingLimit: displayThinkingLimit(p.overrides.reasoningBudget) }
 }
 
 const state = reactive<FormState>(fromProfile(props.profile))
@@ -75,18 +76,39 @@ const mtpInvalid = computed(() => mtpDirty.value && (!mtpValid(mtpAnswer.value) 
   && !props.mtpCandidates.some(c => c.ref.dirId === state.mtp.draft?.dirId && c.ref.rel === state.mtp.draft?.rel))))
 
 const dirty = computed(() => JSON.stringify(state) !== initial.value)
+const thinkingEnabled = computed(() => (state.rows.reasoning.mode === 'custom' ? state.rows.reasoning.value
+  : state.rows.reasoning.mode === 'inherit' ? props.defaults.reasoning : null) === 'on')
+const budgetDirty = computed(() => JSON.stringify(state.rows.reasoningBudget) !== JSON.stringify((JSON.parse(initial.value) as FormState).rows.reasoningBudget)
+  || state.thinkingLimit !== (JSON.parse(initial.value) as FormState).thinkingLimit)
+const limitValue = computed<string | number>({
+  get: () => state.rows.reasoningBudget.mode === 'custom' ? state.thinkingLimit
+    : displayThinkingLimit(state.rows.reasoningBudget.mode === 'inherit' ? props.defaults.reasoningBudget : null),
+  set: (v) => {
+    state.thinkingLimit = v
+    state.rows.reasoningBudget.value = v !== '' && validThinkingLimit(Number(v)) ? String(thinkingBudget(Number(v))) : String(v)
+  },
+})
+const limitInvalid = computed(() => budgetDirty.value && state.rows.reasoningBudget.mode === 'custom'
+  && (limitValue.value === '' || !validThinkingLimit(Number(limitValue.value))))
+const legacyBudgetZero = computed(() => (state.rows.reasoningBudget.mode === 'custom' ? state.rows.reasoningBudget.value
+  : state.rows.reasoningBudget.mode === 'inherit' ? String(props.defaults.reasoningBudget) : '') === '0')
 watch(dirty, d => emit('dirty', d), { immediate: true })
 function discard() {
   Object.assign(state, JSON.parse(initial.value) as FormState)
 }
 
 function inheritedText(key: ParamKey): string {
-  const v = props.defaults[key]
+  const raw = props.defaults[key]
+  const v = key === 'reasoningBudget' && raw != null && raw !== '' ? displayThinkingLimit(raw) : raw
   return v === null || v === undefined || v === '' ? t.models.edit.form.inheritedNone : fmt(t.models.edit.form.inheritedValue, { value: String(v) })
 }
 
 function setMode(key: ParamKey, mode: Mode) {
   const row = state.rows[key]
+  if (key === 'reasoningBudget' && mode === 'custom' && row.mode !== 'custom') {
+    if (!row.value) row.value = String(thinkingBudget(Number(displayThinkingLimit(props.defaults.reasoningBudget))))
+    state.thinkingLimit = displayThinkingLimit(row.value)
+  }
   // Switching to custom starts from the inherited value, which is what the user just saw.
   if (mode === 'custom' && !row.value) row.value = String(props.defaults[key] ?? '')
   row.mode = mode
@@ -126,6 +148,7 @@ function toForm() {
     chatTemplate: state.chatTemplate || null,
     runtime: state.runtime || null,
     ...(mtpDirty.value ? { mtp: mtpAnswer.value } : {}),
+    ...(budgetDirty.value && state.rows.reasoningBudget.mode === 'custom' && !limitInvalid.value ? { thinkingLimit: Number(limitValue.value) } : {}),
     // A Mac has no device choice: the fields are never sent there.
     ...(ui.value.hasGpu ? gpuBody(state.gpu) : {}),
   }
@@ -157,7 +180,7 @@ const deviceNote = computed(() => (devices.failedOf(effectiveRuntime.value) ? rd
 const cpuMulti = computed(() => !!devices.viewOf(effectiveRuntime.value)?.cpu.multi)
 const advancedOpen = computed(() => cpuMulti.value || CPU_FIELDS.some(f => state.rows[f.key].mode !== 'inherit'))
 const blocks = [
-  { id: 'main', advanced: false, fields: PARAM_FIELDS },
+  { id: 'main', advanced: false, fields: PARAM_FIELDS.filter(f => f.key !== 'reasoningBudget') },
   { id: 'cpu', advanced: true, fields: CPU_FIELDS },
 ]
 
@@ -186,7 +209,7 @@ async function refreshPreview() {
 
 function schedule() {
   clearTimeout(timer)
-  if (!props.active || invalidKeys.value.length || gpuInvalid.value || mtpInvalid.value) return
+  if (!props.active || invalidKeys.value.length || gpuInvalid.value || mtpInvalid.value || limitInvalid.value) return
   timer = setTimeout(refreshPreview, 250)
 }
 watch([() => JSON.stringify(state), () => JSON.stringify(props.files), () => props.active, () => props.templates.join('\n')], schedule, { immediate: true })
@@ -319,6 +342,14 @@ const globalExtra = computed(() => props.defaults.extraArgs?.trim())
               <span v-else-if="state.rows[f.key].mode === 'inherit'" class="w-36 text-xs text-muted">{{ inheritedText(f.key) }}</span>
               <span v-else class="w-36 text-xs text-muted">{{ edit.form.omit }}</span>
             </div>
+            <ThinkingLimit v-if="f.key === 'reasoning'" v-model="limitValue" :enabled="thinkingEnabled" :id-prefix="`profile-${name}`"
+              :disabled="state.rows.reasoningBudget.mode !== 'custom'" :legacy-disabled="legacyBudgetZero">
+              <USelect :model-value="state.rows.reasoningBudget.mode" :items="modeItems" size="sm" class="w-24"
+                :aria-label="t.models.thinkingLimit.source" @update:model-value="(m: string) => setMode('reasoningBudget', m as Mode)" />
+              <p v-if="state.rows.reasoningBudget.mode === 'inherit'" class="m-0 text-xs text-muted">{{ inheritedText('reasoningBudget') }}</p>
+              <p v-else-if="state.rows.reasoningBudget.mode === 'omit'" class="m-0 text-xs text-muted">{{ edit.form.omit }}</p>
+            </ThinkingLimit>
+            <p v-if="f.key === 'reasoning' && !thinkingEnabled && limitInvalid" class="w-full text-xs text-error">{{ t.models.thinkingLimit.hiddenInvalid }}</p>
           </div>
         </div>
       </component>
@@ -383,7 +414,7 @@ const globalExtra = computed(() => props.defaults.extraArgs?.trim())
     </div>
 
     <div class="flex flex-wrap items-center gap-2 border-t border-default pt-4">
-      <UButton size="sm" icon="i-lucide-save" :disabled="!dirty || !!invalidKeys.length || gpuInvalid || mtpInvalid" :loading="busy" @click="emit('save', toForm(), false)">
+      <UButton size="sm" icon="i-lucide-save" :disabled="!dirty || !!invalidKeys.length || gpuInvalid || mtpInvalid || limitInvalid" :loading="busy" @click="emit('save', toForm(), false)">
         {{ edit.form.save }}
       </UButton>
       <UButton
@@ -392,7 +423,7 @@ const globalExtra = computed(() => props.defaults.extraArgs?.trim())
         color="neutral"
         variant="outline"
         icon="i-lucide-rotate-cw"
-        :disabled="!dirty || !!invalidKeys.length || gpuInvalid || mtpInvalid"
+        :disabled="!dirty || !!invalidKeys.length || gpuInvalid || mtpInvalid || limitInvalid"
         :loading="busy"
         @click="emit('save', toForm(), true)"
       >

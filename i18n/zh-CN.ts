@@ -293,7 +293,7 @@ export default {
         global: '设为全局配置',
         globalHint: '同步更新所有全局默认上下文，本次值也保存到当前方案。其他方案的自定义值仍优先。',
       },
-      thinking: { title: '思考', on: '开', off: '关', hintOn: '模型先思考再回答，不限制思考长度。', hintOff: '不让模型思考，直接回答（更快）。' },
+      thinking: { title: '思考', on: '开', off: '关', hintOn: '模型先思考再回答。默认不限长度，可在「设置」中填写上限；关闭思考会保留已设上限。', hintOff: '不让模型思考，直接回答（更快）；保留已设上限，重新开启时继续使用。' },
       vision: {
         title: '视觉（看图）',
         hint: '需要配套的视觉文件（名字里通常有 mmproj）。',
@@ -318,6 +318,15 @@ export default {
       },
       cancel: '取消',
       confirm: '确认并启动',
+    },
+    thinkingLimit: {
+      settings: '设置', action: '设置思考上限', title: '思考最大上限',
+      source: '思考上限来源',
+      hint: '0 表示不限制；正整数表示最多思考的 token 数。关闭思考时保留这个值。',
+      invalid: '请输入非负整数；留空、负数和小数不能保存。',
+      hiddenInvalid: '已填写的思考上限无效，请开启思考后修正，或重置修改。',
+      legacyDisabled: '当前旧配置的原始上限 0 表示关闭思考。此处输入 0 则表示不限；未修改时保留旧配置，修改后采用新输入规则。',
+      extraHint: '手写额外参数仍优先，请核对启动命令预览。',
     },
     discover: {
       title: '扫描发现',
@@ -371,6 +380,7 @@ export default {
       'file-incomplete': '所选文件的分片不完整。',
       'file-in-use': '所选主模型已经被另一个模型使用。',
       'bad-setup': '请检查 MTP 设置：开启后需选择模式，N 必须是 1 到 16 的整数；文件模式需选择草稿文件，自带模式不选文件。',
+      'bad-thinking-limit': '思考最大上限必须是非负整数，0 表示不限制。',
       'bad-context': '上下文需要填写有效数字；0 表示用模型自带的长度，留空则不传此参数。',
       'runtime-invalid': '所选的 llama.cpp 版本不存在，或不属于这台电脑的平台。',
       'device-invalid': '设备选择不合法：只能选「自动」、「CPU」、一张 GPU，或打开「使用多张 GPU」后选两张以上；切分模式要是 layer / row / tensor，比例的个数要和所选 GPU 一样多，主 GPU 序号要在所选 GPU 范围内。Mac 上不能选设备。',
