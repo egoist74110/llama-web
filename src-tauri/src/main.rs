@@ -18,6 +18,8 @@ use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 const NO_WINDOW: u32 = 0x08000000;
 /// Longest the launcher waits for the hidden main window to report a finished page load.
 const MAIN_REVEAL_TIMEOUT: Duration = Duration::from_secs(10);
+/// The launcher is created hidden; it only appears when the user has to act or startup is slow.
+const LAUNCHER_DELAY: Duration = Duration::from_millis(2500);
 const PREFIX: &str = "LLAMA_WEB_DESKTOP ";
 fn ready_port(line: &str, session: &str, pid: u32) -> Option<u16> {
     let msg: serde_json::Value = serde_json::from_str(line.strip_prefix(PREFIX)?).ok()?;
@@ -282,6 +284,22 @@ fn reveal_main(app: &tauri::AppHandle) {
     }
     if let Some(launcher) = app.get_webview_window("launcher") {
         let _ = launcher.hide();
+    }
+}
+/// Shows the launcher when no main window is visible yet (slow startup).
+fn show_launcher_if_waiting(app: &tauri::AppHandle) {
+    let state = app.state::<State>();
+    if state.lock().unwrap().quitting {
+        return;
+    }
+    let main_visible = app
+        .get_webview_window("main")
+        .is_some_and(|w| w.is_visible().unwrap_or(false));
+    if main_visible {
+        return;
+    }
+    if let Some(launcher) = app.get_webview_window("launcher") {
+        let _ = launcher.show();
     }
 }
 fn show_main(app: &tauri::AppHandle, port: u16, generation: u64) {
@@ -720,6 +738,16 @@ fn main() {
             })));
             if !first && !pending {
                 start(app.handle().clone());
+                // Normal startup shows nothing until the main window is ready; a slow one gets the launcher.
+                let handle = app.handle().clone();
+                thread::spawn(move || {
+                    thread::sleep(LAUNCHER_DELAY);
+                    let app = handle.clone();
+                    let _ = handle.run_on_main_thread(move || show_launcher_if_waiting(&app));
+                });
+            } else if let Some(launcher) = app.get_webview_window("launcher") {
+                // First launch (choose) and import recovery need the user at the launcher.
+                let _ = launcher.show();
             }
             Ok(())
         })

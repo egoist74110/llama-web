@@ -6,7 +6,7 @@
   "build": { "frontendDist": "../desktop/ui" },
   "app": {
     "withGlobalTauri": true,
-    "windows": [{ "label": "launcher", "title": "llama-web", "width": 640, "height": 460, "resizable": false }],
+    "windows": [{ "label": "launcher", "title": "llama-web", "width": 640, "height": 460, "resizable": false, "visible": false }],
     "security": {
       "capabilities": ["launcher"],
       "csp": "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' ipc: http://ipc.localhost",

@@ -40,3 +40,23 @@ describe('desktop window lifecycle', () => {
     expect(source).toMatch(/get_webview_window\("main"\)\s*\.filter\(\|w\| w\.is_visible\(\)/)
   })
 })
+
+describe('launcher visibility', () => {
+  const conf = JSON.parse(readFileSync('src-tauri/tauri.conf.json', 'utf8'))
+
+  test('launcher is created hidden', () => {
+    const launcher = conf.app.windows.find((w: { label: string }) => w.label === 'launcher')
+    expect(launcher.visible).toBe(false)
+  })
+
+  test('launcher is shown for first launch / recovery, and after a delay if startup is slow', () => {
+    expect(source).toContain('LAUNCHER_DELAY')
+    expect(body('show_launcher_if_waiting')).toContain('launcher.show()')
+    expect(source).toMatch(/else if let Some\(launcher\) = app\.get_webview_window\("launcher"\)[\s\S]*?launcher\.show\(\)/)
+  })
+
+  test('failure and update flows still show the launcher', () => {
+    expect(body('fail')).toContain('window.show()')
+    expect(body('quit')).toContain('launcher.show()')
+  })
+})
