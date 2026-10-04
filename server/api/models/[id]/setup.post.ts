@@ -21,7 +21,7 @@ export default defineEventHandler(async (event) => {
   if (typeof body?.thinking !== 'boolean' || typeof body?.mtp !== 'boolean' || typeof body?.mtpN !== 'number') {
     throw createError({ statusCode: 400, message: t.models.errors.badRequest })
   }
-  const input: FirstSetup = { thinking: body.thinking, mmproj: ref(body.mmproj), mtp: body.mtp, draft: ref(body.draft), mtpN: body.mtpN,
+  const input: FirstSetup = { thinking: body.thinking, mmproj: ref(body.mmproj), mtp: body.mtp, mtpMode: body.mtpMode as FirstSetup['mtpMode'], draft: ref(body.draft), mtpN: body.mtpN,
     ctxSize: body.ctxSize as FirstSetup['ctxSize'], setGlobalContext: body.setGlobalContext as FirstSetup['setGlobalContext'] }
   const ctx = getContext()
   const { entries } = await scanModelDirs(ctx.getSettings().modelDirs)

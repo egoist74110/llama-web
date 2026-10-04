@@ -9,6 +9,9 @@ import { aliasOf } from './importer'
 import { parseRuntimeRef } from './runtimes'
 import { resolveFileRef, type ScanEntry } from './scanner'
 import type { FileRef, ModelDir } from './types'
+import { mtpExtraArgs, mtpValid, sameDirectory, type MtpInput, type MtpMode } from './mtp'
+
+export { MTP_DEFAULT_N, MTP_MAX_N, stripMtpArgs } from './mtp'
 
 export { DEFAULT_PROFILE } from './config'
 
@@ -34,7 +37,7 @@ export class ProfileError extends Error {
   }
 }
 
-export type FilesErrorCode = 'model-not-found' | 'file-not-found' | 'wrong-kind' | 'file-incomplete' | 'file-in-use'
+export type FilesErrorCode = 'model-not-found' | 'file-not-found' | 'wrong-kind' | 'draft-not-neighbour' | 'file-incomplete' | 'file-in-use'
 
 export class FilesError extends Error {
   constructor(public code: FilesErrorCode, message: string = code) {
@@ -159,10 +162,6 @@ export function applyFiles(doc: ModelsDoc, modelId: string, patch: FilesPatch, e
 
 // ---- First start: thinking / vision / MTP ----------------------------------------------------
 
-/** Recommended number of tokens the MTP draft proposes per step. */
-export const MTP_DEFAULT_N = 3
-export const MTP_MAX_N = 16
-
 export interface FirstSetup {
   /** Context form value; absent keeps compatibility with older clients, null omits the flag. */
   ctxSize?: number | null
@@ -173,30 +172,23 @@ export interface FirstSetup {
   /** Vision projector file (must be a scanned mmproj); null = no vision. */
   mmproj: FileRef | null
   mtp: boolean
+  /** Explicit choice when MTP is enabled; no candidate-based capability inference. */
+  mtpMode?: MtpMode | null
   /** Separate MTP file (scanned draft), for models that do not carry MTP themselves; null = none. */
   draft: FileRef | null
   /** Tokens proposed per step (`--spec-draft-n-max`). */
   mtpN: number
 }
 
-const MTP_FLAGS = new Set(['--spec-type', '--spec-draft-n-max'])
-
-/** Drop `--spec-type` / `--spec-draft-n-max` (with their values) from an extra-args text; other text is kept. */
-export function stripMtpArgs(extra: string): string {
-  let tokens: string[]
-  try {
-    tokens = splitArgs(extra)
-  } catch {
-    return extra // unterminated quote: leave the user's text alone (saving it fails elsewhere)
-  }
-  const out: string[] = []
-  for (let i = 0; i < tokens.length; i++) {
-    const tok = tokens[i]!
-    const flag = tok.includes('=') && tok.startsWith('--') ? tok.slice(0, tok.indexOf('=')) : tok
-    if (!MTP_FLAGS.has(flag)) { out.push(tok); continue }
-    if (flag === tok && tokens[i + 1] !== undefined && !tokens[i + 1]!.startsWith('-')) i++
-  }
-  return out.map(a => (/[\s"']/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a)).join(' ')
+/** Validate MTP before any model/profile mutations. File mode always needs a fresh, complete neighbour. */
+export function validateMtp(model: ModelConfig, input: MtpInput, entries: ScanEntry[]): void {
+  if (!mtpValid(input)) throw new ProfileError('bad-setup')
+  if (!input.enabled || input.mode !== 'file') return
+  const entry = entries.find(e => sameRef(e.ref, input.draft))
+  if (!entry) throw new FilesError('file-not-found')
+  if (entry.kind !== 'draft') throw new FilesError('wrong-kind')
+  if (!sameDirectory(model.file, entry.ref)) throw new FilesError('draft-not-neighbour')
+  if (!entry.complete) throw new FilesError('file-incomplete')
 }
 
 /**
@@ -208,16 +200,16 @@ export function applyFirstSetup(doc: ModelsDoc, modelId: string, input: FirstSet
   if (input.ctxSize !== undefined && input.ctxSize !== null && (typeof input.ctxSize !== 'number' || !Number.isFinite(input.ctxSize))) throw new ProfileError('bad-context')
   if (input.setGlobalContext !== undefined && typeof input.setGlobalContext !== 'boolean') throw new ProfileError('bad-context')
   if (input.setGlobalContext && input.ctxSize === undefined) throw new ProfileError('bad-context')
-  if (!Number.isInteger(input.mtpN) || input.mtpN < 1 || input.mtpN > MTP_MAX_N) throw new ProfileError('bad-setup')
   const model = findModel(doc, modelId)
   const profile = model.profiles[model.activeProfile]
   if (!profile) throw new ProfileError('profile-not-found')
+  const mtp: MtpInput = { enabled: input.mtp, mode: input.mtpMode ?? null, n: input.mtpN, draft: input.mtp ? input.draft : null }
+  validateMtp(model, mtp, entries)
   const files: FilesPatch = { mmproj: input.mmproj, draft: input.mtp ? input.draft : null }
   applyFiles(doc, modelId, files, entries)
 
   profile.overrides = { ...profile.overrides, ...(input.ctxSize === undefined ? {} : { ctxSize: input.ctxSize }), reasoning: input.thinking ? 'on' : 'off', ...(input.thinking ? { reasoningBudget: -1 } : {}) }
-  const rest = stripMtpArgs(profile.extraArgs)
-  profile.extraArgs = input.mtp ? [rest, `--spec-type draft-mtp --spec-draft-n-max ${input.mtpN}`].filter(Boolean).join(' ') : rest
+  profile.extraArgs = mtpExtraArgs(profile.extraArgs, mtp)
   model.confirmed = true
   return model
 }
@@ -270,6 +262,8 @@ export interface ProfileForm {
   device?: string | null
   /** Set when the client sent any device field (device / devices / splitMode / tensorSplit / mainGpu): then it is the whole choice (decision 45). */
   gpu?: ReturnType<typeof sanitizeGpuChoice> & object
+  /** Present only when the dedicated MTP control changed. Stored using existing args + draft fields. */
+  mtp?: MtpInput
 }
 
 /** The whole device choice from a client body (single value or GPU group + split settings); throws `device-invalid` when it does not hold together. */
@@ -303,6 +297,7 @@ export function sanitizeForm(raw: unknown): ProfileForm {
   if (chatTemplate !== null && typeof chatTemplate !== 'string') throw new ProfileError('template-not-found')
   return {
     overrides: sanitizeOverrides(r.overrides), extraArgs, chatTemplate,
+    ...(r.mtp === undefined ? {} : { mtp: sanitizeMtp(r.mtp) }),
     ...(r.runtime === undefined ? {} : { runtime: sanitizeRuntimeRef(r.runtime) }),
     ...(hasGpuFields(r)
       ? (() => { const gpu = sanitizeGpu(r); return { gpu, device: gpu.device || null } })()
@@ -310,8 +305,16 @@ export function sanitizeForm(raw: unknown): ProfileForm {
   }
 }
 
+function sanitizeMtp(raw: unknown): MtpInput {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new ProfileError('bad-setup')
+  const input = raw as MtpInput
+  if (!mtpValid(input)) throw new ProfileError('bad-setup')
+  return { enabled: input.enabled, mode: input.enabled ? input.mode : null, n: input.n,
+    draft: input.enabled && input.mode === 'file' ? { dirId: input.draft!.dirId, rel: input.draft!.rel } : null }
+}
+
 /** Save the form into a profile. Extra args must parse and the template must exist. */
-export function saveProfile(doc: ModelsDoc, modelId: string, name: string, form: ProfileForm, templates: string[], runtimeOk?: (ref: string) => boolean, deviceOk?: (device: string) => boolean): Profile {
+export function saveProfile(doc: ModelsDoc, modelId: string, name: string, form: ProfileForm, templates: string[], runtimeOk?: (ref: string) => boolean, deviceOk?: (device: string) => boolean, entries: ScanEntry[] = []): Profile {
   const model = findModel(doc, modelId)
   if (!Object.hasOwn(model.profiles, name)) throw new ProfileError('profile-not-found')
   try {
@@ -326,10 +329,12 @@ export function saveProfile(doc: ModelsDoc, modelId: string, name: string, form:
   if (form.runtime && runtimeOk && !runtimeOk(form.runtime)) throw new ProfileError('runtime-invalid')
   const chosen = form.gpu ? form.gpu.device || form.gpu.devices[0] : form.device
   if (chosen && deviceOk && !deviceOk(chosen)) throw new ProfileError('device-invalid')
+  if (form.mtp) validateMtp(model, form.mtp, entries)
   const profile = model.profiles[name]!
   // Other fields (per-profile preprocess overrides) are kept.
   profile.overrides = form.overrides
-  profile.extraArgs = form.extraArgs
+  profile.extraArgs = form.mtp ? mtpExtraArgs(form.extraArgs, form.mtp) : form.extraArgs
+  if (form.mtp) model.draft = form.mtp.enabled && form.mtp.mode === 'file' ? form.mtp.draft : null
   profile.chatTemplate = form.chatTemplate
   if (form.runtime !== undefined) {
     if (form.runtime) profile.runtime = form.runtime

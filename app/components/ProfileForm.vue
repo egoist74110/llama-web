@@ -6,10 +6,12 @@ import type { LaunchDefaults, ParamKey, ParamOverrides } from '~~/server/core/ar
 import type { Profile } from '~~/server/core/config'
 import type { LaunchPreview } from '~~/server/core/launch'
 import type { ParamField } from '~/composables/useParamFields'
+import { MTP_DEFAULT_N, mtpValid, readMtp, type MtpInput } from '~~/server/core/mtp'
+import type { FileRef } from '~~/server/core/types'
 
 type Mode = 'inherit' | 'custom' | 'omit'
 interface Row { mode: Mode, value: string }
-type FormState = { rows: Record<ParamKey, Row>, extraArgs: string, chatTemplate: string, runtime: string, gpu: GpuForm }
+type FormState = { rows: Record<ParamKey, Row>, extraArgs: string, chatTemplate: string, runtime: string, gpu: GpuForm, mtp: MtpInput }
 
 const props = defineProps<{
   modelId: string
@@ -27,6 +29,8 @@ const props = defineProps<{
   /** The model's own build / device choice (this profile's choice wins over it; empty = follow the global one). */
   modelRuntime?: string
   modelDevice?: string
+  draft: FileRef | null
+  mtpCandidates: Array<{ ref: FileRef, fileName: string, size: number }>
 }>()
 const emit = defineEmits<{ save: [form: object, restart: boolean], dirty: [boolean] }>()
 
@@ -44,7 +48,7 @@ function fromProfile(p: Profile): FormState {
       : v === null || v === '' ? { mode: 'omit', value: '' }
         : { mode: 'custom', value: String(v) }
   }
-  return { rows, extraArgs: p.extraArgs ?? '', chatTemplate: p.chatTemplate ?? '', runtime: p.runtime ?? '', gpu: gpuFormFrom(p) }
+  return { rows, extraArgs: p.extraArgs ?? '', chatTemplate: p.chatTemplate ?? '', runtime: p.runtime ?? '', gpu: gpuFormFrom(p), mtp: readMtp(p.extraArgs ?? '', props.draft) }
 }
 
 const state = reactive<FormState>(fromProfile(props.profile))
@@ -56,6 +60,19 @@ watch(savedKey, () => {
   Object.assign(state, next)
   initial.value = JSON.stringify(next)
 })
+// A shared draft save updates untouched MTP controls without discarding other unsaved edits.
+watch(() => JSON.stringify(props.draft), () => {
+  const baseline = JSON.parse(initial.value) as FormState
+  if (JSON.stringify(state.mtp) === JSON.stringify(baseline.mtp)) {
+    state.mtp = readMtp(props.profile.extraArgs ?? '', props.draft)
+    baseline.mtp = state.mtp
+    initial.value = JSON.stringify(baseline)
+  }
+})
+const mtpDirty = computed(() => JSON.stringify(state.mtp) !== JSON.stringify((JSON.parse(initial.value) as FormState).mtp))
+const mtpAnswer = computed<MtpInput>(() => ({ ...state.mtp, n: state.mtp.enabled ? state.mtp.n : MTP_DEFAULT_N, draft: state.mtp.enabled && state.mtp.mode === 'file' ? state.mtp.draft : null }))
+const mtpInvalid = computed(() => mtpDirty.value && (!mtpValid(mtpAnswer.value) || (state.mtp.enabled && state.mtp.mode === 'file'
+  && !props.mtpCandidates.some(c => c.ref.dirId === state.mtp.draft?.dirId && c.ref.rel === state.mtp.draft?.rel))))
 
 const dirty = computed(() => JSON.stringify(state) !== initial.value)
 watch(dirty, d => emit('dirty', d), { immediate: true })
@@ -108,6 +125,7 @@ function toForm() {
     extraArgs: state.extraArgs,
     chatTemplate: state.chatTemplate || null,
     runtime: state.runtime || null,
+    ...(mtpDirty.value ? { mtp: mtpAnswer.value } : {}),
     // A Mac has no device choice: the fields are never sent there.
     ...(ui.value.hasGpu ? gpuBody(state.gpu) : {}),
   }
@@ -168,7 +186,7 @@ async function refreshPreview() {
 
 function schedule() {
   clearTimeout(timer)
-  if (!props.active || invalidKeys.value.length || gpuInvalid.value) return
+  if (!props.active || invalidKeys.value.length || gpuInvalid.value || mtpInvalid.value) return
   timer = setTimeout(refreshPreview, 250)
 }
 watch([() => JSON.stringify(state), () => JSON.stringify(props.files), () => props.active, () => props.templates.join('\n')], schedule, { immediate: true })
@@ -241,6 +259,12 @@ const globalExtra = computed(() => props.defaults.extraArgs?.trim())
         :note="deviceNote"
         id-prefix="profile"
       />
+    </div>
+
+    <div class="space-y-2">
+      <MtpChoice v-model="state.mtp" :candidates="mtpCandidates" :id-prefix="`profile-${name}`" />
+      <p class="m-0 text-xs text-muted">{{ t.models.firstStart.mtp.sharedHint }}</p>
+      <p class="m-0 text-xs text-muted">{{ t.models.firstStart.mtp.extraHint }}</p>
     </div>
 
     <div>
@@ -359,7 +383,7 @@ const globalExtra = computed(() => props.defaults.extraArgs?.trim())
     </div>
 
     <div class="flex flex-wrap items-center gap-2 border-t border-default pt-4">
-      <UButton size="sm" icon="i-lucide-save" :disabled="!dirty || !!invalidKeys.length || gpuInvalid" :loading="busy" @click="emit('save', toForm(), false)">
+      <UButton size="sm" icon="i-lucide-save" :disabled="!dirty || !!invalidKeys.length || gpuInvalid || mtpInvalid" :loading="busy" @click="emit('save', toForm(), false)">
         {{ edit.form.save }}
       </UButton>
       <UButton
@@ -368,7 +392,7 @@ const globalExtra = computed(() => props.defaults.extraArgs?.trim())
         color="neutral"
         variant="outline"
         icon="i-lucide-rotate-cw"
-        :disabled="!dirty || !!invalidKeys.length || gpuInvalid"
+        :disabled="!dirty || !!invalidKeys.length || gpuInvalid || mtpInvalid"
         :loading="busy"
         @click="emit('save', toForm(), true)"
       >

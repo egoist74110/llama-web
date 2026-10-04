@@ -22,7 +22,7 @@ export default defineEventHandler(async (event) => {
   })
   return {
     name: model.name,
-    candidates: { mmproj: pick(main?.candidates.mmproj ?? []), draft: pick(main?.candidates.draft ?? []) },
+    candidates: { mmproj: pick(main?.candidates.mmproj ?? []), draft: pick((main?.candidates.draft ?? []).filter(ref => entries.some(e => sameRef(e.ref, ref) && e.complete))) },
     current: { mmproj: model.mmproj, draft: model.draft, ctxSize: preview.effective.ctxSize },
     mtpN: MTP_DEFAULT_N,
   }

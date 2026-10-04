@@ -7,9 +7,10 @@
 // Names travel in the body (not the URL) because they are free text, often Chinese.
 // Setting the current profile is POST /api/models/:id/profile.
 import {
-  createProfile, deleteProfile, listTemplates, ProfileError, renameProfile, sanitizeForm, saveProfile,
+  createProfile, deleteProfile, listTemplates, renameProfile, sanitizeForm, saveProfile,
 } from '../../../core/models-admin'
 import { hasDeviceSelection } from '../../../core/config'
+import { scanModelDirs } from '../../../core/scanner'
 import { t } from '../../../core/i18n'
 import { selectableHere } from '../../../core/runtimes'
 import { getContext } from '../../../service/context'
@@ -51,7 +52,8 @@ export default defineEventHandler(async (event) => {
         const form = sanitizeForm(body.form)
         const templates = listTemplates(ctx.dataDir)
         const env = ctx.runtimes.env()
-        ctx.updateModels((doc) => { saveProfile(doc, model.id, name, form, templates, r => selectableHere(r, env), () => hasDeviceSelection(ctx.platform)) })
+        const entries = form.mtp ? (await scanModelDirs(ctx.getSettings().modelDirs)).entries : []
+        ctx.updateModels((doc) => { saveProfile(doc, model.id, name, form, templates, r => selectableHere(r, env), () => hasDeviceSelection(ctx.platform), entries) })
         const restarted = body.restart === true && restartIfUp(model.id, name)
         return { ok: true, restarted }
       }
@@ -59,7 +61,6 @@ export default defineEventHandler(async (event) => {
         throw createError({ statusCode: 400, message: t.models.errors.badRequest })
     }
   } catch (e) {
-    if (e instanceof ProfileError) editError(e)
-    throw e
+    editError(e)
   }
 })

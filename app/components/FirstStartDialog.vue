@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // First start of a model enabled from a scan: confirm context, thinking, vision and MTP, then start it.
 import t from '~~/i18n/zh-CN'
+import { MTP_DEFAULT_N, mtpValid, type MtpInput } from '~~/server/core/mtp'
 
 interface Ref { dirId: string, rel: string }
 interface Candidate { ref: Ref, fileName: string, size: number }
@@ -18,17 +19,15 @@ const setGlobalContext = ref(false)
 const thinking = ref(true)
 const vision = ref(false)
 const mmprojKey = ref('')
-const mtp = ref(false)
-const draftKey = ref('')
-const mtpN = ref(3)
+const mtp = ref<MtpInput>({ enabled: false, mode: null, draft: null, n: MTP_DEFAULT_N })
 const saving = ref(false)
 
 const key = (r: Ref) => `${r.dirId}/${r.rel}`
 const items = (list: Candidate[]) => list.map(c => ({ value: key(c.ref), label: `${c.fileName} · ${formatBytes(c.size)}` }))
 const find = (list: Candidate[], k: string) => list.find(c => key(c.ref) === k)?.ref ?? null
 const hasVision = computed(() => !!info.value?.candidates.mmproj.length)
-const hasDraft = computed(() => !!info.value?.candidates.draft.length)
-const nValid = computed(() => Number.isInteger(mtpN.value) && mtpN.value >= 1 && mtpN.value <= 16)
+const mtpAnswer = computed<MtpInput>(() => ({ ...mtp.value, n: mtp.value.enabled ? mtp.value.n : MTP_DEFAULT_N, draft: mtp.value.enabled && mtp.value.mode === 'file' ? mtp.value.draft : null }))
+const mtpOk = computed(() => mtpValid(mtpAnswer.value))
 // Match the existing number form: empty omits the flag; finite values are checked by llama-server.
 const contextValid = computed(() => ctxSize.value === '' || Number.isFinite(Number(ctxSize.value)))
 const contextK = computed(() => ctxSize.value === '' || !contextValid.value ? '' : `${+(Number(ctxSize.value) / 1024).toPrecision(4)}K`)
@@ -45,13 +44,11 @@ watch(open, async (v) => {
     info.value = r
     ctxSize.value = r.current.ctxSize ?? ''
     setGlobalContext.value = false
-    // Starting point: thinking on, the files that were found are on, MTP at the recommended multiplier.
+    // MTP always starts off; opening it requires an explicit mode choice.
     thinking.value = true
-    mtpN.value = r.mtpN
+    mtp.value = { enabled: false, mode: null, draft: null, n: r.mtpN }
     mmprojKey.value = r.candidates.mmproj[0] ? key(r.candidates.mmproj[0].ref) : ''
     vision.value = !!r.candidates.mmproj.length
-    draftKey.value = r.candidates.draft[0] ? key(r.candidates.draft[0].ref) : ''
-    mtp.value = !!r.candidates.draft.length
   } catch (e) {
     fail(e)
     open.value = false
@@ -59,7 +56,7 @@ watch(open, async (v) => {
 })
 
 async function confirm() {
-  if (!info.value || !nValid.value || !contextValid.value) return
+  if (!info.value || !mtpOk.value || !contextValid.value || saving.value) return
   saving.value = true
   const attempt = feedback.begin(props.modelId)
   try {
@@ -70,9 +67,10 @@ async function confirm() {
         setGlobalContext: setGlobalContext.value,
         thinking: thinking.value,
         mmproj: vision.value ? find(info.value.candidates.mmproj, mmprojKey.value) : null,
-        mtp: mtp.value,
-        draft: mtp.value ? find(info.value.candidates.draft, draftKey.value) : null,
-        mtpN: mtpN.value,
+        mtp: mtp.value.enabled,
+        mtpMode: mtp.value.mode,
+        draft: mtpAnswer.value.draft,
+        mtpN: mtp.value.enabled ? mtp.value.n : MTP_DEFAULT_N,
         start: true,
       },
     })
@@ -141,28 +139,8 @@ async function confirm() {
           </p>
         </section>
 
-        <section class="flex flex-col gap-1.5">
-          <div class="flex items-center justify-between gap-3">
-            <h3 class="m-0 text-sm font-semibold">
-              {{ s.mtp.title }}
-            </h3>
-            <USwitch v-model="mtp" :aria-label="s.mtp.title" />
-          </div>
-          <template v-if="hasDraft">
-            <p class="m-0 text-xs text-muted">
-              {{ s.mtp.found }}
-            </p>
-            <USelect v-if="mtp" v-model="draftKey" :items="items(info.candidates.draft)" size="sm" class="font-mono" :aria-label="s.mtp.title" />
-          </template>
-          <p v-else class="m-0 text-xs text-muted">
-            {{ s.mtp.none }}
-          </p>
-          <label v-if="mtp" class="mt-1 flex items-center gap-2 text-sm">
-            {{ s.mtp.n }}
-            <UInput v-model.number="mtpN" type="number" size="sm" class="w-20" :min="1" :max="16" :color="nValid ? undefined : 'error'" :aria-label="s.mtp.n" />
-            <span class="text-xs text-dimmed">{{ s.mtp.nHint }}</span>
-          </label>
-        </section>
+        <MtpChoice v-model="mtp" :candidates="info.candidates.draft" id-prefix="first-start" />
+        <p class="m-0 text-xs text-muted">{{ s.mtp.extraHint }}</p>
       </div>
     </template>
     <template #footer>
@@ -170,7 +148,7 @@ async function confirm() {
         <UButton size="sm" color="neutral" variant="ghost" @click="open = false">
           {{ s.cancel }}
         </UButton>
-        <UButton size="sm" icon="i-lucide-play" :disabled="!info || !contextValid || (mtp && !nValid)" :loading="saving || !!busy[`start:${modelId}`]" @click="confirm">
+        <UButton size="sm" icon="i-lucide-play" :disabled="!info || !contextValid || !mtpOk" :loading="saving || !!busy[`start:${modelId}`]" @click="confirm">
           {{ s.confirm }}
         </UButton>
       </div>

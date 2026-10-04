@@ -17,7 +17,7 @@ function fresh(): ModelsDoc {
   doc.models.push(planEnable(entries[0], doc))
   return doc
 }
-const answers = (over: Partial<FirstSetup> = {}): FirstSetup => ({ thinking: true, mmproj: null, mtp: false, draft: null, mtpN: 3, ...over })
+const answers = (over: Partial<FirstSetup> = {}): FirstSetup => ({ thinking: true, mmproj: null, mtp: false, mtpMode: 'builtin', draft: null, mtpN: 3, ...over })
 const profile = (doc: ModelsDoc) => doc.models[0]!.profiles['默认']!
 
 describe('first-start answers', () => {
@@ -30,7 +30,7 @@ describe('first-start answers', () => {
 
   test('thinking on / off, vision and MTP with a separate file are stored on the model and profile', () => {
     const doc = fresh()
-    applyFirstSetup(doc, doc.models[0]!.id, answers({ thinking: false, mmproj: ref('q/mmproj-F16.gguf'), mtp: true, draft: ref('q/m-mtp.gguf'), mtpN: 4 }), entries)
+    applyFirstSetup(doc, doc.models[0]!.id, answers({ thinking: false, mmproj: ref('q/mmproj-F16.gguf'), mtp: true, mtpMode: 'file', draft: ref('q/m-mtp.gguf'), mtpN: 4 }), entries)
     const m = doc.models[0]!
     expect(m.confirmed).toBe(true)
     expect(m.mmproj).toEqual(ref('q/mmproj-F16.gguf'))

@@ -148,6 +148,8 @@ const previewFiles = computed(() => ({
   mmproj: picked.mmproj ? fromKey(picked.mmproj) : null,
   draft: picked.draft ? fromKey(picked.draft) : null,
 }))
+const mtpCandidates = computed(() => (scan.value?.entries ?? []).filter(e => e.kind === 'draft' && e.complete && model.value
+  && dirOfRef(e.ref) === dirOfRef(model.value.file)))
 
 // ---- Profiles --------------------------------------------------------------------------------
 type Pending = { kind: 'create' | 'duplicate' | 'rename', name: string } | { kind: 'remove' } | null
@@ -370,6 +372,8 @@ const pendingTitle = computed(() => {
             :running="isUp(name)"
             :active="open && editTab === 'params' && name === selected"
             :files="previewFiles"
+            :draft="model.draft"
+            :mtp-candidates="mtpCandidates"
             :busy="opBusy"
             :model-runtime="model.runtime ?? ''"
             :model-device="model.device ?? ''"

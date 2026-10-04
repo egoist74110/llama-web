@@ -5,6 +5,7 @@ import { t } from '../../../core/i18n'
 import { requestedRuntime, previewLaunch } from '../../../core/launch'
 import { listTemplates, ProfileError, sanitizeForm } from '../../../core/models-admin'
 import { readGpuChoice } from '../../../core/gpu-group'
+import { mtpExtraArgs } from '../../../core/mtp'
 import { getContext } from '../../../service/context'
 import { editError, requireModel, requireProfile } from '../../../service/models-api'
 
@@ -34,9 +35,10 @@ export default defineEventHandler(async (event) => {
       mmproj: refOrNull(files.mmproj, model.mmproj),
       draft: refOrNull(files.draft, model.draft),
     }
+    if (form?.mtp) shown.draft = form.mtp.enabled && form.mtp.mode === 'file' ? form.mtp.draft : null
     return previewLaunch({
       dataDir: ctx.dataDir, settings: ctx.getSettings(), model: shown, host: ctx.runner.host, target: ctx.runtimeTarget, runtimeEnv: ctx.runtimes.env(),
-      form: { overrides: form?.overrides ?? saved.overrides, extraArgs: form?.extraArgs ?? saved.extraArgs, chatTemplate: form ? form.chatTemplate : saved.chatTemplate ?? null, runtime, ...gpu },
+      form: { overrides: form?.overrides ?? saved.overrides, extraArgs: form?.mtp ? mtpExtraArgs(form.extraArgs, form.mtp) : form?.extraArgs ?? saved.extraArgs, chatTemplate: form ? form.chatTemplate : saved.chatTemplate ?? null, runtime, ...gpu },
       deviceInfo: (await ctx.getDeviceInfo(requestedRuntime(shown, runtime))) ?? undefined,
       comboRecord: key => ctx.splitStats.get(key),
     })
