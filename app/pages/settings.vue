@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import t from '~~/i18n/zh-CN'
 
+const route = useRoute()
 const { load, loadError, doc } = useSettings()
 onMounted(load)
 
@@ -45,6 +46,7 @@ function observe() {
 watch(doc, async () => {
   await nextTick()
   observe()
+  goToHash()
 }, { immediate: true })
 onBeforeUnmount(() => observer?.disconnect())
 
@@ -53,6 +55,13 @@ function go(id: string) {
   lockUntil = Date.now() + 900
   document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
+
+// The route may arrive before the async settings cards exist, or change on this same page.
+function goToHash() {
+  const id = route.hash.slice(1)
+  if (sections.value.some(s => s.id === id)) go(id)
+}
+watch(() => route.hash, async () => { await nextTick(); goToHash() })
 </script>
 
 <template>

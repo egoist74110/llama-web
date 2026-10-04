@@ -7,7 +7,7 @@ import type { ModelConfig } from '~~/server/core/config'
 import type { ScanEntry } from '~~/server/core/scanner'
 import type { FileRef } from '~~/server/core/types'
 
-const props = defineProps<{ modelId: string }>()
+const props = defineProps<{ modelId: string, initialProfile?: string, initialTab?: 'files' | 'profiles' | 'params' }>()
 const open = defineModel<boolean>('open', { default: false })
 
 type Detail = { model: ModelConfig, defaults: LaunchDefaults, templates: string[], up: string[], inUse: string[] }
@@ -59,8 +59,8 @@ watch(open, (o) => {
   detail.value = null
   scan.value = null
   selected.value = ''
-  editTab.value = 'files'
-  void loadDetail()
+  editTab.value = props.initialTab ?? 'files'
+  void loadDetail(props.initialProfile)
   void loadScan()
 }, { immediate: true })
 

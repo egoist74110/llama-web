@@ -10,7 +10,7 @@ const s = t.models.firstStart
 const props = defineProps<{ modelId: string, name: string }>()
 const open = defineModel<boolean>('open', { required: true })
 const { busy } = useModelActions()
-const toast = useToast()
+const feedback = useModelStartFeedback()
 
 const info = ref<SetupDoc | null>(null)
 const thinking = ref(true)
@@ -29,8 +29,7 @@ const hasDraft = computed(() => !!info.value?.candidates.draft.length)
 const nValid = computed(() => Number.isInteger(mtpN.value) && mtpN.value >= 1 && mtpN.value <= 16)
 
 function fail(e: unknown) {
-  const err = e as { data?: { message?: string }, message?: string }
-  toast.add({ title: t.models.toast.startFailed, description: err.data?.message ?? err.message, color: 'error', icon: 'i-lucide-circle-alert' })
+  feedback.httpFailure(e, undefined, props.name)
 }
 
 watch(open, async (v) => {
@@ -55,6 +54,7 @@ watch(open, async (v) => {
 async function confirm() {
   if (!info.value || !nValid.value) return
   saving.value = true
+  const attempt = feedback.begin(props.modelId)
   try {
     await $fetch(`/api/models/${encodeURIComponent(props.modelId)}/setup`, {
       method: 'POST',
@@ -67,9 +67,10 @@ async function confirm() {
         start: true,
       },
     })
+    feedback.accepted(attempt)
     open.value = false
   } catch (e) {
-    fail(e)
+    feedback.httpFailure(e, attempt)
   } finally {
     saving.value = false
   }
