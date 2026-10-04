@@ -1,10 +1,10 @@
 <script setup lang="ts">
-// First start of a model enabled from a scan: confirm thinking, vision and MTP, then start it.
+// First start of a model enabled from a scan: confirm context, thinking, vision and MTP, then start it.
 import t from '~~/i18n/zh-CN'
 
 interface Ref { dirId: string, rel: string }
 interface Candidate { ref: Ref, fileName: string, size: number }
-interface SetupDoc { name: string, candidates: { mmproj: Candidate[], draft: Candidate[] }, current: { mmproj: Ref | null, draft: Ref | null }, mtpN: number }
+interface SetupDoc { name: string, candidates: { mmproj: Candidate[], draft: Candidate[] }, current: { mmproj: Ref | null, draft: Ref | null, ctxSize: number | string | null }, mtpN: number }
 
 const s = t.models.firstStart
 const props = defineProps<{ modelId: string, name: string }>()
@@ -13,6 +13,8 @@ const { busy } = useModelActions()
 const feedback = useModelStartFeedback()
 
 const info = ref<SetupDoc | null>(null)
+const ctxSize = ref<number | string>('')
+const setGlobalContext = ref(false)
 const thinking = ref(true)
 const vision = ref(false)
 const mmprojKey = ref('')
@@ -27,6 +29,9 @@ const find = (list: Candidate[], k: string) => list.find(c => key(c.ref) === k)?
 const hasVision = computed(() => !!info.value?.candidates.mmproj.length)
 const hasDraft = computed(() => !!info.value?.candidates.draft.length)
 const nValid = computed(() => Number.isInteger(mtpN.value) && mtpN.value >= 1 && mtpN.value <= 16)
+// Match the existing number form: empty omits the flag; finite values are checked by llama-server.
+const contextValid = computed(() => ctxSize.value === '' || Number.isFinite(Number(ctxSize.value)))
+const contextK = computed(() => ctxSize.value === '' || !contextValid.value ? '' : `${+(Number(ctxSize.value) / 1024).toPrecision(4)}K`)
 
 function fail(e: unknown) {
   feedback.httpFailure(e, undefined, props.name)
@@ -38,6 +43,8 @@ watch(open, async (v) => {
   try {
     const r = await $fetch<SetupDoc>(`/api/models/${encodeURIComponent(props.modelId)}/setup`)
     info.value = r
+    ctxSize.value = r.current.ctxSize ?? ''
+    setGlobalContext.value = false
     // Starting point: thinking on, the files that were found are on, MTP at the recommended multiplier.
     thinking.value = true
     mtpN.value = r.mtpN
@@ -52,13 +59,15 @@ watch(open, async (v) => {
 })
 
 async function confirm() {
-  if (!info.value || !nValid.value) return
+  if (!info.value || !nValid.value || !contextValid.value) return
   saving.value = true
   const attempt = feedback.begin(props.modelId)
   try {
     await $fetch(`/api/models/${encodeURIComponent(props.modelId)}/setup`, {
       method: 'POST',
       body: {
+        ctxSize: ctxSize.value === '' ? null : Number(ctxSize.value),
+        setGlobalContext: setGlobalContext.value,
         thinking: thinking.value,
         mmproj: vision.value ? find(info.value.candidates.mmproj, mmprojKey.value) : null,
         mtp: mtp.value,
@@ -84,6 +93,17 @@ async function confirm() {
         {{ s.loading }}
       </p>
       <div v-else class="flex flex-col gap-5">
+        <section class="flex flex-col gap-1.5">
+          <label for="first-start-context" class="text-sm font-semibold">{{ s.context.title }}</label>
+          <div class="flex items-center gap-3">
+            <UInput id="first-start-context" v-model.number="ctxSize" type="number" step="any" class="w-40 max-w-full font-mono" :color="contextValid ? undefined : 'error'" aria-describedby="first-start-context-hint" />
+            <span class="font-mono text-sm text-muted" aria-live="polite">{{ contextK }}</span>
+          </div>
+          <p id="first-start-context-hint" class="m-0 text-xs text-muted">{{ s.context.hint }}</p>
+          <UCheckbox v-model="setGlobalContext" :label="s.context.global" />
+          <p v-if="setGlobalContext" class="m-0 text-xs text-muted">{{ s.context.globalHint }}</p>
+        </section>
+
         <section class="flex flex-col gap-1.5">
           <div class="flex items-center justify-between gap-3">
             <h3 class="m-0 text-sm font-semibold">
@@ -150,7 +170,7 @@ async function confirm() {
         <UButton size="sm" color="neutral" variant="ghost" @click="open = false">
           {{ s.cancel }}
         </UButton>
-        <UButton size="sm" icon="i-lucide-play" :disabled="!info || (mtp && !nValid)" :loading="saving || !!busy[`start:${modelId}`]" @click="confirm">
+        <UButton size="sm" icon="i-lucide-play" :disabled="!info || !contextValid || (mtp && !nValid)" :loading="saving || !!busy[`start:${modelId}`]" @click="confirm">
           {{ s.confirm }}
         </UButton>
       </div>

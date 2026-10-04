@@ -1,6 +1,7 @@
-// Save the first-start answers { thinking, mmproj, mtp, draft, mtpN, start? } into the model's
+// Save the first-start answers { ctxSize?, setGlobalContext?, thinking, mmproj, mtp, draft, mtpN, start? } into the model's
 // current profile and files, mark the model confirmed, and optionally start it.
-import { applyFirstSetup, type FirstSetup } from '../../../core/models-admin'
+import { type FirstSetup } from '../../../core/models-admin'
+import { saveFirstSetup } from '../../../core/first-setup'
 import { scanModelDirs } from '../../../core/scanner'
 import { t } from '../../../core/i18n'
 import { getContext } from '../../../service/context'
@@ -20,11 +21,12 @@ export default defineEventHandler(async (event) => {
   if (typeof body?.thinking !== 'boolean' || typeof body?.mtp !== 'boolean' || typeof body?.mtpN !== 'number') {
     throw createError({ statusCode: 400, message: t.models.errors.badRequest })
   }
-  const input: FirstSetup = { thinking: body.thinking, mmproj: ref(body.mmproj), mtp: body.mtp, draft: ref(body.draft), mtpN: body.mtpN }
+  const input: FirstSetup = { thinking: body.thinking, mmproj: ref(body.mmproj), mtp: body.mtp, draft: ref(body.draft), mtpN: body.mtpN,
+    ctxSize: body.ctxSize as FirstSetup['ctxSize'], setGlobalContext: body.setGlobalContext as FirstSetup['setGlobalContext'] }
   const ctx = getContext()
   const { entries } = await scanModelDirs(ctx.getSettings().modelDirs)
   try {
-    ctx.updateModels((doc) => { applyFirstSetup(doc, model.id, input, entries) })
+    saveFirstSetup(ctx, model.id, input, entries, ctx.platform)
   } catch (e) {
     editError(e)
   }

@@ -287,6 +287,12 @@ export default {
       title: '第一次启动「{name}」',
       body: '确认下面几项，之后可以随时在「编辑 → 参数」里改。',
       loading: '正在查找同目录的视觉 / MTP 文件……',
+      context: {
+        title: '上下文',
+        hint: '能记住的最多 token 数。0 表示用模型自带的长度，留空则不传此参数；额外参数里的上下文设置仍优先。',
+        global: '设为全局配置',
+        globalHint: '同步更新所有全局默认上下文，本次值也保存到当前方案。其他方案的自定义值仍优先。',
+      },
       thinking: { title: '思考', on: '开', off: '关', hintOn: '模型先思考再回答，不限制思考长度。', hintOff: '不让模型思考，直接回答（更快）。' },
       vision: {
         title: '视觉（看图）',
@@ -356,6 +362,7 @@ export default {
       'file-incomplete': '所选主模型的分片不完整。',
       'file-in-use': '所选主模型已经被另一个模型使用。',
       'bad-setup': 'MTP 倍数需要是 1 到 16 的整数。',
+      'bad-context': '上下文需要填写有效数字；0 表示用模型自带的长度，留空则不传此参数。',
       'runtime-invalid': '所选的 llama.cpp 版本不存在，或不属于这台电脑的平台。',
       'device-invalid': '设备选择不合法：只能选「自动」、「CPU」、一张 GPU，或打开「使用多张 GPU」后选两张以上；切分模式要是 layer / row / tensor，比例的个数要和所选 GPU 一样多，主 GPU 序号要在所选 GPU 范围内。Mac 上不能选设备。',
     },

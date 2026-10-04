@@ -25,7 +25,7 @@ export class EnableError extends Error {
 
 export type ProfileErrorCode =
   | 'model-not-found' | 'profile-not-found' | 'profile-exists' | 'name-invalid' | 'last-profile'
-  | 'bad-overrides' | 'bad-extra-args' | 'template-not-found' | 'in-use' | 'bad-setup' | 'runtime-invalid' | 'device-invalid'
+  | 'bad-overrides' | 'bad-extra-args' | 'template-not-found' | 'in-use' | 'bad-setup' | 'bad-context' | 'runtime-invalid' | 'device-invalid'
 
 export class ProfileError extends Error {
   constructor(public code: ProfileErrorCode, message: string = code, public detail?: string) {
@@ -164,6 +164,10 @@ export const MTP_DEFAULT_N = 3
 export const MTP_MAX_N = 16
 
 export interface FirstSetup {
+  /** Context form value; absent keeps compatibility with older clients, null omits the flag. */
+  ctxSize?: number | null
+  /** Also update every global defaults set; the current profile keeps its own value. */
+  setGlobalContext?: boolean
   /** Let the model think before answering (`--reasoning on`, no length limit) or not (`off`). */
   thinking: boolean
   /** Vision projector file (must be a scanned mmproj); null = no vision. */
@@ -201,6 +205,9 @@ export function stripMtpArgs(extra: string): string {
  * changes when one is refused.
  */
 export function applyFirstSetup(doc: ModelsDoc, modelId: string, input: FirstSetup, entries: ScanEntry[]): ModelConfig {
+  if (input.ctxSize !== undefined && input.ctxSize !== null && (typeof input.ctxSize !== 'number' || !Number.isFinite(input.ctxSize))) throw new ProfileError('bad-context')
+  if (input.setGlobalContext !== undefined && typeof input.setGlobalContext !== 'boolean') throw new ProfileError('bad-context')
+  if (input.setGlobalContext && input.ctxSize === undefined) throw new ProfileError('bad-context')
   if (!Number.isInteger(input.mtpN) || input.mtpN < 1 || input.mtpN > MTP_MAX_N) throw new ProfileError('bad-setup')
   const model = findModel(doc, modelId)
   const profile = model.profiles[model.activeProfile]
@@ -208,7 +215,7 @@ export function applyFirstSetup(doc: ModelsDoc, modelId: string, input: FirstSet
   const files: FilesPatch = { mmproj: input.mmproj, draft: input.mtp ? input.draft : null }
   applyFiles(doc, modelId, files, entries)
 
-  profile.overrides = { ...profile.overrides, reasoning: input.thinking ? 'on' : 'off', ...(input.thinking ? { reasoningBudget: -1 } : {}) }
+  profile.overrides = { ...profile.overrides, ...(input.ctxSize === undefined ? {} : { ctxSize: input.ctxSize }), reasoning: input.thinking ? 'on' : 'off', ...(input.thinking ? { reasoningBudget: -1 } : {}) }
   const rest = stripMtpArgs(profile.extraArgs)
   profile.extraArgs = input.mtp ? [rest, `--spec-type draft-mtp --spec-draft-n-max ${input.mtpN}`].filter(Boolean).join(' ') : rest
   model.confirmed = true
