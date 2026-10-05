@@ -11,6 +11,7 @@ const LIVE = '__live__'
 
 const { state, events, requests, logLines, serverNow } = useLive()
 const toast = useToast()
+const ui = usePlatformUi()
 
 // /logs?tab=events|requests (the overview's "all" links) opens that tab.
 const initialTab = useRoute().query.tab
@@ -136,7 +137,7 @@ const eventRows = computed<TextRow[]>(() => {
   const list: ActivityEvent[] = inFile.value ? parseJsonl<ActivityEvent>(file.value?.lines ?? []) : [...events.value].reverse()
   return list
     .filter(e => !wantModel.value || e.kind === 'runtime' || e.kind === 'tunnel' || e.modelId === wantModel.value)
-    .map((e, i) => ({ key: inFile.value ? String(i) : String(e.id), at: e.at, tag: '', text: eventText(e, modelName), error: e.kind === 'state' && !!e.error }))
+    .map((e, i) => ({ key: inFile.value ? String(i) : String(e.id), at: e.at, tag: '', text: eventText(e, modelName, ui.value.isMac), error: (e.kind === 'state' && !!e.error) || e.kind === 'no-room' || (e.kind === 'watchdog' && e.state === 'stopped') }))
 })
 
 const requestRows = computed<RequestRecord[]>(() => {
@@ -304,7 +305,7 @@ function lineClass(text: string): string {
                 <span v-if="r.stream" class="ml-1 text-dimmed">{{ t.logs.requests.stream }}</span>
               </td>
               <td :class="r.outcome === 'ok' ? '' : r.outcome === 'error' ? 'text-error' : 'text-warning'">
-                {{ r.status }} {{ t.logs.requests.outcome[r.outcome] }}<span v-if="r.error" class="text-dimmed"> · {{ r.error }}</span>
+                {{ r.status }} {{ t.logs.requests.outcome[r.outcome] }}<span v-if="r.error" class="text-dimmed" :title="r.error"> · {{ (t.logs.requests.errorCodes as Record<string, string>)[r.error] ?? r.error }}</span>
               </td>
               <td class="font-mono">
                 {{ formatMs(r.durationMs) }}

@@ -3,6 +3,7 @@
 import t from '~~/i18n/zh-CN'
 import type { StateDoc } from '~~/server/core/live'
 import { quantFromFile } from '~/utils/overview'
+import { gib, tierClass } from '~/utils/memory-check'
 
 const props = defineProps<{ model: StateDoc['models'][number] }>()
 const { busy, start, stop, retry, setProfile } = useModelActions()
@@ -25,6 +26,12 @@ const quant = computed(() => quantFromFile(props.model.files.model))
 const progress = computed(() => shown.value?.progress ?? null)
 // A model enabled from a scan asks its first-start questions before the first load.
 const onStart = () => (props.model.needsSetup ? (firstStart.value = true) : start(props.model.id))
+// Estimated memory of the current profile and whether it fits next to what is online (decisions 42, 43). Once the model is
+// online the free memory no longer has room for it, so only the amount is shown, not a verdict.
+const checks = useMemoryChecks()
+checks.followModel(() => props.model.id, () => props.model.activeProfile)
+const memory = computed(() => checks.get(props.model.id, props.model.activeProfile))
+const memoryOnline = computed(() => ['loading', 'ready', 'draining'].includes(state.value))
 const working = computed(() => !!(busy.value[`start:${props.model.id}`] || busy.value[`stop:${props.model.id}`] || busy.value[`retry:${props.model.id}`]))
 </script>
 
@@ -44,6 +51,12 @@ const working = computed(() => !!(busy.value[`start:${props.model.id}`] || busy.
           </span>
           <span v-else class="lw-chip">{{ t.models.card.mmprojNone }}</span>
           <span v-if="model.files.draft" class="lw-chip">{{ t.models.card.draft }}</span>
+          <template v-if="memory?.estimate">
+            <span class="lw-chip lw-num" :title="fmt(t.memory.cardTitle, { profile: model.activeProfile })">
+              {{ fmt(memory.basis === 'measured' ? t.memory.chip.measured : t.memory.chip.estimated, { n: gib(memory.estimate.total.totalMiB) }) }}
+            </span>
+            <span v-if="!memoryOnline" class="lw-st" :class="tierClass(memory.tier)" :title="t.memory.tierHint[memory.tier]">{{ t.memory.tier[memory.tier] }}</span>
+          </template>
         </div>
         <p class="m-0 break-all font-mono text-xs text-dimmed" :title="model.files.model">
           {{ model.files.model }}

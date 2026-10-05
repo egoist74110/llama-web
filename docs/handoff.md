@@ -1,5 +1,14 @@
 # 交接记录
 
+## 2026-10-05 · 9-4 多模型与显存保护界面 · Claude
+- 做了：① 编辑抽屉（ProfileForm）：`MemoryEstimate.vue`（条 + 档位 + 明细 + 估算说明 + 参数检查列表），和命令预览同一防抖调 `POST /check`；保存前再取一次最新读数，估算「有风险 / 放不下」才弹 `SaveRiskModal`（仍然保存 / 回去改），「无法判断」不弹，不拒绝保存。② 设置页（SettingsServer）：多开开关、在线上限 1–99（开启后不超过端口数）、放不下时二选一（说明里写清只管请求触发，手动启动只被拦）。③ 模型页：`ModelCard` 占用 chip（实测 / 预估）+ 档位（模型在线时只显示数量）；手动启动被 409 拦住时 `StartGuardModal`：risky / unknown 可「仍然启动」（带 `confirm`），nofit / limit 只有「先停止其他模型」（没有强行启动）。④ 总览 `OnlineModels.vue`（至少 2 个在线时列出各自状态 / 速度 / 占用 / 停止，hero 里原来的「另外还有」去掉）、侧栏列出全部在线模型、GPU 卡片下标出在线模型（`modelsOnCard`）。⑤ 日志：no-room / watchdog 事件按错误色，503 `insufficient_memory` 的请求记录显示「放不下，没有加载」。
+- 逻辑放在 `app/utils/memory-check.ts`（可 bun 测试）和 `useMemoryChecks`（一个串行队列、15 秒内复用、在线集合变了就重算）；文案在 `i18n/zh-CN.ts` 的 `memory`、`models.guard`、`models.edit.risk`、`settings.server`。
+- Mac 无 GPU 字样：名词由 `memoryNoun` 选；`platform.mac` 新增 `issues`（cpu-gpu-layers / no-estimate）、`noRoomUnknown`、`poolSystem`；估算说明里只和显卡有关的两条在 Mac 不显示。
+- 验证：`bun test` 1311 pass / 20 skip / 0 fail；`bun run typecheck` 通过；新增 `tests/app/memory-check.test.ts`（20 项）和 `model-start-feedback` 里 2 项（409 打开确认而不是失败弹窗、带 confirm 重发）。浏览器（Mac，隔离数据目录 + 假 llama-server 的临时 dev 服务，已停掉清理）看过：模型页占用 chip、抽屉估算条与明细、保存确认、nofit 启动弹窗（0 / 2 个在线）、「先停止其他模型」真的停掉两个、总览在线列表、侧栏列表、设置页新控件；浅 / 深色和窄屏（375）看过其中大部分。
+- **没验证 / 没做**：Windows / 多卡真机上的界面（显存字样、按卡显示、卡片下的模型名）；risky / unknown 启动弹窗没在浏览器里触发过（这台 Mac 当时可用内存太小，只出现 nofit）；日志页的新文案没在浏览器里看；没跑 `bun run build`；没用真实 llama.cpp / 模型多开。plan 里「显存卡片标出在线模型」那一项没勾。
+- 小事（没改）：假进程的实测占用约 0，总览会显示「实测占用 29 MiB」这种很小的数，真实进程不会这样。设置页在 800 宽的桌面窗口里左侧目录会盖住内容（本包没动过 settings.vue，看起来是原有问题，没确认）。
+- 下一步：阶段关口 9，等你试用（真机验证前我会先说，会占 GPU）；之后做 9-1 至 9-3 的交叉审查（gpt-6.1sol），再处理意见。
+
 ## 2026-10-05 · 9-3 调度支持多开 · Claude
 - 先给用户确认了规则文字（四个选择：无 model 字段取最近使用的 ready；加载全局串行；手动启动不悄悄卸载别人；看门狗 5% 且每轮停一个），已写入 plan「核心行为规则 · 多模型并行」和决定 9。
 - 做了：① settings 版本 10：`scheduler.multiLoad`（默认关）、`onNoRoom`（`unload` | `error`）、`maxLoaded` 1–99（`effectiveMaxLoaded`：关时 1，开时不超过端口数；关时保留用户填的值）；`applyServer` 接收三字段。② `scheduler.ts`：`admit` 钩子 + `multiLoad` / `onNoRoom` / `maxLoaded` 可为 getter；请求放不下按策略卸载（LRU、一次一个、卸完重查）或 `no-room` 拒绝，手动启动只拒绝；`candidates()` / `unload()` 给看门狗；新事件 `no-room` / `make-room`。③ `core/admission.ts`（估算→调度答复、`dropMlockArgs`）、`core/watchdog.ts`、`core/disk-space.ts`；`service/admission.ts`（`admitTarget`、`checkedStart`、`samplePools`）；`checkProfile` 先取实测（`basis`）并返回 `mlockDropped`；`context.ts` 接线（launch 前后读已用量 → `vramStats.record`、偏差事件、看门狗启动/关闭）。④ 503 `insufficient_memory`（`proxy.ts`）；start/retry 接口 409 `limit | nofit | risky | unknown`（`confirm: true` 放行 risky/unknown）；事件在页面可读（`useFormat`）。⑤ `errors.ts` 识别 Metal OOM；`Runner` 端口分配串行；共享 `download()` 要求剩余空间 ≥ 3 倍。

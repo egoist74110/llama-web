@@ -150,6 +150,8 @@ html, body {
 .lw-bar { height: 6px; border-radius: 999px; background: var(--lw-sunken); overflow: hidden; }
 .lw-bar > span { display: block; height: 100%; border-radius: 999px; background: var(--lw-accent); transition: width .4s ease; }
 .lw-bar.warn > span { background: var(--lw-warn); }
+.lw-bar.err > span { background: var(--lw-err); }
+.lw-bar.dim > span { background: var(--lw-dim); }
 
 .lw-tbl { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
 .lw-tbl th { text-align: left; font-weight: 500; font-size: 12px; color: var(--lw-dim); padding: 8px 12px; border-bottom: 1px solid var(--lw-border); white-space: nowrap; }

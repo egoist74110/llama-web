@@ -41,5 +41,6 @@ watch(() => state.value?.firstRun, (first) => {
     <LlamacppSwitchModal />
     <MirrorChoiceModal />
     <ModelStartFailureModal />
+    <StartGuardModal />
   </div>
 </template>

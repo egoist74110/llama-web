@@ -9,6 +9,7 @@ import type { ParamField } from '~/composables/useParamFields'
 import { MTP_DEFAULT_N, mtpValid, readMtp, type MtpInput } from '~~/server/core/mtp'
 import type { FileRef } from '~~/server/core/types'
 import { displayThinkingLimit, thinkingBudget, validThinkingLimit } from '~~/server/core/thinking-limit'
+import { saveNeedsConfirm, type CheckDoc } from '~/utils/memory-check'
 
 type Mode = 'inherit' | 'custom' | 'omit'
 interface Row { mode: Mode, value: string }
@@ -214,13 +215,50 @@ async function refreshPreview() {
   }
 }
 
+// ---- Memory estimate and parameter findings (same debounce, same values on screen) ------------
+const check = ref<CheckDoc | null>(null)
+const checkError = ref('')
+const checking = ref(false)
+let checkSeq = 0
+
+async function refreshCheck() {
+  const mine = ++checkSeq
+  checking.value = true
+  try {
+    const r = await $fetch<CheckDoc>(`/api/models/${encodeURIComponent(props.modelId)}/check`, {
+      method: 'POST', body: { profile: props.name, form: toForm(), files: props.files },
+    })
+    if (mine === checkSeq) { check.value = r; checkError.value = '' }
+  } catch (e) {
+    const err = e as { data?: { message?: string }, message?: string }
+    if (mine === checkSeq) { check.value = null; checkError.value = err.data?.message ?? err.message ?? t.memory.failed }
+  } finally {
+    if (mine === checkSeq) checking.value = false
+  }
+}
+
 function schedule() {
   clearTimeout(timer)
   if (!props.active || invalidKeys.value.length || gpuInvalid.value || mtpInvalid.value || limitInvalid.value) return
-  timer = setTimeout(refreshPreview, 250)
+  timer = setTimeout(() => { void refreshPreview(); void refreshCheck() }, 250)
 }
 watch([() => JSON.stringify(state), () => JSON.stringify(props.files), () => props.active, () => props.templates.join('\n')], schedule, { immediate: true })
-onBeforeUnmount(() => { clearTimeout(timer); seq++ })
+onBeforeUnmount(() => { clearTimeout(timer); seq++; checkSeq++ })
+
+// A risky / not fitting estimate asks before the save goes out (never refuses it); the answer is read again right now.
+const risk = ref<{ restart: boolean } | null>(null)
+const riskOpen = computed({ get: () => !!risk.value, set: (v) => { if (!v) risk.value = null } })
+async function trySave(restart: boolean) {
+  clearTimeout(timer)
+  await refreshCheck()
+  if (saveNeedsConfirm(check.value)) risk.value = { restart }
+  else emit('save', toForm(), restart)
+}
+function confirmSave() {
+  const r = risk.value
+  risk.value = null
+  if (r) emit('save', toForm(), r.restart)
+}
 
 const toast = useToast()
 async function copy() {
@@ -384,6 +422,8 @@ const globalExtra = computed(() => props.defaults.extraArgs?.trim())
       </p>
     </div>
 
+    <MemoryEstimate :check="check" :loading="checking" :error="checkError" />
+
     <div class="space-y-1.5">
       <div class="flex items-center justify-between gap-3">
         <h4 class="text-sm font-medium text-highlighted">
@@ -422,7 +462,7 @@ const globalExtra = computed(() => props.defaults.extraArgs?.trim())
     </div>
 
     <div class="flex flex-wrap items-center gap-2 border-t border-default pt-4">
-      <UButton size="sm" icon="i-lucide-save" :disabled="!dirty || !!invalidKeys.length || gpuInvalid || mtpInvalid || limitInvalid" :loading="busy" @click="emit('save', toForm(), false)">
+      <UButton size="sm" icon="i-lucide-save" :disabled="!dirty || !!invalidKeys.length || gpuInvalid || mtpInvalid || limitInvalid" :loading="busy" @click="trySave(false)">
         {{ edit.form.save }}
       </UButton>
       <UButton
@@ -433,7 +473,7 @@ const globalExtra = computed(() => props.defaults.extraArgs?.trim())
         icon="i-lucide-rotate-cw"
         :disabled="!dirty || !!invalidKeys.length || gpuInvalid || mtpInvalid || limitInvalid"
         :loading="busy"
-        @click="emit('save', toForm(), true)"
+        @click="trySave(true)"
       >
         {{ edit.form.saveRestart }}
       </UButton>
@@ -443,5 +483,6 @@ const globalExtra = computed(() => props.defaults.extraArgs?.trim())
       <span v-if="dirty" class="text-xs text-warning">{{ edit.form.dirty }}</span>
       <span v-else-if="running" class="text-xs text-muted">{{ edit.form.runningNote }}</span>
     </div>
+    <SaveRiskModal v-model:open="riskOpen" :check="check" :restart="risk?.restart ?? false" @confirm="confirmSave" />
   </div>
 </template>

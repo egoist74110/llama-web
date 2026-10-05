@@ -2,6 +2,7 @@
 import t from '~~/i18n/zh-CN'
 import type { ActivityEvent, StateDoc } from '~~/server/core/live'
 import type { RequestRecord } from '~~/server/core/request-log'
+import { noRoomReasonTemplate, poolText } from '../utils/memory-check'
 
 export function fmt(template: string, vars: Record<string, string | number> = {}): string {
   return template.replace(/\{(\w+)\}/g, (m, k: string) => (k in vars ? String(vars[k]) : m))
@@ -71,7 +72,8 @@ export function cfErrorText(code: string, detail = ''): string {
 
 const gibText = (miB: number | null) => (miB === null ? '?' : `${(miB / 1024).toFixed(1)} GB`)
 
-export function eventText(e: ActivityEvent, modelName: (id: string) => string): string {
+/** `isMac`: a Mac never reads GPU / video-memory wording (decision 38). */
+export function eventText(e: ActivityEvent, modelName: (id: string) => string, isMac = false): string {
   if (e.kind === 'state') {
     const vars = { model: modelName(e.modelId), profile: e.profile, from: stateLabel(e.from), to: stateLabel(e.to) }
     return e.error ? fmt(t.events.stateError, { ...vars, reason: reasonText(e.error) }) : fmt(t.events.state, vars)
@@ -87,13 +89,14 @@ export function eventText(e: ActivityEvent, modelName: (id: string) => string): 
   }
   if (e.kind === 'no-room') {
     const key = e.manual ? 'manual' : 'request'
-    return fmt(t.events.noRoom[key], { model: modelName(e.modelId), profile: e.profile, reason: fmt(t.events.noRoomReason[e.reason], { estimate: gibText(e.estimateMiB), available: gibText(e.availableMiB) }) })
+    const template = noRoomReasonTemplate(e.reason, isMac)
+    return fmt(t.events.noRoom[key], { model: modelName(e.modelId), profile: e.profile, reason: fmt(template, { estimate: gibText(e.estimateMiB), available: gibText(e.availableMiB) }) })
   }
   if (e.kind === 'make-room') {
     return fmt(t.events.makeRoom, { model: modelName(e.modelId), profile: e.profile, victim: modelName(e.victimModelId), victimProfile: e.victimProfile })
   }
   if (e.kind === 'watchdog') {
-    const vars = { model: e.modelId ? modelName(e.modelId) : '', profile: e.profile ?? '', pool: e.pool, percent: Math.round(e.freePercent) }
+    const vars = { model: e.modelId ? modelName(e.modelId) : '', profile: e.profile ?? '', pool: poolText(e.pool, isMac), percent: Math.round(e.freePercent) }
     return fmt(e.state === 'stopped' ? t.events.watchdog.stopped : t.events.watchdog.blocked, vars)
   }
   if (e.kind === 'vram-deviation') {

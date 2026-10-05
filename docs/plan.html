@@ -157,7 +157,7 @@ li.task .when{color:var(--ok);font-size:12px;white-space:nowrap}
 │   └─ /v1/*    OpenAI 兼容转发                                                   │
 │        └─ 请求预处理链：[图片压缩] → …（以后可加步骤）                          │
 │                                                                                 │
-│  调度器 Scheduler：模型状态机、排队切换、在线上限 X（固定 1）                   │
+│  调度器 Scheduler：模型状态机、排队切换、在线上限 X（默认 1，可开多开）          │
 │  进程管理 Runner：spawn / 健康检查 / 杀进程树 / 残留清理 / 日志采集             │
 │  扫描器 Scanner：多目录递归、GGUF 头部元数据、分片合并、mmproj/mtp 候选         │
 │  更新器 Updater：启动时按 24 小时检查一次官方 Release，保留 2 个可回退          │
@@ -845,9 +845,10 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 
   <h3>9-4 · 界面（Sonnet 5.5）</h3>
   <ul class="tasks">
-    <li class="task" data-done="false"><span class="t">编辑抽屉：实时「显存预估」条 + 明细（Mac / 纯 CPU 显示「内存预估」，Mac 无 GPU 字样）；保存时有风险 / 放不下的确认对话框；参数合理性警告列表</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">设置页：「允许多个模型同时在线」开关、在线上限（1–99）、「放不下时」二选一（卸载上一个 / 服务端报错）及说明；总览 / 侧栏「正在服务」显示全部在线模型（各自状态、速度、占用）；设备显存卡片在多 GPU 时按卡显示，并标出每张卡上的在线模型</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">模型页：行内显示预估占用与风险档；手动启动有风险时的确认框（可「仍然启动」）；放不下时的提示（可「先停止其他模型」）；请求被拦的事件在日志里可读</span><span class="when"></span></li>
+    <li class="task" data-done="true"><span class="t">编辑抽屉：实时「显存预估」条 + 明细（Mac / 纯 CPU 显示「内存预估」，Mac 无 GPU 字样）；保存时有风险 / 放不下的确认对话框；参数合理性警告列表（MemoryEstimate.vue 与 SaveRiskModal.vue，ProfileForm 与命令预览同一防抖调 POST /check；保存前再取一次最新读数，只有「有风险 / 放不下」才弹确认，「无法判断」不弹；文案选择在 app/utils/memory-check.ts。Mac 浏览器里看过；带「显存」字样的 Windows 路径只有单元测试，没在 Windows 上看过）</span><span class="when">2026-10-05</span></li>
+    <li class="task" data-done="true"><span class="t">设置页：「允许多个模型同时在线」开关、在线上限（1–99，开启后不超过端口个数）、「放不下时」二选一（卸载上一个 / 服务端报错）及说明；总览 / 侧栏「正在服务」显示全部在线模型（各自状态、速度、占用）（SettingsServer.vue；总览新增 OnlineModels.vue，占用取该方案的检查结果：实测优先，否则预估；Mac 浏览器里用假 llama-server 开了两个模型看过，浅 / 深色与窄屏都看过）</span><span class="when">2026-10-05</span></li>
+    <li class="task" data-done="false"><span class="t">设备显存卡片在多 GPU 时按卡显示，并标出每张卡上的在线模型（逐卡显示原来就有；「标出在线模型」已写成 modelsOnCard 并有单元测试，按检查结果里的 CUDA&lt;n&gt; 池归属；还差：Windows / 多卡真机上看实际效果，Mac 没有这张卡片）</span><span class="when"></span></li>
+    <li class="task" data-done="true"><span class="t">模型页：行内显示预估占用与风险档；手动启动有风险时的确认框（可「仍然启动」）；放不下时的提示（可「先停止其他模型」）；请求被拦的事件在日志里可读（ModelCard 的占用 chip + 档位；StartGuardModal 由 409 的 reason 驱动：risky / unknown 可「仍然启动」（带 confirm），nofit / limit 只给「先停止其他模型」；日志里 no-room / watchdog 事件按错误色，503 insufficient_memory 的请求记录显示为「放不下，没有加载」。浏览器里实际点过 nofit 弹窗并停掉了两个在线模型；risky / unknown 弹窗只经单元测试，没在浏览器里触发过，日志页的新文案没在浏览器里看）</span><span class="when">2026-10-05</span></li>
   </ul>
 
 
@@ -887,7 +888,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
   <table>
     <tr><th>坑位</th><th>预留方式</th></tr>
     <tr><td><span class="tag slot">后端</span></td><td>vLLM 等其他后端：<code>backend</code> 字段 + <code>server/core/backends/</code> 模板接口</td></tr>
-    <tr><td><span class="tag slot">调度</span></td><td>在线上限 X 可修改：<code>scheduler.maxLoaded</code> 已存在，界面只读；<b>阶段 9 放开</b>（决定 41）</td></tr>
+    <tr><td><span class="tag slot">调度</span></td><td>在线上限 X 可修改：<code>scheduler.maxLoaded</code>；<b>阶段 9 已放开</b>（决定 41，设置页 9-4）</td></tr>
     <tr><td><span class="tag slot">调度</span></td><td>常驻模型、空闲自动卸载：<code>reserved.pinned</code> / <code>reserved.idleUnloadMin</code></td></tr>
     <tr><td><span class="tag slot">调度</span></td><td>按显存判断能否共存：<b>阶段 9 实现</b>（决定 42、43）；常驻 / 空闲自动卸载仍是坑位</td></tr>
     <tr><td><span class="tag slot">公网</span></td><td>按 key 禁止触发切换：<code>apiKeys[].allowSwitch</code></td></tr>
@@ -926,6 +927,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 <section id="changelog">
   <h2>变更记录</h2>
   <table>
+    <tr><td>2026-10-05</td><td>9-4 多模型与显存保护界面完成（阶段 9 关口，等用户试用）：编辑抽屉的「显存 / 内存预估」条与明细、参数检查列表、保存时有风险 / 放不下的确认；设置页多开开关 / 在线上限 / 放不下时二选一；模型页行内占用与档位、手动启动的确认与「先停止其他模型」；总览「在线的模型」列表、侧栏列出全部在线模型。没有改任何规则；新增的界面文案里 Mac 无 GPU / 显存字样（含只在 Mac 出现的事件文案变体）。多卡「标出每张卡上的在线模型」只有单元测试，Windows 真机界面未看。</td></tr>
     <tr><td>2026-10-05</td><td>9-3 调度支持多开完成（用户先确认规则文字）：「核心行为规则」新增「多模型并行」一节，决定 9 改为已放开。<code>scheduler.multiLoad</code>（默认关）/ <code>maxLoaded</code> 1–99 / <code>onNoRoom</code>（卸载上一个 | 服务端报错）进入 settings（版本 10，迁移只补缺省）；调度在多开时加载前检查，请求触发放不下按设置处理（503 <code>insufficient_memory</code>），手动启动不卸载别人（409 limit / nofit / risky / unknown）；无 model 字段取最近使用的 ready 模型；运行期看门狗（5% 危险线）；加载成功后写 <code>vram-stats.json</code> 并让下次预估取实测；下载前剩余空间 ≥ 3 倍。设置页控件、模型页与总览显示属 9-4。Windows 真机回归未做。</td></tr>
     <tr><td>2026-10-05</td><td>9-2 保存时检查与参数合理性完成：<code>POST /api/models/:id/check</code>（单个方案，或 <code>all</code> 逐个方案分别算）与保存接口共用一套检查，返回显存 / 内存三档 + 逐池明细 + 参数警告；只有实测证实必然启动失败的三类组合拒绝保存（400，错误码 check-failed）。V 缓存量化且 flash-attn 关在 Mac b11146 + Qwen3.5-2B 上仅用 CPU 实测退出码 1；上下文超训练长度、ubatch &gt; batch、CPU 设备写大层数 / 视觉模型选 CPU、mlock &gt; 可用内存、并行槽过多按实测或规则只警告。「别的在线模型取实测」拆出为 9-3 的未完成项（需要先接线加载成功后的记录）。CUDA / Windows 未实测。</td></tr>
     <tr><td>2026-10-05</td><td>9-1 显存 / 内存预估核心（Mac 部分）完成：<code>gguf.ts</code> 补读层数 / KV 头 / 窗口 / SSM / 词表与按层张量字节，<code>memory-estimate.ts</code>（预估纯函数）、<code>memory-sample.ts</code>（系统可用内存）、<code>vram-stats.ts</code>（实测记录模块）；实测结论与误差见 <code>docs/research/memory-estimate.md</code>。发现：llama-server 自动 <code>--parallel</code> 是 4 槽统一 KV；<code>llama-fit-params</code> 的计算缓冲偏大一个数量级、不传 ctx 时会静默缩小上下文；Mac 的 <code>os.freemem()</code> 不可用。CUDA 路径与加载后自动记录（接调度）未做。</td></tr>

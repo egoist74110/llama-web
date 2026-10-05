@@ -20,7 +20,19 @@ const nav = computed(() => [
 const isActive = (to: string) => (to === '/' ? route.path === '/' : route.path.startsWith(to))
 
 // The instance worth showing: generating > ready > loading > failed.
-const top = computed(() => rankInstances(state.value, metrics.value)[0] ?? null)
+const ranked = computed(() => rankInstances(state.value, metrics.value))
+const top = computed(() => ranked.value[0] ?? null)
+// Several models online (decision 41): one line each instead of the single big number.
+const MAX_ROWS = 3
+const rows = computed(() => ranked.value.slice(0, MAX_ROWS).map((x) => {
+  const sp = instanceSpeed(metrics.value, x.model.id, x.inst.profile)
+  const live = x.inst.state === 'ready' || x.inst.state === 'draining'
+  const text = x.inst.state === 'loading' ? (x.inst.progress === null ? '…' : `${x.inst.progress}%`)
+    : live ? (sp.generation === null ? '–' : fmt(L.serving.speed, { n: sp.generation.toFixed(1) })) : stateLabel(x.inst.state)
+  const cls = x.inst.state === 'ready' ? 'lw-dot-ok' : x.inst.state === 'failed' || x.inst.state === 'crashed' ? 'lw-dot-err' : 'lw-dot-warn'
+  return { key: `${x.model.id}:${x.inst.profile}`, name: x.model.name, text, cls, generating: sp.phase === 'generating' }
+}))
+const extra = computed(() => Math.max(0, ranked.value.length - MAX_ROWS))
 const pill = computed(() => {
   const s = top.value?.inst.state
   if (!s) return { cls: 'lw-st-stopped', label: L.serving.idle }
@@ -90,11 +102,23 @@ const modes = [
         <span class="text-xs text-dimmed">{{ L.serving.title }}</span>
         <span class="lw-st" :class="pill.cls">{{ pill.label }}</span>
       </div>
-      <span class="truncate text-[13px] font-semibold">{{ top ? top.model.name : L.noModel }}</span>
-      <div class="flex items-baseline gap-1.5">
-        <span class="lw-num font-mono text-xl font-medium text-[var(--lw-accent-ink)]">{{ big.value }}</span>
-        <span class="text-xs text-dimmed">{{ big.unit }}</span>
-      </div>
+      <template v-if="ranked.length > 1">
+        <ul class="m-0 flex list-none flex-col gap-1.5 p-0">
+          <li v-for="r in rows" :key="r.key" class="flex items-center gap-2 text-[13px]">
+            <span class="size-2 shrink-0 rounded-full bg-current" :class="r.cls" />
+            <span class="min-w-0 flex-1 truncate font-medium" :title="r.name">{{ r.name }}</span>
+            <span class="lw-num shrink-0 font-mono text-xs" :class="r.generating ? 'text-[var(--lw-accent-ink)]' : 'text-dimmed'">{{ r.text }}</span>
+          </li>
+        </ul>
+        <span v-if="extra" class="text-xs text-dimmed">{{ fmt(L.serving.more, { n: extra }) }}</span>
+      </template>
+      <template v-else>
+        <span class="truncate text-[13px] font-semibold">{{ top ? top.model.name : L.noModel }}</span>
+        <div class="flex items-baseline gap-1.5">
+          <span class="lw-num font-mono text-xl font-medium text-[var(--lw-accent-ink)]">{{ big.value }}</span>
+          <span class="text-xs text-dimmed">{{ big.unit }}</span>
+        </div>
+      </template>
     </div>
 
     <div class="flex flex-col gap-2.5 px-1.5">

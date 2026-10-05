@@ -13,7 +13,6 @@ const h = t.overview.hero
 
 const ranked = computed(() => rankInstances(state.value, metrics.value))
 const top = computed(() => ranked.value[0] ?? null)
-const others = computed(() => ranked.value.slice(1))
 const kind = computed(() => {
   const s = top.value?.inst.state
   if (!s) return 'empty'
@@ -180,13 +179,5 @@ const pillCls = (s: string) => (s === 'ready' ? 'lw-st-ready' : s === 'failed' |
       </div>
     </div>
 
-    <div v-if="others.length" class="col-span-full flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-default pt-4 text-[13px]">
-      <span class="text-xs text-dimmed">{{ h.more }}</span>
-      <span v-for="o in others" :key="`${o.model.id}:${o.inst.profile}`" class="inline-flex items-center gap-2">
-        <span class="font-medium">{{ o.model.name }}</span>
-        <span class="text-xs text-dimmed">{{ fmt(h.profile, { name: o.inst.profile }) }}</span>
-        <span class="lw-st" :class="pillCls(o.inst.state)">{{ stateLabel(o.inst.state) }}</span>
-      </span>
-    </div>
   </section>
 </template>

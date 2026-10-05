@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { computed, effectScope, ref, watch } from 'vue'
 import t from '../../i18n/zh-CN'
+import { readStartGuard } from '../../app/utils/memory-check'
 import { LiveHub } from '../../server/core/live'
 import { LaunchConfigError } from '../../server/core/launch'
 import type { ActivityEvent, StateDoc } from '../../server/core/live'
@@ -11,6 +12,7 @@ function harness() {
   const states = new Map<string, ReturnType<typeof ref>>()
   const live = { state: ref<StateDoc | null>(null), events: ref<ActivityEvent[]>([]) }
   const toasts: unknown[] = []
+  const guards: unknown[] = []
   const requests: Array<{ url: string, resolve: (v?: unknown) => void, reject: (e: unknown) => void }> = []
   const useState = (key: string, init: () => unknown) => {
     if (!states.has(key)) states.set(key, ref(init()))
@@ -27,7 +29,7 @@ function harness() {
   scope.run(() => feedback.follow())
   const actions = load('useModelActions', 'useModelActions', {
     ...common, useModelStartFeedback: () => feedback, useToast: () => ({ add: (v: unknown) => toasts.push(v) }),
-    fmt: (s: string) => s,
+    fmt: (s: string) => s, readStartGuard, useStartGuard: () => ({ open: (g: unknown) => guards.push(g) }),
     $fetch: (url: string) => new Promise((resolve, reject) => requests.push({ url, resolve, reject })),
   }) as ReturnType<typeof import('../../app/composables/useModelActions').useModelActions>
   live.state.value = {
@@ -40,7 +42,7 @@ function harness() {
   function event(to: 'loading' | 'stopped' | 'failed' | 'ready', error: string | null = null, modelId = 'm1', profile = 'default') {
     live.events.value = [{ kind: 'state', id: ++id, at: 1000 + id, modelId, profile, from: 'loading', to, error }, ...live.events.value]
   }
-  return { actions, feedback, live, requests, toasts, event, close: () => scope.stop() }
+  return { actions, feedback, live, requests, toasts, guards, event, close: () => scope.stop() }
 }
 
 describe('manual model start feedback', () => {
@@ -201,6 +203,37 @@ describe('manual model start feedback', () => {
       expect(h.requests).toHaveLength(1)
       h.requests[0]!.resolve({ ok: true })
       await work
+    } finally { h.close() }
+  })
+
+  test('a refused start (409 with a reason) opens the guard instead of a failure modal, and a confirmed one goes out with confirm', async () => {
+    const h = harness()
+    try {
+      const work = h.actions.start('m1', 'other')
+      h.requests[0]!.reject({ statusCode: 409, data: { statusCode: 409, message: 'x', data: { reason: 'risky', estimateMiB: 9000, availableMiB: 9500, pool: 'CUDA0' } } })
+      await work
+      expect(h.guards).toHaveLength(1)
+      expect(h.guards[0]).toMatchObject({ modelId: 'm1', profile: 'other', name: 'Model One', action: 'start', guard: { reason: 'risky', estimateMiB: 9000 } })
+      expect(h.feedback.notice.value).toBeNull()
+      expect(h.toasts).toHaveLength(0)
+      expect(h.actions.busy.value['start:m1']).toBeUndefined()
+      // The user chose "start anyway": same call with the confirm mark.
+      const again = h.actions.start('m1', 'other', true)
+      expect(h.requests).toHaveLength(2)
+      h.requests[1]!.resolve({ ok: true })
+      await again
+      expect(h.guards).toHaveLength(1)
+    } finally { h.close() }
+  })
+
+  test('an ordinary HTTP error of a start still opens the failure modal', async () => {
+    const h = harness()
+    try {
+      const work = h.actions.start('m1')
+      h.requests[0]!.reject({ statusCode: 500, data: { statusCode: 500, message: 'boom' } })
+      await work
+      expect(h.guards).toHaveLength(0)
+      expect(h.feedback.notice.value).toMatchObject({ modelId: 'm1', kind: 'unknown' })
     } finally { h.close() }
   })
 })

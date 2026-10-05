@@ -3,9 +3,13 @@
 // Everything comes from useLive(); local API addresses use the server's LAN host.
 import t from '~~/i18n/zh-CN'
 import type { ActivityEvent } from '~~/server/core/live'
+import { modelsOnCard } from '~/utils/memory-check'
 import { apiAddress } from '~/utils/overview'
 
 const { state, events, requests, metrics } = useLive()
+// The memory checks of the models that are online: the list below the hero and the model names on each GPU card.
+const checks = useMemoryChecks()
+checks.followOnline()
 const toast = useToast()
 const o = t.overview
 const tl = o.tiles
@@ -30,6 +34,10 @@ const ui = usePlatformUi()
 const gpus = computed(() => (metrics.value?.gpu.available ? metrics.value.gpu.gpus : []))
 const gb = (mib: number) => (mib / 1024).toFixed(1)
 const pct = (used: number, total: number) => (total > 0 ? Math.min(100, Math.round(used / total * 100)) : 0)
+
+// Names of the online models on one card (the check names the card each of them draws memory from).
+const onCard = (index: number) => modelsOnCard(state.value, (id, profile) => checks.get(id, profile)?.estimate, index)
+const online = computed(() => rankInstances(state.value, metrics.value).length)
 
 const inflight = computed(() => (state.value?.models ?? []).reduce((n, m) => n + m.instances.reduce((k, i) => k + i.inflight, 0), 0))
 const queued = computed(() => (state.value?.queue ?? []).reduce((n, q) => n + q.waiting, 0))
@@ -100,6 +108,7 @@ const tokens = (n: number | null) => (n === null ? '–' : n.toLocaleString('zh-
 
     <template v-else>
       <OverviewHero />
+      <OnlineModels v-if="online > 1" />
 
       <div class="grid grid-cols-[repeat(auto-fit,minmax(min(200px,100%),1fr))] gap-3.5">
         <section v-if="ui.hasGpu && gpus.length" class="lw-card flex flex-col gap-2.5 px-[18px] py-4">
@@ -114,6 +123,7 @@ const tokens = (n: number | null) => (n === null ? '–' : n.toLocaleString('zh-
             </div>
             <div class="lw-bar"><span :style="{ width: `${pct(g.usedMiB, g.totalMiB)}%` }" /></div>
             <div v-if="g.utilization !== null" class="lw-num text-xs text-dimmed">{{ fmt(o.gpu.util, { n: g.utilization }) }}</div>
+            <div v-if="gpus.length > 1 || onCard(g.index).length" class="min-h-[1em] truncate text-xs text-muted" :title="onCard(g.index).join('、')">{{ onCard(g.index).length ? fmt(t.overview.online.onCard, { names: onCard(g.index).join('、') }) : '' }}</div>
           </div>
         </section>
 
@@ -163,7 +173,7 @@ const tokens = (n: number | null) => (n === null ? '–' : n.toLocaleString('zh-
           <ol v-else class="m-0 flex list-none flex-col px-[18px] pb-3.5">
             <li v-for="e in recentEvents" :key="e.id" class="grid grid-cols-[14px_1fr_auto] items-start gap-2.5 py-[7px]">
               <span class="mt-1.5 size-2 rounded-full bg-current" :class="eventDot(e)" />
-              <span class="min-w-0 break-words text-[13px]">{{ eventText(e, modelName) }}</span>
+              <span class="min-w-0 break-words text-[13px]">{{ eventText(e, modelName, ui.isMac) }}</span>
               <time class="lw-num font-mono text-xs text-dimmed">{{ formatClock(e.at) }}</time>
             </li>
           </ol>
