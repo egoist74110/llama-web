@@ -638,6 +638,21 @@ ol.steps li{margin:4px 0}
 实测前先告诉我。做完按会话收尾流程结束，然后停下等我试用。</pre></div>
   </div>
 
+  <div class="pkg" id="p8-chat">
+    <div class="pkg-head"><b>8-chat 内置聊天页「对话」</b><span class="m sonnet">Sonnet 5.5</span></div>
+    <ul class="scope">
+      <li>范围以 plan 关键决定 55 和阶段 8 的「内置聊天页」任务为准：自己做界面，<b>不内嵌 llama-server 自带网页</b>；调用 <code>/v1/chat/completions</code> 流式；模型下拉只列运行中实例，固定 <code>名字:方案</code>；没有在线模型只提示不加载；对话只存浏览器本地（localStorage 要 try/catch）。</li>
+      <li>第一版不做图片上传、多会话列表、系统提示词 / 采样参数面板、导出，不要顺手实现。</li>
+      <li>已有未提交草稿 <code>app/utils/chat.ts</code>（SSE 解析、读取 delta / timings、安全 Markdown，先转义）和 <code>tests/app/chat.test.ts</code>，先读再决定复用；页面、composable、菜单入口（<code>AppSidebar.vue</code>）、<code>i18n/zh-CN.ts</code> 文案都还没写。</li>
+      <li>验证：单元测试 + 构建后在 Mac 上用已有模型做一次真实流式对话（停止、思考折叠、速度显示、没有在线模型的空状态、深浅色）；没做的验证如实写明。Mac 上开发运行用隔离数据目录，不要读 <code>data/secrets.json</code>。</li>
+      <li>做完提交并推送，不发版；plan 打勾与交接按会话收尾流程。</li>
+    </ul>
+    <div class="prompt"><button type="button">复制</button><pre>执行工作包 8-chat：内置聊天页「对话」（关键决定 55）。
+按 AGENTS.md 的规则开始：读 docs/claude-guide.html 的 8-chat 卡片与会话规则、docs/handoff.md 最上面两条、docs/plan.html 关键决定 55 与对应任务，再读 app/utils/chat.ts、tests/app/chat.test.ts（未提交草稿）、app/components/AppSidebar.vue、app/pages/logs.vue（页面风格参考）。
+只做这个工作包，不碰 MTP 真机验收、阶段 9、Mac 打包、发包。写代码前先把你的页面结构与 composable 划分简短告诉我确认。
+做完跑 bun test、bun run typecheck，如实汇报失败项；用 Mac 上已有模型做真实流式验证并写明没验证的部分；plan 打勾、交接、提交并推送。</pre></div>
+  </div>
+
   <div class="gatebox"><span class="m gate">阶段关口 8</span> 8-7 完成后停下，用户试用并确认（含 Mac 真机，如有）。不自动发版。</div>
 </section>
 

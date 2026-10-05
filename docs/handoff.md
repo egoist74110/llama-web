@@ -1,5 +1,13 @@
 # 交接记录
 
+## 2026-10-05 · 规划：内置聊天页（8-chat）与 Mac 发包前提 · Claude
+- 用户需求：把 llama.cpp 自带聊天放进客户端。用户否掉「iframe 内嵌 /upstream/<模型>/」（难看、风格不符），要求自己做；模型没在线时按我的建议只提示不加载。已写入 plan 关键决定 55、阶段 8 任务「内置聊天页」、claude-guide 的 8-chat 卡片（含可复制提示词）。**本会话没有实现页面**；用户要求按工作包在新会话做。
+- 未提交草稿（在工作区，未入库）：`app/utils/chat.ts`（parseSse / readDelta / errorMessage / renderMarkdown，Markdown 先转义、只生成固定标签、链接只放 http(s)）与 `tests/app/chat.test.ts`（5 项通过）。新会话先读再决定是否复用。
+- 已确认的边界：页面只在 :5001，公网仍只开放 /v1/*；对话只存浏览器本地；第一版不做图片上传 / 多会话 / 参数面板。Mac 上已有模型，可做真实流式验证。
+- Mac 发包前提（用户回答）：没有 Apple 开发者证书，只能发未公证测试包；Mac 包与 Windows 同一个版本一起发。Mac 打包工作包（macOS runner 构建、DMG、Release 流程、Mac 应用内更新路径、Intel 延后）仍须用户另行启动，未开始。
+- 发现的事实：`/upstream/<模型>/` 直通口已存在（只放行本机 / 局域网、只对 ready 的模型，不触发加载）。
+- 下一步：用户开新会话，用 claude-guide 里 8-chat 的提示词。阶段 9（先 9-1 预估核心，需真机，开始前告知）与 Mac 打包等用户启动。
+
 ## 2026-10-05 · 发布 v0.1.0-beta.6 + 一次「打不开」的排查 · Claude
 - 发布：v0.1.0-beta.6（提交 e94b239）由 Windows 草稿工作流构建成功（工作流内 bun test / typecheck / cargo test / 包内容检查通过），下载的安装包 SHA-256 与 SHA256SUMS 一致（6190b2d2…edc9）、清单 commit 正确后发布为预发布版。内容见 `docs/release-notes/v0.1.0-beta.6.md`（首次按本机调参、重新推荐、模型删除、镜像兜底与自定义镜像、引导页、Cloudflare 权限修复等）。
 - 用户反馈「打不开」（窗口：Service exited (exit code: 1) + Bun 版本号）。排查结论：用户机器上装的是 **beta.4**（resources/versions.json 为 0.1.0-beta.4），beta.6 并未装上；数据目录的 settings.json 已被用户之前用 start.bat 从源码运行时升到版本 8，而 beta.4 只支持到 7。装上 beta.6 后用户确认能正常打开。所以不是 beta.6 的问题。
