@@ -25,6 +25,12 @@ export const PARAM_FIELDS: ParamField[] = [
   { key: 'reasoningBudget', kind: 'number' },
 ]
 
+/** The few settings the first-start dialog asks about; shown first, the rest sits under "more". The thinking limit hangs off `reasoning`. */
+export const COMMON_KEYS: ParamKey[] = ['ctxSize', 'reasoning']
+export const COMMON_FIELDS: ParamField[] = PARAM_FIELDS.filter(f => COMMON_KEYS.includes(f.key))
+/** Everything else in the main list; the raw thinking-limit row is replaced by the shortcut control. */
+export const MORE_FIELDS: ParamField[] = PARAM_FIELDS.filter(f => !COMMON_KEYS.includes(f.key) && f.key !== 'reasoningBudget')
+
 /** CPU tuning (threads, NUMA, affinity mask): shown in a collapsed "advanced" block, not in the main list. */
 export const CPU_FIELDS: ParamField[] = [
   { key: 'threads', kind: 'number' },

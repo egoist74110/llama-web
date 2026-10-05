@@ -168,6 +168,10 @@ export interface FirstSetup {
   ctxSize?: number | null
   /** Also update every global defaults set; the current profile keeps its own value. */
   setGlobalContext?: boolean
+  /** Also set every global defaults set's thinking switch (`reasoning`) to this answer. */
+  setGlobalThinking?: boolean
+  /** Also set every global defaults set's thinking limit (`reasoningBudget`); needs `thinkingLimit`. */
+  setGlobalThinkingLimit?: boolean
   /** Let the model think before answering (`--reasoning on`) or not (`off`). */
   thinking: boolean
   /** Shortcut value: 0 = unlimited, positive integer = token cap. Absent preserves older clients. */
@@ -204,6 +208,10 @@ export function applyFirstSetup(doc: ModelsDoc, modelId: string, input: FirstSet
   if (input.setGlobalContext !== undefined && typeof input.setGlobalContext !== 'boolean') throw new ProfileError('bad-context')
   if (input.setGlobalContext && input.ctxSize === undefined) throw new ProfileError('bad-context')
   if (input.thinkingLimit !== undefined && !validThinkingLimit(input.thinkingLimit)) throw new ProfileError('bad-thinking-limit')
+  for (const flag of [input.setGlobalThinking, input.setGlobalThinkingLimit]) {
+    if (flag !== undefined && typeof flag !== 'boolean') throw new ProfileError('bad-thinking-limit')
+  }
+  if (input.setGlobalThinkingLimit && input.thinkingLimit === undefined) throw new ProfileError('bad-thinking-limit')
   const model = findModel(doc, modelId)
   const profile = model.profiles[model.activeProfile]
   if (!profile) throw new ProfileError('profile-not-found')

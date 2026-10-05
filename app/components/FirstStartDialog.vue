@@ -17,6 +17,8 @@ const feedback = useModelStartFeedback()
 const info = ref<SetupDoc | null>(null)
 const ctxSize = ref<number | string>('')
 const setGlobalContext = ref(false)
+const setGlobalThinking = ref(false)
+const setGlobalThinkingLimit = ref(false)
 const thinking = ref(true)
 const thinkingLimit = ref<number | string>(0)
 const thinkingLimitOk = computed(() => thinkingLimit.value !== '' && validThinkingLimit(Number(thinkingLimit.value)))
@@ -47,6 +49,8 @@ watch(open, async (v) => {
     info.value = r
     ctxSize.value = r.current.ctxSize ?? ''
     setGlobalContext.value = false
+    setGlobalThinking.value = false
+    setGlobalThinkingLimit.value = false
     // MTP always starts off; opening it requires an explicit mode choice.
     thinking.value = true
     thinkingLimit.value = 0
@@ -69,6 +73,8 @@ async function confirm() {
       body: {
         ctxSize: ctxSize.value === '' ? null : Number(ctxSize.value),
         setGlobalContext: setGlobalContext.value,
+        setGlobalThinking: setGlobalThinking.value,
+        setGlobalThinkingLimit: thinking.value && setGlobalThinkingLimit.value,
         thinking: thinking.value,
         thinkingLimit: Number(thinkingLimit.value),
         mmproj: vision.value ? find(info.value.candidates.mmproj, mmprojKey.value) : null,
@@ -124,7 +130,13 @@ async function confirm() {
           <p class="m-0 text-xs text-muted">
             {{ thinking ? s.thinking.hintOn : s.thinking.hintOff }}
           </p>
+          <UCheckbox v-model="setGlobalThinking" :label="s.thinking.global" />
           <ThinkingLimit v-model="thinkingLimit" :enabled="thinking" id-prefix="first-start" />
+          <template v-if="thinking">
+            <UCheckbox v-model="setGlobalThinkingLimit" :label="s.thinking.globalLimit" />
+            <p v-if="setGlobalThinking || setGlobalThinkingLimit" class="m-0 text-xs text-muted">{{ s.thinking.globalHint }}</p>
+          </template>
+          <p v-else-if="setGlobalThinking" class="m-0 text-xs text-muted">{{ s.thinking.globalHint }}</p>
           <p v-if="!thinking && !thinkingLimitOk" class="text-xs text-error">{{ t.models.thinkingLimit.hiddenInvalid }}</p>
         </section>
 

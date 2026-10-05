@@ -179,10 +179,17 @@ watch([effectiveRuntime, () => props.active, () => ui.value.hasGpu], () => {
 const deviceNote = computed(() => (devices.failedOf(effectiveRuntime.value) ? rd.listFailed : devices.viewOf(effectiveRuntime.value)?.source === 'nvidia-smi' ? rd.listFromSmi : ''))
 const cpuMulti = computed(() => !!devices.viewOf(effectiveRuntime.value)?.cpu.multi)
 const advancedOpen = computed(() => cpuMulti.value || CPU_FIELDS.some(f => state.rows[f.key].mode !== 'inherit'))
-const blocks = [
-  { id: 'main', advanced: false, fields: PARAM_FIELDS.filter(f => f.key !== 'reasoningBudget') },
-  { id: 'cpu', advanced: true, fields: CPU_FIELDS },
-]
+const moreOpen = computed(() => MORE_FIELDS.some(f => state.rows[f.key].mode !== 'inherit'))
+// Page order: the few common settings and MTP first, then chat template and build / device, then the rest.
+const blocks = {
+  common: { id: 'common', fields: COMMON_FIELDS },
+  more: { id: 'more', fields: MORE_FIELDS },
+  cpu: { id: 'cpu', fields: CPU_FIELDS },
+}
+type Step = { id: string, fields: ParamField[] }
+// Steps without parameter rows carry an empty field list.
+const step = (id: string): Step => ({ id, fields: [] })
+const layout: Step[] = [step('common-head'), blocks.common, step('mtp'), step('template'), step('runtime'), blocks.more, blocks.cpu]
 
 // ---- Preview (server-built) ------------------------------------------------------------------
 const preview = ref<LaunchPreview | null>(null)
@@ -239,121 +246,122 @@ const globalExtra = computed(() => props.defaults.extraArgs?.trim())
 
 <template>
   <div class="space-y-5">
-    <div class="space-y-1.5">
-      <h4 class="text-sm font-medium text-highlighted">
-        {{ edit.form.template }}
-      </h4>
-      <USelect
-        :model-value="toSelectValue(state.chatTemplate)"
-        :items="templateItems"
-        class="w-full sm:w-80"
-        :aria-label="edit.form.template"
-        @update:model-value="(v: unknown) => { state.chatTemplate = fromSelectValue(v) }"
-      />
-      <p class="text-xs text-muted">
-        {{ edit.form.templateHint }}
-      </p>
-    </div>
-
-    <div class="space-y-3">
-      <div class="space-y-1.5">
+    <template v-for="b in layout" :key="b.id">
+      <div v-if="b.id === 'common-head'">
         <h4 class="text-sm font-medium text-highlighted">
-          {{ rd.runtime }}
+          {{ edit.form.commonTitle }}
         </h4>
-        <USelect
-          :model-value="toSelectValue(state.runtime)"
-          :items="runtimeChoices"
-          class="w-full sm:w-80"
-          :aria-label="rd.runtime"
-          @update:model-value="(v: unknown) => { state.runtime = fromSelectValue(v) }"
-        />
         <p class="text-xs text-muted">
-          {{ rd.runtimeHint }}
+          {{ edit.form.commonHint }} {{ edit.form.hint }}
         </p>
       </div>
-      <DeviceChoice
-        v-if="ui.hasGpu"
-        v-model="state.gpu"
-        :view="devices.viewOf(effectiveRuntime)"
-        :runtime="effectiveRuntime"
-        :inherit-label="rd.inherit"
-        :label="rd.device"
-        :hint="rd.deviceHint"
-        :note="deviceNote"
-        id-prefix="profile"
-      />
-    </div>
-
-    <div class="space-y-2">
-      <MtpChoice v-model="state.mtp" :candidates="mtpCandidates" :id-prefix="`profile-${name}`" />
-      <p class="m-0 text-xs text-muted">{{ t.models.firstStart.mtp.sharedHint }}</p>
-      <p class="m-0 text-xs text-muted">{{ t.models.firstStart.mtp.extraHint }}</p>
-    </div>
-
-    <div>
-      <h4 class="text-sm font-medium text-highlighted">
-        {{ edit.form.title }}
-      </h4>
-      <p class="text-xs text-muted">
-        {{ edit.form.hint }}
-      </p>
-      <component :is="b.advanced ? 'details' : 'div'" v-for="b in blocks" :key="b.id" :open="b.advanced ? advancedOpen || undefined : undefined" :class="b.advanced ? 'mt-1 border-t border-default' : 'mt-1'">
-        <summary v-if="b.advanced" class="cursor-pointer select-none py-3 text-sm font-medium text-highlighted">
-          {{ rd.advanced }}
-          <span class="block text-xs font-normal text-muted">{{ rd.advancedHint }}</span>
-        </summary>
-        <div class="divide-y divide-default">
-          <div v-for="f in b.fields" :key="f.key" class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3">
-            <div class="min-w-0 flex-1 basis-56">
-              <p class="text-sm text-default">
-                {{ paramText(f.key, ui.isMac).label }}
-              </p>
-              <p class="text-xs text-muted">
-                {{ paramText(f.key, ui.isMac).hint }}
-              </p>
-            </div>
-            <div class="flex items-center gap-2">
-              <USelect
-                :model-value="state.rows[f.key].mode"
-                :items="modeItems"
-                size="sm"
-                class="w-24"
-                :aria-label="paramText(f.key, ui.isMac).label"
-                @update:model-value="(m: string) => setMode(f.key, m as Mode)"
-              />
-              <template v-if="state.rows[f.key].mode === 'custom'">
-                <USelect
-                  v-if="f.kind === 'select'"
-                  v-model="state.rows[f.key].value"
-                  :items="selectItems(f, state.rows[f.key].value)"
-                  size="sm"
-                  class="w-36"
-                />
-                <UInput
-                  v-else
-                  :model-value="state.rows[f.key].value"
-                  :type="f.kind === 'number' ? 'number' : 'text'"
-                  size="sm"
-                  class="w-36"
-                  :color="invalidKeys.includes(f.key) ? 'error' : undefined"
-                  @update:model-value="(v: string | number | undefined) => { state.rows[f.key].value = v == null ? '' : String(v) }"
-                />
-              </template>
-              <span v-else-if="state.rows[f.key].mode === 'inherit'" class="w-36 text-xs text-muted">{{ inheritedText(f.key) }}</span>
-              <span v-else class="w-36 text-xs text-muted">{{ edit.form.omit }}</span>
-            </div>
-            <ThinkingLimit v-if="f.key === 'reasoning'" v-model="limitValue" :enabled="thinkingEnabled" :id-prefix="`profile-${name}`"
-              :disabled="state.rows.reasoningBudget.mode !== 'custom'" :legacy-disabled="legacyBudgetZero">
-              <USelect :model-value="state.rows.reasoningBudget.mode" :items="modeItems" size="sm" class="w-24"
-                :aria-label="t.models.thinkingLimit.source" @update:model-value="(m: string) => setMode('reasoningBudget', m as Mode)" />
-              <p v-if="state.rows.reasoningBudget.mode === 'inherit'" class="m-0 text-xs text-muted">{{ inheritedText('reasoningBudget') }}</p>
-              <p v-else-if="state.rows.reasoningBudget.mode === 'omit'" class="m-0 text-xs text-muted">{{ edit.form.omit }}</p>
-            </ThinkingLimit>
-            <p v-if="f.key === 'reasoning' && !thinkingEnabled && limitInvalid" class="w-full text-xs text-error">{{ t.models.thinkingLimit.hiddenInvalid }}</p>
-          </div>
+      <div v-else-if="b.id === 'mtp'" class="space-y-2">
+        <MtpChoice v-model="state.mtp" :candidates="mtpCandidates" :id-prefix="`profile-${name}`" />
+        <p class="m-0 text-xs text-muted">{{ t.models.firstStart.mtp.sharedHint }}</p>
+        <p class="m-0 text-xs text-muted">{{ t.models.firstStart.mtp.extraHint }}</p>
+      </div>
+      <div v-else-if="b.id === 'template'" class="space-y-1.5">
+        <h4 class="text-sm font-medium text-highlighted">
+          {{ edit.form.template }}
+        </h4>
+        <USelect
+          :model-value="toSelectValue(state.chatTemplate)"
+          :items="templateItems"
+          class="w-full sm:w-80"
+          :aria-label="edit.form.template"
+          @update:model-value="(v: unknown) => { state.chatTemplate = fromSelectValue(v) }"
+        />
+        <p class="text-xs text-muted">
+          {{ edit.form.templateHint }}
+        </p>
+      </div>
+      <div v-else-if="b.id === 'runtime'" class="space-y-3">
+        <div class="space-y-1.5">
+          <h4 class="text-sm font-medium text-highlighted">
+            {{ rd.runtime }}
+          </h4>
+          <USelect
+            :model-value="toSelectValue(state.runtime)"
+            :items="runtimeChoices"
+            class="w-full sm:w-80"
+            :aria-label="rd.runtime"
+            @update:model-value="(v: unknown) => { state.runtime = fromSelectValue(v) }"
+          />
+          <p class="text-xs text-muted">
+            {{ rd.runtimeHint }}
+          </p>
         </div>
-      </component>
-    </div>
+        <DeviceChoice
+          v-if="ui.hasGpu"
+          v-model="state.gpu"
+          :view="devices.viewOf(effectiveRuntime)"
+          :runtime="effectiveRuntime"
+          :inherit-label="rd.inherit"
+          :label="rd.device"
+          :hint="rd.deviceHint"
+          :note="deviceNote"
+          id-prefix="profile"
+        />
+      </div>
+      <div v-else>
+        <component :is="b.id === 'common' ? 'div' : 'details'" :open="b.id === 'cpu' ? advancedOpen || undefined : b.id === 'more' ? moreOpen || undefined : undefined" :class="b.id === 'common' ? 'mt-1' : 'border-t border-default'">
+          <summary v-if="b.id !== 'common'" class="cursor-pointer select-none py-3 text-sm font-medium text-highlighted">
+            {{ b.id === 'cpu' ? rd.advanced : edit.form.moreTitle }}
+            <span class="block text-xs font-normal text-muted">{{ b.id === 'cpu' ? rd.advancedHint : edit.form.moreHint }}</span>
+          </summary>
+          <div class="divide-y divide-default">
+            <div v-for="f in b.fields" :key="f.key" class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3">
+              <div class="min-w-0 flex-1 basis-56">
+                <p class="text-sm text-default">
+                  {{ paramText(f.key, ui.isMac).label }}
+                </p>
+                <p class="text-xs text-muted">
+                  {{ paramText(f.key, ui.isMac).hint }}
+                </p>
+              </div>
+              <div class="flex items-center gap-2">
+                <USelect
+                  :model-value="state.rows[f.key].mode"
+                  :items="modeItems"
+                  size="sm"
+                  class="w-24"
+                  :aria-label="paramText(f.key, ui.isMac).label"
+                  @update:model-value="(m: string) => setMode(f.key, m as Mode)"
+                />
+                <template v-if="state.rows[f.key].mode === 'custom'">
+                  <USelect
+                    v-if="f.kind === 'select'"
+                    v-model="state.rows[f.key].value"
+                    :items="selectItems(f, state.rows[f.key].value)"
+                    size="sm"
+                    class="w-36"
+                  />
+                  <UInput
+                    v-else
+                    :model-value="state.rows[f.key].value"
+                    :type="f.kind === 'number' ? 'number' : 'text'"
+                    size="sm"
+                    class="w-36"
+                    :color="invalidKeys.includes(f.key) ? 'error' : undefined"
+                    @update:model-value="(v: string | number | undefined) => { state.rows[f.key].value = v == null ? '' : String(v) }"
+                  />
+                </template>
+                <span v-else-if="state.rows[f.key].mode === 'inherit'" class="w-36 text-xs text-muted">{{ inheritedText(f.key) }}</span>
+                <span v-else class="w-36 text-xs text-muted">{{ edit.form.omit }}</span>
+              </div>
+              <ThinkingLimit v-if="f.key === 'reasoning'" v-model="limitValue" :enabled="thinkingEnabled" :id-prefix="`profile-${name}`"
+                :disabled="state.rows.reasoningBudget.mode !== 'custom'" :legacy-disabled="legacyBudgetZero">
+                <USelect :model-value="state.rows.reasoningBudget.mode" :items="modeItems" size="sm" class="w-24"
+                  :aria-label="t.models.thinkingLimit.source" @update:model-value="(m: string) => setMode('reasoningBudget', m as Mode)" />
+                <p v-if="state.rows.reasoningBudget.mode === 'inherit'" class="m-0 text-xs text-muted">{{ inheritedText('reasoningBudget') }}</p>
+                <p v-else-if="state.rows.reasoningBudget.mode === 'omit'" class="m-0 text-xs text-muted">{{ edit.form.omit }}</p>
+              </ThinkingLimit>
+              <p v-if="f.key === 'reasoning' && !thinkingEnabled && limitInvalid" class="w-full text-xs text-error">{{ t.models.thinkingLimit.hiddenInvalid }}</p>
+            </div>
+          </div>
+        </component>
+      </div>
+    </template>
 
     <div class="space-y-1.5">
       <h4 class="text-sm font-medium text-highlighted">

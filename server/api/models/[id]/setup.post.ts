@@ -1,4 +1,4 @@
-// Save the first-start answers { ctxSize?, setGlobalContext?, thinking, thinkingLimit?, mmproj, mtp, draft, mtpN, start? } into the model's
+// Save the first-start answers { ctxSize?, setGlobalContext?, setGlobalThinking?, setGlobalThinkingLimit?, thinking, thinkingLimit?, mmproj, mtp, draft, mtpN, start? } into the model's
 // current profile and files, mark the model confirmed, and optionally start it.
 import { type FirstSetup } from '../../../core/models-admin'
 import { saveFirstSetup } from '../../../core/first-setup'
@@ -22,7 +22,8 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, message: t.models.errors.badRequest })
   }
   const input: FirstSetup = { thinking: body.thinking, thinkingLimit: body.thinkingLimit as FirstSetup['thinkingLimit'], mmproj: ref(body.mmproj), mtp: body.mtp, mtpMode: body.mtpMode as FirstSetup['mtpMode'], draft: ref(body.draft), mtpN: body.mtpN,
-    ctxSize: body.ctxSize as FirstSetup['ctxSize'], setGlobalContext: body.setGlobalContext as FirstSetup['setGlobalContext'] }
+    ctxSize: body.ctxSize as FirstSetup['ctxSize'], setGlobalContext: body.setGlobalContext as FirstSetup['setGlobalContext'],
+    setGlobalThinking: body.setGlobalThinking as FirstSetup['setGlobalThinking'], setGlobalThinkingLimit: body.setGlobalThinkingLimit as FirstSetup['setGlobalThinkingLimit'] }
   const ctx = getContext()
   const { entries } = await scanModelDirs(ctx.getSettings().modelDirs)
   try {

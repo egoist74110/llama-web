@@ -5,9 +5,11 @@
 import t from '~~/i18n/zh-CN'
 import type { GpuChoice } from '~~/server/core/gpu-group'
 import type { ParamField } from '~/composables/useParamFields'
+import { displayThinkingLimit, thinkingBudget, validThinkingLimit } from '~~/server/core/thinking-limit'
 
 type Key = 'defaults' | 'defaultsCpu'
-type FormState = { values: Record<string, string>, gpu: GpuForm, extraArgs: string }
+// `limit` is the thinking-limit shortcut (0 = unlimited); it writes `values.reasoningBudget` (-1 = unlimited) when valid.
+type FormState = { values: Record<string, string>, gpu: GpuForm, extraArgs: string, limit: string }
 
 const s = t.settings.defaults
 const { doc, saving, save } = useSettings()
@@ -15,13 +17,13 @@ const ui = usePlatformUi()
 const toast = useToast()
 const devices = useDevices()
 
-const emptyState = (): FormState => ({ values: {}, gpu: emptyGpuForm(), extraArgs: '' })
+const emptyState = (): FormState => ({ values: {}, gpu: emptyGpuForm(), extraArgs: '', limit: '0' })
 function from(d: Record<string, unknown>): FormState {
   const values: Record<string, string> = {}
   for (const f of ALL_FIELDS) values[f.key] = d[f.key] === null || d[f.key] === undefined ? '' : String(d[f.key])
   // An explicit "auto" and no choice mean the same at the root.
   const gpu = gpuFormFrom({ ...d, device: typeof d.device === 'string' && d.device !== 'auto' ? d.device : '' } as GpuChoice)
-  return { values, gpu, extraArgs: String(d.extraArgs ?? '') }
+  return { values, gpu, extraArgs: String(d.extraArgs ?? ''), limit: String(displayThinkingLimit(values.reasoningBudget === '' ? null : values.reasoningBudget)) }
 }
 
 const which = ref<Key>('defaults')
@@ -52,11 +54,21 @@ const showDevice = computed(() => ui.value.hasGpu && which.value === 'defaults')
 watch(() => ui.value.hasGpu, (has) => { if (has) void devices.load('') }, { immediate: true })
 const gpuInvalid = computed(() => showDevice.value && !ratioValid(state.value.gpu))
 
-const blocks = computed(() => [
-  { id: 'main', advanced: false, fields: PARAM_FIELDS },
-  { id: 'cpu', advanced: true, fields: CPU_FIELDS },
-])
+const blocks = [
+  { id: 'common', fields: COMMON_FIELDS },
+  { id: 'more', fields: MORE_FIELDS },
+  { id: 'cpu', fields: CPU_FIELDS },
+]
 const advancedOpen = computed(() => CPU_FIELDS.some(f => state.value.values[f.key] !== ''))
+const thinkingEnabled = computed(() => state.value.values.reasoning === 'on')
+const limitInvalid = computed(() => state.value.limit === '' || !validThinkingLimit(Number(state.value.limit)))
+const limitValue = computed<string>({
+  get: () => state.value.limit,
+  set: (v) => {
+    state.value.limit = String(v)
+    if (v !== '' && validThinkingLimit(Number(v))) state.value.values.reasoningBudget = String(thinkingBudget(Number(v)))
+  },
+})
 
 function selectItems(f: ParamField, current: string) {
   const items = withEmptyOption(s.empty, (f.options ?? []).map(o => ({ label: o, value: o })))
@@ -116,36 +128,51 @@ async function submit() {
         />
       </div>
 
-      <component :is="b.advanced ? 'details' : 'div'" v-for="b in blocks" :key="b.id" :open="b.advanced ? advancedOpen || undefined : undefined" :class="b.advanced ? 'border-t border-default' : ''">
-        <summary v-if="b.advanced" class="cursor-pointer select-none py-3 text-sm font-medium text-highlighted">
-          {{ s.advanced }}
-          <span class="block text-xs font-normal text-muted">{{ s.advancedHint }}</span>
-        </summary>
-        <div class="divide-y divide-default">
-          <div v-for="f in b.fields" :key="f.key" class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3" :class="{ 'first:pt-0': !b.advanced && !showDevice }">
-            <div class="min-w-0 flex-1 basis-56">
-              <p class="text-sm text-default">
-                {{ paramText(f.key, ui.isMac).label }}
-              </p>
-              <p class="text-xs text-muted">
-                {{ paramText(f.key, ui.isMac).hint }}
-              </p>
-            </div>
-            <USelect v-if="f.kind === 'select'" :model-value="toSelectValue(state.values[f.key])" :items="selectItems(f, state.values[f.key]!)" size="sm" class="w-40" :aria-label="paramText(f.key, ui.isMac).label" @update:model-value="(v: unknown) => { state.values[f.key] = fromSelectValue(v) }" />
-            <UInput
-              v-else
-              :model-value="state.values[f.key]"
-              :type="f.kind === 'number' ? 'number' : 'text'"
-              size="sm"
-              class="w-40"
-              :placeholder="s.empty"
-              :color="invalidKeys.includes(f.key) ? 'error' : undefined"
-              :aria-label="paramText(f.key, ui.isMac).label"
-              @update:model-value="(v: string | number | undefined) => { state.values[f.key] = v == null ? '' : String(v) }"
-            />
-          </div>
+      <template v-for="b in blocks" :key="b.id">
+        <div v-if="b.id === 'common'" class="pt-3">
+          <h4 class="text-sm font-medium text-highlighted">
+            {{ s.commonTitle }}
+          </h4>
+          <p class="text-xs text-muted">
+            {{ s.commonHint }}
+          </p>
         </div>
-      </component>
+      <component :is="b.id === 'common' ? 'div' : 'details'" :open="b.id === 'cpu' ? advancedOpen || undefined : undefined" :class="b.id === 'common' ? '' : 'border-t border-default'">
+          <summary v-if="b.id !== 'common'" class="cursor-pointer select-none py-3 text-sm font-medium text-highlighted">
+            {{ b.id === 'cpu' ? s.advanced : s.moreTitle }}
+            <span class="block text-xs font-normal text-muted">{{ b.id === 'cpu' ? s.advancedHint : s.moreHint }}</span>
+          </summary>
+          <div class="divide-y divide-default">
+            <div v-for="f in b.fields" :key="f.key" class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3" :class="{ 'first:pt-0': b.id === 'common' && !showDevice }">
+              <div class="min-w-0 flex-1 basis-56">
+                <p class="text-sm text-default">
+                  {{ paramText(f.key, ui.isMac).label }}
+                </p>
+                <p class="text-xs text-muted">
+                  {{ paramText(f.key, ui.isMac).hint }}
+                </p>
+              </div>
+              <USelect v-if="f.kind === 'select'" :model-value="toSelectValue(state.values[f.key])" :items="selectItems(f, state.values[f.key]!)" size="sm" class="w-40" :aria-label="paramText(f.key, ui.isMac).label" @update:model-value="(v: unknown) => { state.values[f.key] = fromSelectValue(v) }" />
+              <UInput
+                v-else
+                :model-value="state.values[f.key]"
+                :type="f.kind === 'number' ? 'number' : 'text'"
+                size="sm"
+                class="w-40"
+                :placeholder="s.empty"
+                :color="invalidKeys.includes(f.key) ? 'error' : undefined"
+                :aria-label="paramText(f.key, ui.isMac).label"
+                @update:model-value="(v: string | number | undefined) => { state.values[f.key] = v == null ? '' : String(v) }"
+              />
+              <ThinkingLimit v-if="f.key === 'reasoning'" v-model="limitValue" :enabled="thinkingEnabled" id-prefix="defaults" />
+              <p v-if="f.key === 'reasoning' && !thinkingEnabled && limitInvalid" class="w-full text-xs text-error">{{ t.models.thinkingLimit.hiddenInvalid }}</p>
+            </div>
+          </div>
+        </component>
+        <p v-if="b.id === 'common'" class="m-0 pb-3 text-xs text-muted">
+          {{ s.mtpNote }}
+        </p>
+      </template>
     </div>
 
     <div class="mt-2 space-y-1.5 border-t border-default pt-4">
@@ -158,7 +185,7 @@ async function submit() {
       </p>
     </div>
     <div class="mt-4 flex flex-wrap items-center gap-2">
-      <UButton size="sm" icon="i-lucide-save" :disabled="!dirty || !!invalidKeys.length || gpuInvalid" :loading="saving === which" @click="submit">
+      <UButton size="sm" icon="i-lucide-save" :disabled="!dirty || !!invalidKeys.length || gpuInvalid || limitInvalid" :loading="saving === which" @click="submit">
         {{ t.settings.save }}
       </UButton>
       <UButton size="sm" color="neutral" variant="outline" icon="i-lucide-rotate-ccw" @click="restore">

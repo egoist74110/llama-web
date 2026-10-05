@@ -1,5 +1,14 @@
 # 交接记录
 
+## 2026-10-05 · A2 首次启动配置进入全局与单模型配置（关键决定 50） · Claude
+- 核对结果：单模型侧上下文 / 思考 / 上限 / mmproj / MTP 早已有共享控件；缺口在全局页（思考上限只有原始数字框，无 MTP）。用户确认：全局思考上限改快捷控件；MTP 不进全局；首次确认的「设为全局」加思考开关、上限两个勾选；常用项抽出置顶、其余折叠。
+- 服务端：`FirstSetup` 增加 `setGlobalThinking` / `setGlobalThinkingLimit`；`saveFirstSetup` 泛化为 ctxSize / reasoning / reasoningBudget 多字段同步（GPU + CPU，Mac 一份），先校验后写，模型写失败只回退改过的全局字段。无新配置字段、无迁移。
+- 界面：`useParamFields` 新增 COMMON / MORE；`ProfileForm` 顶部「常用设置」（上下文、思考 + 上限、MTP）→ 聊天模板 / 运行库 / 设备 → 折叠「更多参数」→ CPU 进阶；`SettingsDefaults` 同样分组，思考上限用 `ThinkingLimit`（0 → -1），无效值阻止保存；`FirstStartDialog` 加两个勾选。文案在 i18n。
+- 验证：新增 `first-setup-global.test.ts` 6 项、`param-groups.test.ts` 2 项；`bun run typecheck` 通过；全量 1050 pass / 19 skip / 65 fail，其中 62 个是改动前就有的 Mac 失败，另 3 个（TunnelManager、registry、runner 端口）偶发，重跑通过，与本改动无关。隔离数据目录 + `nuxt dev` + 浏览器：首次确认框勾选后 settings.json / models.json 值正确（Mac 只写一份）；全局页思考上限显示 512，改 0 保存得 -1，「更多参数」默认折叠；编辑抽屉参数页分组与折叠正常。
+- 没验证：Windows 上 GPU + CPU 两份同步的真实界面（单测覆盖了 win32 两份）；窄屏 / 深色走查；真实模型启动。
+- 提示：全局页「更多参数」默认折叠（全局本来每项都有值，无法按「有自定义」自动展开）；模型页折叠状态按有无自定义值决定。
+- 下一步：阶段 8 剩余项见 plan（MTP 真机验收、旧安装是否「按本机重新推荐」、镜像后续）与用户在 Windows 上的试用关口。
+
 ## 2026-10-05 · 模型删除按钮 + 二次确认（关键决定 51） · Claude
 - 用户确认三点：文件进系统回收站；共享的草稿 / 视觉文件跳过并提示（本模型自己的照删）；运行中 / 加载中 / 排队中拒绝删除，不自动停止。
 - 实现：`server/core/model-remove.ts`（planRemove / removeModel，纯模块，可注入 trash 与文件系统）、`trash.ts`（Windows PowerShell + VB 回收站，路径走环境变量，失败按序号回报；Mac 用 osascript 让 Finder 删，路径作 argv；其他平台 gio；失败即报失败，绝不永久删除）、`ModelOps.busy / forget`（忙则抛 ModelBusyError，否则清理 failed / stopped 残留）。接口 `GET /api/models/:id/remove-plan`（弹窗预览）、`POST /api/models/:id/remove {deleteFiles}`。界面 `ModelRemoveModal.vue`，卡片和编辑抽屉各一个按钮；文案在 i18n `models.remove`。
