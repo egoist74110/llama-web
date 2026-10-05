@@ -807,9 +807,10 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 
   <h3>9-2 · 保存时检查与参数合理性（Sonnet 5.5）</h3>
   <ul class="tasks">
-    <li class="task" data-done="false"><span class="t"><code>POST /api/models/:id/check</code>（不保存，只算）与保存接口里的同一检查：返回显存三档 + 明细 + 参数合理性警告列表（决定 43 列出的各项）；仅在真实 llama-server 证实必然启动失败的组合才作为错误拒绝保存</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">合并参数时按「最终选中的运行库 / 设备」计算（接阶段 8 的引用与设备解析）；别的在线模型占用取实测；检查结果不写入配置</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">测试：每条合理性规则正反各一例；显存三档边界（85% / 100%）；设备不存在；多方案分别计算；旧配置（无 device / runtime）照常</span><span class="when"></span></li>
+    <li class="task" data-done="true"><span class="t"><code>POST /api/models/:id/check</code>（不保存，只算）与保存接口里的同一检查：返回显存三档 + 明细 + 参数合理性警告列表（决定 43 列出的各项）；仅在真实 llama-server 证实必然启动失败的组合才作为错误拒绝保存（<code>server/core/model-check.ts</code>、<code>server/service/model-check.ts</code>；错误只有三类：V 缓存量化但 flash-attn 关〔Mac b11146 实测退出码 1〕、设备不在该版本列表〔8-7 在真实 5090 上实测〕、版本不支持切分模式；其余都只是警告，显存三档永远不拒绝保存）</span><span class="when">2026-10-05</span></li>
+    <li class="task" data-done="true"><span class="t">合并参数时按「最终选中的运行库 / 设备」计算（接阶段 8 的引用与设备解析；吃的是命令预览的最终参数数组，额外参数已覆盖在内）；检查结果不写入配置；别的在线模型和别的程序已占的部分来自设备「当前可用」的实时读数（<code>--list-devices</code> / nvidia-smi / 系统内存）</span><span class="when">2026-10-05</span></li>
+    <li class="task" data-done="false"><span class="t">别的在线模型占用改取 <code>vram-stats.json</code> 的实测值：要等 9-3 把「加载成功后记录」接进调度（现在没有记录可查）；同一模型已在线时，检查里的可用量不含它自己，只会偏保守（结果里有 <code>online</code> 标记）</span><span class="when"></span></li>
+    <li class="task" data-done="true"><span class="t">测试：每条合理性规则正反各一例；显存三档边界（85% / 100%）；设备不存在；多方案分别计算；旧配置（无 device / runtime）照常（<code>tests/core/model-check.test.ts</code> 19 项、<code>tests/service/model-check.test.ts</code> 7 项 + Windows 专属 1 项）</span><span class="when">2026-10-05</span></li>
   </ul>
 
   <h3>9-3 · 调度支持多开（Opus 5.5）</h3>
@@ -910,6 +911,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 <section id="changelog">
   <h2>变更记录</h2>
   <table>
+    <tr><td>2026-10-05</td><td>9-2 保存时检查与参数合理性完成：<code>POST /api/models/:id/check</code>（单个方案，或 <code>all</code> 逐个方案分别算）与保存接口共用一套检查，返回显存 / 内存三档 + 逐池明细 + 参数警告；只有实测证实必然启动失败的三类组合拒绝保存（400，错误码 check-failed）。V 缓存量化且 flash-attn 关在 Mac b11146 + Qwen3.5-2B 上仅用 CPU 实测退出码 1；上下文超训练长度、ubatch &gt; batch、CPU 设备写大层数 / 视觉模型选 CPU、mlock &gt; 可用内存、并行槽过多按实测或规则只警告。「别的在线模型取实测」拆出为 9-3 的未完成项（需要先接线加载成功后的记录）。CUDA / Windows 未实测。</td></tr>
     <tr><td>2026-10-05</td><td>9-1 显存 / 内存预估核心（Mac 部分）完成：<code>gguf.ts</code> 补读层数 / KV 头 / 窗口 / SSM / 词表与按层张量字节，<code>memory-estimate.ts</code>（预估纯函数）、<code>memory-sample.ts</code>（系统可用内存）、<code>vram-stats.ts</code>（实测记录模块）；实测结论与误差见 <code>docs/research/memory-estimate.md</code>。发现：llama-server 自动 <code>--parallel</code> 是 4 槽统一 KV；<code>llama-fit-params</code> 的计算缓冲偏大一个数量级、不传 ctx 时会静默缩小上下文；Mac 的 <code>os.freemem()</code> 不可用。CUDA 路径与加载后自动记录（接调度）未做。</td></tr>
     <tr><td>2026-10-05</td><td>用户在 Mac 上试用 DMG 无问题（首次打开用“仍要打开”）；v0.1.0-beta.7（Windows + macOS arm64）公开为预发布。</td></tr>
     <tr><td>2026-10-05</td><td>用户要求 Mac 与 Windows 同版本一起发：版本升到 0.1.0-beta.7，发布说明 <code>docs/release-notes/v0.1.0-beta.7.md</code>（Mac 未签名 / 未公证、首次打开步骤未经真机验证）；macOS 工作流增加 <code>attach_to_draft</code>，把 DMG 挂到 Windows 工作流创建的草稿并追加 SHA256SUMS；Mac 桌面版不再注册应用内安装钩子（原来会去下载 .exe）。只建草稿，公开由用户确认。</td></tr>

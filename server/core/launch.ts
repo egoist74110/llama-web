@@ -3,7 +3,7 @@
 // scheduler records them as a load failure.
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { buildLaunchArgs, cmdProgramMayExpand, formatCmdCommand, formatPosixCommand, type ArgWarning, type BuildInput, type LaunchDefaults, type LaunchParams, type ParamOverrides } from './args'
+import { buildLaunchArgs, cmdProgramMayExpand, formatCmdCommand, formatPosixCommand, type ArgWarning, type BuildInput, type LaunchDefaults, type LaunchParams, type ParamOverrides, type ParamValue } from './args'
 import { deviceMissing, type DeviceList } from './devices'
 import { autoPick, comboKey, requiredDevices, resolveGpuSelection, type GpuChoice, type GpuGroup, type GpuSelection } from './gpu-group'
 import { comboWarnings, type ComboRecord } from './split-stats'
@@ -153,10 +153,14 @@ export interface LaunchPreview {
    */
   command: string
   shell: 'cmd' | 'posix'
+  /** The argument array behind `command` (without the program), as it would be passed. */
+  args: string[]
   ok: boolean
   warnings: ArgWarning[]
   /** Merged form values before extra-args replacement. */
   effective: LaunchParams
+  /** `--n-gpu-layers` before a CPU device forced it to 0. */
+  requestedGpuLayers: ParamValue
   /** Configured files that do not exist (the command still shows where they are expected). */
   missing: Array<'model' | 'mmproj' | 'draft' | 'chatTemplate' | 'runtime'>
   /** The port is allocated at start; this is only the first port of the range. */
@@ -220,8 +224,8 @@ export function previewLaunch(input: PreviewInput): LaunchPreview {
   if (win && cmdProgramMayExpand(program)) warnings.push({ code: 'preview-program-percent', severity: 'warning' })
   return {
     command: win ? formatCmdCommand(program, built.args) : formatPosixCommand(program, built.args),
-    shell: win ? 'cmd' : 'posix',
-    ok: built.ok && !extra.some(w => w.severity === 'error'), warnings, effective: built.effective, missing, port, runtime, device: built.device,
+    shell: win ? 'cmd' : 'posix', args: built.args,
+    ok: built.ok && !extra.some(w => w.severity === 'error'), warnings, effective: built.effective, requestedGpuLayers: built.requestedGpuLayers, missing, port, runtime, device: built.device,
   }
 }
 

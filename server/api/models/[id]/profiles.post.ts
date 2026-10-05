@@ -14,6 +14,7 @@ import { scanModelDirs } from '../../../core/scanner'
 import { t } from '../../../core/i18n'
 import { selectableHere } from '../../../core/runtimes'
 import { getContext } from '../../../service/context'
+import { checkBeforeSave } from '../../../service/model-check'
 import { assertProfileFree, editError, requireModel, requireProfile, restartIfUp } from '../../../service/models-api'
 
 export default defineEventHandler(async (event) => {
@@ -52,10 +53,12 @@ export default defineEventHandler(async (event) => {
         const form = sanitizeForm(body.form)
         const templates = listTemplates(ctx.dataDir)
         const env = ctx.runtimes.env()
+        // A combination that cannot start is refused; memory tiers and warnings never block (they come back for the interface).
+        const check = await checkBeforeSave(model, name, body)
         const entries = form.mtp ? (await scanModelDirs(ctx.getSettings().modelDirs)).entries : []
         ctx.updateModels((doc) => { saveProfile(doc, model.id, name, form, templates, r => selectableHere(r, env), () => hasDeviceSelection(ctx.platform), entries) })
         const restarted = body.restart === true && restartIfUp(model.id, name)
-        return { ok: true, restarted }
+        return { ok: true, restarted, check }
       }
       default:
         throw createError({ statusCode: 400, message: t.models.errors.badRequest })

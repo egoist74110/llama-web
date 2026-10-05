@@ -1,5 +1,14 @@
 # 交接记录
 
+## 2026-10-05 · 9-2 保存时检查与参数合理性 · Claude
+- 做了：① `server/core/model-check.ts`（纯模块）：`finalParams` 从最终参数数组读出各项（别名、后者覆盖、`--load-mode mlock`、`-nkvo`、rope），`checkLaunch` 给出显存 / 内存三档 + 逐池明细 + 参数问题（`issues`，`error` / `warning`），`deviceInputs` 把「最终设备」换成 `DeviceInput[]`（Mac 一个共享池；`auto` 取最大的卡；多卡按 `--tensor-split`，否则按可用量分比例）。② `model-facts.ts`（首个分片头 + 全部分片大小，按路径 + 大小 + 修改时间缓存）。③ `server/service/model-check.ts`：`buildPreview`（从 preview.post.ts 抽出，预览行为不变）、`checkProfile`、`checkBeforeSave`；`ctx.getMemoryProbe`（设备列表 + nvidia-smi 兜底 + 系统内存）。④ `POST /api/models/:id/check`（`{profile, form?, files?, fresh?}`，或 `{all:true}` 逐方案分别算）；`profiles.post.ts` 的 save 先检查，有 error 就 400（`check-failed`，中文原因），否则照存并在响应里带 `check`。⑤ `LaunchPreview` 新增 `args`、`requestedGpuLayers`（CPU 设备把层数压成 0 之前的值）。⑥ i18n `models.check.issues` 与 `errors['check-failed']`；`docs/research/memory-estimate.md` 加了实测表。
+- 只有三类拒绝保存：V 缓存量化且 flash-attn 关（**Mac b11146 + Qwen3.5-2B，仅 CPU，实测退出码 1**）、设备不在该版本的列表（8-7 在真实 5090 上实测过）、版本不支持切分模式。其余（ctx 超训练长度、ubatch>batch、CPU 写大层数、视觉模型在 CPU、mlock>可用内存、每槽<1024 token）实测能启动或属规则，只警告。显存三档永不拒绝。
+- 验证：`bun test` 1214 pass / 20 skip / 0 fail；`bun run typecheck` 通过。新增 `tests/core/model-check.test.ts` 19 项、`tests/service/model-check.test.ts`（真实 context，桩设备列表）7 项 + Windows 专属 1 项（本机 skip）。隔离数据目录 + `nuxt dev` 打真实接口：`all:true` 两个方案各算出三档与明细；V 缓存量化 + fa off 的 check 返回 blocked，save 返回 400 中文原因且没写入；只带 ubatch>batch 的 save 成功并带回警告。
+- **没做 / 没验证**：Windows / CUDA 路径（`device-missing`、多卡份额、nvidia-smi 兜底、Windows 专属用例）没跑；「别的在线模型取 vram-stats 实测」没做（还没有记录，接线属 9-3，plan 已拆成未勾选项；现在的可用量是设备实时读数，已含别的模型，同一模型已在线时偏保守，结果里有 `online`）；界面没做（9-4）；每次检查最多跑一次 `--list-devices`（60 秒缓存，`fresh:true` 重问），Mac 上第一次探测曾读空一次，之后正常，原因没查清（失败不缓存，只影响一次预算为 unknown）。
+- 注意：设备缺失会让该方案连无关字段都存不了，直到换设备（只在该版本自己的列表读到时才判）；每槽 1024 token 是经验阈值。过程：开发服务与临时数据目录已清理；`src-tauri/Cargo.lock` 被 cargo 改写，已 `git checkout` 还原。
+- 给 9-3：加载前用同一条路径（`deviceInputs` + `estimateMemory`）判断；成功后调 `VramStats.record` 并让 `checkProfile` 取实测；mlock 超可用时由 9-3 负责「加载不带该参数并在命令预览标出」；看门狗用 `sampleSystemMemory`。
+- 下一步：9-3（Opus 5.5，开始前先把决定 41 / 42 的规则文字给用户确认）。
+
 ## 2026-10-05 · 9-1 显存 / 内存预估核心（Mac 口径）· Claude
 - 做了：① `gguf.ts` 新增 `readGguf`（返回 `meta` + `layout`），`GgufMeta.arch` 补读层数 / 嵌入宽 / FFN 宽 / 注意力头 / KV 头（数字或每层数组）/ key·value 长度 / 滑动窗口及模式 / `full_attention_interval` / SSM 参数 / 词表大小，`layout` 给每层张量字节；旧字段不变。② `server/core/memory-estimate.ts`：`estimateMemory`（权重 / KV / 循环状态 / 计算缓冲 / mmproj / 草稿 / 设备固定开销，按池输出明细与三档，共享内存与独立显存两种，CPU 只有主机池；返回结构无 GPU 字样；读不到预算 = `unknown`，不判成放得下）。③ `memory-sample.ts`（系统可用内存：Mac `vm_stat` 的 free + speculative + inactive + purgeable，Linux MemAvailable，Windows os.freemem）。④ `vram-stats.ts`（`data/vram-stats.json`：版本、原子写、只存数字、不透明 key、逐池记录、并发加载不记、`preferMeasured` 实测优先但不低于确知部分）。⑤ `docs/research/memory-estimate.md`：全部核对与误差。
 - 实测（Apple M4 16 GiB，b11146，3 个模型：SmolLM2-135M、Gemma 3 270M、Qwen3.5-2B + mmproj；模型文件在会话临时目录，已删除）：KV / 循环状态与 llama.cpp 自报逐项 0% 误差，总量 0% ~ +10%（偏大）；对整机已用量大信号 +1% ~ +8%。**CUDA 路径没有实测。**

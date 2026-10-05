@@ -7,7 +7,9 @@ import {
   type ModelsDoc, type Settings,
 } from '../core/config'
 import { authenticate, defaultSecrets, normalizeSecrets, SECRETS_MIGRATIONS, SECRETS_VERSION, type SecretsDoc } from '../core/keys'
-import { describeDevices, DeviceProbe, type DevicesView } from '../core/devices'
+import { describeDevices, DeviceProbe, type DeviceList, type DevicesView, type GpuDevice } from '../core/devices'
+import { sampleSystemMemory } from '../core/memory-sample'
+import type { SystemMemory } from '../core/memory-estimate'
 import { chooseExe, LaunchConfigError, llamaServerExe, planLaunch, runtimeKeyOf, type DeviceInfo } from '../core/launch'
 import { comboKey } from '../core/gpu-group'
 import { blamesSplitMode, SplitModeLoadError, SplitStats } from '../core/split-stats'
@@ -42,6 +44,12 @@ import { cloudflareHooks } from './cloudflare-hooks'
 import { acquireDataLock, type DataLock } from '../core/data-lock'
 import { detectPlatform, runtimeTarget, type PlatformInfo, type RuntimeTarget } from '../core/platform'
 
+export interface MemoryProbe {
+  list: DeviceList | null
+  fallbackGpus: GpuDevice[]
+  system: SystemMemory
+}
+
 export interface AppContext {
   dataDir: string
   platform: PlatformInfo
@@ -75,6 +83,11 @@ export interface AppContext {
   getDevices(opts?: { runtime?: string | null, refresh?: boolean }): Promise<DevicesView | { applicable: false }>
   /** Device list and split modes of one build for the command preview; null on a Mac or when the build cannot be run. */
   getDeviceInfo(runtime?: string | null): Promise<DeviceInfo | null>
+  /**
+   * What the memory check reads from the machine: the device list of one build (`runtime` = a reference, empty = the global
+   * version; null when it cannot be run), the NVIDIA cards as a fallback for it, and the system memory.
+   */
+  getMemoryProbe(runtime?: string | null, opts?: { refresh?: boolean }): Promise<MemoryProbe>
   /** Row / tensor combinations the user confirmed or that failed to load (decision 45). */
   splitStats: SplitStats
   /** Record key of a group on the build `runtime` resolves to (empty = the global version); null when no build can be resolved. */
@@ -540,6 +553,18 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
       if (!exe) return null
       const [devices, splitModes] = await Promise.all([deviceProbe.list(exe), deviceProbe.splitModes(exe)])
       return { devices, splitModes }
+    },
+    async getMemoryProbe(runtime, opts) {
+      const exe = exeOf(runtime?.trim() || null)
+      const list = exe ? await deviceProbe.list(exe, { refresh: opts?.refresh === true }) : null
+      let fallbackGpus: GpuDevice[] = []
+      if (platform.os !== 'darwin' && list?.source !== 'list-devices') {
+        try {
+          fallbackGpus = parseNvidiaSmi(await runNvidiaSmi()).map(g => ({ id: `CUDA${g.index}`, name: g.name, totalMiB: g.totalMiB, freeMiB: g.totalMiB - g.usedMiB }))
+        } catch { /* no nvidia-smi: the card stays unknown */ }
+      }
+      const s = await sampleSystemMemory()
+      return { list, fallbackGpus, system: { totalMiB: s.totalMiB, availableMiB: s.availableMiB } }
     },
     splitStats,
     splitKey(runtime, devices, mode) {

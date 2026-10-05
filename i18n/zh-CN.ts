@@ -386,7 +386,24 @@ export default {
       'bad-thinking-limit': '思考最大上限必须是非负整数，0 表示不限制。',
       'bad-context': '上下文需要填写有效数字；0 表示用模型自带的长度，留空则不传此参数。',
       'runtime-invalid': '所选的 llama.cpp 版本不存在，或不属于这台电脑的平台。',
+      'check-failed': '这些设置现在一定无法启动，没有保存：{detail}',
       'device-invalid': '设备选择不合法：只能选「自动」、「CPU」、一张 GPU，或打开「使用多张 GPU」后选两张以上；切分模式要是 layer / row / tensor，比例的个数要和所选 GPU 一样多，主 GPU 序号要在所选 GPU 范围内。Mac 上不能选设备。',
+    },
+    // Findings of the save-time check (POST /api/models/:id/check); `{...}` is filled from the issue's detail.
+    check: {
+      issues: {
+        'v-cache-needs-fa': 'V 缓存用了量化类型 {type}，但 Flash Attention 是关闭的，llama-server 会直接报错退出。把 Flash Attention 改成 on / auto，或把 V 缓存改成 f16。',
+        'device-missing': '所选设备 {device} 不在这个 llama.cpp 版本的设备列表里，启动会失败。换一个设备，或换一个能看到它的 llama.cpp 版本。',
+        'split-mode-unsupported': '这个 llama.cpp 版本不支持切分模式 {mode}，启动会失败。换一个模式或换版本。',
+        'ctx-over-train': '上下文 {ctx} 超过了模型的训练长度 {train}，又没有设置 RoPE / YaRN 缩放：能启动，但超出的部分质量会明显变差。',
+        'ubatch-over-batch': '微批大小（ubatch）{ubatch} 大于批大小（batch）{batch}，实际会按批大小截断，这个设置没有效果。',
+        'cpu-gpu-layers': '设备选的是 CPU，但 GPU 层数写了 {layers}：这个数字不会生效，模型全部在 CPU 上运行。',
+        'mmproj-on-cpu': '视觉模型（mmproj）选在 CPU 上运行，识别图片会很慢。',
+        'mlock-exceeds-memory': '锁定内存（mlock）要锁住约 {mlockMiB} MiB，但系统现在只有约 {availableMiB} MiB 可用，会把系统逼进换页。去掉 mlock，或换更小的模型 / 量化。',
+        'slot-ctx-small': '并行槽数 {parallel} 把上下文分到每个槽只剩约 {perSlot} token，对话很快会装不下。减少并行槽数，或加大上下文。',
+        'file-missing': '配置里的 {kind} 文件不存在，无法估算，也无法启动。',
+        'no-estimate': '读不到模型文件的信息，无法估算显存 / 内存占用。',
+      },
     },
     remove: {
       open: '删除',

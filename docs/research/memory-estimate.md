@@ -87,6 +87,23 @@ f32 4、f16 2、bf16 2、q8_0 34/32、q4_0 18/32、q4_1 20/32、iq4_nl 18/32、q
 - 系统余量沿用决定 44 的“总量的 15% 与 2 GiB 中较大者”。**这个值没有被实测证明也没有被推翻**（没有做让系统进入内存压力的测试）；9-3 的看门狗阶段再看。
 - 预算 = min(设备工作集上限 − 已分配, 可用内存 − 余量)，由 `estimateMemory` 对共享内存设备做；纯 CPU 只看后者。
 
+## 保存时检查：哪些组合“必然启动失败”（9-2，Mac b11146，Qwen3.5-2B Q4_K_M，`--device none -ngl 0`，只用 CPU、不占 GPU）
+
+| 组合 | 结果 | 处理 |
+|---|---|---|
+| `-ctv q8_0 -fa off`（`-fa 0` 同） | 退出码 1：`quantized V cache requires flash_attn to be enabled` | **错误，拒绝保存** |
+| `-ctv q8_0 -fa on` / `auto` / 不写；`-ctk q8_0 -fa off` | 正常启动 | 无 |
+| `-c 400000`（训练长度 262144） | 正常启动，日志警告并把槽上下文截到训练长度 | 警告 `ctx-over-train`（有 rope / yarn 选项时不报） |
+| `-b 256 -ub 512` | 正常启动 | 警告 `ubatch-over-batch` |
+| `-ngl 99 --device none` | 正常启动（层数不生效） | 警告 `cpu-gpu-layers` |
+| `-np 8 -c 512` | 正常启动 | 每槽 < 1024 token 时警告 `slot-ctx-small`（1024 是经验阈值，没有实测依据） |
+
+另有两类错误不是这次测的：设备不在该版本的 `--list-devices` 里（8-7 在真实 RTX 5090 上看到 `invalid device`，退出 1；只按该版本自己的列表判断，列表读不到时不拒绝）、该版本 `--help` 里没有所选切分模式。显存 / 内存三档**永远不拒绝保存**：可用量随时在变，决定权在用户。
+
+`--list-devices` 在 Mac 上除了 `MTL0` 还会列出 `BLAS: Accelerate (0 MiB)`，检查按总量最大的一项取 Metal 设备。
+
+未验证：Windows / CUDA 上这些规则（`mlock` 对 `--load-mode mlock` 的识别按 `--help` 文字写成，没在 Windows 上跑）；`-ot` / `--n-cpu-moe` 不理解；`--fit` 开着时 llama-server 可能自己降层数而不是失败，所以“放不下”只是预估，不是必然失败。
+
 ## 没有验证的部分（如实）
 
 - **CUDA / 独立显存**：nvidia-smi 的显存对比、设备固定开销 512 MiB（猜测值，偏大）、绑定嵌入在卡上的副本、多卡流水并行是否让计算缓冲翻倍、`row` / `tensor` 模式，全部未实测。Windows WDDM 下 `nvidia-smi` 取不到单进程显存、改用加载前后差值的做法，只有 `loadDelta` 的纯函数测试。

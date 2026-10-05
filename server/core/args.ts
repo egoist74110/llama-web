@@ -291,6 +291,8 @@ export interface BuildResult {
   warnings: ArgWarning[]
   /** Merged form values (before extra-args replacement). */
   effective: LaunchParams
+  /** `--n-gpu-layers` as the layers asked for it, before a CPU device forced it to 0 (the save check warns about the mismatch). */
+  requestedGpuLayers: ParamValue
   /**
    * The device the final command asks for in launch-plan terms (`auto`, `cpu` or one id): the form's choice,
    * unless the extra args carry their own `--device` / `-dev` (then that value; several devices count as `auto`).
@@ -299,7 +301,7 @@ export interface BuildResult {
 }
 
 /** Value of a flag group: `--flag=value` or the token after the flag. */
-function groupValue(g: ArgGroup): string {
+export function groupValue(g: ArgGroup): string {
   const first = g.tokens[0] ?? ''
   return (first.includes('=') && first.startsWith('--') ? first.slice(first.indexOf('=') + 1) : (g.tokens[1] ?? '')).trim()
 }
@@ -331,6 +333,7 @@ export function buildLaunchArgs(input: BuildInput): BuildResult {
   const warnings: ArgWarning[] = []
   const effective = mergeParams(input.defaults, input.model?.overrides, input.profile?.overrides)
   const device = input.device ?? 'auto'
+  const requestedGpuLayers = effective.gpuLayers
   // A CPU run keeps every layer on the CPU whatever the form says.
   if (device === 'cpu') effective.gpuLayers = 0
 
@@ -416,7 +419,7 @@ export function buildLaunchArgs(input: BuildInput): BuildResult {
   }
   args.push('--host', input.host, '--port', String(input.port))
 
-  return { ok: !warnings.some(w => w.severity === 'error'), args, warnings, effective, device: extraDevice(extra) ?? device }
+  return { ok: !warnings.some(w => w.severity === 'error'), args, warnings, effective, requestedGpuLayers, device: extraDevice(extra) ?? device }
 }
 
 /** Quote one argument for display (Windows / POSIX-ish double quotes). */
