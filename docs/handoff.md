@@ -1,5 +1,13 @@
 # 交接记录
 
+## 2026-10-05 · 决定 52 Cloudflare token 权限误报排查与教程修正 · Claude
+- 结论：不是程序误判。用用户桌面版保存的 token 只读探测 Cloudflare：verify 与 zones 为 200，但 dns_records、settings 均 403（错误码 10000）；用户在后台补齐权限并 Update token 后，一键配置第 4、5 步通过（未重新构建）。
+- 第 5 步先报「token 无效」：根因是缺 Account 级隧道权限，且错误码 9109（无权访问资源）被 `BAD_TOKEN_CODES` 当成无效 token。已移出该集合，改为 forbidden（权限不足）。另把 `dns_records` 探测的 per_page 由 1 改 5。
+- 新版 Cloudflare 界面每条 policy 只能选一种范围，实际需要 4 条：Entire Account · Cloudflare One Connector: cloudflared Write；Entire Account · Cloudflare Tunnel Write；All zones · DNS Read / Write；All zones · Zone Read。向导教程（`i18n/zh-CN.ts` howToken）、缺权限提示文字、README 已按此重写，并写明「Update token 才生效、Roll 后需重新粘贴」。
+- 验证：新增测试 1 项（9109 判权限不足）；cloudflare 与 app 相关测试 102 pass / 0 fail；`bun run typecheck` 通过。用户手工在真实 Cloudflare 上跑通第 4、5 步。没验证：向导后续步骤（建隧道 / DNS / 公网访问）的完整走通、其他权限缺失组合的真实错误码。
+- 过程注意：读取保存的 token 做探测，第二次被自动审批拦下，未绕过；探测只输出状态码，没有复述 token。cargo 改写的 Cargo.lock 已还原。
+- 下一步：用户选择下一项（A2 首次启动配置加全局与单模型配置、A3 模型删除按钮，两项都需先问清范围）。
+
 ## 2026-10-05 · Mac 可用性、启动器、桌面壳 Mac 开发运行、首次按硬件调参、引导页、镜像兜底 · Claude
 - 完成（均在 Mac 实测，Windows 未跑）：① `scripts/launch.ts` 统一 start.bat / start.command / `bun run start*`，默认运行桌面壳，`web` 只起服务；构建前自动 `bun install`（根因：旧 node_modules 缺依赖导致 Mac 构建失败）。② Rust 壳跨平台（job.rs 进程组、update.rs sha2、`BUN` 文件名、icon.png），`desktop/prepare.ts --dev`。③ 关键决定 54：首次按 Mac 内存 / Windows 显存或内存给上下文与批大小，settings v8（`setup.tuned`），额外参数精简为 `--no-prefill-assistant`。④ 引导页重做 + 左侧「新手引导」入口（无模型时显示）；修复 updater 冷却期状态「正在检查」。⑤ 关键决定 53：API 限流 / 不可达兜底（github-feed.ts）与公共镜像（mirrors.ts + MirrorChoiceModal），只在用户发起的更新失败后弹窗。
 - 验证：`bun run typecheck` 通过；全部测试失败项与改动前一致（63 个，本机 Mac 原有：pre-commit 脚本、osascript / tilde 路径等），新增测试 mirror-fallback 8 项、分档与额外参数各项；`cargo test` 7 项；真实网络下三个镜像的元数据与下载 SHA-256 通过；被墙模拟下弹窗 → 镜像 → 安装成功。

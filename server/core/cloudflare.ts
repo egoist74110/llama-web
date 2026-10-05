@@ -1,6 +1,6 @@
 // One-click Cloudflare tunnel setup (plan 阶段 4, 4-5). Pure module (no Nitro), fetch injectable.
 //
-// With a Cloudflare API token (Account · Cloudflare Tunnel · Edit, Zone · DNS · Edit,
+// With a Cloudflare API token (Cloudflare Tunnel Write + cloudflared Write on the account, DNS Write,
 // Zone · Zone · Read) llama-web creates (or reuses) a remotely managed tunnel, points the
 // hostname's ingress rule at the public entry, creates / re-points the proxied DNS CNAME
 // (`<tunnel id>.cfargotunnel.com`) and fetches the tunnel token.
@@ -77,7 +77,7 @@ interface Envelope<T> {
 }
 
 /** Error codes Cloudflare uses for a token it does not accept at all. */
-const BAD_TOKEN_CODES = new Set([1000, 6003, 6100, 6101, 6102, 6103, 6111, 9106, 9109])
+const BAD_TOKEN_CODES = new Set([1000, 6003, 6100, 6101, 6102, 6103, 6111, 9106])
 
 export class CfClient {
   constructor(private token: string, private fetchFn: FetchFn = fetch, private base = CF_API) {}
@@ -108,7 +108,8 @@ export class CfClient {
     // Only Cloudflare's own short messages; they never contain the token.
     const message = (env?.errors ?? []).map(e => `${e.code ?? ''} ${e.message ?? ''}`.trim()).join('; ').slice(0, 300)
     if (res.status === 401 || codes.some(c => BAD_TOKEN_CODES.has(c))) throw new CfError('bad-token', message, res.status)
-    if (res.status === 403 || codes.includes(10000)) throw new CfError('forbidden', perm ?? '', res.status)
+    // 9109 ("Unauthorized to access requested resource") is a permission problem, not an invalid token.
+    if (res.status === 403 || codes.includes(10000) || codes.includes(9109)) throw new CfError('forbidden', perm ?? '', res.status)
     if (res.status === 404) throw new CfError('not-found', message, 404)
     throw new CfError('api', message || `HTTP ${res.status}`, res.status)
   }
@@ -207,7 +208,7 @@ export async function inspect(api: CfClient): Promise<Inspection> {
   const dnsOk = new Map<string, boolean>()
   await Promise.all(active.map(async (z) => {
     try {
-      await api.call('GET', `/zones/${z.id}/dns_records?per_page=1`, undefined, 'dns')
+      await api.call('GET', `/zones/${z.id}/dns_records?per_page=5`, undefined, 'dns')
       dnsOk.set(z.id, true)
     } catch (e) {
       if (!forbidden(e)) throw e

@@ -101,12 +101,13 @@ Cloudflare 不提供免费域名，也不能通过 API 代你注册；域名要�
 
 ### 方式 A：一键完成（推荐）
 
-1. 创建 Cloudflare API token：右上角头像 → My Profile → API Tokens → Create Token → Create Custom Token。权限三行：
-   - Account · Cloudflare Tunnel · Edit
-   - Zone · DNS · Edit
-   - Zone · Zone · Read
+1. 创建 Cloudflare API token：右上角头像 → My Profile → API Tokens → Create Token → Create Custom Token。权限策略四条（新版界面每条只能选一种范围）：
+   - Entire Account：Cloudflare One Connector: cloudflared · Write
+   - Entire Account：Cloudflare Tunnel · Write
+   - All zones：DNS · Read 和 Write
+   - All zones：Zone · Read
 
-   Account Resources 选你的账号，Zone Resources 选要用的域名（或 All zones）。
+   改已有 token 要点 Review token → Update token 才生效；Roll 之后要重新粘贴新值。
 2. 引导的「Cloudflare API token」一步：粘贴后点「校验并继续」（会先向 Cloudflare 校验，缺权限会指出缺哪项）。已保存过就直接「沿用」。
 3. 「地址」一步：选域名（只列出可用的 zone）、填子域名（默认 `llm`）。看不到任何域名时会显示「域名从哪里来」的说明，也可以改走方式 B。
 4. 「预览并执行」一步：预览列出将要做的事：新建 / 复用隧道、入口规则 `子域名.域名 → http://127.0.0.1:<入口端口>`、新建或修改 DNS CNAME（`<隧道ID>.cfargotunnel.com`，代理开启）、保存隧道 token、打开公网入口和托管开关。

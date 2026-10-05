@@ -328,6 +328,15 @@ describe('apply', () => {
     expect(job.steps[1]!.error).toEqual({ code: 'forbidden', detail: 'tunnel' })
   })
 
+  test('code 9109 is a permission problem, not an invalid token', async () => {
+    const cf = new FakeCloudflare()
+    const { s } = setup(cf)
+    const p = await planSetup(client(cf), input())
+    cf.failures.push({ method: 'PUT', path: /configurations$/, status: 400, code: 9109 })
+    const job = await s.apply(client(cf), input(), p.fingerprint)
+    expect(job.steps[1]!.error).toEqual({ code: 'forbidden', detail: 'tunnel' })
+  })
+
   test('cleanup deletes exactly what the failed run created', async () => {
     const cf = new FakeCloudflare()
     const keep = cf.addTunnel({ name: 'someone-else' })
