@@ -1,19 +1,14 @@
 #!/bin/bash
 # llama-web launcher for macOS (source version). Double-click it in Finder, or run ./start.command.
 # Close the Terminal window (or press Ctrl+C) to stop the server and all llama-server processes.
-# Usage: ./start.command          run the last build (builds first if there is none)
+# Usage: ./start.command          ask whether to rebuild (default follows whether sources changed)
 #        ./start.command build    rebuild, then run
+#        ./start.command run      run the last build without asking
+# The logic lives in scripts/launch.ts (shared with start.bat).
 cd "$(dirname "$0")" || exit 1
 
 # A script started from Finder gets a minimal PATH: add the usual places bun is installed.
 export PATH="$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
-
-failed() {
-  echo
-  echo "[llama-web] stopped with an error (exit code $1). See the messages above."
-  read -r -p "Press Enter to close. " _
-  exit 1
-}
 
 if ! command -v bun >/dev/null 2>&1; then
   echo "[llama-web] bun was not found in PATH. Install it from https://bun.sh and try again."
@@ -21,14 +16,11 @@ if ! command -v bun >/dev/null 2>&1; then
   exit 1
 fi
 
-if [ "$1" = "build" ] || [ ! -f ".output/server/index.mjs" ]; then
-  if [ ! -d "node_modules" ]; then
-    echo "[llama-web] installing dependencies..."
-    bun install || failed $?
-  fi
-  echo "[llama-web] building..."
-  bun run build || failed $?
+bun scripts/launch.ts "$@"
+code=$?
+if [ "$code" -ne 0 ]; then
+  echo
+  echo "[llama-web] stopped with an error (exit code $code). See the messages above."
+  read -r -p "Press Enter to close. " _
+  exit "$code"
 fi
-
-echo "[llama-web] starting..."
-bun ".output/server/index.mjs" || failed $?

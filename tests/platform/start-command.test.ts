@@ -13,10 +13,8 @@ test('start.command is a bash script with LF line endings', () => {
   expect(readFileSync(join(root, '.gitattributes'), 'utf8')).toMatch(/^\*\.command text eol=lf$/m)
 })
 
-test('start.command builds when asked or when there is no build, then runs the built server', () => {
-  expect(raw).toContain('[ "$1" = "build" ] || [ ! -f ".output/server/index.mjs" ]')
-  expect(raw).toContain('bun run build')
-  expect(raw).toContain('bun ".output/server/index.mjs"')
+test('start.command delegates to the shared launcher with its arguments', () => {
+  expect(raw).toContain('bun scripts/launch.ts "$@"')
 })
 
 test('start.command works from Finder: own directory, a PATH that finds bun, and a pause on errors', () => {
@@ -26,10 +24,9 @@ test('start.command works from Finder: own directory, a PATH that finds bun, and
   expect(raw).toContain('read -r -p')
 })
 
-test('start.command has the same entry points as start.bat', () => {
+test('start.command and start.bat share scripts/launch.ts', () => {
   const bat = readFileSync(join(root, 'start.bat'), 'utf8')
-  for (const step of ['bun install', 'bun run build', 'index.mjs']) {
-    expect(bat).toContain(step)
-    expect(raw).toContain(step)
-  }
+  expect(bat).toContain('scripts\\launch.ts')
+  const launcher = readFileSync(join(root, 'scripts', 'launch.ts'), 'utf8')
+  for (const step of ['bun', 'install', 'build', 'index.mjs']) expect(launcher).toContain(step)
 })

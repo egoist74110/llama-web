@@ -279,6 +279,7 @@ li.task .when{color:var(--ok);font-size:12px;white-space:nowrap}
     <tr><td>51</td><td>模型删除（后续需求，先不做）</td><td>模型列表 / 详情增加「删除」按钮，需二次确认弹窗。弹窗左下角放一个独立的勾选框，勾选后同时删除模型文件、MTP 草稿文件与视觉（mmproj）文件；默认不勾选，只移除 llama-web 里的模型登记与配置。永久删除磁盘文件属不可恢复操作，具体删除范围、正在使用或被其他方案共享的草稿 / 视觉文件如何处理，由后续 AI 先向用户确认</td></tr>
     <tr><td>52</td><td>Cloudflare token 权限误报（待排查）</td><td>用户给了 DNS Read、DNS Write 后，一键配置仍提示「token 缺少权限：Zone · DNS · Edit」。检查权限的探测在 <code>server/core/cloudflare.ts</code>（对每个 active 区域 GET <code>/zones/{id}/dns_records</code>，403 即判缺 DNS 权限），可能原因：token 的 Zone Resources 没包含目标区域 / 全部区域、探测的是别的区域、或权限组名称与界面显示不同。先复现并确认真实被拒的请求，再决定是修判断还是改提示文案（应写清具体缺哪项和作用范围）</td></tr>
     <tr><td>53</td><td>GitHub API 限流时的镜像重试（待用户确认方案）</td><td>检查更新反复出现「GitHub API 请求已被限流」，希望出错时换镜像站重试。涉及安全：llama-web 与 llama.cpp 的更新源 / 下载域名目前严格限定为官方 GitHub（<code>app-update.ts</code> 的 feed 与安装包前缀校验、<code>llamacpp.ts</code> 等），安装包还要校验 SHA-256；加入第三方镜像会放宽这一限制。实现前先向用户确认：镜像来源（固定哪个站、是否可由用户填写）、仅用于元数据还是也用于下载、下载是否仍以官方清单的校验值为准；也可先考虑不依赖 API 的方式（如 releases.atom / 网页重定向）或可选 GitHub token 提高限额</td></tr>
+    <tr><td>54</td><td>首次运行按本机配置默认参数</td><td>用户 2026-10-05 要求：Mac 按统一内存、Windows 按最大 NVIDIA 显卡显存（没有 NVIDIA 卡或明显是核显则按系统内存）给出全局默认的上下文与批大小；<code>defaults</code> 与 <code>defaultsCpu</code> 分别按显存 / 内存分档（<code>server/core/config.ts</code> 的 <code>tunedDefaults</code>）。仅在 settings 里 <code>setup.tuned=false</code> 时执行一次（版本 8；旧安装迁移为 true，不改动已有参数）。K/V 缓存、flash attention、加速层数在 Mac 上「不传」，由 llama.cpp 自行选择（实测默认 f16 / auto / auto）。内置额外参数去掉 <code>--jinja --props --slots -cb</code>（当前 llama-server 默认已开或应用不用），只留 <code>--no-prefill-assistant</code>（Windows GPU 版仍带 <code>--load-mode mlock</code>）。</td></tr>
   </table>
 </section>
 
@@ -888,6 +889,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 <section id="changelog">
   <h2>变更记录</h2>
   <table>
+    <tr><td>2026-10-05</td><td>关键决定 54：首次运行按本机内存 / 显存给全局默认参数，内置额外参数精简；settings 升到版本 8。</td></tr>
     <tr><td>2026-10-05</td><td>记录两个试用问题（未排查、未修复）：Cloudflare token 给了 DNS Read / Write 仍报缺 Zone · DNS · Edit（决定 52）；检查更新常被 GitHub API 限流，希望失败时换镜像重试（决定 53，涉及更新源与下载校验的安全限制，需先确认）</td></tr>
     <tr><td>2026-10-05</td><td>记录两项后续需求（均未实现）：首次启动配置加入全局与单模型配置（决定 50）；模型删除按钮、二次确认及可选连同模型 / 草稿 / 视觉文件一起删除（决定 51）。发布 v0.1.0-beta.5（修复启动窗口一闪而过）</td></tr>
     <tr><td>2026-10-04</td><td>修复桌面版启动双窗口：不是第二个进程或重复创建窗口，而是启动器窗口与刚创建的主窗口在主页面加载期间同时可见（实测约 0.3 秒）。主窗口改为隐藏创建，页面加载完成（或 10 秒兜底）后显示并同时隐藏启动器；二次启动只唤起可见的主窗口。不改配置、依赖或其他行为</td></tr>

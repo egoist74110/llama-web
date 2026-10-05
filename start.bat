@@ -1,7 +1,9 @@
 @echo off
 rem llama-web launcher. Close this window (or press Ctrl+C) to stop the server and all llama-server processes.
-rem Usage: start.bat          run the last build (builds first if there is none)
+rem Usage: start.bat          ask whether to rebuild (default follows whether sources changed)
 rem        start.bat build    rebuild, then run
+rem        start.bat run      run the last build without asking
+rem The logic lives in scripts/launch.ts (shared with start.command).
 setlocal
 cd /d "%~dp0"
 title llama-web
@@ -13,28 +15,11 @@ if errorlevel 1 (
   exit /b 1
 )
 
-if /i "%~1"=="build" goto build
-if not exist ".output\server\index.mjs" goto build
-goto run
-
-:build
-if not exist "node_modules" (
-  echo [llama-web] installing dependencies...
-  call bun install
-  if errorlevel 1 goto failed
+call bun scripts\launch.ts %*
+if errorlevel 1 (
+  echo.
+  echo [llama-web] stopped with an error (exit code %errorlevel%). See the messages above.
+  pause
+  exit /b 1
 )
-echo [llama-web] building...
-call bun run build
-if errorlevel 1 goto failed
-
-:run
-echo [llama-web] starting...
-call bun ".output\server\index.mjs"
-if errorlevel 1 goto failed
 exit /b 0
-
-:failed
-echo.
-echo [llama-web] stopped with an error (exit code %errorlevel%). See the messages above.
-pause
-exit /b 1

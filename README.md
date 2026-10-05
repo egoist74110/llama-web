@@ -35,14 +35,17 @@ bun install
 
 ## 启动
 
-双击 `start.bat`（没有构建产物时会先安装依赖并构建）。关闭窗口或按 Ctrl+C 即停止服务并结束所有 llama-server。
+双击 `start.bat`（Windows）或 `start.command`（macOS，Finder 里双击；第一次若提示没有执行权限，先 `chmod +x start.command`）。两者都只是调用同一个 `scripts/launch.ts`。关闭窗口或按 Ctrl+C 即停止服务并结束所有 llama-server。
+
+有构建产物时会显示「源码自上次构建后是否有改动」，并给 3 秒倒计时：源码有改动默认重新构建，没改动默认直接运行；按 `b` 重新构建、`r` 直接运行、`q` 退出，按 Enter 取默认。没有构建产物时自动安装依赖并构建。
 
 ```bash
-start.bat          # 运行上次的构建
-start.bat build    # 重新构建后运行
+start.bat          # 询问（默认按源码是否改动）；macOS 用 ./start.command
+start.bat build    # 总是重新构建后运行
+start.bat run      # 不询问，直接运行上次的构建
 ```
 
-macOS 源码版用 `start.command`（Finder 里双击，或在终端运行 `./start.command`；第一次若提示没有执行权限，先 `chmod +x start.command`），参数相同。
+两端通用的命令行写法（效果相同）：`bun run start`、`bun run start:build`、`bun run start:run`。
 
 默认地址 `http://localhost:5001`（监听 `0.0.0.0`，局域网可访问，完整功能，不需要 key）。第一次打开会进入设置向导：添加模型目录并启用模型。
 

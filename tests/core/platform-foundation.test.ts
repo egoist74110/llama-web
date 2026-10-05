@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { archiveCommand, extractArchive, listingTotals, safeArchivePath, validateArchive } from '../../server/core/archive'
-import { defaultSettings, normalizeSettings, SETTINGS_MIGRATIONS, SETTINGS_VERSION } from '../../server/core/config'
+import { defaultSettings, tunedDefaults, normalizeSettings, SETTINGS_MIGRATIONS, SETTINGS_VERSION } from '../../server/core/config'
 import { acquireDataLock } from '../../server/core/data-lock'
 import { installedDir, installLatest, listInstalled, versionsDir } from '../../server/core/llamacpp'
 import { cloudflaredAssetName, platformInfo, runtimeTarget, type RuntimeTarget } from '../../server/core/platform'
@@ -41,6 +41,34 @@ test('host facts distinguish unknown NVIDIA, CPU and unverified Mac; unsupported
   expect(defaultSettings(platformInfo('win32', 'x64', false)).defaults.gpuLayers).toBe(0)
   expect(defaultSettings(platformInfo('win32', 'x64', false)).defaults.flashAttn).toBeNull()
   expect(defaultSettings(platformInfo('darwin', 'arm64')).defaults.cacheTypeK).toBeNull()
+})
+
+test('first-run tuning follows unified memory (Mac), the largest NVIDIA card or system memory (Windows)', () => {
+  const GiB = 1024
+  const mac = (gib: number) => tunedDefaults({ os: 'darwin', memory: { totalMiB: gib * GiB } }).defaults!
+  expect(mac(8)).toMatchObject({ ctxSize: 8192, batchSize: 512, ubatchSize: 512 })
+  expect(mac(16)).toMatchObject({ ctxSize: 32768, batchSize: 512 })
+  expect(mac(32)).toMatchObject({ ctxSize: 65536, batchSize: 2048, ubatchSize: 1024 })
+  expect(mac(64).ctxSize).toBe(131072)
+  expect(mac(128).ctxSize).toBe(262144)
+  const win = (ramGiB: number, cards: number[] | null) => tunedDefaults({
+    os: 'win32', memory: { totalMiB: ramGiB * GiB },
+    nvidia: cards ? { state: 'ok', gpus: cards.map(c => ({ memoryMiB: c * GiB })) } : { state: 'none', gpus: [] },
+  })
+  expect(win(32, [8, 24, 12]).defaults).toMatchObject({ ctxSize: 131072, batchSize: 2048 }) // largest card wins
+  expect(win(32, [6]).defaults).toMatchObject({ ctxSize: 8192, batchSize: 512 })
+  expect(win(16, [12]).defaultsCpu).toMatchObject({ ctxSize: 16384, batchSize: 512 }) // CPU set follows RAM
+  expect(win(16, null).defaults).toMatchObject({ ctxSize: 16384, batchSize: 512 }) // no NVIDIA card: memory decides
+  expect(win(8, null).defaults!.ctxSize).toBe(8192)
+  expect(tunedDefaults({ os: 'win32', memory: { totalMiB: 0 } })).toEqual({})
+  expect(tunedDefaults({ os: 'linux', memory: { totalMiB: 32 * GiB } })).toEqual({})
+})
+
+test('built-in extra arguments only carry flags that change llama-server behaviour', () => {
+  const d = defaultSettings(platformInfo('win32', 'x64', true))
+  expect(d.defaults.extraArgs).toBe('--no-prefill-assistant --load-mode mlock')
+  expect(defaultSettings(platformInfo('darwin', 'arm64')).defaults.extraArgs).toBe('--no-prefill-assistant')
+  expect(d.defaultsCpu.extraArgs).toBe('--no-prefill-assistant')
 })
 
 test('v3 settings migration backs up exact bytes and retains current version and every user parameter', () => {

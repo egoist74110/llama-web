@@ -88,7 +88,7 @@ export interface Settings {
   logs: { keepRunsPerModel: number, keepDays: number, usageKeepDays: number }
   gpu: { sampleSec: number }
   /** First-run wizard: `done` is set when it is finished or skipped. */
-  setup: { done: boolean }
+  setup: { done: boolean, /** False = the launch defaults have not been tuned to this machine yet (decision 54). */ tuned: boolean }
 }
 
 export interface Profile extends Pick<GpuChoice, 'devices' | 'splitMode' | 'tensorSplit' | 'mainGpu'> {
@@ -135,7 +135,7 @@ export interface ModelsDoc {
   models: ModelConfig[]
 }
 
-export const SETTINGS_VERSION = 7
+export const SETTINGS_VERSION = 8
 export const MODELS_VERSION = 1
 
 /**
@@ -146,7 +146,7 @@ export const MODELS_VERSION = 1
 export const DEFAULT_CPU_DEFAULTS: LaunchDefaults = {
   ...DEFAULT_LAUNCH_DEFAULTS,
   ctxSize: 32768, cacheTypeK: null, cacheTypeV: null, flashAttn: null, gpuLayers: 0, batchSize: 512, ubatchSize: 512,
-  extraArgs: '--jinja --no-prefill-assistant --props --slots -cb',
+  extraArgs: '--no-prefill-assistant',
 }
 
 /** Hosts with a separate CPU channel and its own defaults: Windows only (a Mac has one channel and one set of defaults). */
@@ -163,6 +163,51 @@ export const currentTagFor = (s: Settings, host: { os: NodeJS.Platform }, accel:
 export const defaultsFor = (s: Settings, host: { os: NodeJS.Platform }, accel: string): LaunchDefaults =>
   hasCpuChannel(host) && accel === 'cpu' ? s.defaultsCpu : s.defaults
 
+/** The facts first-run tuning needs (a subset of the system detection result). */
+export interface TuneInput {
+  os: NodeJS.Platform
+  memory: { totalMiB: number }
+  nvidia?: { state: string, gpus: Array<{ memoryMiB: number | null }> }
+}
+
+type Tier = Pick<LaunchDefaults, 'ctxSize' | 'batchSize' | 'ubatchSize'>
+
+/** Mac unified memory: model and KV cache share it, so the context is sized from total memory. */
+export function memoryTier(totalMiB: number): Tier {
+  const gib = totalMiB / 1024
+  const ctxSize = gib < 12 ? 8192 : gib < 24 ? 32768 : gib < 48 ? 65536 : gib < 96 ? 131072 : 262144
+  return gib < 24 ? { ctxSize, batchSize: 512, ubatchSize: 512 } : { ctxSize, batchSize: 2048, ubatchSize: 1024 }
+}
+
+/** CPU inference is slower and the model sits in system memory too: half the context, small batches. */
+export function cpuTier(totalMiB: number): Tier {
+  return { ctxSize: Math.max(8192, Number(memoryTier(totalMiB).ctxSize) / 2), batchSize: 512, ubatchSize: 512 }
+}
+
+/** Discrete GPU: context from the largest card's memory (K/V are quantised, flash attention is on). */
+export function vramTier(maxMiB: number): Tier {
+  const gib = maxMiB / 1024
+  const ctxSize = gib < 8 ? 8192 : gib < 12 ? 16384 : gib < 16 ? 32768 : gib < 24 ? 65536 : gib < 48 ? 131072 : 262144
+  return gib < 8 ? { ctxSize, batchSize: 512, ubatchSize: 512 } : { ctxSize, batchSize: 2048, ubatchSize: 1024 }
+}
+
+/**
+ * First-run launch parameters from what the machine has (decision 54). Returns only the fields to
+ * overwrite on the fresh defaults; an unknown fact leaves the built-in values alone.
+ *  - Mac: unified memory.
+ *  - Windows: `defaults` (the GPU channel) from the largest NVIDIA card; with no NVIDIA card (or an
+ *    integrated one: only NVIDIA is detected) from system memory like the CPU set; `defaultsCpu` from system memory.
+ */
+export function tunedDefaults(info: TuneInput): { defaults?: Partial<LaunchDefaults>, defaultsCpu?: Partial<LaunchDefaults> } {
+  const ram = info.memory.totalMiB
+  if (!(ram > 0)) return {}
+  if (info.os === 'darwin') return { defaults: memoryTier(ram) }
+  if (info.os !== 'win32') return {}
+  const cards = (info.nvidia?.state === 'ok' ? info.nvidia.gpus : []).map(g => g.memoryMiB ?? 0)
+  const vram = Math.max(0, ...cards)
+  return { defaults: vram > 0 ? vramTier(vram) : cpuTier(ram), defaultsCpu: cpuTier(ram) }
+}
+
 export function defaultSettings(platform?: PlatformInfo): Settings {
   const windowsCuda = platform ? platform.os === 'win32' && platform.acceleration === 'cuda' : process.platform === 'win32'
   return {
@@ -174,13 +219,13 @@ export function defaultSettings(platform?: PlatformInfo): Settings {
     scheduler: { maxLoaded: 1, loadTimeoutSec: 600, drainTimeoutSec: 300, heartbeatSec: 15, portRange: [7100, 7199] },
     defaults: windowsCuda ? { ...DEFAULT_LAUNCH_DEFAULTS } : {
       ...DEFAULT_LAUNCH_DEFAULTS, cacheTypeK: null, cacheTypeV: null, flashAttn: null,
-      gpuLayers: platform?.acceleration === 'cpu' ? 0 : null, extraArgs: '--jinja --no-prefill-assistant --props --slots -cb',
+      gpuLayers: platform?.acceleration === 'cpu' ? 0 : null, extraArgs: '--no-prefill-assistant',
     },
     defaultsCpu: { ...DEFAULT_CPU_DEFAULTS },
     preprocess: { image: { enabled: true, maxEdge: 896, format: 'jpeg', quality: 90 } },
     logs: { keepRunsPerModel: 20, keepDays: 14, usageKeepDays: 30 },
     gpu: { sampleSec: 2 },
-    setup: { done: false },
+    setup: { done: false, tuned: false },
   }
 }
 
@@ -232,6 +277,11 @@ export const SETTINGS_MIGRATIONS: Record<number, (old: any) => any> = {
   6: (old) => {
     if (!isObj(old.llamacpp)) old.llamacpp = {}
     old.llamacpp.autoUpdate = false
+    return old
+  },
+  // 8: first-run tuning (decision 54). An existing installation keeps every parameter it has.
+  7: (old) => {
+    old.setup = { ...(isObj(old.setup) ? old.setup : { done: false }), tuned: true }
     return old
   },
 }

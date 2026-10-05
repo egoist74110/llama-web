@@ -3,7 +3,7 @@
 // and shared by the custom Bun entry, the Nitro plugin and the dev-mode routes.
 import { join } from 'node:path'
 import {
-  currentTagFor, defaultModels, defaultSettings, hasCpuChannel, hasDeviceSelection, MODELS_VERSION, normalizeModels, normalizeSettings, SETTINGS_MIGRATIONS, SETTINGS_VERSION,
+  currentTagFor, defaultModels, defaultSettings, tunedDefaults, hasCpuChannel, hasDeviceSelection, MODELS_VERSION, normalizeModels, normalizeSettings, SETTINGS_MIGRATIONS, SETTINGS_VERSION,
   type ModelsDoc, type Settings,
 } from '../core/config'
 import { authenticate, defaultSecrets, normalizeSecrets, SECRETS_MIGRATIONS, SECRETS_VERSION, type SecretsDoc } from '../core/keys'
@@ -480,7 +480,16 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
   // Background, once per start (plan 关键决定 15): adopt an installed llama.cpp, download a newer
   // release and make it current, prune old versions. Loads meanwhile use the current version.
   // After residue cleanup, so leftovers of the last run do not hold a version directory.
-  void cleanupDone.then(() => detect()).then(() => {
+  void cleanupDone.then(() => detect()).then((info) => {
+    // First run only (decision 54): size the launch defaults to this machine, once.
+    if (!getSettings().setup.tuned) {
+      const tuned = tunedDefaults(info)
+      settingsRef.update((s) => {
+        Object.assign(s.defaults, tuned.defaults)
+        Object.assign(s.defaultsCpu, tuned.defaultsCpu)
+        s.setup.tuned = true
+      })
+    }
     void updater.run()
     // The other channel only follows releases once the user has downloaded it.
     if (secondary && secondary.updater.refresh().length) void secondary.updater.run()

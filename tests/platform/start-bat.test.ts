@@ -12,6 +12,6 @@ test('start.bat uses cmd redirections only', () => {
 })
 
 // `bun` is usually bun.cmd: without `call` the batch file never returns to its error handling.
-test('start.bat runs the built server with call bun', () => {
-  expect(text).toContain('call bun ".output\\server\\index.mjs"')
+test('start.bat runs the shared launcher with call bun and passes its arguments', () => {
+  expect(text).toContain('call bun scripts\\launch.ts %*')
 })

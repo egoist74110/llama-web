@@ -182,5 +182,6 @@ test('default defaults match the plan and produce a sane command', () => {
   expect(r.warnings).toEqual([])
   expect(after(r.args, '--ctx-size')).toBe('262144')
   expect(after(r.args, '--flash-attn')).toBe('on')
-  expect(r.args).toContain('--jinja')
+  expect(r.args).toContain('--no-prefill-assistant')
+  expect(r.args).not.toContain('--jinja') // on by default in llama-server
 })

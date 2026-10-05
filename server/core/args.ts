@@ -93,7 +93,7 @@ export const DEFAULT_LAUNCH_DEFAULTS: LaunchDefaults = {
   threads: null,
   numa: null,
   cpuMask: null,
-  extraArgs: '--jinja --no-prefill-assistant --props --slots --load-mode mlock -cb',
+  extraArgs: '--no-prefill-assistant --load-mode mlock',
 }
 
 // Flags llama-web manages itself from file references.

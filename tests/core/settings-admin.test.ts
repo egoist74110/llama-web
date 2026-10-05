@@ -213,7 +213,7 @@ describe('first run and directory status', () => {
 
   test('old settings files without a "setup" section are filled from defaults', () => {
     const { setup: _omit, ...old } = defaultSettings()
-    expect(normalizeSettings(old as unknown as Settings).setup).toEqual({ done: false })
+    expect(normalizeSettings(old as unknown as Settings).setup).toEqual({ done: false, tuned: false })
   })
 
   test('dirStatus reports whether the directory exists', () => {

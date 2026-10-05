@@ -14,6 +14,9 @@
     "dev": "nuxt dev",
     "build": "nuxt build",
     "preview": "bun .output/server/index.mjs",
+    "start": "bun scripts/launch.ts",
+    "start:build": "bun scripts/launch.ts build",
+    "start:run": "bun scripts/launch.ts run",
     "typecheck": "nuxt typecheck",
     "postinstall": "nuxt prepare"
   },
