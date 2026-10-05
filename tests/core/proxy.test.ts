@@ -589,6 +589,41 @@ describe('live speed', () => {
   })
 })
 
+describe('thinking off is enforced', () => {
+  const mk = (overrides: Record<string, unknown>, extraArgs = ''): ModelsDoc => ({
+    version: 1,
+    models: [{
+      id: 'q', name: 'Quiet', backend: 'llama-server', file: { dirId: 'd', rel: 'q.gguf' }, mmproj: null, draft: null,
+      activeProfile: 'default', profiles: { default: { overrides, extraArgs } },
+    }],
+  })
+  const echoed = async (models: ModelsDoc, extra: Record<string, unknown>) => {
+    const { post } = setup({ models })
+    const res = await post('/v1/chat/completions', { model: 'Quiet', messages: [], ...extra })
+    return (await res.json()).echo
+  }
+
+  test('a request asking for thinking is rewritten when the profile is off', async () => {
+    const echo = await echoed(mk({ reasoning: 'off' }), { chat_template_kwargs: { enable_thinking: true, preserve_thinking: true } })
+    expect(echo.chat_template_kwargs).toEqual({ enable_thinking: false, preserve_thinking: true })
+  })
+
+  test('extra args --reasoning off also counts', async () => {
+    const echo = await echoed(mk({ reasoning: 'on' }, '--reasoning off'), { chat_template_kwargs: { enable_thinking: true } })
+    expect(echo.chat_template_kwargs.enable_thinking).toBe(false)
+  })
+
+  test('a profile that allows thinking leaves the request alone', async () => {
+    const echo = await echoed(mk({ reasoning: 'on' }), { chat_template_kwargs: { enable_thinking: true } })
+    expect(echo.chat_template_kwargs.enable_thinking).toBe(true)
+  })
+
+  test('off profile does not add the field when the request has none', async () => {
+    const echo = await echoed(mk({ reasoning: 'off' }), {})
+    expect(echo.chat_template_kwargs).toBeUndefined()
+  })
+})
+
 describe('request records', () => {
   const png = async (w: number, h: number) => (await sharp({ create: { width: w, height: h, channels: 3, background: '#3366aa' } }).png().toBuffer()).toString('base64')
 

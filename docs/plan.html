@@ -301,6 +301,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
     <li>否则进入切换队列：当前模型进入 draining → unloading → 目标 loading → ready，然后转发。多个等待同一目标的请求共享同一次加载。</li>
     <li>等待期间，如果是流式请求，每 15 秒发送一次 SSE 注释行 <code>: loading 63%</code> 保持连接。</li>
     <li>目标模型没有配置 mmproj，但请求里有图片 → 直接返回 400 和中文说明，不去加载模型。</li>
+    <li>目标方案的最终思考模式是 <code>off</code>（表单、模型层、额外参数合并后；GPU 全局默认）时，请求里的 <code>chat_template_kwargs.enable_thinking</code> 一律改成 <code>false</code>——llama-server 里请求优先于启动参数，不改的话客户端能把关闭的思考重新打开。请求里没有这个字段时不添加；其余字段（如 <code>preserve_thinking</code>）不动。请求记录里的参数仍是客户端原样发来的值。</li>
     <li><code>GET /v1/models</code> 由 llama-web 自己返回：已启用模型的基础名 + 用户自建方案的 <code>名字:方案</code>；内置「默认」方案不单独列出，即使修改了其参数也不列出。不带方案名仍使用当前方案，已有的 <code>名字:默认</code> 调用继续有效。</li>
   </ol>
   <h3>多模型并行（设置里打开「允许多个模型同时在线」后；9-3，用户 2026-10-05 确认）</h3>
@@ -932,6 +933,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 <section id="changelog">
   <h2>变更记录</h2>
   <table>
+    <tr><td>2026-10-05</td><td>用户要求「思考模式设成 off 就必须不思考」：请求路由新增一条——方案最终思考模式为 off 时，代理把请求里的 <code>chat_template_kwargs.enable_thinking</code> 强制改为 <code>false</code>（请求里没有该字段则不加）。起因：客户端每次都发 <code>enable_thinking: true</code>，会盖过 <code>--reasoning off</code>。实现在 <code>server/core/thinking-guard.ts</code>，只看 GPU 全局默认（CPU 版全局默认的思考值不参与判断）</td></tr>
     <tr><td>2026-10-05</td><td>9-5 复审返工：加载后采样期间进程退出按加载失败处理（CR-008）；延迟采样测试不再依赖前序用例的统计记录（CR-009）。规则与决定未变。</td></tr>
     <tr><td>2026-10-05</td><td>9-5 处理 2026-10-05 审核报告的 7 项意见：<code>worstTier</code> 改为 <code>unknown</code> 高于 <code>risky</code>（与 <code>admission.ts</code> 一致）；<code>preferMeasured</code> 保留当前预算的未知性；看门狗在采样后重取候选、遍历全部告急池，并通过 <code>scheduler.unload(…, { idleOnly: true })</code> 在同一个 tick 内检查在途请求；加载后实测采样放进 <code>ready</code> 之前（5 秒超时，失败不影响加载），<code>exclusive</code> 由「期间没有其它模型状态变化」决定；对话流识别 200 响应里的 SSE <code>error</code>；已删除的会话不再被晚到的保存写回（<code>withTombstones</code>）。规则与决定未变。</td></tr>
     <tr><td>2026-10-05</td><td>9-4 多模型与显存保护界面完成（阶段 9 关口，等用户试用）：编辑抽屉的「显存 / 内存预估」条与明细、参数检查列表、保存时有风险 / 放不下的确认；设置页多开开关 / 在线上限 / 放不下时二选一；模型页行内占用与档位、手动启动的确认与「先停止其他模型」；总览「在线的模型」列表、侧栏列出全部在线模型。没有改任何规则；新增的界面文案里 Mac 无 GPU / 显存字样（含只在 Mac 出现的事件文案变体）。多卡「标出每张卡上的在线模型」只有单元测试，Windows 真机界面未看。</td></tr>

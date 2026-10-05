@@ -14,6 +14,7 @@ import { resolvePreprocessOptions, runPreprocess, type PreprocessResult } from '
 import { sourceOf, summarizeImages, summarizeParams, UsageTap, type RequestMeta, type RequestRecord } from './request-log'
 import { findModel, hasImages, listModelNames, resolveTarget, type RouteResult } from './routing'
 import { diagnose } from './errors'
+import { effectiveReasoning, forceThinkingOff } from './thinking-guard'
 import type { SpeedMeter } from './speed'
 import { SchedulerError, type Lease, type NoRoomDetail, type Scheduler, type Target } from './scheduler'
 
@@ -547,7 +548,9 @@ export function createProxy(deps: ProxyDeps) {
         const result = await runPreprocess(json, { options: resolvePreprocessOptions(deps.getSettings().preprocess, profile) })
         if (Object.keys(result.reports).length) deps.onEvent?.({ type: 'preprocess', target, result })
         trace.images = summarizeImages(result.reports.image)
-        if (result.changed) body = new TextEncoder().encode(JSON.stringify(json))
+        // A profile with thinking off is a hard rule: the request cannot switch it back on.
+        const thinkingForced = effectiveReasoning(deps.getSettings(), profile) === 'off' && forceThinkingOff(json)
+        if (result.changed || thinkingForced) body = new TextEncoder().encode(JSON.stringify(json))
       } catch (e) {
         return errorResponse(500, 'preprocess_failed', fmt(t.api.preprocessFailed, { detail: String((e as Error)?.message ?? e) }))
       }
