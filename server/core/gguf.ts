@@ -32,6 +32,44 @@ export interface GgufMeta {
   /** split.count / split.no (zero-based) for sharded files. */
   splitCount: number | null
   splitNo: number | null
+  /** Hyper-parameters the memory estimate needs; every field is null when the file does not carry it. */
+  arch: GgufArch
+}
+
+/** Per-architecture hyper-parameters read from `<arch>.*` keys (all optional: older files and other kinds carry fewer). */
+export interface GgufArch {
+  blockCount: number | null
+  embeddingLength: number | null
+  feedForwardLength: number | null
+  headCount: number | null
+  /** KV heads: a number, or one entry per layer (0 = the layer has no attention, e.g. a Mamba layer of a hybrid). */
+  headCountKv: number | number[] | null
+  keyLength: number | null
+  valueLength: number | null
+  slidingWindow: number | null
+  /** `sliding_window_pattern`: a number N (every Nth layer is global) or one flag per layer (1 = sliding window). */
+  slidingWindowPattern: number | number[] | null
+  /** `full_attention_interval`: every Nth layer is full attention, the others are recurrent (Qwen3.5 / Qwen3-Next). */
+  fullAttentionInterval: number | null
+  ssm: { convKernel: number | null, stateSize: number | null, groupCount: number | null, innerSize: number | null } | null
+  expertCount: number | null
+  /** `vocab_size` key, else the length of `tokenizer.ggml.tokens`. */
+  vocabSize: number | null
+}
+
+/** Weight bytes per layer, from the tensor infos (the numbers are file bytes: block-quantised sizes). */
+export interface GgufLayout {
+  /** `blk.N.*` tensor bytes, indexed by N (holes are 0). */
+  layerBytes: number[]
+  /** `token_embd.*`. */
+  embedBytes: number
+  /** `output.weight` and `output_norm.*`; 0 + `tiedOutput` when the output projection reuses the embedding. */
+  outputBytes: number
+  tiedOutput: boolean
+  /** Everything else (rope tables, ...). */
+  otherBytes: number
+  /** Sum of all tensor bytes in this file (a shard holds only some tensors). */
+  tensorBytes: number
 }
 
 const MAGIC = 0x46554747 // "GGUF" little-endian
@@ -57,6 +95,21 @@ const TENSOR_TYPES: Record<number, string> = {
   16: 'IQ2_XXS', 17: 'IQ2_XS', 18: 'IQ3_XXS', 19: 'IQ1_S', 20: 'IQ4_NL', 21: 'IQ3_S',
   22: 'IQ2_S', 23: 'IQ4_XS', 24: 'I8', 25: 'I16', 26: 'I32', 27: 'I64', 28: 'F64',
   29: 'IQ1_M', 30: 'BF16', 34: 'TQ1_0', 35: 'TQ2_0', 39: 'MXFP4',
+}
+
+/** ggml_type -> [elements per block, bytes per block]. */
+export const TENSOR_BLOCK: Record<number, [number, number]> = {
+  0: [1, 4], 1: [1, 2], 2: [32, 18], 3: [32, 20], 6: [32, 22], 7: [32, 24], 8: [32, 34], 9: [32, 36],
+  10: [256, 84], 11: [256, 110], 12: [256, 144], 13: [256, 176], 14: [256, 210], 15: [256, 292],
+  16: [256, 66], 17: [256, 74], 18: [256, 98], 19: [256, 50], 20: [32, 18], 21: [256, 110],
+  22: [256, 82], 23: [256, 136], 24: [1, 1], 25: [1, 2], 26: [1, 4], 27: [1, 8], 28: [1, 8],
+  29: [256, 56], 30: [1, 2], 34: [256, 54], 35: [256, 66], 39: [32, 17],
+}
+
+/** Bytes a tensor of `elems` elements of ggml type `type` takes in the file (unknown types: 2 bytes per element). */
+export function tensorBytes(type: number, elems: number): number {
+  const b = TENSOR_BLOCK[type]
+  return b ? Math.ceil(elems / b[0]) * b[1] : elems * 2
 }
 
 // GGUF value types
@@ -148,17 +201,26 @@ async function skipValue(r: Reader, type: number): Promise<void> {
   if (type === T_ARRAY) {
     const elem = await r.u32()
     const len = await r.u64()
-    const elemFixed = FIXED_SIZE[elem]
-    if (elemFixed !== undefined) return r.skip(elemFixed * len)
-    if (len > MAX_ENTRIES * 100) throw new GgufError('corrupt', 'Array too large')
-    for (let i = 0; i < len; i++) await skipValue(r, elem)
-    return
+    return skipArrayBody(r, elem, len)
   }
   throw new GgufError('corrupt', `Unknown value type ${type}`)
 }
 
+async function skipArrayBody(r: Reader, elem: number, len: number): Promise<void> {
+  const elemFixed = FIXED_SIZE[elem]
+  if (elemFixed !== undefined) return r.skip(elemFixed * len)
+  if (len > MAX_ENTRIES * 100) throw new GgufError('corrupt', 'Array too large')
+  for (let i = 0; i < len; i++) await skipValue(r, elem)
+}
+
+const MAX_KEEP_ARRAY = 4096
+// Numeric arrays worth keeping (per-layer head counts / window flags).
+const KEPT_ARRAYS = ['.attention.head_count_kv', '.attention.head_count', '.attention.sliding_window_pattern', '.feed_forward_length']
+
 function wanted(key: string): boolean {
-  return key.startsWith('general.') || key.startsWith('split.') || key.endsWith('.context_length')
+  if (key.startsWith('general.') || key.startsWith('split.')) return true
+  // Architecture keys (`<arch>.…`): the architecture is not known yet while reading, so keep every non-tokenizer scalar.
+  return !key.startsWith('tokenizer.') && !key.startsWith('quantize.') && key.includes('.')
 }
 
 function str(v: unknown): string | null {
@@ -169,7 +231,8 @@ function num(v: unknown): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null
 }
 
-export async function readGgufMeta(file: string): Promise<GgufMeta> {
+/** Header + tensor infos of one file. `layout` is for the memory estimate; most callers want `readGgufMeta`. */
+export async function readGguf(file: string): Promise<{ meta: GgufMeta, layout: GgufLayout }> {
   const fileSize = (await stat(file)).size
   const fh = await open(file, 'r')
   try {
@@ -189,19 +252,30 @@ export async function readGgufMeta(file: string): Promise<GgufMeta> {
 
     const kv = new Map<string, unknown>()
     let hasChatTemplate = false
+    let tokenCount: number | null = null
     for (let i = 0; i < kvCount; i++) {
       const key = await r.string(MAX_KEY_LEN)
       if (key === null) throw new GgufError('corrupt', 'Key too long')
       const type = await r.u32()
       if (key === 'tokenizer.chat_template') hasChatTemplate = true
-      if (wanted(key) && type !== T_ARRAY) kv.set(key, await readScalar(r, type))
+      if (type === T_ARRAY) {
+        const elem = await r.u32()
+        const len = await r.u64()
+        if (key === 'tokenizer.ggml.tokens') tokenCount = len
+        if (FIXED_SIZE[elem] !== undefined && len <= MAX_KEEP_ARRAY && KEPT_ARRAYS.some(suffix => key.endsWith(suffix))) {
+          const items: number[] = []
+          for (let n = 0; n < len; n++) items.push(Number(await readScalar(r, elem)))
+          kv.set(key, items)
+        } else await skipArrayBody(r, elem, len)
+      } else if (wanted(key)) kv.set(key, await readScalar(r, type))
       else await skipValue(r, type)
     }
 
     let tensorParams = 0
     const byType = new Map<number, number>()
+    const layout: GgufLayout = { layerBytes: [], embedBytes: 0, outputBytes: 0, tiedOutput: true, otherBytes: 0, tensorBytes: 0 }
     for (let i = 0; i < tensorCount; i++) {
-      await r.string(0)
+      const name = (await r.string(256)) ?? ''
       const nDims = await r.u32()
       if (nDims > 8) throw new GgufError('corrupt', 'Implausible tensor rank')
       let elems = 1
@@ -210,7 +284,20 @@ export async function readGgufMeta(file: string): Promise<GgufMeta> {
       r.skip(8) // data offset
       tensorParams += elems
       byType.set(ttype, (byType.get(ttype) ?? 0) + elems)
+      const bytes = tensorBytes(ttype, elems)
+      layout.tensorBytes += bytes
+      const blk = /^blk\.(\d+)\./.exec(name)
+      if (blk) {
+        const n = Number(blk[1])
+        if (n < 100_000) layout.layerBytes[n] = (layout.layerBytes[n] ?? 0) + bytes
+        else layout.otherBytes += bytes
+      } else if (name.startsWith('token_embd.')) layout.embedBytes += bytes
+      else if (name.startsWith('output')) {
+        layout.outputBytes += bytes
+        if (name.startsWith('output.weight')) layout.tiedOutput = false
+      } else layout.otherBytes += bytes
     }
+    for (let n = 0; n < layout.layerBytes.length; n++) layout.layerBytes[n] ??= 0
 
     const architecture = str(kv.get('general.architecture'))
     const fileType = num(kv.get('general.file_type'))
@@ -223,7 +310,34 @@ export async function readGgufMeta(file: string): Promise<GgufMeta> {
       quantization = TENSOR_TYPES[best] ?? null
     }
 
-    return {
+    const key = (name: string) => (architecture ? kv.get(`${architecture}.${name}`) : undefined)
+    const numOrList = (v: unknown): number | number[] | null => {
+      if (Array.isArray(v)) return v.every(x => Number.isFinite(x)) ? (v as number[]) : null
+      return num(v)
+    }
+    const ssmState = num(key('ssm.state_size'))
+    const arch: GgufArch = {
+      blockCount: num(key('block_count')),
+      embeddingLength: num(key('embedding_length')),
+      feedForwardLength: Array.isArray(key('feed_forward_length')) ? Math.max(0, ...(key('feed_forward_length') as number[])) : num(key('feed_forward_length')),
+      headCount: Array.isArray(key('attention.head_count')) ? Math.max(0, ...(key('attention.head_count') as number[])) : num(key('attention.head_count')),
+      headCountKv: numOrList(key('attention.head_count_kv')),
+      keyLength: num(key('attention.key_length')),
+      valueLength: num(key('attention.value_length')),
+      slidingWindow: num(key('attention.sliding_window')),
+      slidingWindowPattern: numOrList(key('attention.sliding_window_pattern')),
+      fullAttentionInterval: num(key('full_attention_interval')),
+      ssm: ssmState === null ? null : {
+        convKernel: num(key('ssm.conv_kernel')),
+        stateSize: ssmState,
+        groupCount: num(key('ssm.group_count')),
+        innerSize: num(key('ssm.inner_size')),
+      },
+      expertCount: num(key('expert_count')),
+      vocabSize: num(key('vocab_size')) ?? tokenCount,
+    }
+
+    const meta: GgufMeta = {
       version,
       fileSize,
       architecture,
@@ -234,13 +348,19 @@ export async function readGgufMeta(file: string): Promise<GgufMeta> {
       parameterCountFromTensors: declared === null && tensorCount > 0,
       quantization,
       fileType,
-      contextLength: architecture ? num(kv.get(`${architecture}.context_length`)) : null,
+      contextLength: num(key('context_length')),
       hasChatTemplate,
       tensorCount,
       splitCount: num(kv.get('split.count')),
       splitNo: num(kv.get('split.no')),
+      arch,
     }
+    return { meta, layout }
   } finally {
     await fh.close()
   }
+}
+
+export async function readGgufMeta(file: string): Promise<GgufMeta> {
+  return (await readGguf(file)).meta
 }

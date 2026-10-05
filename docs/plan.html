@@ -798,10 +798,11 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 
   <h3>9-1 · 显存 / 内存预估核心（Opus 5.5）</h3>
   <ul class="tasks">
-    <li class="task" data-done="false"><span class="t">先在真实 llama-server 上核对：<code>--fit</code> / <code>llama-fit-params</code> 的行为、<code>--parallel</code> 对 KV 总量的影响、各 K / V 缓存类型的字节数、flash-attn 对计算缓冲的影响；用 3 个不同架构的真实 GGUF（稠密、含滑动窗口 / 混合层、带 mmproj）对比预估与 nvidia-smi 实测，记录误差；占 GPU 的核对开始前先告诉用户</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">预估纯函数（决定 43、45）：权重 / KV / 计算缓冲 / mmproj / 草稿 / 设备固定开销 / 系统内存，输出明细与三档；<b>按用户实际启用的 GPU 逐卡算</b>（单卡就是一张，多卡按切分比例落到各卡）；读取 GGUF 元数据补充层数、KV 头数、每头维度、滑动窗口等字段（<code>gguf.ts</code> 扩展，保持向后兼容）；测试覆盖各量化类型、分片、部分卸载、CPU 设备、无 GPU</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">实测记录 <code>data/vram-stats.json</code>（版本字段、原子写、只存数字，逐 GPU 记录）：加载成功后记录设备显存增量；预估优先用实测；偏差过大写事件；<b>Windows WDDM 下 nvidia-smi 可能取不到单进程显存，用加载前后设备已用量之差，且仅在没有别的加载同时进行时记录</b></span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">Mac / CPU：用可用内存（<code>vm_stat</code> / <code>os.freemem</code> 口径要核对，含可回收缓存）代替显存；返回结构不带 GPU 字样；测试用构造数据</span><span class="when"></span></li>
+    <li class="task" data-done="true"><span class="t">Mac（Metal）部分：在真实 llama-server b11146 上核对 <code>--fit</code> / <code>llama-fit-params</code>、<code>--parallel</code>（自动 = 4 槽统一 KV）、各 K / V 缓存类型字节数、flash-attn 对计算缓冲的影响；3 个不同架构（稠密 SmolLM2-135M、滑动窗口 Gemma 3 270M、线性注意力混合 + mmproj 的 Qwen3.5-2B）× 8 组参数对比 llama.cpp 自报分项（总量偏差 0% ~ +10%，KV / 循环状态 0%）与整机已用量差值（大信号 +1% ~ +8%）；记录见 <code>docs/research/memory-estimate.md</code></span><span class="when">2026-10-05</span></li>
+    <li class="task" data-done="false"><span class="t"><b>CUDA / nvidia-smi 部分（仍未做，需要 Windows + NVIDIA 机器）：</b>在真实 llama-server 上核对 CUDA 路径：<code>--fit</code> / <code>llama-fit-params</code> 的行为、<code>--parallel</code> 对 KV 总量的影响、各 K / V 缓存类型的字节数、flash-attn 对计算缓冲的影响；用 3 个不同架构的真实 GGUF（稠密、含滑动窗口 / 混合层、带 mmproj）对比预估与 nvidia-smi 实测，记录误差；同时核对设备固定开销（现为 512 MiB 的猜测值）、绑定嵌入在卡上的副本、多卡计算缓冲；占 GPU 的核对开始前先告诉用户</span><span class="when"></span></li>
+    <li class="task" data-done="true"><span class="t">预估纯函数（决定 43、45）：权重 / KV / 计算缓冲 / mmproj / 草稿 / 设备固定开销 / 系统内存，输出明细与三档；<b>按用户实际启用的 GPU 逐卡算</b>（单卡就是一张，多卡按切分比例落到各卡）；读取 GGUF 元数据补充层数、KV 头数、每头维度、滑动窗口等字段（<code>gguf.ts</code> 扩展，保持向后兼容）；测试覆盖各量化类型、分片、部分卸载、CPU 设备、无 GPU（<code>server/core/memory-estimate.ts</code>、<code>gguf.ts</code> 的 <code>readGguf</code>；调用方把「最终选中的设备 / 切分比例」换成 <code>DeviceInput</code> 属于 9-2）</span><span class="when">2026-10-05</span></li>
+    <li class="task" data-done="false"><span class="t"><b>模块已完成（<code>server/core/vram-stats.ts</code>：版本字段、原子写、只存数字、逐设备记录、预估优先用实测、并发加载不记录，有测试）；还差：加载成功后在调度里调用 / 偏差大写事件（9-1 不改调度，接线放 9-3）、Windows WDDM 的前后差值取法未在真机验证。</b>实测记录 <code>data/vram-stats.json</code>（版本字段、原子写、只存数字，逐 GPU 记录）：加载成功后记录设备显存增量；预估优先用实测；偏差过大写事件；<b>Windows WDDM 下 nvidia-smi 可能取不到单进程显存，用加载前后设备已用量之差，且仅在没有别的加载同时进行时记录</b></span><span class="when"></span></li>
+    <li class="task" data-done="true"><span class="t">Mac / CPU：用可用内存（<code>vm_stat</code> / <code>os.freemem</code> 口径要核对，含可回收缓存）代替显存；返回结构不带 GPU 字样；测试用构造数据（<code>server/core/memory-sample.ts</code>：<code>vm_stat</code> 的 free + speculative + inactive + purgeable，不含活动页；<code>os.freemem()</code> 在 Mac 上只数 free 页，不可用；Linux 用 MemAvailable，Windows 用 os.freemem）</span><span class="when">2026-10-05</span></li>
   </ul>
 
   <h3>9-2 · 保存时检查与参数合理性（Sonnet 5.5）</h3>
@@ -909,6 +910,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 <section id="changelog">
   <h2>变更记录</h2>
   <table>
+    <tr><td>2026-10-05</td><td>9-1 显存 / 内存预估核心（Mac 部分）完成：<code>gguf.ts</code> 补读层数 / KV 头 / 窗口 / SSM / 词表与按层张量字节，<code>memory-estimate.ts</code>（预估纯函数）、<code>memory-sample.ts</code>（系统可用内存）、<code>vram-stats.ts</code>（实测记录模块）；实测结论与误差见 <code>docs/research/memory-estimate.md</code>。发现：llama-server 自动 <code>--parallel</code> 是 4 槽统一 KV；<code>llama-fit-params</code> 的计算缓冲偏大一个数量级、不传 ctx 时会静默缩小上下文；Mac 的 <code>os.freemem()</code> 不可用。CUDA 路径与加载后自动记录（接调度）未做。</td></tr>
     <tr><td>2026-10-05</td><td>用户在 Mac 上试用 DMG 无问题（首次打开用“仍要打开”）；v0.1.0-beta.7（Windows + macOS arm64）公开为预发布。</td></tr>
     <tr><td>2026-10-05</td><td>用户要求 Mac 与 Windows 同版本一起发：版本升到 0.1.0-beta.7，发布说明 <code>docs/release-notes/v0.1.0-beta.7.md</code>（Mac 未签名 / 未公证、首次打开步骤未经真机验证）；macOS 工作流增加 <code>attach_to_draft</code>，把 DMG 挂到 Windows 工作流创建的草稿并追加 SHA256SUMS；Mac 桌面版不再注册应用内安装钩子（原来会去下载 .exe）。只建草稿，公开由用户确认。</td></tr>
     <tr><td>2026-10-05</td><td>新增阶段 9 任务 9-mac-dmg（Mac arm64 构建与 DMG，不发布；无证书只出未签名测试包，Mac 包日后与 Windows 同版本发），claude-guide 加对应卡片。</td></tr>

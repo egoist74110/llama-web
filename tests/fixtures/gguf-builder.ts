@@ -10,12 +10,13 @@ export type KvValue =
   | { t: 'str', v: string }
   | { t: 'strarr', v: string[] }
   | { t: 'u32arr', v: number[] }
+  | { t: 'i32', v: number }
 
 export interface FakeGguf {
   version?: number
   kvs?: Array<[string, KvValue]>
   /** [dims, ggml type] */
-  tensors?: Array<{ dims: number[], type: number }>
+  tensors?: Array<{ dims: number[], type: number, name?: string }>
 }
 
 const u32 = (n: number) => { const b = Buffer.alloc(4); b.writeUInt32LE(n); return b }
@@ -25,6 +26,7 @@ const str = (s: string) => { const d = Buffer.from(s, 'utf8'); return Buffer.con
 function value(kv: KvValue): Buffer {
   switch (kv.t) {
     case 'u32': return Buffer.concat([u32(4), u32(kv.v)])
+    case 'i32': { const b = Buffer.alloc(4); b.writeInt32LE(kv.v); return Buffer.concat([u32(5), b]) }
     case 'u64': return Buffer.concat([u32(10), u64(kv.v)])
     case 'f32': { const b = Buffer.alloc(4); b.writeFloatLE(kv.v); return Buffer.concat([u32(6), b]) }
     case 'bool': return Buffer.concat([u32(7), Buffer.from([kv.v ? 1 : 0])])
@@ -42,7 +44,7 @@ export function buildGguf(spec: FakeGguf = {}): Buffer {
   ]
   for (const [k, v] of kvs) parts.push(str(k), value(v))
   tensors.forEach((t, i) => {
-    parts.push(str(`t${i}`), u32(t.dims.length), ...t.dims.map(u64), u32(t.type), u64(0))
+    parts.push(str(t.name ?? `t${i}`), u32(t.dims.length), ...t.dims.map(u64), u32(t.type), u64(0))
   })
   return Buffer.concat(parts)
 }

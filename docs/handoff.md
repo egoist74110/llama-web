@@ -1,5 +1,14 @@
 # 交接记录
 
+## 2026-10-05 · 9-1 显存 / 内存预估核心（Mac 口径）· Claude
+- 做了：① `gguf.ts` 新增 `readGguf`（返回 `meta` + `layout`），`GgufMeta.arch` 补读层数 / 嵌入宽 / FFN 宽 / 注意力头 / KV 头（数字或每层数组）/ key·value 长度 / 滑动窗口及模式 / `full_attention_interval` / SSM 参数 / 词表大小，`layout` 给每层张量字节；旧字段不变。② `server/core/memory-estimate.ts`：`estimateMemory`（权重 / KV / 循环状态 / 计算缓冲 / mmproj / 草稿 / 设备固定开销，按池输出明细与三档，共享内存与独立显存两种，CPU 只有主机池；返回结构无 GPU 字样；读不到预算 = `unknown`，不判成放得下）。③ `memory-sample.ts`（系统可用内存：Mac `vm_stat` 的 free + speculative + inactive + purgeable，Linux MemAvailable，Windows os.freemem）。④ `vram-stats.ts`（`data/vram-stats.json`：版本、原子写、只存数字、不透明 key、逐池记录、并发加载不记、`preferMeasured` 实测优先但不低于确知部分）。⑤ `docs/research/memory-estimate.md`：全部核对与误差。
+- 实测（Apple M4 16 GiB，b11146，3 个模型：SmolLM2-135M、Gemma 3 270M、Qwen3.5-2B + mmproj；模型文件在会话临时目录，已删除）：KV / 循环状态与 llama.cpp 自报逐项 0% 误差，总量 0% ~ +10%（偏大）；对整机已用量大信号 +1% ~ +8%。**CUDA 路径没有实测。**
+- 重要发现：llama-server 自动 `--parallel` = 4 槽统一 KV（本应用默认 1）；滑动窗口层格数 = pad256(窗口 × 槽数 + ubatch)，循环状态随槽数线性增长；`llama-fit-params` 的计算缓冲比真实大一个数量级（按每 token 都要 logits 预留），不传 `-c` 时会静默缩小上下文，传了只降 `-ngl`；Mac 上 llama.cpp 报的“可用”是 Metal 工作集上限（约 74% RAM）、不含别的程序；`os.freemem()` 在 Mac 上不可用。
+- 验证：`bun test` 1188 pass / 19 skip / 0 fail；`bun run typecheck` 通过。新增 3 个测试文件（estimate 27、sample 5、stats 9 个用例）。
+- **没做 / 没验证**：CUDA 与 nvidia-smi 对比、设备固定开销 512 MiB（猜测）、多卡计算缓冲、MoE / MLA / 其他混合架构（只有通用公式，结果里有 `unverified-*` 标记）、草稿模型计算缓冲、WDDM 前后差值取法；系统余量 15% / 2 GiB 沿用未被实测推翻；**加载成功后自动记录和偏差事件没有接到调度**（不改调度，放 9-3）；plan 9-1 第 1 项拆成 Mac 部分（已勾）和 CUDA 部分（未勾），第 3 项未勾。
+- 给 9-2：把“最终选中的运行库 / 设备 / 切分比例”换成 `DeviceInput[]`（`share` = 层占比；Mac 用设备列表的 free 做 `freeMiB`，再加 `capMiB`），`ModelFacts` 由 `readGguf` 首个分片 + 全部分片大小之和（`sharded: true`）组成；`extraArgs` 里的 `--no-kv-offload`、`--swa-full`、`--mlock` 要由调用方翻译成 `EstimateParams`；`-ot` / `--n-cpu-moe` 公式不理解。
+- 给 9-3：调用 `loadDelta` + `VramStats.record`（`exclusive` 只在没有别的加载进行时为 true）；预算里“别的在线模型”用实测；看门狗用 `sampleSystemMemory`。
+
 ## 2026-10-05 · v0.1.0-beta.7 公开 · Claude
 - 用户在 Mac 上试用 DMG：首次打开用“隐私与安全性 → 仍要打开”，没问题（没提供 macOS 版本 / 机型 / 模型）。发布说明与 `docs/macos-desktop.md` 据此改为“已实测首次打开”，其余（右键打开、xattr、其他 macOS 版本、Metal 细节）仍标未验证。用户要求我公开草稿：`gh release edit v0.1.0-beta.7 --draft=false`（保持预发布）。
 - plan 9-mac-dmg 第 4 项（评估 + 首次打开文档）按实测打勾。Mac 应用内更新仍未做（只显示发布页链接）；Intel 延后。
