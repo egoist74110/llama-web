@@ -1,5 +1,12 @@
 # 交接记录
 
+## 2026-10-05 · 9-5 复审返工（CR-008 / CR-009）· Claude
+- 依据：`docs/reviews/code-audit-2026-10-05-r2.md`。CR-008：进程在加载后采样期间退出，调度器仍标 ready。CR-009：新增测试读到前序用例留下的统计记录。
+- 做了：① CR-008：`context.ts` 的 `gated` 在采样期间同时等待 `rp.exited`，采样结束后进程已退出就抛 `LoadError('exited')`，不会被「统计失败不影响加载」的 catch 吞掉；采样返回、超时、进程退出三种结束方式都先检查退出。② CR-009：延迟采样用例只看最新的两条记录（本用例的两次加载）。③ 加强 CR-005 测试：空闲候选限定 `pools: ['system']` 并断言事件的池为 `system`。
+- 新增用例：multi-load-run「采样期间进程退出 → 加载失败」（真实子进程，SIGKILL；已确认旧代码上会失败）。
+- 验证：`bun test` 1322 pass / 20 skip / 0 fail（整套）；`bun run typecheck` 通过。没有 build、真机、浏览器验证；采样超时分支没有单独用例（与「采样返回」共用同一条退出检查）。
+- 下一步：复审本次返工；其余同上一条。
+
 ## 2026-10-05 · 9-5 审查意见修复 · Claude
 - 依据：`docs/reviews/code-audit-2026-10-05.md`（CR-001 至 CR-007，5 major / 2 minor）。每项先写失败测试再修（已对 CR-002 / CR-003 用旧代码确认会失败）。
 - 做了：① CR-002：`worstTier` 顺序改为 ok < risky < unknown < nofit，调度的未知拦截不再被另一池的 risky 盖住；测试里的错误断言已改。② CR-003：`preferMeasured` 里原来就是 unknown 的池，换成实测占用后仍是 unknown（除非已经 nofit）。③ CR-001：`Scheduler.unload(target, cause, { idleOnly })`，有在途请求就返回 false；看门狗采样后才取候选，并带 `idleOnly` 卸载。④ CR-005：看门狗按危险程度遍历全部告急池，选第一个有可停候选的池，每轮最多停一个；全部池都没有候选才报 blocked。⑤ CR-007：`context.ts` 里加载后的实测采样放在 `ready` 之前（返回给调度器的是包装对象，采样超时 5 秒、失败不影响加载）；`exclusive` 由「采样窗口内没有任何模型状态变化（加载 / 排空 / 卸载 / 崩溃）」决定；新增 `ctx.measure.used` 作为测试替换点。⑥ CR-004：`readDelta` 识别 `{error}` 事件，`streamChat` 抛出其 message（已收到的正文保留）。⑦ CR-006：`withTombstones(backend)`（`app/utils/chat-db.ts`），已删除会话的晚到保存被丢弃。

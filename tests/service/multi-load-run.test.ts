@@ -123,13 +123,45 @@ t('the measurement after a load is taken before the next load starts, and each l
     releaseAfter([1100])
     await Promise.all([a, b])
     expect(pidOf('n')).toBeDefined()
-    const entries = Object.values(JSON.parse(readFileSync(join(dir, 'vram-stats.json'), 'utf8')).entries as Record<string, { measuredMiB: number[] }>)
+    // Earlier tests left records of their own: look at the two newest (the loads of this test).
+    const all = Object.values(JSON.parse(readFileSync(join(dir, 'vram-stats.json'), 'utf8')).entries as Record<string, { at: number, measuredMiB: number[] }>)
+    const entries = all.sort((x, y) => y.at - x.at).slice(0, 2)
     // First load: 1100 - 100; second load: 2100 - 1100. Neither contains the other's memory.
-    expect(entries.map(e => e.measuredMiB[0]!).sort((x, y) => x - y)).toEqual([1000, 1000])
+    expect(entries.map(e => e.measuredMiB[0]!)).toEqual([1000, 1000])
   } finally {
     ctx!.measure.used = realUsed
     await ctx!.scheduler.unload(target('m'))
     await ctx!.scheduler.unload(target('n'))
+  }
+}, 30000)
+
+t('a process that exits while its load is being measured is a failed load, not a ready model', async () => {
+  free(22000)
+  const realUsed = ctx!.measure.used
+  let n = 0
+  let releaseAfter!: (v: Array<number | null>) => void
+  ctx!.measure.used = (ids) => {
+    n++
+    if (n === 1) return Promise.resolve(ids.map(() => 100))
+    return new Promise(r => { releaseAfter = r })
+  }
+  try {
+    const waiting = ctx!.scheduler.acquire(target('o')).then(l => l, e => e)
+    const end = Date.now() + 10000
+    while (n < 2 && Date.now() < end) await new Promise(r => setTimeout(r, 10))
+    expect(n).toBe(2)
+    const proc = pidOf('o')!
+    expect(ctx!.scheduler.stateOf(target('o'))).toBe('loading') // healthy, but the measurement is pending
+    process.kill(proc.pid!, 'SIGKILL')
+    await proc.exited
+    releaseAfter?.([1100])
+    const got = await waiting
+    expect((got as SchedulerError).code).toBe('failed')
+    expect(ctx!.scheduler.stateOf(target('o'))).not.toBe('ready')
+    expect(isAlive(proc.pid!)).toBe(false)
+  } finally {
+    ctx!.measure.used = realUsed
+    await ctx!.scheduler.stop('o').catch(() => {}) // clears the failed state for the tests after this one
   }
 }, 30000)
 

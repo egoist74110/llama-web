@@ -25,7 +25,7 @@ import { ModelOps } from '../core/model-ops'
 import { createProxy, type Proxy, type ProxyEvent } from '../core/proxy'
 import { handlePublic, PublicListener } from '../core/public-entry'
 import { runStartupCleanup } from '../core/residue'
-import { PidRegistry, Runner } from '../core/runner'
+import { LoadError, PidRegistry, Runner } from '../core/runner'
 import { Scheduler, type SchedulerEvent } from '../core/scheduler'
 import { dropMlockArgs, type AdmissionData } from '../core/admission'
 import { loadDelta, VramStats } from '../core/vram-stats'
@@ -445,22 +445,29 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
           // The measurement belongs to the load: `ready` settles for the scheduler only after it, so the next load
           // (which would add its own memory to the reading) cannot start before it is taken. A failing or slow
           // measurement never fails the load.
+          let exitedInfo: { code: number | null } | null = null
+          const exitedFirst = rp.exited.then((x) => { exitedInfo = x; return null })
           const gated = rp.ready.then(async () => {
             stopTracking()
             if (combo) splitStats.succeed(combo)
-            if (!admitted?.statsKey || !usedBefore) return
-            try {
-              const after = await Promise.race([measure.used(admitted.sampleIds), new Promise<null>(r => setTimeout(r, MEASURE_TIMEOUT_MS, null))])
-              if (!after) return
-              // What the load added per pool. Another model starting to stop or crash meanwhile frees memory and would make the
-              // difference too small, so then the sample is refused as not exclusive.
-              const measured = loadDelta(usedBefore, after)
-              const res = vramStats.record(admitted.statsKey, { estimateMiB: admitted.estimateMiB, measuredMiB: measured, exclusive: memoryEvents === eventsBefore })
-              if (res.significant && res.deviation !== null) {
-                log(`memory ${plan.tag}: the load took ${Math.round(res.deviation * 100)}% ${res.deviation > 0 ? 'more' : 'less'} than estimated, the next estimate uses the measurement`)
-                live.onGuard({ kind: 'vram-deviation', modelId: target.modelId, profile: target.profile, deviation: res.deviation })
-              }
-            } catch { /* statistics only */ }
+            if (admitted?.statsKey && usedBefore) {
+              try {
+                // A process that exits while it is being measured ends the wait at once.
+                const after = await Promise.race([measure.used(admitted.sampleIds), exitedFirst, new Promise<null>(r => setTimeout(r, MEASURE_TIMEOUT_MS, null))])
+                if (after && !exitedInfo) {
+                  // What the load added per pool. Another model starting to stop or crash meanwhile frees memory and would make the
+                  // difference too small, so then the sample is refused as not exclusive.
+                  const measured = loadDelta(usedBefore, after)
+                  const res = vramStats.record(admitted.statsKey, { estimateMiB: admitted.estimateMiB, measuredMiB: measured, exclusive: memoryEvents === eventsBefore })
+                  if (res.significant && res.deviation !== null) {
+                    log(`memory ${plan.tag}: the load took ${Math.round(res.deviation * 100)}% ${res.deviation > 0 ? 'more' : 'less'} than estimated, the next estimate uses the measurement`)
+                    live.onGuard({ kind: 'vram-deviation', modelId: target.modelId, profile: target.profile, deviation: res.deviation })
+                  }
+                }
+              } catch { /* statistics only */ }
+            }
+            // Healthy once, gone before the load was handed over: that is a failed load, whatever the measurement did.
+            if (exitedInfo) throw new LoadError('exited', `Exited with code ${(exitedInfo as { code: number | null }).code ?? '-'} right after it became ready`, (exitedInfo as { code: number | null }).code ?? null, rp.tail())
           }, (e) => { stopTracking(); throw e })
           gated.catch(() => {})
           void rp.exited.then((x) => {

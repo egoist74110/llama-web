@@ -152,11 +152,12 @@ describe('Watchdog', () => {
   })
 
   test('the most endangered pool has only busy models: another pool in danger is still handled', async () => {
-    const { dog, stops } = setup(
-      [cand('gpu', { inflight: 1, pools: ['CUDA0'] }), cand('cpu', { pools: [] })],
+    const { dog, stops, events } = setup(
+      [cand('gpu', { inflight: 1, pools: ['CUDA0'] }), cand('cpu', { pools: ['system'] })],
       () => [pool('CUDA0', 24000, 20), pool('system', 16000, 300)],
     )
     expect(await dog.tick()).toEqual(T('cpu'))
+    expect(events[0]).toMatchObject({ state: 'stopped', pool: 'system' })
     expect(stops.map(s => s.target.modelId)).toEqual(['cpu'])
   })
 
