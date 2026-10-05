@@ -840,7 +840,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
     <li class="task" data-done="true"><span class="t">修 macOS CI 到如实通过：先判断每类失败是环境还是代码问题。pre-commit 在 macOS bash 3.2 下语法错误属代码问题（<code>$(...)</code> 内 case 分支需前导括号）；其余写死 Windows 假设的测试改为按平台断言，不删测试、不放宽断言；TunnelManager 的 EPERM / 超时先查清原因</span><span class="when">2026-10-05</span></li>
     <li class="task" data-done="true"><span class="t">新增 <code>.github/workflows/release-macos.yml</code>（手动触发，版本须等于 package.json，只上传构建产物，不建 Release / tag）：macos-15 上冻结安装、测试、typecheck、构建 arm64 Tauri 壳（<code>tauri.macos.conf.json</code>，Windows 配置不动）、内置校验过摘要的 Bun、sharp / libvips；产出 <code>llama-web_&lt;ver&gt;_macos-arm64.dmg</code>、<code>.sha256</code> 与清单</span><span class="when">2026-10-05</span></li>
     <li class="task" data-done="true"><span class="t">扩展 <code>desktop/check-package.ts</code> 的 Mac 模式：检查挂载后的 .app（无 data / 密钥 / 个人路径，Bun 为 Mach-O arm64，sharp darwin-arm64 与 libvips 在位，无 win32 二进制）；Windows 模式行为不变并补回归测试</span><span class="when">2026-10-05</span></li>
-    <li class="task" data-done="false"><span class="t">评估 Bun JIT 所需 entitlements 与 ad-hoc 签名对内置 Bun、运行时下载的 llama.cpp 能否执行（runner 实测）；把没有证书时用户首次打开的步骤写进文档，步骤在用户 Mac 上实际试过后再定稿；更新路径只记初步想法（手动下载新 DMG）</span><span class="when"></span></li>
+    <li class="task" data-done="true"><span class="t">评估 Bun JIT 所需 entitlements 与 ad-hoc 签名对内置 Bun、运行时下载的 llama.cpp 能否执行（runner 实测）；把没有证书时用户首次打开的步骤写进文档，步骤在用户 Mac 上实际试过后再定稿；更新路径只记初步想法（手动下载新 DMG）</span><span class="when">2026-10-05</span></li>
   </ul>
   <div class="accept"><h3>验收标准</h3>
     <ul>
@@ -909,6 +909,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 <section id="changelog">
   <h2>变更记录</h2>
   <table>
+    <tr><td>2026-10-05</td><td>用户在 Mac 上试用 DMG 无问题（首次打开用“仍要打开”）；v0.1.0-beta.7（Windows + macOS arm64）公开为预发布。</td></tr>
     <tr><td>2026-10-05</td><td>用户要求 Mac 与 Windows 同版本一起发：版本升到 0.1.0-beta.7，发布说明 <code>docs/release-notes/v0.1.0-beta.7.md</code>（Mac 未签名 / 未公证、首次打开步骤未经真机验证）；macOS 工作流增加 <code>attach_to_draft</code>，把 DMG 挂到 Windows 工作流创建的草稿并追加 SHA256SUMS；Mac 桌面版不再注册应用内安装钩子（原来会去下载 .exe）。只建草稿，公开由用户确认。</td></tr>
     <tr><td>2026-10-05</td><td>新增阶段 9 任务 9-mac-dmg（Mac arm64 构建与 DMG，不发布；无证书只出未签名测试包，Mac 包日后与 Windows 同版本发），claude-guide 加对应卡片。</td></tr>
     <tr><td>2026-10-05</td><td>完成关键决定 50：首次确认项进入全局与单模型配置。全局页上下文 / 思考 / 思考上限（快捷控件）置顶为「常用设置」，其余折叠；模型参数页顶部「常用设置」含上下文、思考与上限、MTP，其余收进「更多参数」；首次确认框新增「思考开关 / 上限也设为全局默认」勾选（saveFirstSetup 泛化为多字段同步，失败回退）。MTP 不进全局（用户确认）。新增 8 项测试；全量失败项为本机 Mac 原有（另有 3 个偶发失败，重跑通过）</td></tr>

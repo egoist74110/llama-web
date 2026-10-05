@@ -1,5 +1,9 @@
 # 交接记录
 
+## 2026-10-05 · v0.1.0-beta.7 公开 · Claude
+- 用户在 Mac 上试用 DMG：首次打开用“隐私与安全性 → 仍要打开”，没问题（没提供 macOS 版本 / 机型 / 模型）。发布说明与 `docs/macos-desktop.md` 据此改为“已实测首次打开”，其余（右键打开、xattr、其他 macOS 版本、Metal 细节）仍标未验证。用户要求我公开草稿：`gh release edit v0.1.0-beta.7 --draft=false`（保持预发布）。
+- plan 9-mac-dmg 第 4 项（评估 + 首次打开文档）按实测打勾。Mac 应用内更新仍未做（只显示发布页链接）；Intel 延后。
+
 ## 2026-10-05 · 准备 v0.1.0-beta.7（Windows + macOS arm64 同版本，只建草稿）· Claude
 - 用户要求 Mac 与 Windows 一起发，选择新版本 beta.7，且 DMG 尚未经用户在 Mac 上试用，所以先建草稿、首次打开步骤标注“未经真机验证”。已做：`package.json` → 0.1.0-beta.7；`docs/release-notes/v0.1.0-beta.7.md`；`release-macos.yml` 新增 `attach_to_draft`（只往已存在的草稿传，拒绝已公开 / 已有 DMG / 缺 Windows 安装包，合并 SHA256SUMS，Mac 许可汇总另名上传）；`server/entry.ts` 只在 Windows 注册应用内安装钩子（否则 Mac 会下载 .exe 然后在壳里报错）。`bun test` 1147 pass / 0 fail，typecheck 通过。
 - **待用户操作**（我的 `gh workflow run` 被权限拦截）：① 提交推送后先跑 `Windows release (draft)`（版本 0.1.0-beta.7）；② 再跑 `macOS arm64 build`（版本 0.1.0-beta.7，勾选 attach_to_draft）；③ 下载草稿里的包核对 SHA256SUMS、安装试用后，再公开草稿。公开前不要宣称 Mac 已验证。
