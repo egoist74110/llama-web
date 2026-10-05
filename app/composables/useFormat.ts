@@ -69,6 +69,8 @@ export function cfErrorText(code: string, detail = ''): string {
   return fmt(errors[code] ?? code, { detail: detail ? `（${detail}）` : '' })
 }
 
+const gibText = (miB: number | null) => (miB === null ? '?' : `${(miB / 1024).toFixed(1)} GB`)
+
 export function eventText(e: ActivityEvent, modelName: (id: string) => string): string {
   if (e.kind === 'state') {
     const vars = { model: modelName(e.modelId), profile: e.profile, from: stateLabel(e.from), to: stateLabel(e.to) }
@@ -82,6 +84,20 @@ export function eventText(e: ActivityEvent, modelName: (id: string) => string): 
   }
   if (e.kind === 'runtime-fallback') {
     return fmt(t.events.runtimeFallback[e.reason], { model: modelName(e.modelId), profile: e.profile, from: e.from, to: e.to })
+  }
+  if (e.kind === 'no-room') {
+    const key = e.manual ? 'manual' : 'request'
+    return fmt(t.events.noRoom[key], { model: modelName(e.modelId), profile: e.profile, reason: fmt(t.events.noRoomReason[e.reason], { estimate: gibText(e.estimateMiB), available: gibText(e.availableMiB) }) })
+  }
+  if (e.kind === 'make-room') {
+    return fmt(t.events.makeRoom, { model: modelName(e.modelId), profile: e.profile, victim: modelName(e.victimModelId), victimProfile: e.victimProfile })
+  }
+  if (e.kind === 'watchdog') {
+    const vars = { model: e.modelId ? modelName(e.modelId) : '', profile: e.profile ?? '', pool: e.pool, percent: Math.round(e.freePercent) }
+    return fmt(e.state === 'stopped' ? t.events.watchdog.stopped : t.events.watchdog.blocked, vars)
+  }
+  if (e.kind === 'vram-deviation') {
+    return fmt(t.events.vramDeviation, { model: modelName(e.modelId), profile: e.profile, percent: Math.round(e.deviation * 100) })
   }
   const rt = t.events.runtime
   const vars = { tag: e.tag ?? '', code: (t.status.runtime.errors as Record<string, string>)[e.code ?? ''] ?? e.code ?? '', from: e.from ?? '' }

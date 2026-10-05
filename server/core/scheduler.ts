@@ -1,5 +1,8 @@
 // Model scheduler: per-target state machine, serialised switching queue, draining with a
-// timeout, shared loads, crash auto-reload (at most once), and an LRU online limit.
+// timeout, shared loads, crash auto-reload (at most once), and an LRU online limit. With `multiLoad` on
+// (decision 41) several targets stay online; every load is checked first (`admit`) and, when the target does
+// not fit, a manual start is refused while a request either unloads the least recently used model or is refused
+// (`onNoRoom`, decision 42). With it off nothing is checked and one model is online, as before.
 // Process handling is injected (`launch`), so this module is pure and testable.
 //
 // State machine (see plan「核心行为规则」):
@@ -31,13 +34,41 @@ export interface ModelProcess {
   tail?(n?: number): string[]
 }
 
-export type Launcher = (target: Target) => Promise<ModelProcess>
+/** Outcome of the memory check made before a load (multi-load only). */
+export type AdmitTier = 'ok' | 'risky' | 'nofit' | 'unknown'
+
+/** The numbers behind a refusal; the proxy turns them into the 503 text. */
+export interface NoRoomDetail {
+  /**
+   * `limit` = the online limit is reached, `memory` = it does not fit next to what is online, `unknown` = the free memory
+   * could not be read, `watchdog` = the memory ran short while it was loading or running (decision 44).
+   */
+  reason: 'limit' | 'memory' | 'unknown' | 'watchdog'
+  estimateMiB: number | null
+  availableMiB: number | null
+  /** The memory pool that decided (device id, `host`, ...). */
+  pool: string | null
+  /** The online limit (reason `limit`). */
+  limit?: number
+}
+
+export interface Admission {
+  tier: AdmitTier
+  detail: Omit<NoRoomDetail, 'reason'>
+  /** Memory pools the target draws on (device ids, `host`); the watchdog only stops models that share the short pool. */
+  pools: string[]
+  /** Opaque to the scheduler; handed to the launcher (measurement key, arguments to change, ...). */
+  data?: unknown
+}
+
+export type Launcher = (target: Target, admission?: Admission) => Promise<ModelProcess>
 
 export type SchedulerErrorCode =
   | 'failed' // the target failed to load (or is in the failed state); needs a manual retry
   | 'stopped' // the target was stopped manually while the request was waiting
   | 'cancelled' // the waiting request was aborted by its caller
   | 'shutdown' // the scheduler is shutting down
+  | 'no-room' // multi-load: the target does not fit (`cause` is a NoRoomDetail)
 
 export class SchedulerError extends Error {
   constructor(public code: SchedulerErrorCode, public target: Target, public override cause?: unknown) {
@@ -75,11 +106,24 @@ export interface Lease {
 export type SchedulerEvent =
   | { type: 'state', target: Target, from: ModelState, to: ModelState, error?: unknown }
   | { type: 'drain-timeout', target: Target, inflight: number }
+  /** A load was refused (`manual` = a start from the interface, otherwise a request). */
+  | { type: 'no-room', target: Target, detail: NoRoomDetail, manual: boolean }
+  /** A request needed room: this model was unloaded for it (`unload` policy). */
+  | { type: 'make-room', target: Target, victim: Target, detail: NoRoomDetail }
 
 export interface SchedulerOptions {
   launch: Launcher
-  /** Online limit X (fixed at 1 for now). */
+  /** Online limit X; the caller passes 1 while multi-load is off. May be a getter (read at every load). */
   maxLoaded?: number
+  /** Multi-load is on (decision 41): loads are checked with `admit`. May be a getter. */
+  multiLoad?: boolean
+  /** What a request does when the target does not fit (decision 42). May be a getter. */
+  onNoRoom?: 'unload' | 'error'
+  /**
+   * Memory check before a load, given the targets that are online. A throw counts as `unknown`. Without it (or with
+   * `multiLoad` off) there is no check and only the online limit applies.
+   */
+  admit?: (target: Target, online: Target[]) => Promise<Admission>
   drainTimeoutMs: number
   onEvent?: (e: SchedulerEvent) => void
   /**
@@ -113,6 +157,18 @@ export interface SchedulerSnapshot {
   queue: QueueSnapshot[]
 }
 
+/** A model the watchdog may stop (decision 44). */
+export interface Candidate {
+  target: Target
+  state: 'loading' | 'ready'
+  inflight: number
+  /** Order of loading: higher = loaded later. */
+  loadSeq: number
+  /** Order of last use: higher = used more recently. */
+  useSeq: number
+  pools: string[]
+}
+
 const OCCUPYING: ReadonlySet<ModelState> = new Set(['loading', 'ready', 'draining', 'unloading'])
 
 const keyOf = (t: Target) => JSON.stringify([t.modelId, t.profile])
@@ -131,6 +187,10 @@ interface Instance {
   /** Launched by the automatic post-crash reload. */
   autoReloaded: boolean
   stopRequested: boolean
+  /** Why the load is being stopped, when the waiting requests should be told (watchdog). */
+  stopCause: NoRoomDetail | null
+  /** Memory pools from the admission (empty = unknown). */
+  pools: string[]
   evicting: Promise<void> | null
   forceNow: (() => void) | null
   drainWaiters: Array<() => void>
@@ -182,10 +242,16 @@ export class Scheduler {
   private pumping = false
   private seq = 0
   private shuttingDown = false
-  readonly maxLoaded: number
 
-  constructor(private opts: SchedulerOptions) {
-    this.maxLoaded = Number.isInteger(opts.maxLoaded) && opts.maxLoaded! >= 1 ? opts.maxLoaded! : 1
+  constructor(private opts: SchedulerOptions) {}
+
+  get maxLoaded(): number {
+    const n = this.opts.maxLoaded
+    return Number.isInteger(n) && n! >= 1 ? n! : 1
+  }
+
+  private get multi(): boolean {
+    return !!this.opts.multiLoad && !!this.opts.admit
   }
 
   /** Current state of a target (`stopped` when unknown). */
@@ -359,6 +425,30 @@ export class Scheduler {
     return { models, queue }
   }
 
+  /** Models that are loading or ready, with what the watchdog needs to pick one (decision 44). */
+  candidates(): Candidate[] {
+    return [...this.instances.values()]
+      .filter(i => (i.state === 'ready' || i.state === 'loading') && !i.evicting)
+      .map(i => ({ target: i.target, state: i.state as 'loading' | 'ready', inflight: i.inflight.size, loadSeq: i.born, useSeq: i.useSeq, pools: i.pools }))
+  }
+
+  /**
+   * Unload one target (not its model's other profiles). A load in progress is aborted and the requests waiting for it
+   * get `cause`; a ready one is drained and unloaded as usual. False when it is not loading or ready.
+   */
+  async unload(target: Target, cause: NoRoomDetail | null = null): Promise<boolean> {
+    const inst = this.instances.get(keyOf(target))
+    if (!inst) return false
+    if (inst.state === 'loading') {
+      inst.stopCause = cause
+      await this.abortLoad(inst)
+      return true
+    }
+    if (inst.state !== 'ready') return false
+    await this.evict(inst, false)
+    return true
+  }
+
   // -------------------------------------------------------------------------------------
 
   private abortLoad(inst: Instance): Promise<void> {
@@ -447,21 +537,41 @@ export class Scheduler {
     // The same target may still be on its way out (manual stop); let it finish first.
     if (inst?.evicting) await inst.evicting
 
-    // Make room: evict least-recently-used ready models until below the limit.
+    // Make room. Without multi-load: evict least-recently-used ready models until below the limit. With it: the limit and
+    // the memory check decide; a manual start is refused, a request unloads (or is refused, `onNoRoom`).
+    const multi = this.multi
+    const byRequest = job.waiters.some(w => !w.manual)
+    let admission: Admission | undefined
     for (;;) {
       if (job.cancelled) return this.rejectAll(job, this.shuttingDown ? 'shutdown' : 'stopped')
       const others = [...this.instances.values()].filter(i => i.key !== key && OCCUPYING.has(i.state))
-      if (others.length < this.maxLoaded) break
+      let why: NoRoomDetail | null = null
+      admission = undefined
+      if (others.length >= this.maxLoaded) {
+        why = { reason: 'limit', estimateMiB: null, availableMiB: null, pool: null, limit: this.maxLoaded }
+      } else if (multi) {
+        admission = await this.admission(target, others)
+        if (job.cancelled) return this.rejectAll(job, this.shuttingDown ? 'shutdown' : 'stopped')
+        // `unknown` cannot be told apart from "fits" for a manual start (the interface asked the user first) or when
+        // nothing else is online (the same as a single-model start); next to other models it counts as "does not fit".
+        if (admission.tier === 'nofit') why = { reason: 'memory', ...admission.detail }
+        else if (admission.tier === 'unknown' && byRequest && others.length > 0) why = { reason: 'unknown', ...admission.detail }
+      }
+      if (!why) break
+      if (multi && (!byRequest || this.opts.onNoRoom === 'error' || others.length === 0)) return this.refuse(job, why)
       const victim = others.filter(i => i.state === 'ready').sort((a, b) => a.useSeq - b.useSeq)[0]
-      if (victim) await this.evict(victim, false)
-      else await Promise.race(others.map(i => i.evicting ?? i.proc?.exited ?? Promise.resolve()))
+      if (victim) {
+        if (multi) this.emit({ type: 'make-room', target, victim: victim.target, detail: why })
+        await this.evict(victim, false)
+      } else await Promise.race(others.map(i => i.evicting ?? i.proc?.exited ?? Promise.resolve()))
     }
 
     inst = this.newInstance(target, job.fromCrash && !manual, inst?.state)
+    inst.pools = admission?.pools ?? []
     this.setState(inst, 'loading')
     let proc: ModelProcess | null = null
     try {
-      proc = await this.opts.launch(target)
+      proc = await this.opts.launch(target, admission)
       inst.proc = proc
       if (inst.stopRequested) await proc.stop()
       void proc.exited.then(exit => this.onExit(inst!, exit))
@@ -472,6 +582,7 @@ export class Scheduler {
       if (inst.stopRequested || job.cancelled) {
         this.setState(inst, 'stopped')
         this.instances.delete(key)
+        if (inst.stopCause && !this.shuttingDown) return this.refuse(job, inst.stopCause)
         return this.rejectAll(job, this.shuttingDown ? 'shutdown' : 'stopped')
       }
       if (!proc && this.opts.isPrecondition?.(e)) {
@@ -492,7 +603,7 @@ export class Scheduler {
     const inst: Instance = {
       key: keyOf(target), target, state: prev, proc: null, inflight: new Set(),
       useSeq: ++this.seq, born: this.seq, lastUsedAt: null, error: null, autoReloaded,
-      stopRequested: false, evicting: null, forceNow: null, drainWaiters: [], loadWaiters: [],
+      stopRequested: false, stopCause: null, pools: [], evicting: null, forceNow: null, drainWaiters: [], loadWaiters: [],
     }
     this.instances.set(inst.key, inst)
     return inst
@@ -552,6 +663,21 @@ export class Scheduler {
 
   private emit(e: SchedulerEvent) {
     try { this.opts.onEvent?.(e) } catch { /* listeners must not break scheduling */ }
+  }
+
+  /** `admit` of the options; an exception is an answer that could not be read. */
+  private async admission(target: Target, others: Instance[]): Promise<Admission> {
+    try {
+      return await this.opts.admit!(target, others.map(i => i.target))
+    } catch {
+      return { tier: 'unknown', detail: { estimateMiB: null, availableMiB: null, pool: null }, pools: [] }
+    }
+  }
+
+  /** Reject the job's waiters with `no-room`; the target stays as it was (nothing was loaded or unloaded for it). */
+  private refuse(job: Job, detail: NoRoomDetail) {
+    this.emit({ type: 'no-room', target: job.target, detail, manual: !job.waiters.some(w => !w.manual) })
+    for (const w of job.waiters.splice(0)) w.reject(new SchedulerError('no-room', job.target, detail))
   }
 
   private resolveAll(job: Job, inst: Instance) {

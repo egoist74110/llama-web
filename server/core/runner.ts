@@ -228,13 +228,26 @@ export class Runner {
     this.host = opts.host ?? '127.0.0.1'
   }
 
+  /** Tail of the allocation queue: two starts never probe the range at the same time. */
+  private allocating: Promise<unknown> = Promise.resolve()
+
+  /** The first free port, reserved before the next allocation looks (several models may start close together). */
+  private reservePort(): Promise<number | null> {
+    const run = this.allocating.then(async () => {
+      const port = await allocatePort(this.opts.portRange, this.reserved, this.host)
+      if (port !== null) this.reserved.add(port)
+      return port
+    })
+    this.allocating = run.catch(() => null)
+    return run
+  }
+
   /** Allocate a port and spawn. Load progress is reported through `ready`. */
   async start(spec: StartSpec): Promise<RunningProcess> {
-    const port = await allocatePort(this.opts.portRange, this.reserved, this.host)
+    const port = await this.reservePort()
     if (port === null) {
       throw new LoadError('no-port', `No free port in ${this.opts.portRange[0]}-${this.opts.portRange[1]}`)
     }
-    this.reserved.add(port)
     const rp = new RunningProcess(this, spec, port)
     this.procs.add(rp)
     rp.exited.then(() => {

@@ -231,7 +231,7 @@ li.task .when{color:var(--ok);font-size:12px;white-space:nowrap}
     <tr><td>6b</td><td>变体</td><td>一个模型下多个「配置方案」，界面切换当前方案，切换即重启</td></tr>
     <tr><td>7</td><td>客户端选方案</td><td><code>模型名</code> = 当前方案；<code>模型名:方案名</code> 可直接调用；<code>GET /v1/models</code> 只列基础名与用户自建方案，隐藏内置的 <code>模型名:默认</code>（已有客户端仍可直接调用）。请求未运行的模型 → 自动切换（公网请求也可以触发）</td></tr>
     <tr><td>8</td><td>切换时旧请求还在跑</td><td>排队等旧请求结束，期间旧模型不再接新请求；超时强制中断；加载期间对流式请求发 SSE 心跳</td></tr>
-    <tr><td>9</td><td>在线上限 X</td><td>配置项存在，界面只读，固定 1；满了卸载最久未用的；常驻 / 空闲卸载 / 显存判断留坑。<b>阶段 9（规划）放开：见决定 41–43，用户 2026-10-03 要求</b></td></tr>
+    <tr><td>9</td><td>在线上限 X</td><td>默认固定 1；满了卸载最久未用的；常驻 / 空闲卸载留坑。<b>阶段 9 已放开（9-3，2026-10-05）：设置里「允许多个模型同时在线」（<code>scheduler.multiLoad</code>，默认关）打开后上限 <code>maxLoaded</code> 可填 1–99；规则见「核心行为规则 · 多模型并行」与决定 41–44</b></td></tr>
     <tr><td>10</td><td>日志</td><td>「模型输出 / 事件 / 请求」三个标签；模型输出按次存文件，其他按天存；实时 t/s，不做历史平均</td></tr>
     <tr><td>11</td><td>图片预处理</td><td>做成预处理步骤链，第一版只有图片压缩，参数按模型可覆盖；模型没配 mmproj 时收到图片 → 中文报错</td></tr>
     <tr><td>11b</td><td>reasoning-debug 日志</td><td>并入请求记录的「参数摘要」</td></tr>
@@ -302,6 +302,20 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
     <li>等待期间，如果是流式请求，每 15 秒发送一次 SSE 注释行 <code>: loading 63%</code> 保持连接。</li>
     <li>目标模型没有配置 mmproj，但请求里有图片 → 直接返回 400 和中文说明，不去加载模型。</li>
     <li><code>GET /v1/models</code> 由 llama-web 自己返回：已启用模型的基础名 + 用户自建方案的 <code>名字:方案</code>；内置「默认」方案不单独列出，即使修改了其参数也不列出。不带方案名仍使用当前方案，已有的 <code>名字:默认</code> 调用继续有效。</li>
+  </ol>
+  <h3>多模型并行（设置里打开「允许多个模型同时在线」后；9-3，用户 2026-10-05 确认）</h3>
+  <p>开关默认关。关闭时上面的状态机和路由原样生效：同时只有一个模型在线，切换时卸载旧的，不做任何内存检查，<code>maxLoaded</code> 视为 1。打开后：</p>
+  <ol>
+    <li><b>每个「模型 + 方案」有自己的状态机</b>（状态集合不变），一个崩溃不影响其他在线模型；在线数量上限为 <code>maxLoaded</code>（1–99，且不超过端口范围里的端口数）。</li>
+    <li><b>加载全局串行</b>：同一时刻只加载一个模型（不是按设备串行），其余排队；多个等待同一目标的请求仍共享一次加载。</li>
+    <li><b>目标已 ready 就直接转发</b>，与其他在线模型无关。否则加载前先检查：在线数没到上限，并且预估放得下（三档：可以 ≤ 可用的 85%、有风险 85%–100%、放不下 &gt; 100%；可用量是设备当前的实时读数，已含别的在线模型和别的程序，系统内存另留 15% 与 2 GiB 中较大者）→ 直接加载，不卸载别人。「有风险」的请求照常加载（请求没法询问用户）。</li>
+    <li><b>到上限或放不下</b>，请求触发的加载（本机 / 局域网 / 公网一视同仁）按设置 <code>onNoRoom</code>：<b>卸载上一个</b>（默认）= 卸载最久未用的 ready 模型（draining 流程不变：不接新请求、等在途请求、超时强断），<b>一次一个、卸完重新检查</b>，直到放得下；<b>服务端报错</b> = 不加载、不影响在线模型，返回 HTTP 503，错误码 <code>insufficient_memory</code>，中文原因含预估与可用量，写事件和请求记录（不含对话内容）。卸到只剩目标自己仍放不下，也返回 503。</li>
+    <li><b>读不到可用量</b>（nvidia-smi 缺失、内存读取失败）算「未知」：旁边有别的在线模型时请求按「放不下」处理；旁边没有别的在线模型时与单开一样直接加载；手动启动弹确认。</li>
+    <li><b>手动启动</b>（模型页启动 / 重试）不会悄悄卸载别的模型：到上限或放不下 → 接口返回 409（<code>reason</code> 为 <code>limit</code> / <code>nofit</code>），提示先停止其他模型，不提供强行启动；「有风险」或「未知」→ 409（<code>risky</code> / <code>unknown</code>），界面确认后带 <code>confirm: true</code> 再启动。调度在真正加载时再检查一次，防止竞态。</li>
+    <li><b>没有 <code>model</code> 字段的请求</b>：用「最近被请求使用过的 ready 模型」；没有 ready 的才用正在加载的，都没有返回 no-model。只有一个在线模型时与旧规则相同。<code>/v1/models</code> 不变。</li>
+    <li><b>运行期看门狗</b>：每 2 秒读一次可用显存 / 系统内存，任一池可用 &lt; 5%（危险线）→ 先停<b>最新加载</b>且没有在途请求的模型（加载中的也算，等待它的请求收到 503），仍不回升则下一轮起依次停<b>最久未用</b>的空闲模型，每轮只停一个；有在途请求的模型绝不停（只提示一次）；只处理自己登记的子进程。某张卡低只停用到这张卡的模型，系统内存低则任何模型都可停。读数失败不停任何模型。</li>
+    <li><b>实测</b>：加载成功后记下每个池的实际增量到 <code>data/vram-stats.json</code>（只存数字）；同一启动形态的下一次预估以实测为准（不低于确知部分）；偏差大写事件。</li>
+    <li><b>mlock</b>：预估发现锁定内存大于可用内存时，加载不带 <code>--load-mode mlock</code> / <code>--mlock</code>，日志和检查结果（<code>mlockDropped</code>）标出。注意：按目前的预估口径，这种情况同时意味着放不下，会先被第 3、4 条拦住。</li>
   </ol>
   <h3>参数合并</h3>
   <p>最终参数 = 全局默认 ← 模型设置 ← 当前方案的覆盖 ← 方案的「额外参数」。表单项每一项都有「继承 / 自定义」两种状态。额外参数里出现了表单已经管理的参数（例如 <code>-c</code>、<code>--jinja</code>）时给出警告，以额外参数为准。<code>--host</code> / <code>--port</code> 由 llama-web 分配，不允许用户覆盖。</p>
@@ -801,7 +815,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
     <li class="task" data-done="true"><span class="t">Mac（Metal）部分：在真实 llama-server b11146 上核对 <code>--fit</code> / <code>llama-fit-params</code>、<code>--parallel</code>（自动 = 4 槽统一 KV）、各 K / V 缓存类型字节数、flash-attn 对计算缓冲的影响；3 个不同架构（稠密 SmolLM2-135M、滑动窗口 Gemma 3 270M、线性注意力混合 + mmproj 的 Qwen3.5-2B）× 8 组参数对比 llama.cpp 自报分项（总量偏差 0% ~ +10%，KV / 循环状态 0%）与整机已用量差值（大信号 +1% ~ +8%）；记录见 <code>docs/research/memory-estimate.md</code></span><span class="when">2026-10-05</span></li>
     <li class="task" data-done="false"><span class="t"><b>CUDA / nvidia-smi 部分（仍未做，需要 Windows + NVIDIA 机器）：</b>在真实 llama-server 上核对 CUDA 路径：<code>--fit</code> / <code>llama-fit-params</code> 的行为、<code>--parallel</code> 对 KV 总量的影响、各 K / V 缓存类型的字节数、flash-attn 对计算缓冲的影响；用 3 个不同架构的真实 GGUF（稠密、含滑动窗口 / 混合层、带 mmproj）对比预估与 nvidia-smi 实测，记录误差；同时核对设备固定开销（现为 512 MiB 的猜测值）、绑定嵌入在卡上的副本、多卡计算缓冲；占 GPU 的核对开始前先告诉用户</span><span class="when"></span></li>
     <li class="task" data-done="true"><span class="t">预估纯函数（决定 43、45）：权重 / KV / 计算缓冲 / mmproj / 草稿 / 设备固定开销 / 系统内存，输出明细与三档；<b>按用户实际启用的 GPU 逐卡算</b>（单卡就是一张，多卡按切分比例落到各卡）；读取 GGUF 元数据补充层数、KV 头数、每头维度、滑动窗口等字段（<code>gguf.ts</code> 扩展，保持向后兼容）；测试覆盖各量化类型、分片、部分卸载、CPU 设备、无 GPU（<code>server/core/memory-estimate.ts</code>、<code>gguf.ts</code> 的 <code>readGguf</code>；调用方把「最终选中的设备 / 切分比例」换成 <code>DeviceInput</code> 属于 9-2）</span><span class="when">2026-10-05</span></li>
-    <li class="task" data-done="false"><span class="t"><b>模块已完成（<code>server/core/vram-stats.ts</code>：版本字段、原子写、只存数字、逐设备记录、预估优先用实测、并发加载不记录，有测试）；还差：加载成功后在调度里调用 / 偏差大写事件（9-1 不改调度，接线放 9-3）、Windows WDDM 的前后差值取法未在真机验证。</b>实测记录 <code>data/vram-stats.json</code>（版本字段、原子写、只存数字，逐 GPU 记录）：加载成功后记录设备显存增量；预估优先用实测；偏差过大写事件；<b>Windows WDDM 下 nvidia-smi 可能取不到单进程显存，用加载前后设备已用量之差，且仅在没有别的加载同时进行时记录</b></span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t"><b>模块已完成（<code>server/core/vram-stats.ts</code>：版本字段、原子写、只存数字、逐设备记录、预估优先用实测、并发加载不记录，有测试）；9-3 已把「加载成功后记录 + 偏差事件」接进 <code>context.ts</code> 的 launch（<code>usedOf</code> 前后差值，加载串行所以总是独占）；还差：Windows WDDM 的前后差值取法未在真机验证，Mac 上的差值只用假进程跑过（没有真实增量）。</b>实测记录 <code>data/vram-stats.json</code>（版本字段、原子写、只存数字，逐 GPU 记录）：加载成功后记录设备显存增量；预估优先用实测；偏差过大写事件；<b>Windows WDDM 下 nvidia-smi 可能取不到单进程显存，用加载前后设备已用量之差，且仅在没有别的加载同时进行时记录</b></span><span class="when"></span></li>
     <li class="task" data-done="true"><span class="t">Mac / CPU：用可用内存（<code>vm_stat</code> / <code>os.freemem</code> 口径要核对，含可回收缓存）代替显存；返回结构不带 GPU 字样；测试用构造数据（<code>server/core/memory-sample.ts</code>：<code>vm_stat</code> 的 free + speculative + inactive + purgeable，不含活动页；<code>os.freemem()</code> 在 Mac 上只数 free 页，不可用；Linux 用 MemAvailable，Windows 用 os.freemem）</span><span class="when">2026-10-05</span></li>
   </ul>
 
@@ -809,18 +823,19 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
   <ul class="tasks">
     <li class="task" data-done="true"><span class="t"><code>POST /api/models/:id/check</code>（不保存，只算）与保存接口里的同一检查：返回显存三档 + 明细 + 参数合理性警告列表（决定 43 列出的各项）；仅在真实 llama-server 证实必然启动失败的组合才作为错误拒绝保存（<code>server/core/model-check.ts</code>、<code>server/service/model-check.ts</code>；错误只有三类：V 缓存量化但 flash-attn 关〔Mac b11146 实测退出码 1〕、设备不在该版本列表〔8-7 在真实 5090 上实测〕、版本不支持切分模式；其余都只是警告，显存三档永远不拒绝保存）</span><span class="when">2026-10-05</span></li>
     <li class="task" data-done="true"><span class="t">合并参数时按「最终选中的运行库 / 设备」计算（接阶段 8 的引用与设备解析；吃的是命令预览的最终参数数组，额外参数已覆盖在内）；检查结果不写入配置；别的在线模型和别的程序已占的部分来自设备「当前可用」的实时读数（<code>--list-devices</code> / nvidia-smi / 系统内存）</span><span class="when">2026-10-05</span></li>
-    <li class="task" data-done="false"><span class="t">别的在线模型占用改取 <code>vram-stats.json</code> 的实测值：要等 9-3 把「加载成功后记录」接进调度（现在没有记录可查）；同一模型已在线时，检查里的可用量不含它自己，只会偏保守（结果里有 <code>online</code> 标记）</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">别的在线模型占用改取 <code>vram-stats.json</code> 的实测值：要等 9-3 把「加载成功后记录」接进调度（现在没有记录可查）；同一模型已在线时，检查里的可用量不含它自己，只会偏保守（结果里有 <code>online</code> 标记）。<b>9-3 的处理</b>：目标自己的预估已优先取实测（<code>basis: measured</code>）；别的在线模型占用没有再另取实测，因为可用量本来就是设备当前的实时读数，已包含它们的真实占用。如果要改成「预估总量 − 各在线模型的实测」请告诉我，这一项因此不打勾</span><span class="when"></span></li>
     <li class="task" data-done="true"><span class="t">测试：每条合理性规则正反各一例；显存三档边界（85% / 100%）；设备不存在；多方案分别计算；旧配置（无 device / runtime）照常（<code>tests/core/model-check.test.ts</code> 19 项、<code>tests/service/model-check.test.ts</code> 7 项 + Windows 专属 1 项）</span><span class="when">2026-10-05</span></li>
   </ul>
 
   <h3>9-3 · 调度支持多开（Opus 5.5）</h3>
   <ul class="tasks">
-    <li class="task" data-done="false"><span class="t"><b>开始前：把决定 41 / 42 的规则文字给用户确认，再同步「核心行为规则」和决定 9。</b></span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">调度：<code>scheduler.multiLoad</code> 开关（默认关，关时 <code>maxLoaded</code> 钳制为 1，行为与旧版一致）、开后 <code>maxLoaded</code> 1–99（端口范围 7100–7199 够用，校验时仍要保证不超过可用端口数）；每个在线模型独立状态；加载串行；达到上限或放不下时按 <code>onNoRoom</code> 处理（卸载上一个沿用 draining 流程 / 报错）；同一模型的多个等待请求仍共享一次加载；迁移只补缺省字段（settings 版本升级）</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">加载前检查（决定 42）：用实时可用量 + 预估；<b>请求触发（本机 / 局域网 / 公网）</b>放不下：<code>onNoRoom = error</code> 或卸载后仍放不下 → 返回 503 <code>insufficient_memory</code>，不加载、不影响在线模型，写事件与请求记录（不含对话内容）；手动启动走 9-4 的确认流程，接口返回「有风险」让界面确认后带确认标记再启动</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">失败识别：<code>errors.ts</code> 识别 CUDA / Metal 显存不足日志并给出针对性提示（降低上下文 / 层数 / 换设备 / 停其他模型）；多进程残留清理、停止全部、退出时结束所有子进程树的行为回归；端口分配并发安全</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">底线（决定 44）：系统内存余量检查；预估发现 <code>mlock</code> 超过可用内存时加载不带该参数并在命令预览里标出；运行期看门狗（设备可用显存 / 系统可用内存低于危险线 → 先停最新加载且无在途请求的模型，再停最久未用的空闲模型，只处理自己登记的子进程）；检测不到时按「未知」处理，不当作放得下；下载前检查磁盘空间</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">测试（假 llama-server + 注入的显存采样）：看门狗触发与恢复、内存余量边界、检测失败按未知、多设备并存、同设备放得下 / 放不下、请求触发被拦、空闲卸载腾地方、在途请求保护、加载串行、崩溃一个不影响另一个、单开配置（默认）行为与旧版完全一致</span><span class="when"></span></li>
+    <li class="task" data-done="true"><span class="t"><b>开始前：把决定 41 / 42 的规则文字给用户确认，再同步「核心行为规则」和决定 9。</b></span><span class="when">2026-10-05</span></li>
+    <li class="task" data-done="true"><span class="t">调度：<code>scheduler.multiLoad</code> 开关（默认关，关时 <code>maxLoaded</code> 钳制为 1，行为与旧版一致）、开后 <code>maxLoaded</code> 1–99（端口范围 7100–7199 够用，校验时仍要保证不超过可用端口数）；每个在线模型独立状态；加载串行；达到上限或放不下时按 <code>onNoRoom</code> 处理（卸载上一个沿用 draining 流程 / 报错）；同一模型的多个等待请求仍共享一次加载；迁移只补缺省字段（settings 版本升级）。<b>已实现</b>：settings 版本 10、<code>effectiveMaxLoaded</code>、<code>Scheduler</code> 的 <code>admit</code> / <code>multiLoad</code> / <code>onNoRoom</code>（<code>server/core/scheduler.ts</code>，规则见「核心行为规则 · 多模型并行」），设置接口 <code>applyServer</code> 接收三个字段；设置页控件属于 9-4</span><span class="when">2026-10-05</span></li>
+    <li class="task" data-done="true"><span class="t">加载前检查（决定 42）：用实时可用量 + 预估；<b>请求触发（本机 / 局域网 / 公网）</b>放不下：<code>onNoRoom = error</code> 或卸载后仍放不下 → 返回 503 <code>insufficient_memory</code>，不加载、不影响在线模型，写事件与请求记录（不含对话内容）；手动启动走 9-4 的确认流程，接口返回「有风险」让界面确认后带确认标记再启动。<b>已实现</b>：<code>server/service/admission.ts</code>（<code>admitTarget</code>、<code>checkedStart</code>：start / retry 接口返回 409 <code>limit / nofit / risky / unknown</code>，<code>confirm: true</code> 放行 risky / unknown）；请求触发的 503 在 <code>proxy.ts</code></span><span class="when">2026-10-05</span></li>
+    <li class="task" data-done="true"><span class="t">失败识别：<code>errors.ts</code> 识别 CUDA / Metal 显存不足日志并给出针对性提示（降低上下文 / 层数 / 换设备 / 停其他模型）；多进程残留清理、停止全部、退出时结束所有子进程树的行为回归；端口分配并发安全。<b>已做</b>：Metal 的显存不足日志（<code>kIOGPUCommandBufferCallbackErrorOutOfMemory</code> 等）归入 <code>oom</code>，提示补「先停止其他在线模型 / 换设备」；<code>Runner</code> 的端口分配串行（并发启动不会拿到同一个端口）；POSIX 上用真实子进程验证了卸载会杀死进程、停止后无残留。<b>Windows 的多进程残留 / 进程树回归没跑（见下一条）</b></span><span class="when">2026-10-05</span></li>
+    <li class="task" data-done="true"><span class="t">底线（决定 44）：系统内存余量检查；预估发现 <code>mlock</code> 超过可用内存时加载不带该参数并在命令预览里标出；运行期看门狗（设备可用显存 / 系统可用内存低于危险线 → 先停最新加载且无在途请求的模型，再停最久未用的空闲模型，只处理自己登记的子进程）；检测不到时按「未知」处理，不当作放得下；下载前检查磁盘空间。<b>已做</b>：余量沿用 9-1 的预估；看门狗（<code>server/core/watchdog.ts</code>，仅多开打开时工作）；<code>mlock</code> 加载时去掉（<code>dropMlockArgs</code>，按现有预估口径它被「放不下」先拦住，见规则第 10 条）；读不到按未知；<code>llamacpp.ts</code> 的共享 <code>download()</code>（llama.cpp、cloudflared、应用安装包）在已知大小时要求剩余空间 ≥ 3 倍，手动添加运行库原本就有这项检查。看门狗只用注入的读数测试过，没有在真实内存压力下跑</span><span class="when">2026-10-05</span></li>
+    <li class="task" data-done="true"><span class="t">测试（假 llama-server + 注入的显存采样）：看门狗触发与恢复、内存余量边界、检测失败按未知、多设备并存、同设备放得下 / 放不下、请求触发被拦、空闲卸载腾地方、在途请求保护、加载串行、崩溃一个不影响另一个、单开配置（默认）行为与旧版完全一致</span><span class="when">2026-10-05</span></li>
+    <li class="task" data-done="false"><span class="t">Windows 真机回归：多个 llama-server 同时在线时的残留清理（<code>pids.json</code> 多条）、退出时结束所有进程树、停止其中一个不影响另一个、nvidia-smi 读数下看门狗与加载实测（WDDM 前后差值）；9-3 只在 Mac（POSIX，假 llama-server）上验证过。占 GPU 的部分开始前先告诉用户</span><span class="when"></span></li>
   </ul>
 
   <h3>审查（gpt-6.1sol 或用户指定的模型）</h3>
@@ -911,6 +926,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 <section id="changelog">
   <h2>变更记录</h2>
   <table>
+    <tr><td>2026-10-05</td><td>9-3 调度支持多开完成（用户先确认规则文字）：「核心行为规则」新增「多模型并行」一节，决定 9 改为已放开。<code>scheduler.multiLoad</code>（默认关）/ <code>maxLoaded</code> 1–99 / <code>onNoRoom</code>（卸载上一个 | 服务端报错）进入 settings（版本 10，迁移只补缺省）；调度在多开时加载前检查，请求触发放不下按设置处理（503 <code>insufficient_memory</code>），手动启动不卸载别人（409 limit / nofit / risky / unknown）；无 model 字段取最近使用的 ready 模型；运行期看门狗（5% 危险线）；加载成功后写 <code>vram-stats.json</code> 并让下次预估取实测；下载前剩余空间 ≥ 3 倍。设置页控件、模型页与总览显示属 9-4。Windows 真机回归未做。</td></tr>
     <tr><td>2026-10-05</td><td>9-2 保存时检查与参数合理性完成：<code>POST /api/models/:id/check</code>（单个方案，或 <code>all</code> 逐个方案分别算）与保存接口共用一套检查，返回显存 / 内存三档 + 逐池明细 + 参数警告；只有实测证实必然启动失败的三类组合拒绝保存（400，错误码 check-failed）。V 缓存量化且 flash-attn 关在 Mac b11146 + Qwen3.5-2B 上仅用 CPU 实测退出码 1；上下文超训练长度、ubatch &gt; batch、CPU 设备写大层数 / 视觉模型选 CPU、mlock &gt; 可用内存、并行槽过多按实测或规则只警告。「别的在线模型取实测」拆出为 9-3 的未完成项（需要先接线加载成功后的记录）。CUDA / Windows 未实测。</td></tr>
     <tr><td>2026-10-05</td><td>9-1 显存 / 内存预估核心（Mac 部分）完成：<code>gguf.ts</code> 补读层数 / KV 头 / 窗口 / SSM / 词表与按层张量字节，<code>memory-estimate.ts</code>（预估纯函数）、<code>memory-sample.ts</code>（系统可用内存）、<code>vram-stats.ts</code>（实测记录模块）；实测结论与误差见 <code>docs/research/memory-estimate.md</code>。发现：llama-server 自动 <code>--parallel</code> 是 4 槽统一 KV；<code>llama-fit-params</code> 的计算缓冲偏大一个数量级、不传 ctx 时会静默缩小上下文；Mac 的 <code>os.freemem()</code> 不可用。CUDA 路径与加载后自动记录（接调度）未做。</td></tr>
     <tr><td>2026-10-05</td><td>用户在 Mac 上试用 DMG 无问题（首次打开用“仍要打开”）；v0.1.0-beta.7（Windows + macOS arm64）公开为预发布。</td></tr>

@@ -75,6 +75,18 @@ describe('ports', () => {
 })
 
 describe('runner', () => {
+  test('several starts at once get different ports (several models online, decision 41)', async () => {
+    const procs = await Promise.all([start('ok'), start('ok'), start('ok')])
+    try {
+      const ports = procs.map(p => p.port)
+      expect(new Set(ports).size).toBe(3)
+      await Promise.all(procs.map(p => p.ready))
+    } finally {
+      await Promise.all(procs.map(p => p.stop()))
+    }
+    expect(registry.list()).toEqual([])
+  }, 30000)
+
   test('ready after /health 200; output captured line by line; pids.json kept in sync', async () => {
     const lines: Array<[LogStream, string]> = []
     const p = await start('ok', { onLine: (s, l) => lines.push([s, l]) })

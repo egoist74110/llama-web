@@ -3,7 +3,7 @@
 // and shared by the custom Bun entry, the Nitro plugin and the dev-mode routes.
 import { join } from 'node:path'
 import {
-  currentTagFor, defaultModels, defaultSettings, tunedDefaults, hasCpuChannel, hasDeviceSelection, MODELS_VERSION, normalizeModels, normalizeSettings, SETTINGS_MIGRATIONS, SETTINGS_VERSION,
+  currentTagFor, defaultModels, defaultSettings, effectiveMaxLoaded, tunedDefaults, hasCpuChannel, hasDeviceSelection, MODELS_VERSION, normalizeModels, normalizeSettings, SETTINGS_MIGRATIONS, SETTINGS_VERSION,
   type ModelsDoc, type Settings,
 } from '../core/config'
 import { authenticate, defaultSecrets, normalizeSecrets, SECRETS_MIGRATIONS, SECRETS_VERSION, type SecretsDoc } from '../core/keys'
@@ -27,6 +27,10 @@ import { handlePublic, PublicListener } from '../core/public-entry'
 import { runStartupCleanup } from '../core/residue'
 import { PidRegistry, Runner } from '../core/runner'
 import { Scheduler, type SchedulerEvent } from '../core/scheduler'
+import { dropMlockArgs, type AdmissionData } from '../core/admission'
+import { loadDelta, VramStats } from '../core/vram-stats'
+import { Watchdog } from '../core/watchdog'
+import { admitTarget, samplePools, usedOf } from './admission'
 import { SpeedMeter } from '../core/speed'
 import { isFirstRun } from '../core/settings-admin'
 import { JsonStore, resolveDataDir, type VersionedDoc } from '../core/store'
@@ -99,6 +103,10 @@ export interface AppContext {
   appUpdate: AppUpdater
   runner: Runner
   scheduler: Scheduler
+  /** Memory the loads really took (data/vram-stats.json); estimates prefer it (decision 43). */
+  vramStats: VramStats
+  /** Stops models when memory runs short, while several may be online (decision 44). */
+  watchdog: Watchdog
   /** Management actions (start / stop / restart / switch); use these instead of the scheduler directly. */
   ops: ModelOps
   proxy: Proxy
@@ -164,8 +172,13 @@ function logSchedulerEvent(e: SchedulerEvent) {
   if (e.type === 'state') {
     const err = e.error ? ` (${(e.error as Error).message ?? e.error})` : ''
     log(`model ${describeTarget(e.target)}: ${e.from} -> ${e.to}${err}`)
-  } else {
+  } else if (e.type === 'drain-timeout') {
     log(`model ${describeTarget(e.target)}: drain timeout, ${e.inflight} request(s) interrupted`)
+  } else if (e.type === 'no-room') {
+    const d = e.detail
+    log(`model ${describeTarget(e.target)}: not loaded (${e.manual ? 'manual start' : 'request'}), ${d.reason}${d.estimateMiB !== null ? `, needs ~${Math.round(d.estimateMiB)} MiB` : ''}${d.availableMiB !== null ? `, ${Math.round(d.availableMiB)} MiB available` : ''}`)
+  } else {
+    log(`model ${describeTarget(e.target)}: unloading ${describeTarget(e.victim)} to make room (${e.detail.reason})`)
   }
 }
 
@@ -356,14 +369,20 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     preferredLanHost = host
     if (!networkProbe.signal.aborted) live.notify()
   })
+  const vramStats = new VramStats(dataDir)
   const scheduler: Scheduler = new Scheduler({
-    maxLoaded: getSettings().scheduler.maxLoaded,
+    // Read at every load: the switch and the limit apply to the next one without a restart.
+    get maxLoaded() { return effectiveMaxLoaded(getSettings()) },
+    get multiLoad() { return getSettings().scheduler.multiLoad },
+    get onNoRoom() { return getSettings().scheduler.onNoRoom },
+    admit: admitTarget,
     get drainTimeoutMs() { return getSettings().scheduler.drainTimeoutSec * 1000 },
     onEvent: (e) => { logSchedulerEvent(e); live.onSchedulerEvent(e) },
     // Initial llama.cpp download still running (or not installed yet): not a model failure.
     isPrecondition: e => e instanceof LaunchConfigError && e.code === 'no-runtime',
-    launch: async (target) => {
+    launch: async (target, admission) => {
       await cleanupDone
+      const admitted = admission?.data as AdmissionData | undefined
       let plan = planLaunch(target, { dataDir, settings: getSettings(), models: getModels(), host: runner.host, target: selectedTarget, runtimeEnv: runtimes.env() })
       // Protect the build from deletion from here on (before the first await) until it runs or the start fails.
       const launchId = ++launchSeq
@@ -385,15 +404,24 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
         }
         for (const w of plan.warnings) log(`args ${plan.tag}: ${w.code} ${w.flag ?? ''} ${w.layer ?? ''}`.trim())
         log(`starting ${plan.tag}: ${plan.exe}`)
+        // Memory before the process exists, to measure what this load really takes (serial loads: nothing else is loading).
+        const usedBefore = admitted?.statsKey ? await usedOf(admitted.sampleIds, platform.os) : null
+        let launchArgs = plan.args
+        if (admitted?.dropMlock) {
+          const base = plan.args
+          launchArgs = port => dropMlockArgs(base(port)).args
+          log(`starting ${plan.tag}: mlock would lock more than the free memory, loading without it`)
+        }
         const progress = new LoadProgress()
         const report = (p: number | null) => { if (p !== null) live.onLoadProgress(target.modelId, target.profile, p) }
         const stopTracking = trackWeightLoad({ files: plan.weightFiles, progress, report, usedMiB: totalUsedMiB })
         // One output file per start; lines also go to the live feed of the log page.
         const run = logs.startRun(target.modelId)
         run.append(`# llama-web: starting ${plan.tag} at ${new Date().toISOString()}`)
+        if (admitted?.dropMlock) run.append('# llama-web: mlock removed from the arguments (more than the free memory would be locked)')
         try {
           const rp = await runner.start({
-            exe: plan.exe, args: plan.args, tag: plan.tag, loadTimeoutMs: plan.loadTimeoutMs,
+            exe: plan.exe, args: launchArgs, tag: plan.tag, loadTimeoutMs: plan.loadTimeoutMs,
             onLine: (stream, line) => {
               run.append(line)
               live.onLogLine(target.modelId, target.profile, stream, line)
@@ -403,7 +431,18 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
           })
           launching.delete(launchId) // runner.list() covers it from here on
           const combo = plan.combo
-          void rp.ready.then(() => { stopTracking(); if (combo) splitStats.succeed(combo) }, stopTracking)
+          void rp.ready.then(async () => {
+            stopTracking()
+            if (combo) splitStats.succeed(combo)
+            if (!admitted?.statsKey || !usedBefore) return
+            // What the load added per pool (decision 43). Loads are serial, so nothing else of ours was loading meanwhile.
+            const measured = loadDelta(usedBefore, await usedOf(admitted.sampleIds, platform.os))
+            const res = vramStats.record(admitted.statsKey, { estimateMiB: admitted.estimateMiB, measuredMiB: measured, exclusive: true })
+            if (res.significant && res.deviation !== null) {
+              log(`memory ${plan.tag}: the load took ${Math.round(res.deviation * 100)}% ${res.deviation > 0 ? 'more' : 'less'} than estimated, the next estimate uses the measurement`)
+              live.onGuard({ kind: 'vram-deviation', modelId: target.modelId, profile: target.profile, deviation: res.deviation })
+            }
+          }, stopTracking)
           void rp.exited.then((x) => {
             stopTracking()
             run.append(`# llama-web: exited code=${x.code ?? '-'} signal=${x.signal ?? '-'}${x.requested ? ' (stopped by llama-web)' : ''}`)
@@ -432,6 +471,21 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     },
   })
   const ops = new ModelOps(scheduler)
+  // Reads free memory every two seconds, but only has work while several models may be online and one is loading or ready.
+  const watchdog = new Watchdog({
+    sample: () => samplePools(platform.os),
+    candidates: () => scheduler.candidates(),
+    unload: (t, cause) => scheduler.unload(t, cause),
+    enabled: () => getSettings().scheduler.multiLoad,
+    onEvent: (e) => {
+      log(e.state === 'stopped'
+        ? `watchdog: ${e.pool} has ${Math.round(e.freePercent)}% free, stopped ${e.modelId}:${e.profile}`
+        : `watchdog: ${e.pool} has ${Math.round(e.freePercent)}% free, every model has requests running, nothing stopped`)
+      live.onGuard(e)
+    },
+  })
+  watchdog.start()
+  startupClose.push(() => watchdog.stop())
   const proxy = createProxy({
     scheduler, getModels, getSettings, onEvent: logProxyEvent,
     onRequest: (r) => { logs.appendRequest(r); usage.record(r); live.onRequest(r) },
@@ -575,7 +629,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
         return null
       }
     },
-    runtimes, runtimeAdd, appUpdate, runner, scheduler, ops, proxy, publicEntry, applyPublic, live, logs, usage, cleanupDone,
+    runtimes, runtimeAdd, appUpdate, runner, scheduler, vramStats, watchdog, ops, proxy, publicEntry, applyPublic, live, logs, usage, cleanupDone,
     shutdown() {
       closing ??= (async () => {
         networkProbe.abort()
@@ -591,6 +645,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
         modelsStore.close()
         secretsStore.close()
         gpu.stop()
+        watchdog.stop()
         await scheduler.shutdown()
         await runner.stopAll()
         usage.close()

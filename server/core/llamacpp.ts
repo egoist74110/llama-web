@@ -5,11 +5,12 @@
 // rollback flow is stage 4 (updater); this module is the initial-fetch part.
 import { createHash } from 'node:crypto'
 import { chmodSync, createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { checkExtractedTree, extractArchive, type ArchiveOptions } from './archive'
 import { pickCuda, type CudaLimits } from './cuda'
+import { freeBytes, neededBytes } from './disk-space'
 import { apiFallbackCode, fetchExpandedAssets } from './github-feed'
 import { legacyWindows, targetKey, type RuntimeTarget } from './platform'
 
@@ -17,7 +18,7 @@ const REPO = 'ggml-org/llama.cpp'
 const TAG_RE = /^b\d+$/
 
 export type RuntimeErrorCode =
-  | 'network' | 'rate-limited' | 'http' | 'no-nightly-tag' | 'bad-tag' | 'asset-missing' | 'no-digest' | 'digest-mismatch' | 'extract-failed' | 'extract-too-large' | 'no-server-exe' | 'no-compatible-cuda'
+  | 'network' | 'rate-limited' | 'http' | 'no-nightly-tag' | 'bad-tag' | 'asset-missing' | 'no-digest' | 'digest-mismatch' | 'extract-failed' | 'extract-too-large' | 'no-server-exe' | 'no-compatible-cuda' | 'disk-space'
 
 export class RuntimeError extends Error {
   constructor(public code: RuntimeErrorCode, message: string, public detail?: string) {
@@ -266,10 +267,14 @@ export async function sha256File(file: string): Promise<string> {
  * connection or a shutdown ends it as `network`. Without a published digest it fails (`no-digest`)
  * unless `allowMissingDigest` is set (hand-added sources: the caller shows the value and asks).
  */
-export async function download(fetchFn: FetchFn, asset: ReleaseAsset, file: string, net: NetOptions = {}, allowMissingDigest = false): Promise<string> {
+export async function download(fetchFn: FetchFn, asset: ReleaseAsset, file: string, net: NetOptions = {}, allowMissingDigest = false, freeOf: (dir: string) => number | null = freeBytes): Promise<string> {
   const expected = /^sha256:([0-9a-f]{64})$/i.exec(asset.digest ?? '')?.[1]?.toLowerCase()
   if (!expected && !allowMissingDigest) throw new RuntimeError('no-digest', 'Release asset has no SHA-256 digest', asset.name)
   const stall = net.stallMs ?? DEFAULT_STALL_MS
+  // Not enough room for the download and its unpacked copy: refuse before anything is fetched (decision 44).
+  const need = neededBytes(asset.size)
+  const free = need === null ? null : freeOf(dirname(file))
+  if (need !== null && free !== null && free < need) throw new RuntimeError('disk-space', `Not enough free disk space for ${asset.name}`, String(need))
   const g = guard(net.signal, stall)
   try {
     const res = await fetchChecked(fetchFn, asset.browser_download_url, g.signal)

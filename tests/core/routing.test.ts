@@ -96,3 +96,23 @@ test('hasImages', () => {
   expect(hasImages({ prompt: 'x' })).toBe(false)
   expect(hasImages(null)).toBe(false)
 })
+
+describe('no model field with several models online (decision 41)', () => {
+  const at = (modelId: string, profile: string, state: ModelSnapshot['state'], lastUsedAt: number | null): ModelSnapshot =>
+    ({ ...snap(modelId, profile, state), lastUsedAt })
+
+  test('the most recently used ready model is the default one', () => {
+    const r = resolveTarget(doc, undefined, [at('qwen', 'RP', 'ready', 100), at('colon', 'long', 'ready', 200), at('llama3', '8b', 'ready', 150)])
+    expect(r.ok && r.target).toEqual({ modelId: 'colon', profile: 'long' })
+  })
+
+  test('a model that was never used counts as the oldest; a tie goes to the later one; ready beats loading', () => {
+    expect(resolveTarget(doc, '', [at('qwen', 'RP', 'ready', null), at('colon', 'main', 'ready', 5)])).toMatchObject({ target: { modelId: 'colon' } })
+    expect(resolveTarget(doc, '', [at('qwen', 'RP', 'ready', null), at('colon', 'main', 'ready', null)])).toMatchObject({ target: { modelId: 'colon' } })
+    expect(resolveTarget(doc, '', [at('qwen', 'RP', 'loading', null), at('colon', 'main', 'ready', 1)])).toMatchObject({ target: { modelId: 'colon' } })
+  })
+
+  test('one online model behaves as before', () => {
+    expect(resolveTarget(doc, undefined, [at('qwen', 'RP', 'ready', 1), at('colon', 'main', 'stopped', 9)])).toMatchObject({ target: { modelId: 'qwen' } })
+  })
+})

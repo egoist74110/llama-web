@@ -25,16 +25,24 @@ function withProfile(model: ModelConfig, profile: string): RouteResult {
   return { ok: true, target: { modelId: model.id, profile }, model, profile: p }
 }
 
+/** The most recently used of these (a never-used one counts as oldest; later in the list wins a tie). */
+function latestUsed(list: ModelSnapshot[]): ModelSnapshot | undefined {
+  let best: ModelSnapshot | undefined
+  for (const s of list) if (!best || (s.lastUsedAt ?? -1) >= (best.lastUsedAt ?? -1)) best = s
+  return best
+}
+
 /**
  * Resolve a request's `model` field.
  * - `name` → that model's current profile. A whole-string match wins, so names that
  *   contain `:` keep working.
  * - `name:profile` → split at the last `:`.
- * - missing / empty → the running model (ready first, then one being loaded).
+ * - missing / empty → the running model: with several online (multi-load) the one used most recently, then the one
+ *   loaded most recently; ready ones first, then one being loaded.
  */
 export function resolveTarget(doc: ModelsDoc, field: unknown, running: ModelSnapshot[] = []): RouteResult {
   if (typeof field !== 'string' || field.trim() === '') {
-    const cur = running.find(s => s.state === 'ready') ?? running.find(s => s.state === 'loading')
+    const cur = latestUsed(running.filter(s => s.state === 'ready')) ?? running.find(s => s.state === 'loading')
     const model = cur && doc.models.find(m => m.id === cur.modelId)
     if (!cur || !model) return { ok: false, code: 'no-model' }
     return withProfile(model, cur.profile)

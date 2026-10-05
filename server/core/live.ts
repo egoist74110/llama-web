@@ -10,7 +10,7 @@ import type { RuntimeCheck, VersionView } from './updater'
 import type { AppUpdateView } from './app-update'
 import type { RequestRecord } from './request-log'
 import type { LogStream } from './runner'
-import type { ModelState, SchedulerEvent, SchedulerSnapshot } from './scheduler'
+import type { ModelState, NoRoomDetail, SchedulerEvent, SchedulerSnapshot } from './scheduler'
 import type { SpeedDoc } from './speed'
 import type { TunnelInfo } from './tunnel'
 import type { FileRef, ModelDir } from './types'
@@ -80,6 +80,14 @@ export type ActivityEvent =
   | { id: number, at: number, kind: 'tunnel', state: 'connected' | 'error', code: string | null }
   /** A model asked for a llama.cpp build that cannot be used; the newest official build of the channel runs instead (the saved choice is unchanged). */
   | { id: number, at: number, kind: 'runtime-fallback', modelId: string, profile: string, from: string, to: string, reason: 'missing' | 'other-platform' | 'invalid' }
+  /** A load was refused or stopped for lack of memory (decisions 42, 44). `manual` = started from the interface. */
+  | { id: number, at: number, kind: 'no-room', modelId: string, profile: string, reason: NoRoomDetail['reason'], estimateMiB: number | null, availableMiB: number | null, pool: string | null, manual: boolean }
+  /** A request needed room and this model was unloaded for it (decision 42, `unload`). */
+  | { id: number, at: number, kind: 'make-room', modelId: string, profile: string, victimModelId: string, victimProfile: string, reason: NoRoomDetail['reason'] }
+  /** The watchdog stopped a model because memory ran short (`stopped`), or could not (`blocked`: every candidate has requests running). */
+  | { id: number, at: number, kind: 'watchdog', modelId: string | null, profile: string | null, pool: string, state: 'stopped' | 'blocked', freePercent: number }
+  /** A finished load used noticeably more or less memory than estimated (decision 43). */
+  | { id: number, at: number, kind: 'vram-deviation', modelId: string, profile: string, deviation: number }
 
 /** Activity event without the id / time the hub assigns. */
 export type ActivityInput =
@@ -88,6 +96,10 @@ export type ActivityInput =
   | { kind: 'runtime', state: RuntimeStatus['state'], tag: string | null, code: string | null, note?: string | null, from?: string | null }
   | { kind: 'tunnel', state: 'connected' | 'error', code: string | null }
   | { kind: 'runtime-fallback', modelId: string, profile: string, from: string, to: string, reason: 'missing' | 'other-platform' | 'invalid' }
+  | { kind: 'no-room', modelId: string, profile: string, reason: NoRoomDetail['reason'], estimateMiB: number | null, availableMiB: number | null, pool: string | null, manual: boolean }
+  | { kind: 'make-room', modelId: string, profile: string, victimModelId: string, victimProfile: string, reason: NoRoomDetail['reason'] }
+  | { kind: 'watchdog', modelId: string | null, profile: string | null, pool: string, state: 'stopped' | 'blocked', freePercent: number }
+  | { kind: 'vram-deviation', modelId: string, profile: string, deviation: number }
 
 /** Short reason key (the diagnosed kind when the output was recognised) or message; null when none. */
 export function errorText(e: unknown): string | null {
@@ -171,9 +183,19 @@ export class LiveHub {
       this.progress.delete(instKey(modelId, profile))
       this.since.set(instKey(modelId, profile), this.now())
       this.record({ kind: 'state', modelId, profile, from: e.from, to: e.to, error: errorText(e.error) })
-    } else {
+    } else if (e.type === 'drain-timeout') {
       this.record({ kind: 'drain-timeout', modelId, profile, inflight: e.inflight })
+    } else if (e.type === 'no-room') {
+      const { reason, estimateMiB, availableMiB, pool } = e.detail
+      this.record({ kind: 'no-room', modelId, profile, reason, estimateMiB, availableMiB, pool, manual: e.manual })
+    } else {
+      this.record({ kind: 'make-room', modelId, profile, victimModelId: e.victim.modelId, victimProfile: e.victim.profile, reason: e.detail.reason })
     }
+  }
+
+  /** The watchdog or the load measurement has something to report (decisions 43, 44). */
+  onGuard(input: Extract<ActivityInput, { kind: 'watchdog' | 'vram-deviation' }>): void {
+    this.record(input)
   }
 
   /** Estimated load progress of an instance (only kept while it is loading). */

@@ -15,7 +15,7 @@ import { sourceOf, summarizeImages, summarizeParams, UsageTap, type RequestMeta,
 import { findModel, hasImages, listModelNames, resolveTarget, type RouteResult } from './routing'
 import { diagnose } from './errors'
 import type { SpeedMeter } from './speed'
-import { SchedulerError, type Lease, type Scheduler, type Target } from './scheduler'
+import { SchedulerError, type Lease, type NoRoomDetail, type Scheduler, type Target } from './scheduler'
 
 /** Request body limit for /v1 and /upstream (bytes). */
 export const MAX_BODY_BYTES = 100 * 1024 * 1024
@@ -179,7 +179,16 @@ function schedulerErrorResponse(e: unknown, modelName: string): Response {
     case 'stopped': return errorResponse(503, 'model_stopped', fmt(t.api.modelStopped, { model: modelName }))
     case 'shutdown': return errorResponse(503, 'shutting_down', t.api.shuttingDown)
     case 'cancelled': return errorResponse(499, 'cancelled', 'cancelled')
+    case 'no-room': return errorResponse(503, 'insufficient_memory', noRoomText(e.cause as NoRoomDetail | undefined, modelName))
   }
+}
+
+const gib = (miB: number | null) => (miB === null ? '?' : `${(miB / 1024).toFixed(1)} GB`)
+
+/** Chinese reason of a refused load (decision 42): numbers included, no paths or names beyond the model. */
+export function noRoomText(d: NoRoomDetail | undefined, model: string): string {
+  const vars = { model, estimate: gib(d?.estimateMiB ?? null), available: gib(d?.availableMiB ?? null), limit: String(d?.limit ?? '') }
+  return fmt(t.api.noRoom[d?.reason ?? 'memory'], vars)
 }
 
 // ---------------------------------------------------------------------------------------

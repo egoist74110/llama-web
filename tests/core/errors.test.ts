@@ -12,6 +12,9 @@ describe('classify: llama-server output', () => {
     ['oom', ['llama_kv_cache_init: failed to allocate buffer for kv cache']],
     ['oom', ['ggml_vulkan: Device memory allocation of size 123 failed.', 'vk::Device::allocateMemory: ErrorOutOfDeviceMemory']],
     ['oom', ['terminate called after throwing an instance of \'std::bad_alloc\'']],
+    // Metal (macOS): the GPU command buffer is killed for lack of memory, or a buffer cannot be allocated.
+    ['oom', ['ggml_metal_graph_compute: command buffer 0 failed with status 5', 'error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)']],
+    ['oom', ['ggml_metal_log_allocated_size: warning: failed to allocate buffer, size = 20480.00 MiB']],
     ['file-missing', ['gguf_init_from_file: failed to open GGUF file \'X:\\models\\a.gguf\' (No such file or directory)']],
     ['unknown-arg', ['error: invalid argument: --no-such-flag']],
     ['unknown-arg', ['error while handling argument "--ctx-size": stoi']],

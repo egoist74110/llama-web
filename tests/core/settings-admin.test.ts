@@ -154,14 +154,30 @@ describe('applyImagePreprocess', () => {
 })
 
 describe('applyServer', () => {
-  test('saves port, range and timeouts; never touches maxLoaded', () => {
+  test('saves port, range and timeouts; the multi-model fields stay as they were unless sent', () => {
     const s = defaultSettings()
-    applyServer(s, { port: 5005, portRange: [7200, 7250], loadTimeoutSec: 120, drainTimeoutSec: 60, maxLoaded: 4 })
+    applyServer(s, { port: 5005, portRange: [7200, 7250], loadTimeoutSec: 120, drainTimeoutSec: 60 })
     expect(s.server.port).toBe(5005)
     expect(s.scheduler.portRange).toEqual([7200, 7250])
     expect(s.scheduler.loadTimeoutSec).toBe(120)
     expect(s.scheduler.drainTimeoutSec).toBe(60)
     expect(s.scheduler.maxLoaded).toBe(1)
+  })
+
+  test('multi-model switches: multiLoad, limit 1-99 within the port range, onNoRoom (decisions 41, 42)', () => {
+    const s = defaultSettings()
+    applyServer(s, { multiLoad: true, maxLoaded: 3, onNoRoom: 'error' })
+    expect(s.scheduler).toMatchObject({ multiLoad: true, maxLoaded: 3, onNoRoom: 'error' })
+    expect(codeOf(() => applyServer(s, { maxLoaded: 0 }))).toBe('bad-max-loaded')
+    expect(codeOf(() => applyServer(s, { maxLoaded: 100 }))).toBe('bad-max-loaded')
+    expect(codeOf(() => applyServer(s, { maxLoaded: 1.5 }))).toBe('bad-max-loaded')
+    expect(codeOf(() => applyServer(s, { maxLoaded: 4, portRange: [7200, 7202] }))).toBe('bad-max-loaded')
+    expect(codeOf(() => applyServer(s, { onNoRoom: 'maybe' }))).toBe('bad-on-no-room')
+    expect(codeOf(() => applyServer(s, { multiLoad: 'on' }))).toBe('bad-request')
+    // With the switch off the limit only has to be a valid number.
+    applyServer(s, { multiLoad: false, maxLoaded: 4, portRange: [7200, 7202] })
+    expect(s.scheduler.maxLoaded).toBe(4)
+    expect(s.scheduler.portRange).toEqual([7200, 7202])
   })
 
   test('rejects bad ports, ranges that contain the listening or public port, and bad timeouts', () => {
@@ -195,10 +211,10 @@ describe('applySettingsPatch', () => {
     expect(codeOf(() => applySettingsPatch(settingsWith(), { image: { quality: 70 }, server: { port: 1 } }, models()))).toBe('bad-port')
   })
 
-  test('the result still passes normalizeSettings and keeps maxLoaded at 1', () => {
+  test('the result still passes normalizeSettings and keeps the single-model defaults', () => {
     const s = settingsWith()
     applySettingsPatch(s, { server: { port: 5010 }, defaults: { ctxSize: 4096 } }, models())
-    expect(normalizeSettings(structuredClone(s)).scheduler.maxLoaded).toBe(1)
+    expect(normalizeSettings(structuredClone(s)).scheduler).toMatchObject({ maxLoaded: 1, multiLoad: false, onNoRoom: 'unload' })
   })
 })
 

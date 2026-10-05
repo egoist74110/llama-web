@@ -39,7 +39,7 @@ const install = (t: RuntimeTarget, tag: string) => {
 
 describe('settings version 6', () => {
   test('the version and the new defaults', () => {
-    expect(SETTINGS_VERSION).toBe(9)
+    expect(SETTINGS_VERSION).toBe(10)
     const d = defaultSettings()
     expect(d.version).toBe(SETTINGS_VERSION)
     expect(d.llamacpp.autoUpdate).toBe(false)
@@ -91,6 +91,13 @@ describe('settings version 6', () => {
     const s = normalizeSettings(doc)
     expect(s.defaultsCpu).toEqual(DEFAULT_CPU_DEFAULTS)
     expect(s.llamacpp.acceleration).toBe('cuda') // old installations are Windows CUDA
+    expect(s.scheduler).toMatchObject({ multiLoad: false, onNoRoom: 'unload', maxLoaded: 1 }) // version 10: one model, as before
+  })
+
+  test('migration 9 -> 10 adds the multi-model fields and keeps what is there', () => {
+    const out = SETTINGS_MIGRATIONS[9]!({ version: 9, scheduler: { maxLoaded: 1, loadTimeoutSec: 99 } })
+    expect(out.scheduler).toEqual({ maxLoaded: 1, loadTimeoutSec: 99, multiLoad: false, onNoRoom: 'unload' })
+    expect(SETTINGS_MIGRATIONS[9]!({ version: 9, scheduler: { multiLoad: true, onNoRoom: 'error' } }).scheduler).toEqual({ multiLoad: true, onNoRoom: 'error' })
   })
 
   test('a hand-edited defaultsCpu with missing keys is filled from the built-in values', () => {

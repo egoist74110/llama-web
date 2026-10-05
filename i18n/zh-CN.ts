@@ -45,7 +45,7 @@ export default {
       imageHint: '请求里的图片先压缩再交给模型，省内存也省时间。个别模型可以在方案里单独覆盖。',
       loadError: { oom: '内存不足' },
       advice: {
-        oom: '内存放不下。可以：调小上下文长度（ctx）；把 K / V 缓存类型改成 q8_0；换更小的量化文件；或先关掉别的占内存的程序。',
+        oom: '内存放不下。可以：调小上下文长度（ctx）；把 K / V 缓存类型改成 q8_0；换更小的量化文件；先停止其他在线的模型，或关掉别的占内存的程序。',
         crashed: '模型运行中进程意外退出。看下面的日志最后几行，可能是内存不够或输入太长；处理后手动重试。',
       },
       params: {
@@ -126,7 +126,7 @@ export default {
       },
       error: '获取失败：{code}。{detail} 自动检查每天最多一次，请稍后重试。',
       errorUsing: '检查更新失败（{code}），继续使用 {using}。{detail}',
-      errors: { network: '网络连接失败', 'rate-limited': 'GitHub API 请求已被限流，请稍后重试', http: 'GitHub 返回错误' },
+      errors: { network: '网络连接失败', 'rate-limited': 'GitHub API 请求已被限流，请稍后重试', http: 'GitHub 返回错误', 'disk-space': '磁盘剩余空间不足（至少需要下载大小的 3 倍），已取消下载' },
     },
   },
   overview: {
@@ -222,6 +222,22 @@ export default {
     state: '{model}（{profile}）：{from} → {to}',
     stateError: '{model}（{profile}）：{from} → {to}，原因：{reason}',
     drainTimeout: '{model}（{profile}）：等待超时，{count} 个请求被中断',
+    noRoom: {
+      request: '请求没有加载「{model}」（{profile}）：{reason}',
+      manual: '没有启动「{model}」（{profile}）：{reason}',
+    },
+    noRoomReason: {
+      memory: '放不下（预估需要 {estimate}，可用 {available}）',
+      limit: '同时在线的模型已达上限',
+      unknown: '读不到可用显存 / 内存，按放不下处理',
+      watchdog: '加载时内存不足，被保护机制停止',
+    },
+    makeRoom: '为加载「{model}」（{profile}）卸载了「{victim}」（{victimProfile}）',
+    watchdog: {
+      stopped: '内存只剩 {percent}%（{pool}），保护机制停止了「{model}」（{profile}）',
+      blocked: '内存只剩 {percent}%（{pool}），但在线的模型都有请求在处理，没有停止任何模型',
+    },
+    vramDeviation: '「{model}」（{profile}）实际占用与预估相差 {percent}%，下次按实测计算',
     tunnel: {
       connected: '隧道：已连通',
       error: '隧道：出错（{reason}）',
@@ -389,6 +405,13 @@ export default {
       'check-failed': '这些设置现在一定无法启动，没有保存：{detail}',
       'device-invalid': '设备选择不合法：只能选「自动」、「CPU」、一张 GPU，或打开「使用多张 GPU」后选两张以上；切分模式要是 layer / row / tensor，比例的个数要和所选 GPU 一样多，主 GPU 序号要在所选 GPU 范围内。Mac 上不能选设备。',
     },
+    // Answers of a manual start while several models may be online (decisions 41, 42); the interface (9-4) asks the user.
+    start: {
+      limit: '同时在线的模型已达上限（{limit} 个）。先停止一个再启动「{model}」。',
+      nofit: '「{model}」放不下：预估需要 {estimate}，当前可用 {available}。先停止其他模型，或改用更小的模型 / 参数。',
+      risky: '「{model}」有风险：预估需要 {estimate}，当前可用 {available}，余量很小。确认后才会启动。',
+      unknown: '读不到当前可用的显存 / 内存，无法判断「{model}」能否放下。确认后才会启动。',
+    },
     // Findings of the save-time check (POST /api/models/:id/check); `{...}` is filled from the issue's detail.
     check: {
       issues: {
@@ -399,7 +422,7 @@ export default {
         'ubatch-over-batch': '微批大小（ubatch）{ubatch} 大于批大小（batch）{batch}，实际会按批大小截断，这个设置没有效果。',
         'cpu-gpu-layers': '设备选的是 CPU，但 GPU 层数写了 {layers}：这个数字不会生效，模型全部在 CPU 上运行。',
         'mmproj-on-cpu': '视觉模型（mmproj）选在 CPU 上运行，识别图片会很慢。',
-        'mlock-exceeds-memory': '锁定内存（mlock）要锁住约 {mlockMiB} MiB，但系统现在只有约 {availableMiB} MiB 可用，会把系统逼进换页。去掉 mlock，或换更小的模型 / 量化。',
+        'mlock-exceeds-memory': '锁定内存（mlock）要锁住约 {mlockMiB} MiB，但系统现在只有约 {availableMiB} MiB 可用，会把系统逼进换页。去掉 mlock，或换更小的模型 / 量化。允许多个模型同时在线时，加载会自动不带 mlock。',
         'slot-ctx-small': '并行槽数 {parallel} 把上下文分到每个槽只剩约 {perSlot} token，对话很快会装不下。减少并行槽数，或加大上下文。',
         'file-missing': '配置里的 {kind} 文件不存在，无法估算，也无法启动。',
         'no-estimate': '读不到模型文件的信息，无法估算显存 / 内存占用。',
@@ -819,6 +842,8 @@ export default {
       'bad-port': '监听端口必须是 1024 到 65535 之间的整数，且不能和公网入口端口相同。',
       'bad-port-range': '端口范围必须是 1024 到 65535 之间的两个整数（起 ≤ 止），且不能包含监听端口或公网入口端口。',
       'bad-timeout': '超时必须是整数秒，并在允许的范围内：{detail}',
+      'bad-max-loaded': '在线上限必须是 1 到 99 之间的整数，并且不能超过端口范围里的端口数（{detail}）。',
+      'bad-on-no-room': '「放不下时」只能选「卸载上一个」或「服务端报错」。',
       'bad-public-port': '公网入口端口必须是 1024 到 65535 之间的整数，且不能和监听端口相同、不能在 llama-server 端口范围内。',
       'bad-mirror': '自定义镜像前缀不合法：必须是 https:// 开头的公网域名，不能带账号密码、端口、参数，也不能是本机、内网或 IP 地址。',
       'bad-domain': '域名格式不对，只填主机名，例如 llm.example.com（不要带 https:// 或路径）：{detail}',
@@ -1595,6 +1620,13 @@ export default {
     loadFailed: '模型「{model}」加载失败：{reason}。请查看日志，处理后手动重试。',
     modelStopped: '模型「{model}」已被手动停止，请求已取消。',
     shuttingDown: 'llama-web 正在关闭。',
+    // 503 insufficient_memory (decision 42): the load was not started; models already online are untouched.
+    noRoom: {
+      memory: '模型「{model}」放不下：预估需要 {estimate}，当前可用 {available}。为避免拖垮服务器，没有加载。请联系服务所有者先停止别的模型，或改用更小的模型 / 参数。',
+      limit: '同时在线的模型已达上限（{limit} 个），而服务端设置为不自动卸载，所以没有加载「{model}」。请联系服务所有者。',
+      unknown: '读不到服务器当前可用的显存 / 内存，为避免拖垮服务器，没有加载「{model}」。请联系服务所有者。',
+      watchdog: '服务器的显存 / 内存不足，「{model}」在加载时被保护机制停止。请联系服务所有者。',
+    },
     upstreamUnreachable: '无法连接到模型「{model}」的 llama-server 进程：{detail}',
     interrupted: '模型「{model}」已卸载或意外退出，请求被中断。',
     notRunning: '模型「{model}」当前没有运行。/upstream 只转发到已经在运行的模型，不会自动加载。',
@@ -1634,7 +1666,7 @@ export default {
   // Failure card: advice per diagnosed kind (the title is the loadError text).
   failure: {
     advice: {
-      'oom': '显存放不下。可以：调小上下文长度（ctx）；减少放进显卡的层数（-ngl）；把 K / V 缓存类型改成 q8_0；换更小的量化文件；或先到「总览」确认没有别的程序占着显存。',
+      'oom': '显存放不下。可以：调小上下文长度（ctx）；减少放进显卡的层数（-ngl）；把 K / V 缓存类型改成 q8_0；换更小的量化文件；换一张空闲的卡（设备）；先停止其他在线的模型；或先到「总览」确认没有别的程序占着显存。',
       'cuda-error': 'CUDA 运行出错。确认显卡驱动是最新的、没有别的程序独占显卡；再试一次，仍然出现就把下面的日志发给开发者。',
       'dll-missing': 'llama-server 启动不了，缺少 CUDA 运行库。到「设置」确认 llama.cpp 已完整下载（包含 cudart），或重启 llama-web 让它重新下载。',
       'file-missing': '找不到模型文件（或 mmproj / 草稿模型）。到「模型」页检查文件还在不在、模型目录有没有改名。',
@@ -1730,6 +1762,7 @@ export default {
       'no-installer': '这个版本缺少 Windows 安装包或校验文件',
       'no-digest': '安装包没有可用的 SHA-256 校验值，已拒绝下载',
       'digest-mismatch': '安装包校验不一致，已删除并拒绝安装',
+      'disk-space': '磁盘剩余空间不足（至少需要安装包大小的 3 倍），已取消下载',
       'busy': '正在下载或安装，请稍候',
       'not-desktop': '只有 Windows 桌面版可以在应用内安装更新',
       'not-ready': '安装包还没有下载完成',

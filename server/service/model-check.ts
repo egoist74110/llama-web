@@ -6,6 +6,7 @@ import { t } from '../core/i18n'
 import { previewLaunch, requestedRuntime, type LaunchPreview } from '../core/launch'
 import { checkLaunch, type CheckIssue, type ModelCheck } from '../core/model-check'
 import { fileBytes, loadModelFacts } from '../core/model-facts'
+import { preferMeasured, statsKey } from '../core/vram-stats'
 import { ProfileError, sanitizeForm } from '../core/models-admin'
 import { readGpuChoice } from '../core/gpu-group'
 import { mtpExtraArgs } from '../core/mtp'
@@ -50,7 +51,17 @@ export async function buildPreview(model: ModelConfig, body: PreviewBody | undef
 }
 
 /** Check one profile (saved, or as it is on screen when `body.form` / `body.files` carry values). */
-export async function checkProfile(model: ModelConfig, profile: string, body?: PreviewBody, opts: { fresh?: boolean } = {}): Promise<ModelCheck & { online: boolean }> {
+export interface ProfileCheck extends ModelCheck {
+  online: boolean
+  /** `measured` = the estimate uses what an earlier identical launch really took (decision 43). */
+  basis: 'measured' | 'formula'
+  /** Key of that record (a hash, no names or paths). */
+  statsKey: string
+  /** Several models may be online and `mlock` would lock more than is free: the load runs without it (decision 44). */
+  mlockDropped: boolean
+}
+
+export async function checkProfile(model: ModelConfig, profile: string, body?: PreviewBody, opts: { fresh?: boolean } = {}): Promise<ProfileCheck> {
   const ctx = getContext()
   const { preview, shown } = await buildPreview(model, body, profile)
   const settings = ctx.getSettings()
@@ -72,7 +83,19 @@ export async function checkProfile(model: ModelConfig, profile: string, body?: P
     model: main, mmprojBytes: mm ? await fileBytes(mm) : 0, hasMmproj: !!shown.mmproj, draft,
     list: probe.list, fallbackGpus: probe.fallbackGpus, system: probe.system, missing: preview.missing,
   })
-  return { ...check, online: ctx.ops.upProfiles(model.id).length > 0 }
+  // The measurement of an identical earlier launch replaces the formula (never below what is known exactly).
+  const key = statsKey([model.id, profile, preview.device, preview.args.join('\u0000')])
+  let basis: 'measured' | 'formula' = 'formula'
+  let { estimate, tier } = check
+  if (estimate) {
+    const m = preferMeasured(estimate, ctx.vramStats.lookup(key))
+    ;({ basis } = m)
+    estimate = m
+    tier = m.tier
+  }
+  const mlockDropped = settings.scheduler.multiLoad && !!estimate && estimate.mlockMiB > 0
+    && probe.system.availableMiB !== null && estimate.mlockMiB > probe.system.availableMiB
+  return { ...check, estimate, tier, online: ctx.ops.upProfiles(model.id).length > 0, basis, statsKey: key, mlockDropped }
 }
 
 /** Chinese text of one issue. */
@@ -85,8 +108,8 @@ export function issueText(i: CheckIssue): string {
  * The save refuses a profile that cannot start (only `error` issues, see model-check.ts); a failing check itself never
  * blocks a save. Returns the check for the response.
  */
-export async function checkBeforeSave(model: ModelConfig, name: string, body: { form?: unknown }): Promise<(ModelCheck & { online: boolean }) | null> {
-  let check: ModelCheck & { online: boolean }
+export async function checkBeforeSave(model: ModelConfig, name: string, body: { form?: unknown }): Promise<ProfileCheck | null> {
+  let check: ProfileCheck
   try {
     check = await checkProfile(model, requireProfile(model, name), { form: body.form })
   } catch (e) {

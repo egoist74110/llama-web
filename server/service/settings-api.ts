@@ -35,7 +35,9 @@ export function describeSettings(): SettingsDoc {
       portRange: s.scheduler.portRange,
       loadTimeoutSec: s.scheduler.loadTimeoutSec,
       drainTimeoutSec: s.scheduler.drainTimeoutSec,
+      multiLoad: s.scheduler.multiLoad,
       maxLoaded: s.scheduler.maxLoaded,
+      onNoRoom: s.scheduler.onNoRoom,
     },
     public: {
       ...s.public,

@@ -37,7 +37,7 @@ export interface FailureDoc {
 /** Output pattern -> kind. Order matters: the first matching rule wins. */
 const OUTPUT_RULES: Array<[FailureKind, RegExp]> = [
   // "out of memory" alone also appears in harmless text: it needs a GPU / allocator word on the same line.
-  ['oom', /(?:cuda|cublas|vulkan|hip|metal|ggml|alloc|device)\w*[^\n]*out of memory|out of memory[^\n]*(?:cuda|vulkan|device)|cudaMalloc failed|failed to allocate (?:CUDA|Vulkan|\S+ )?(?:buffer|memory)|unable to allocate .*buffer|ggml_backend_\w*alloc_buffer: allocating .* failed|failed to allocate .*compute buffer|CUDA_ERROR_OUT_OF_MEMORY|ErrorOutOfDeviceMemory|std::bad_alloc|not enough memory/i],
+  ['oom', /(?:cuda|cublas|vulkan|hip|metal|ggml|alloc|device)\w*[^\n]*out of memory|out of memory[^\n]*(?:cuda|vulkan|device)|cudaMalloc failed|failed to allocate (?:CUDA|Vulkan|\S+ )?(?:buffer|memory)|unable to allocate .*buffer|ggml_backend_\w*alloc_buffer: allocating .* failed|failed to allocate .*compute buffer|CUDA_ERROR_OUT_OF_MEMORY|ErrorOutOfDeviceMemory|std::bad_alloc|not enough memory|kIOGPUCommandBufferCallbackErrorOutOfMemory|ggml_metal\w*[^\n]*(?:failed to allocate|insufficient memory)|Insufficient Memory \(/i],
   ['port-in-use', /couldn't bind HTTP server socket|address already in use|only one usage of each socket address/i],
   // llama-server: `error while handling argument "--device": invalid device: CUDA7` (checked on b11146); before unknown-arg, which would also match.
   ['device-missing', /invalid device: \S+/i],

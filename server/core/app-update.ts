@@ -116,7 +116,7 @@ export function sumFor(text: string, name: string): string | null {
 
 export type AppUpdateErrorCode =
   | 'network' | 'rate-limited' | 'http' | 'bad-response' | 'no-installer' | 'no-digest' | 'digest-mismatch' | 'busy'
-  | 'not-desktop' | 'not-ready' | 'nothing-new' | 'cancelled' | 'failed'
+  | 'not-desktop' | 'not-ready' | 'nothing-new' | 'cancelled' | 'failed' | 'disk-space'
 
 export class AppUpdateError extends Error {
   constructor(public code: AppUpdateErrorCode, message: string) {
@@ -425,7 +425,7 @@ export class AppUpdater {
       if (this.stopped) return
       const code: AppUpdateErrorCode = abort.signal.aborted ? 'cancelled'
         : e instanceof AppUpdateError ? e.code
-          : e instanceof RuntimeError ? (e.code === 'digest-mismatch' ? 'digest-mismatch' : e.code === 'no-digest' ? 'no-digest' : e.code === 'rate-limited' || e.code === 'http' ? e.code : 'network')
+          : e instanceof RuntimeError ? (e.code === 'digest-mismatch' ? 'digest-mismatch' : e.code === 'no-digest' ? 'no-digest' : e.code === 'rate-limited' || e.code === 'http' || e.code === 'disk-space' ? e.code : 'network')
             : 'failed'
       throw fail(code)
     } finally {

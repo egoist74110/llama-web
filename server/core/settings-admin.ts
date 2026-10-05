@@ -6,7 +6,7 @@ import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 import { applyGpuChoice, hasGpuFields, sanitizeGpuChoice } from './gpu-group'
 import { ArgsSyntaxError, PARAM_DEFS, paramValueOk, splitArgs, type LaunchDefaults, type ParamValue } from './args'
-import { cleanWizard, hasCpuChannel, hasDeviceSelection, TUNNEL_MODES, TUNNEL_PROTOCOLS, type ModelsDoc, type Settings, type TunnelMode, type TunnelProtocol } from './config'
+import { cleanWizard, hasCpuChannel, hasDeviceSelection, MAX_LOADED_LIMIT, NO_ROOM_POLICIES, TUNNEL_MODES, TUNNEL_PROTOCOLS, type ModelsDoc, type NoRoomPolicy, type Settings, type TunnelMode, type TunnelProtocol } from './config'
 import { normalizeCustomMirror } from './mirrors'
 import type { PublicStatus } from './public-entry'
 import type { ModelDir } from './types'
@@ -14,7 +14,7 @@ import type { ModelDir } from './types'
 export type SettingsErrorCode =
   | 'bad-request' | 'dir-path' | 'dir-duplicate' | 'dir-depth' | 'dir-in-use' | 'dir-limit'
   | 'bad-param' | 'bad-extra-args' | 'bad-image' | 'bad-port' | 'bad-port-range' | 'bad-timeout'
-  | 'bad-public-port' | 'bad-domain' | 'bad-mirror'
+  | 'bad-public-port' | 'bad-domain' | 'bad-mirror' | 'bad-max-loaded' | 'bad-on-no-room'
 
 export class SettingsError extends Error {
   constructor(public code: SettingsErrorCode, public detail = '') {
@@ -155,11 +155,15 @@ export interface PortsPatch {
   portRange?: unknown
   loadTimeoutSec?: unknown
   drainTimeoutSec?: unknown
+  multiLoad?: unknown
+  maxLoaded?: unknown
+  onNoRoom?: unknown
 }
 
 /**
- * Listening port, llama-server port range and timeouts. The online limit (`maxLoaded`) is
- * deliberately not editable (plan decision 9).
+ * Listening port, llama-server port range and timeouts, and the multi-model switches (decision 41): `multiLoad`,
+ * the online limit `maxLoaded` (1-99, and while `multiLoad` is on not more than there are ports in the range) and
+ * `onNoRoom` (what a request does when the next model does not fit, decision 42).
  */
 export function applyServer(draft: Settings, raw: unknown): void {
   if (!isObj(raw)) throw new SettingsError('bad-request')
@@ -181,8 +185,19 @@ export function applyServer(draft: Settings, raw: unknown): void {
   const drain = p.drainTimeoutSec === undefined ? draft.scheduler.drainTimeoutSec : int(p.drainTimeoutSec, 5, 7200)
   if (load === null) throw new SettingsError('bad-timeout', 'loadTimeoutSec')
   if (drain === null) throw new SettingsError('bad-timeout', 'drainTimeoutSec')
+  const multi = p.multiLoad === undefined ? draft.scheduler.multiLoad : p.multiLoad
+  if (typeof multi !== 'boolean') throw new SettingsError('bad-request', 'multiLoad')
+  const maxLoaded = p.maxLoaded === undefined ? draft.scheduler.maxLoaded : int(p.maxLoaded, 1, MAX_LOADED_LIMIT)
+  if (maxLoaded === null) throw new SettingsError('bad-max-loaded', String(MAX_LOADED_LIMIT))
+  // One port per process: the limit must fit the range (checked only while the switch is on).
+  if (multi && maxLoaded > range[1] - range[0] + 1) throw new SettingsError('bad-max-loaded', `${range[1] - range[0] + 1}`)
+  const onNoRoom = p.onNoRoom === undefined ? draft.scheduler.onNoRoom : p.onNoRoom
+  if (!NO_ROOM_POLICIES.includes(onNoRoom as NoRoomPolicy)) throw new SettingsError('bad-on-no-room')
   draft.server.port = port
   draft.scheduler.portRange = range
+  draft.scheduler.multiLoad = multi
+  draft.scheduler.maxLoaded = maxLoaded
+  draft.scheduler.onNoRoom = onNoRoom as NoRoomPolicy
   draft.scheduler.loadTimeoutSec = load
   draft.scheduler.drainTimeoutSec = drain
 }
@@ -283,7 +298,7 @@ export interface SettingsDoc {
   builtinDefaultsCpu?: LaunchDefaults
   image: Settings['preprocess']['image']
   mirror: Settings['mirror']
-  server: { port: number, portRange: [number, number], loadTimeoutSec: number, drainTimeoutSec: number, maxLoaded: number }
+  server: { port: number, portRange: [number, number], loadTimeoutSec: number, drainTimeoutSec: number, multiLoad: boolean, maxLoaded: number, onNoRoom: NoRoomPolicy }
   public: Settings['public'] & {
     /** State of the public listener right now. */
     status: PublicStatus

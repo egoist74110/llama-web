@@ -52,14 +52,19 @@ beforeAll(async () => {
   mkdirSync(customDir(dir, 'r1'), { recursive: true })
   writeFileSync(join(customDir(dir, 'r1'), win ? 'llama-server.exe' : 'llama-server'), 'x')
   process.env.LLAMA_WEB_DATA = dir
+  delete (globalThis as Record<symbol, unknown>)[Symbol.for('llama-web.context')]
   DeviceProbe.prototype.list = async () => devices
   const { getContext } = await import('../../server/service/context')
   ctx = getContext()
   svc = await import('../../server/service/model-check')
+  // The machine's real free memory must not decide a tier (a busy machine made the first test fail): a fixed reading.
+  const realProbe = ctx.getMemoryProbe
+  ctx.getMemoryProbe = async (r, o) => ({ ...(await realProbe(r, o)), system: { totalMiB: 64000, availableMiB: 60000 } })
 })
 afterAll(async () => {
   DeviceProbe.prototype.list = realList
   await ctx?.shutdown()
+  delete (globalThis as Record<symbol, unknown>)[Symbol.for('llama-web.context')] // the next test file makes its own
   delete process.env.LLAMA_WEB_DATA
   if (dir) rmSync(dir, { recursive: true, force: true })
 })

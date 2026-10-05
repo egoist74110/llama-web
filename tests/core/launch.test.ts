@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { join, resolve } from 'node:path'
-import { defaultSettings, normalizeModels, normalizeSettings, type ModelsDoc, type Settings } from '../../server/core/config'
+import { defaultSettings, effectiveMaxLoaded, normalizeModels, normalizeSettings, type ModelsDoc, type Settings } from '../../server/core/config'
 import { splitArgs } from '../../server/core/args'
 import { LaunchConfigError, llamaServerExe, planLaunch, previewLaunch } from '../../server/core/launch'
 
@@ -79,10 +79,23 @@ describe('config normalisation', () => {
     expect(s.server.port).toBe(5001)
   })
 
-  test('scheduler.maxLoaded is a placeholder pinned to 1 (decision 9)', () => {
-    for (const v of [2, 'abc', 0, 1.5, 1]) {
+  test('scheduler.maxLoaded is a whole number 1-99, anything else is 1; multiLoad / onNoRoom fall back to off / unload (decisions 9, 41)', () => {
+    for (const v of ['abc', 0, 1.5, 1, 100, -3]) {
       expect(normalizeSettings({ version: 1, scheduler: { maxLoaded: v } } as any).scheduler.maxLoaded).toBe(1)
     }
+    for (const v of [2, 99]) expect(normalizeSettings({ version: 1, scheduler: { maxLoaded: v } } as any).scheduler.maxLoaded).toBe(v)
+    const odd = normalizeSettings({ version: 1, scheduler: { multiLoad: 'yes', onNoRoom: 'crash' } } as any).scheduler
+    expect(odd.multiLoad).toBe(false)
+    expect(odd.onNoRoom).toBe('unload')
+  })
+
+  test('effectiveMaxLoaded: 1 while multiLoad is off, then the limit, never above the port count', () => {
+    const s = normalizeSettings({ version: 1, scheduler: { maxLoaded: 5 } } as any)
+    expect(effectiveMaxLoaded(s)).toBe(1)
+    s.scheduler.multiLoad = true
+    expect(effectiveMaxLoaded(s)).toBe(5)
+    s.scheduler.portRange = [7100, 7102]
+    expect(effectiveMaxLoaded(s)).toBe(3)
   })
 
   test('rejects wrong shapes', () => {

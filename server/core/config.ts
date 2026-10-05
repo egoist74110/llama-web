@@ -77,7 +77,18 @@ export interface Settings {
     acceleration: Acceleration
   }
   scheduler: {
+    /**
+     * Online limit X. Only used while `multiLoad` is on (see `effectiveMaxLoaded`); the value is kept when the switch is
+     * turned off, so it is there again when it is turned on.
+     */
     maxLoaded: number
+    /** Several models may be online at once (decision 41). Off = exactly one, as before the feature existed. */
+    multiLoad: boolean
+    /**
+     * A request needs a model that does not fit next to the online ones (decision 42): `unload` = unload the least recently
+     * used model(s) until it fits, `error` = refuse the request with 503 `insufficient_memory`. Only used with `multiLoad`.
+     */
+    onNoRoom: NoRoomPolicy
     loadTimeoutSec: number
     drainTimeoutSec: number
     heartbeatSec: number
@@ -138,7 +149,11 @@ export interface ModelsDoc {
   models: ModelConfig[]
 }
 
-export const SETTINGS_VERSION = 9
+export type NoRoomPolicy = 'unload' | 'error'
+export const NO_ROOM_POLICIES: readonly NoRoomPolicy[] = ['unload', 'error']
+export const MAX_LOADED_LIMIT = 99
+
+export const SETTINGS_VERSION = 10
 export const MODELS_VERSION = 1
 
 /**
@@ -220,7 +235,7 @@ export function defaultSettings(platform?: PlatformInfo): Settings {
     modelDirs: [],
     mirror: { custom: '' },
     llamacpp: { cudaRuntime: '', current: '', currentCpu: '', keepVersions: 2, autoUpdate: false, acceleration: 'auto' },
-    scheduler: { maxLoaded: 1, loadTimeoutSec: 600, drainTimeoutSec: 300, heartbeatSec: 15, portRange: [7100, 7199] },
+    scheduler: { maxLoaded: 1, multiLoad: false, onNoRoom: 'unload', loadTimeoutSec: 600, drainTimeoutSec: 300, heartbeatSec: 15, portRange: [7100, 7199] },
     defaults: windowsCuda ? { ...DEFAULT_LAUNCH_DEFAULTS } : {
       ...DEFAULT_LAUNCH_DEFAULTS, cacheTypeK: null, cacheTypeV: null, flashAttn: null,
       gpuLayers: platform?.acceleration === 'cpu' ? 0 : null, extraArgs: '--no-prefill-assistant',
@@ -293,6 +308,20 @@ export const SETTINGS_MIGRATIONS: Record<number, (old: any) => any> = {
     old.mirror = { custom: '', ...(isObj(old.mirror) ? old.mirror : {}) }
     return old
   },
+  // 10: several models online (decision 41): off, and what a request does when the next model does not fit (unload).
+  9: (old) => {
+    old.scheduler = { ...(isObj(old.scheduler) ? old.scheduler : {}) }
+    old.scheduler.multiLoad ??= false
+    old.scheduler.onNoRoom ??= 'unload'
+    return old
+  },
+}
+
+/** The online limit that is in force: 1 unless `multiLoad` is on, never more than there are ports for the processes. */
+export function effectiveMaxLoaded(s: Pick<Settings, 'scheduler'>): number {
+  if (!s.scheduler.multiLoad) return 1
+  const [from, to] = s.scheduler.portRange
+  return Math.max(1, Math.min(s.scheduler.maxLoaded, MAX_LOADED_LIMIT, to - from + 1))
 }
 
 export function defaultModels(): ModelsDoc {
@@ -334,8 +363,11 @@ export function normalizeSettings(doc: Settings): Settings {
   for (const key of ['defaults', 'defaultsCpu'] as const) cleanStoredChoice(out[key])
   // Usage log retention: 7 / 14 / 30 only, never above 30 (decision 40).
   out.logs.usageKeepDays = normalizeUsageKeepDays(out.logs.usageKeepDays)
-  // Placeholder (decision 9): the field exists but the online limit stays fixed at 1.
-  out.scheduler.maxLoaded = 1
+  // Online limit (decisions 9, 41): a whole number from 1 to 99; it only takes effect while `multiLoad` is on.
+  const ml = out.scheduler.maxLoaded
+  out.scheduler.maxLoaded = Number.isInteger(ml) && ml >= 1 && ml <= MAX_LOADED_LIMIT ? ml : 1
+  if (typeof out.scheduler.multiLoad !== 'boolean') out.scheduler.multiLoad = false
+  if (!NO_ROOM_POLICIES.includes(out.scheduler.onNoRoom)) out.scheduler.onNoRoom = 'unload'
   return out as Settings
 }
 
