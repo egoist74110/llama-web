@@ -13,6 +13,7 @@ const nav = computed(() => [
   ...(showGuide.value ? [{ to: '/setup', label: t.nav.guide, icon: 'i-lucide-compass', count: null }] : []),
   { to: '/', label: t.nav.overview, icon: 'i-lucide-layout-dashboard', count: null },
   { to: '/models', label: t.nav.models, icon: 'i-lucide-box', count: state.value?.models.length || null },
+  { to: '/chat', label: t.nav.chat, icon: 'i-lucide-message-square', count: null },
   { to: '/logs', label: t.nav.logs, icon: 'i-lucide-text', count: null },
   { to: '/settings', label: t.nav.settings, icon: 'i-lucide-sliders-horizontal', count: null },
 ])
@@ -72,12 +73,12 @@ const modes = [
         v-for="n in nav"
         :key="n.to"
         :to="n.to"
-        class="lw-nav-item justify-center min-[820px]:justify-start"
+        class="lw-nav-item justify-center max-[819px]:flex-col max-[819px]:gap-0.5 max-[819px]:px-1 max-[819px]:text-xs min-[820px]:justify-start"
         :class="{ 'is-active': isActive(n.to) }"
         :aria-current="isActive(n.to) ? 'page' : undefined"
       >
         <UIcon :name="n.icon" class="lw-nav-icon size-[17px] shrink-0" />
-        <span class="min-[820px]:flex-1">{{ n.label }}</span>
+        <span class="whitespace-nowrap min-[820px]:flex-1">{{ n.label }}</span>
         <span v-if="n.count" class="lw-num hidden text-xs text-dimmed min-[820px]:inline">{{ n.count }}</span>
       </NuxtLink>
     </nav>

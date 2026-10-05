@@ -1,5 +1,15 @@
 # 交接记录
 
+## 2026-10-05 · 8-chat 内置聊天页「对话」（关键决定 55） · Claude
+- 用户确认：图片单张 20 MB / 单会话 200 MB（服务端发送时仍会压缩，这里只防浏览器存储）；每次发送整段历史（与 llama.cpp 自带网页一致，超长由服务端报错并原样显示）；不做 Markdown 表格；只加「重新生成最后一条」，不做编辑消息。
+- 实现：`app/pages/chat.vue`（模型下拉只列 ready 实例，值为 `名字:方案`；没有在线模型只提示并给去模型页的入口，不触发加载）、`ChatSessions`（新建 / 切换 / 重命名 / 删除确认）、`ChatMessage`（思考折叠、安全 Markdown、速度）、`ChatComposer`（图片按钮在无 mmproj 时置灰并说明，支持粘贴图片，超限提示）；`useChat.ts`（会话、模型、流式、停止、重新生成）；`utils/chat.ts`（草稿复用，新增图片限制、标题、请求消息组装、`streamChat`，Markdown 加了 `---` 分隔线）；`utils/chat-db.ts`（IndexedDB，失败退回内存并提示不会保存）。菜单加「对话」，窄屏菜单改为图标在上、文字在下（原来 5 项会竖排折行）。文案全部在 `i18n/zh-CN.ts` 的 `chat`。无新配置字段、无迁移。
+- 验证：`tests/app/chat.test.ts` 11 项通过（SSE 跨块、timings、错误文案、停止、图片限制、请求消息、内存存储）；`bun run typecheck` 通过；全量 `bun test` 1075 pass / 19 skip / 65 fail，与改动前（git stash 后 64 fail）逐项对比，失败项一致（51 个 pre-commit 脚本等 Mac 原有，偶发 TunnelManager 有进有出），无一涉及聊天。
+- Mac 真实验证（隔离数据目录 + `nuxt dev` + 内置浏览器，Qwen3.5-2B Q4_K_M，llama.cpp b11146）：没有在线模型的空状态；启动后模型出现在下拉；真实流式输出（约 50 tokens/秒）、思考折叠、代码块 Markdown；停止后保留已生成内容；完整回复后显示「189 tokens · 50.5 tokens/秒」；重新生成；多会话，刷新后会话与消息恢复；重命名并写入 IndexedDB；删除确认后从 IndexedDB 移除；深色；375 宽窄屏；本机 `/v1` 不需要 key；请求记录里只有元数据（`messages` 条数），没有对话内容。
+- **没验证**：发图（本机没有 mmproj，只验证了按钮置灰与说明；`image_url` 组装只有单测，未对真实多模态模型发送，也没确认服务端压缩链路在聊天请求上的表现）；图片超限提示的界面；浏览器禁用 IndexedDB 时的内存退回与提示（只有单测覆盖内存后端）；Safari / Firefox；Windows；公网入口；超长上下文报错的显示；构建产物（`bun run build` / 自定义 Bun 入口）下的流式（只在 `nuxt dev` 下跑，`/v1` 走 `server/routes/v1`）。
+- 已知：请求记录里 `promptTokens / completionTokens` 对聊天页的流式请求是 null（没带 `stream_options.include_usage`，未处理，不在本包范围）。会话列表标题默认取首条消息前 24 字。
+- 过程：开发服务用的临时数据目录、模型副本与进程已清理；机器上原有的 :5001 服务不是本会话启动的，没动。
+- 下一步：用户试用对话页（尤其用带 mmproj 的模型发图）；MTP 真机验收、阶段 9、Mac 打包、发包仍等用户另行启动。
+
 ## 2026-10-05 · 规划：内置聊天页（8-chat）与 Mac 发包前提 · Claude
 - 用户需求：把 llama.cpp 自带聊天放进客户端。用户否掉「iframe 内嵌 /upstream/<模型>/」（难看、风格不符），要求自己做；模型没在线时按我的建议只提示不加载。已写入 plan 关键决定 55、阶段 8 任务「内置聊天页」、claude-guide 的 8-chat 卡片（含可复制提示词）。**本会话没有实现页面**；用户要求按工作包在新会话做。
 - 未提交草稿（在工作区，未入库）：`app/utils/chat.ts`（parseSse / readDelta / errorMessage / renderMarkdown，Markdown 先转义、只生成固定标签、链接只放 http(s)）与 `tests/app/chat.test.ts`（5 项通过）。新会话先读再决定是否复用。
