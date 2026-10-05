@@ -30,3 +30,10 @@ test('start.command and start.bat share scripts/launch.ts', () => {
   const launcher = readFileSync(join(root, 'scripts', 'launch.ts'), 'utf8')
   for (const step of ['bun', 'install', 'build', 'index.mjs']) expect(launcher).toContain(step)
 })
+
+test('the launcher runs the desktop shell by default and only the service for "web"', () => {
+  const launcher = readFileSync(join(root, 'scripts', 'launch.ts'), 'utf8')
+  expect(launcher).toContain("args.includes('web')")
+  expect(launcher).toContain("'desktop/prepare.ts', '--dev'")
+  expect(launcher).toContain('llama-web-desktop')
+})

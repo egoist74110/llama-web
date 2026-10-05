@@ -17,6 +17,7 @@
     "start": "bun scripts/launch.ts",
     "start:build": "bun scripts/launch.ts build",
     "start:run": "bun scripts/launch.ts run",
+    "start:web": "bun scripts/launch.ts web",
     "typecheck": "nuxt typecheck",
     "postinstall": "nuxt prepare"
   },

@@ -12,6 +12,6 @@ export default defineEventHandler(async (event) => {
   if (!updater) throw createError({ statusCode: 400, message: t.llamacpp.errors['bad-channel'] })
   if (updater.getStatus().state === 'working') throw createError({ statusCode: 409, message: t.appUpdate.errors.busy })
   await ctx.getSystem()
-  void updater.run({ force: true })
+  void updater.run({ force: true, mirror: typeof body?.mirror === 'string' ? body.mirror : undefined })
   return describeLlamacpp()
 })

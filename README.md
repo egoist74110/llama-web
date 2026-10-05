@@ -37,15 +37,18 @@ bun install
 
 双击 `start.bat`（Windows）或 `start.command`（macOS，Finder 里双击；第一次若提示没有执行权限，先 `chmod +x start.command`）。两者都只是调用同一个 `scripts/launch.ts`。关闭窗口或按 Ctrl+C 即停止服务并结束所有 llama-server。
 
+默认启动**桌面版**（和安装包里的应用一样：Tauri 壳 + 内置服务）：先按需构建服务端，再把它复制进壳的资源目录，编译并运行壳（需要 [Rust](https://rustup.rs)；第一次编译要几分钟，之后是增量）。壳用它自己的数据目录，不是仓库的 `data/`；要换目录，设置环境变量 `LLAMA_WEB_DATA`（绝对路径）。只想要服务、用浏览器打开，加 `web`。
+
 有构建产物时会显示「源码自上次构建后是否有改动」，并给 3 秒倒计时：源码有改动默认重新构建，没改动默认直接运行；按 `b` 重新构建、`r` 直接运行、`q` 退出，按 Enter 取默认。没有构建产物时自动安装依赖并构建。
 
 ```bash
 start.bat          # 询问（默认按源码是否改动）；macOS 用 ./start.command
 start.bat build    # 总是重新构建后运行
 start.bat run      # 不询问，直接运行上次的构建
+start.bat web      # 只启动服务（浏览器打开），可和 build / run 组合
 ```
 
-两端通用的命令行写法（效果相同）：`bun run start`、`bun run start:build`、`bun run start:run`。
+两端通用的命令行写法（效果相同）：`bun run start`、`bun run start:build`、`bun run start:run`、`bun run start:web`。
 
 默认地址 `http://localhost:5001`（监听 `0.0.0.0`，局域网可访问，完整功能，不需要 key）。第一次打开会进入设置向导：添加模型目录并启用模型。
 

@@ -1,8 +1,10 @@
 // Cross-platform (Windows / macOS) launcher for the built app. Wrapped by start.bat / start.command.
-// Usage: bun scripts/launch.ts [build|run|ask]
-//   build  always rebuild, then run
-//   run    never rebuild (builds only if there is no build output), then run
-//   ask    (default) decide by whether sources changed since the last build; asks when stdin is a terminal
+// Usage: bun scripts/launch.ts [desktop|web] [build|run]
+//   desktop  (default) run the desktop shell (src-tauri) around the built service, like the installed app
+//   web      run only the built service; open it in a browser
+//   build    always rebuild, then run
+//   run      never rebuild (builds only if there is no build output), then run
+//   (neither) decide by whether sources changed since the last build; asks when stdin is a terminal
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
@@ -71,10 +73,36 @@ async function exec(cmd: string[]): Promise<number> {
   return await child.exited
 }
 
+const shellDir = join(root, 'src-tauri')
+const shellExe = join(shellDir, 'target', 'debug', process.platform === 'win32' ? 'llama-web-desktop.exe' : 'llama-web-desktop')
+const resourcesStamp = join(shellDir, 'resources', 'versions.json')
+
+async function runDesktop(built: boolean): Promise<number> {
+  const cargo = Bun.spawnSync(['cargo', '--version'], { stdout: 'ignore', stderr: 'ignore' })
+  if (cargo.exitCode !== 0) {
+    console.log('[llama-web] cargo was not found in PATH. Install Rust from https://rustup.rs (the desktop shell needs it), or use "web".')
+    return 1
+  }
+  // Refresh the shell's bundled copy of the service when it was rebuilt or has never been prepared.
+  if (built || !existsSync(resourcesStamp) || statSync(resourcesStamp).mtimeMs < statSync(entry).mtimeMs) {
+    console.log('[llama-web] preparing desktop resources...')
+    const code = await exec(['bun', 'desktop/prepare.ts', '--dev'])
+    if (code !== 0) return code
+  }
+  console.log('[llama-web] building the desktop shell (first time takes a few minutes)...')
+  const compiled = await exec(['cargo', 'build', '--manifest-path', join(shellDir, 'Cargo.toml')])
+  if (compiled !== 0) return compiled
+  console.log('[llama-web] starting the desktop app...')
+  return await exec([shellExe])
+}
+
 async function main() {
-  const mode = process.argv[2] ?? 'ask'
+  const args = process.argv.slice(2)
+  const web = args.includes('web')
+  const mode = args.find(a => a === 'build' || a === 'run') ?? 'ask'
   const hasBuild = existsSync(entry)
   let build: boolean
+
 
   if (mode === 'build') build = true
   else if (!hasBuild) build = true
@@ -102,6 +130,7 @@ async function main() {
     if (code !== 0) return code
   }
 
+  if (!web) return await runDesktop(build)
   console.log('[llama-web] starting...')
   return await exec(['bun', entry])
 }

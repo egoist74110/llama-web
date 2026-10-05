@@ -13,8 +13,9 @@ import { targetKey } from './platform'
 import { UpdateCheckStore } from './update-check'
 import {
   clearLeftovers, installBuild, installedDir, listInstalled, resolveLatest, RuntimeError, versionsDir,
-  type InstallOptions, type NetOptions, type RuntimeStatus,
+  type FetchFn, type InstallOptions, type NetOptions, type RuntimeStatus,
 } from './llamacpp'
+import { mirrorById, mirrorFetch, mirrorHelps, type Mirror } from './mirrors'
 
 const TAG_RE = /^b\d+$/
 
@@ -221,8 +222,8 @@ export class Updater {
   }
 
   /** Startup check (single flight). Never throws: failures end in an `error` status. */
-  run(opts: { force?: boolean, manual?: boolean } = {}): Promise<RuntimeStatus> {
-    this.running ??= this.check(opts.force === true, opts.manual === true).finally(() => { this.running = null; this.scheduleChecks() })
+  run(opts: { force?: boolean, manual?: boolean, mirror?: string } = {}): Promise<RuntimeStatus> {
+    this.running ??= this.check(opts.force === true, opts.manual === true, opts.mirror ? mirrorById(opts.mirror) : null).finally(() => { this.running = null; this.scheduleChecks() })
     return this.running
   }
 
@@ -235,7 +236,7 @@ export class Updater {
   }
 
   /** `force`: an explicit download bypasses the automatic-check cooldown and autoUpdate switch. */
-  private async check(force: boolean, manual: boolean): Promise<RuntimeStatus> {
+  private async check(force: boolean, manual: boolean, mirror: Mirror | null = null): Promise<RuntimeStatus> {
     const { dataDir, platform } = this.opts
     clearLeftovers(dataDir, this.opts.target)
     const installed = this.refresh()
@@ -249,19 +250,22 @@ export class Updater {
     const before = current
     try {
       const at = (this.opts.now ?? Date.now)()
-      if (!force && !manual && this.checks.remaining(this.checkKey, at) > 0) {
+      // Nothing installed and automatic installs on: the cooldown must not leave the user without a runtime.
+      if (!force && !manual && this.checks.remaining(this.checkKey, at) > 0 && (current || !this.opts.llamacpp().autoUpdate)) {
         this.safePrune()
         const result = this.checks.get(this.checkKey)?.result as Partial<RuntimeStatus> | null
         if (!current && result?.state === 'error' && typeof result.code === 'string' && typeof result.detail === 'string') {
           return this.set({ state: 'error', code: result.code, detail: result.detail, using: current || null })
         }
-        return this.set(current ? { state: 'ready', tag: current, note: 'cached' } : { state: 'idle' })
+        return this.set(current ? { state: 'ready', tag: current, note: 'cached' } : { state: 'disabled' })
       }
       this.checks.save(this.checkKey, at)
       this.checkView = { state: 'checking' }
       if (this.opts.selectionError) throw new RuntimeError('asset-missing', 'Choose runtime acceleration in settings.json and restart', this.opts.selectionError)
       this.set({ state: 'working', step: 'resolve', detail: '' })
-      const fetchFn = this.opts.fetch ?? fetch
+      // A mirror is only ever chosen by the user for this one run.
+      const plain: FetchFn = this.opts.fetch ?? fetch
+      const fetchFn = mirror ? mirrorFetch(mirror, plain) : plain
       const net: NetOptions = { ...this.opts.net, signal: this.abort.signal }
       const latest = await resolveLatest(fetchFn, cfg.cudaRuntime, platform, net, this.opts.target, this.opts.cudaLimits?.())
       this.checked(latest.tag, at)
@@ -278,7 +282,7 @@ export class Updater {
         return this.set({ state: 'ready', tag: now, note: now === latest.tag ? 'latest' : 'pinned', latest: latest.tag })
       }
       await installBuild(latest, {
-        dataDir, cudaRuntime: cfg.cudaRuntime, cudaLimits: this.opts.cudaLimits?.(), fetch: this.opts.fetch, extract: this.opts.extract, platform, target: this.opts.target, net,
+        dataDir, cudaRuntime: cfg.cudaRuntime, cudaLimits: this.opts.cudaLimits?.(), fetch: fetchFn, extract: this.opts.extract, platform, target: this.opts.target, net,
         onStep: (step, detail) => this.set({ state: 'working', step, detail, tag: latest.tag }),
       })
       const installedNow = this.refresh()
@@ -302,7 +306,8 @@ export class Updater {
         const at = this.checks.get(this.checkKey)?.at ?? (this.opts.now ?? Date.now)()
         this.checks.save(this.checkKey, at, { state: 'error', code, detail })
       } catch { /* Preserve the original failure if saving its result also fails. */ }
-      return this.set({ state: 'error', code, detail, using: usable })
+      const offer = (force || manual) && mirrorHelps(code) ? (force ? 'download' as const : 'check' as const) : undefined
+      return this.set({ state: 'error', code, detail, using: usable, ...(offer ? { offer } : {}) })
     }
   }
 

@@ -278,7 +278,7 @@ li.task .when{color:var(--ok);font-size:12px;white-space:nowrap}
     <tr><td>50</td><td>首次启动配置进入全局与单模型配置（后续需求，先不做）</td><td>首次启用确认框里已有的配置（上下文、MTP 模式与草稿文件、思考开关与上限等）也要出现在「全局默认参数」和「单个模型 / 方案的独立配置」里，可随时修改，与首次确认共用同一套控件和存储，不另设一份。具体范围与优先级由后续 AI 核对首次确认框的全部项后向用户确认</td></tr>
     <tr><td>51</td><td>模型删除（后续需求，先不做）</td><td>模型列表 / 详情增加「删除」按钮，需二次确认弹窗。弹窗左下角放一个独立的勾选框，勾选后同时删除模型文件、MTP 草稿文件与视觉（mmproj）文件；默认不勾选，只移除 llama-web 里的模型登记与配置。永久删除磁盘文件属不可恢复操作，具体删除范围、正在使用或被其他方案共享的草稿 / 视觉文件如何处理，由后续 AI 先向用户确认</td></tr>
     <tr><td>52</td><td>Cloudflare token 权限误报（待排查）</td><td>用户给了 DNS Read、DNS Write 后，一键配置仍提示「token 缺少权限：Zone · DNS · Edit」。检查权限的探测在 <code>server/core/cloudflare.ts</code>（对每个 active 区域 GET <code>/zones/{id}/dns_records</code>，403 即判缺 DNS 权限），可能原因：token 的 Zone Resources 没包含目标区域 / 全部区域、探测的是别的区域、或权限组名称与界面显示不同。先复现并确认真实被拒的请求，再决定是修判断还是改提示文案（应写清具体缺哪项和作用范围）</td></tr>
-    <tr><td>53</td><td>GitHub API 限流时的镜像重试（待用户确认方案）</td><td>检查更新反复出现「GitHub API 请求已被限流」，希望出错时换镜像站重试。涉及安全：llama-web 与 llama.cpp 的更新源 / 下载域名目前严格限定为官方 GitHub（<code>app-update.ts</code> 的 feed 与安装包前缀校验、<code>llamacpp.ts</code> 等），安装包还要校验 SHA-256；加入第三方镜像会放宽这一限制。实现前先向用户确认：镜像来源（固定哪个站、是否可由用户填写）、仅用于元数据还是也用于下载、下载是否仍以官方清单的校验值为准；也可先考虑不依赖 API 的方式（如 releases.atom / 网页重定向）或可选 GitHub token 提高限额</td></tr>
+    <tr><td>53</td><td>GitHub 限流 / 大陆不可达时的元数据兜底与公共镜像（2026-10-05 已确认并实现）</td><td>① <b>不依赖 API 的兜底</b>：API 被限流或报错时，llama.cpp 改用 <code>releases/latest/download/nightly-tag.txt</code> 取版本号、<code>releases/expanded_assets/&lt;tag&gt;</code> 页面取资产与 SHA-256；llama-web 自己改用 <code>releases.atom</code> + 同样的资产页（<code>server/core/github-feed.ts</code>）。② <b>内置公共镜像</b>（<code>server/core/mirrors.ts</code>：ghfast.top 推荐、gh-proxy.com 备用、ghproxy.net 备选，前缀写法）：<b>只在用户点了检查 / 下载 / 更新且 GitHub 连不上或被限流后</b>，弹窗让用户二选一，选定后只对这一次操作生效；自动检查失败不弹、不用镜像。镜像请求只放行 github.com / api.github.com，重定向只允许回到镜像或 GitHub。③ 经镜像时校验值也来自镜像（用户确认接受，弹窗里写明风险）；直连能用时校验值仍来自官方。镜像清单依据 2026-10-05 的实测，会失效，需要定期复查。未做：用户自填代理 / 镜像地址、系统代理读取、自建镜像。</td></tr>
     <tr><td>54</td><td>首次运行按本机配置默认参数</td><td>用户 2026-10-05 要求：Mac 按统一内存、Windows 按最大 NVIDIA 显卡显存（没有 NVIDIA 卡或明显是核显则按系统内存）给出全局默认的上下文与批大小；<code>defaults</code> 与 <code>defaultsCpu</code> 分别按显存 / 内存分档（<code>server/core/config.ts</code> 的 <code>tunedDefaults</code>）。仅在 settings 里 <code>setup.tuned=false</code> 时执行一次（版本 8；旧安装迁移为 true，不改动已有参数）。K/V 缓存、flash attention、加速层数在 Mac 上「不传」，由 llama.cpp 自行选择（实测默认 f16 / auto / auto）。内置额外参数去掉 <code>--jinja --props --slots -cb</code>（当前 llama-server 默认已开或应用不用），只留 <code>--no-prefill-assistant</code>（Windows GPU 版仍带 <code>--load-mode mlock</code>）。</td></tr>
   </table>
 </section>
@@ -753,10 +753,18 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
     <li class="task" data-done="false"><span class="t">首次启动配置加入全局默认与单个模型 / 方案配置（关键决定 50，先不做）</span><span class="when"></span></li>
     <li class="task" data-done="false"><span class="t">模型删除按钮 + 二次确认弹窗，左下角勾选框可同时删除模型文件、草稿与视觉文件（关键决定 51，先不做）</span><span class="when"></span></li>
     <li class="task" data-done="false"><span class="t">排查并修复 Cloudflare 一键配置的 token 权限误报：给了 DNS Read / DNS Write 仍提示缺 Zone · DNS · Edit（关键决定 52）</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">检查更新被 GitHub API 限流时的镜像 / 备用源重试（关键决定 53，先确认方案再做）</span><span class="when"></span></li>
+    <li class="task" data-done="true"><span class="t">检查更新被 GitHub API 限流时的镜像 / 备用源重试（关键决定 53，先确认方案再做）</span><span class="when">2026-10-05</span></li>
     <li class="task" data-done="false"><span class="t">MTP 真实模型验收：用支持自带 MTP 的模型（如 Qwen）及配套草稿文件模型分别检查真实加载 / 推理、参数和后续编辑。2026-10-04 本轮只验证了构造文件、真实保存接口和启动参数数组，未运行真实模型 / GPU；真机开始前先告知用户</span><span class="when"></span></li>
     <li class="task" data-done="true"><span class="t">首次启动确认框在第一项新增上下文设置：输入完整数值，旁边显示 K 简写；提供「设为全局配置」选项，勾选后全局配置统一采用该上下文值。验证本地设置与全局设置的保存及后续编辑</span><span class="when">2026-10-04</span></li>
     <li class="task" data-done="true"><span class="t">思考开启时增加「设置」入口，只接受非负整数；默认 0 表示不限，映射 <code>--reasoning-budget -1</code>，正整数由程序拼接上限参数。关闭时隐藏入口并保留上限。首次保存与当前方案后续编辑接通，保留继承 / 自定义 / 不传、旧原始 0 语义及额外参数优先级。构造数据回归与隔离生产构建浏览器验证默认 / 自定义 / 关开保留、保存 / 启动参数数组 / 命令预览；保留 MTP、首次上下文及启动失败提示。未运行真实模型 / GPU 推理或安装包验收</span><span class="when">2026-10-04</span></li>
+    <li class="task" data-done="true"><span class="t">新手引导页重做并常驻左侧菜单：四步竖排卡片（模型目录 → 安装 llama.cpp → 启用模型 → 启动），按实际配置自动打勾、当前步骤高亮；左侧「新手引导」入口在没有任何模型时显示，添加模型后消失；「先跳过」改为带边框按钮；第二步提供真正的「下载并安装」；Mac 路径提示改成访达写法。验证：开发服务全新数据在浏览器里走了加目录 → 步骤打勾；<b>没验证</b>真实添加模型后菜单项消失</span><span class="when">2026-10-05</span></li>
+    <li class="task" data-done="true"><span class="t">修复 llama.cpp 状态一直显示「正在检查」：24 小时检查冷却内且没有安装任何版本时状态被置为待检查；现在显示「未安装，请在设置中下载运行库」，自动更新开启时不再被冷却挡住（<code>server/core/updater.ts</code>）</span><span class="when">2026-10-05</span></li>
+    <li class="task" data-done="true"><span class="t">GitHub 限流 / 大陆不可达的兜底与公共镜像（关键决定 53）：API 限流或报错时改用 github.com 页面（latest 下载重定向、资产页、releases.atom）；用户发起的检查 / 下载失败后弹窗二选一（ghfast.top 推荐、gh-proxy.com 备用），自动检查不弹。真实网络验证三个镜像的元数据与下载（SHA-256 通过）、被墙模拟的完整弹窗流程；<b>没验证</b>：大陆网络下镜像是否可用、llama-web 安装包经镜像下载的真实运行</span><span class="when">2026-10-05</span></li>
+    <li class="task" data-done="false"><span class="t">首次运行按本机配置默认参数（关键决定 54）：Mac 按统一内存、Windows 按最大 NVIDIA 显存（没有 NVIDIA 卡按系统内存）给上下文与批大小，settings 升到版本 8，内置额外参数精简为 <code>--no-prefill-assistant</code>。已在 Mac 实测首次生成、单元测试覆盖各档；<b>还差</b>：Windows 实机检测与生成、分档数值用真实模型验证（目前是保守经验值）</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">启动器统一（<code>scripts/launch.ts</code>，<code>start.bat</code> / <code>start.command</code> / <code>bun run start</code> 共用）：询问是否重新构建（按源码是否改动给默认）、构建前自动 <code>bun install</code>、默认运行桌面版、<code>web</code> 只起服务。Mac 终端已验证；<b>还差</b>：Windows 实机、Finder 双击</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">桌面壳在 Mac 上开发运行（用户 2026-10-05 要求，范围：开发运行，不含 DMG / 签名 / 公证）：Rust 壳按平台分支（进程组代替作业对象、sha2 代替 BCrypt、内置 <code>bun</code>），<code>desktop/prepare.ts --dev</code>，启动器编译并运行壳。Mac 上编译、<code>cargo test</code> 7 项、启动内置服务、强杀壳后服务自行退出均已验证；<b>还差</b>：窗口界面的肉眼检查、正常关窗退出、Windows 上重新编译 <code>cfg(windows)</code> 分支（本机无法交叉检查）</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">镜像后续（关键决定 53 的未做部分）：用户自填代理 / 镜像地址、读取系统代理、并发测速自动选镜像；镜像清单按实测会失效，需定期复查；经镜像下载的 llama-web 安装包做一次真机验证</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">已有安装的默认参数不自动改（保护用户现有设置）：旧的额外参数仍含 <code>--jinja --props --slots -cb</code>。是否提供「按本机重新推荐」的一键入口，待用户决定</span><span class="when"></span></li>
   </ul>
 
   <h3>Mac 专项（决定 38，贯穿 8-1 至 8-6）</h3>
@@ -889,6 +897,8 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 <section id="changelog">
   <h2>变更记录</h2>
   <table>
+    <tr><td>2026-10-05</td><td>统一启动器（scripts/launch.ts）与桌面壳在 Mac 上开发运行；Mac 默认参数 / Windows 首次按硬件调参（决定 54）；新手引导页重做并常驻左侧；修复 llama.cpp 状态一直「正在检查」；plan 增补相应任务与未完成项。</td></tr>
+    <tr><td>2026-10-05</td><td>关键决定 53 落地：GitHub API 限流兜底（atom / 资产页）、内置公共镜像并只在用户发起的更新失败后弹窗二选一；经真实网络验证三个镜像的元数据与下载（SHA-256 通过）。</td></tr>
     <tr><td>2026-10-05</td><td>关键决定 54：首次运行按本机内存 / 显存给全局默认参数，内置额外参数精简；settings 升到版本 8。</td></tr>
     <tr><td>2026-10-05</td><td>记录两个试用问题（未排查、未修复）：Cloudflare token 给了 DNS Read / Write 仍报缺 Zone · DNS · Edit（决定 52）；检查更新常被 GitHub API 限流，希望失败时换镜像重试（决定 53，涉及更新源与下载校验的安全限制，需先确认）</td></tr>
     <tr><td>2026-10-05</td><td>记录两项后续需求（均未实现）：首次启动配置加入全局与单模型配置（决定 50）；模型删除按钮、二次确认及可选连同模型 / 草稿 / 视觉文件一起删除（决定 51）。发布 v0.1.0-beta.5（修复启动窗口一闪而过）</td></tr>

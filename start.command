@@ -1,9 +1,10 @@
 #!/bin/bash
 # llama-web launcher for macOS (source version). Double-click it in Finder, or run ./start.command.
 # Close the Terminal window (or press Ctrl+C) to stop the server and all llama-server processes.
-# Usage: ./start.command          ask whether to rebuild (default follows whether sources changed)
+# Usage: ./start.command          desktop app; asks whether to rebuild (default follows whether sources changed)
 #        ./start.command build    rebuild, then run
 #        ./start.command run      run the last build without asking
+#        ./start.command web      only the service (open it in a browser); combines with build / run
 # The logic lives in scripts/launch.ts (shared with start.bat).
 cd "$(dirname "$0")" || exit 1
 

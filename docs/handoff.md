@@ -1,5 +1,13 @@
 # 交接记录
 
+## 2026-10-05 · Mac 可用性、启动器、桌面壳 Mac 开发运行、首次按硬件调参、引导页、镜像兜底 · Claude
+- 完成（均在 Mac 实测，Windows 未跑）：① `scripts/launch.ts` 统一 start.bat / start.command / `bun run start*`，默认运行桌面壳，`web` 只起服务；构建前自动 `bun install`（根因：旧 node_modules 缺依赖导致 Mac 构建失败）。② Rust 壳跨平台（job.rs 进程组、update.rs sha2、`BUN` 文件名、icon.png），`desktop/prepare.ts --dev`。③ 关键决定 54：首次按 Mac 内存 / Windows 显存或内存给上下文与批大小，settings v8（`setup.tuned`），额外参数精简为 `--no-prefill-assistant`。④ 引导页重做 + 左侧「新手引导」入口（无模型时显示）；修复 updater 冷却期状态「正在检查」。⑤ 关键决定 53：API 限流 / 不可达兜底（github-feed.ts）与公共镜像（mirrors.ts + MirrorChoiceModal），只在用户发起的更新失败后弹窗。
+- 验证：`bun run typecheck` 通过；全部测试失败项与改动前一致（63 个，本机 Mac 原有：pre-commit 脚本、osascript / tilde 路径等），新增测试 mirror-fallback 8 项、分档与额外参数各项；`cargo test` 7 项；真实网络下三个镜像的元数据与下载 SHA-256 通过；被墙模拟下弹窗 → 镜像 → 安装成功。
+- 没验证：Windows 上的启动器 / Rust 编译 / 首次调参；套壳窗口肉眼与正常关窗；大陆网络下镜像；llama-web 安装包经镜像；真实模型推理（本机无 gguf）。
+- 发现的坑：Bun 的 fetch 不接受镜像的 `Location: /https://...`，mirrorFetch 自己跟随重定向；`cargo` 会改写 Cargo.lock 并去掉 `# pre-commit:allow` 注释，提交前需补回。
+- 决定 / 待用户：分档数值待真实模型验证；是否给旧安装提供「按本机重新推荐」；Mac DMG / 签名 / 公证未启动。
+- 下一步：用户在 Windows 上试 `start.bat`（桌面模式首次编译）；再决定上面的待办。
+
 ## 2026-10-05 · 试用问题记录：Cloudflare token 权限误报、更新检查限流 · Claude
 - 问题 1：用户给 token 授予 DNS Read、DNS Write，一键配置仍提示「token 缺少权限：Zone · DNS · Edit」。记录为关键决定 52；探测在 server/core/cloudflare.ts（GET /zones/{id}/dns_records，403 判缺权限）。可能是 Zone Resources 范围或判断逻辑问题，尚未复现。
 - 问题 2：检查更新常报「GitHub API 请求已被限流」，用户希望出错时换镜像站重试。记录为关键决定 53；更新源 / 下载域名目前限定官方 GitHub 且校验 SHA-256，加镜像要先和用户确认来源与校验方式。

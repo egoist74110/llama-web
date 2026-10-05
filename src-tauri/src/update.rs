@@ -6,7 +6,6 @@ use std::{
     fs,
     path::{Path, PathBuf},
 };
-use windows_sys::Win32::Security::Cryptography::{BCryptHash, BCRYPT_SHA256_ALG_HANDLE};
 
 const PREFIX: &str = "LLAMA_WEB_DESKTOP ";
 const MAX_INSTALLER: u64 = 512 * 1024 * 1024;
@@ -52,7 +51,9 @@ pub fn request(line: &str, session: &str, pid: u32) -> Option<Request> {
     })
 }
 
+#[cfg(windows)]
 pub fn sha256(data: &[u8]) -> Result<String, String> {
+    use windows_sys::Win32::Security::Cryptography::{BCryptHash, BCRYPT_SHA256_ALG_HANDLE};
     let mut out = [0u8; 32];
     let len = u32::try_from(data.len()).map_err(|_| "Installer too large".to_string())?;
     // SAFETY: input and output buffers are valid for the lengths passed; the pseudo handle needs no cleanup.
@@ -71,6 +72,12 @@ pub fn sha256(data: &[u8]) -> Result<String, String> {
         return Err(format!("BCryptHash failed: {status:#x}"));
     }
     Ok(out.iter().map(|b| format!("{b:02x}")).collect())
+}
+
+#[cfg(not(windows))]
+pub fn sha256(data: &[u8]) -> Result<String, String> {
+    use sha2::{Digest, Sha256};
+    Ok(Sha256::digest(data).iter().map(|b| format!("{b:02x}")).collect())
 }
 
 /// The installer to run: inside `<data_dir>/run/app-update`, the expected name, a plain file, the expected digest.
@@ -112,6 +119,7 @@ mod tests {
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" // pre-commit:allow (public SHA-256 test vector)
         );
     }
+    #[cfg(windows)] // the fixture paths are Windows paths
     #[test]
     fn request_requires_identity_absolute_path_digest_and_version() {
         let sha = "a".repeat(64);

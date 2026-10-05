@@ -4,9 +4,10 @@ mod resources;
 mod update;
 
 use serde::Serialize;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::{
     io::{BufRead, BufReader, Write},
-    os::windows::process::CommandExt,
     path::{Path, PathBuf},
     process::{Child, ChildStdin, Command, Stdio},
     sync::{Arc, Mutex},
@@ -15,7 +16,21 @@ use std::{
 };
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
+#[cfg(windows)]
 const NO_WINDOW: u32 = 0x08000000;
+/// File name of the bundled Bun runtime.
+const BUN: &str = if cfg!(windows) { "bun.exe" } else { "bun" };
+/// Windows: no console window. Elsewhere: its own process group, which the job ends as a whole.
+fn prepare_child(command: &mut Command) -> &mut Command {
+    #[cfg(windows)]
+    {
+        command.creation_flags(NO_WINDOW)
+    }
+    #[cfg(unix)]
+    {
+        std::os::unix::process::CommandExt::process_group(command, 0)
+    }
+}
 /// Longest the launcher waits for the hidden main window to report a finished page load.
 const MAIN_REVEAL_TIMEOUT: Duration = Duration::from_secs(10);
 /// The launcher is created hidden; it only appears when the user has to act or startup is slow.
@@ -149,7 +164,7 @@ fn desktop_import(
                 .resource_dir()
                 .map_err(|e| e.to_string())?
                 .join("resources");
-            let mut command = Command::new(resource.join("bun.exe"));
+            let mut command = Command::new(resource.join(BUN));
             let cached = resources::writable_resources(&resource, &cache_root(&app)?)?;
             command.arg(cached.join("import-data.mjs"));
             if recovering {
@@ -157,9 +172,7 @@ fn desktop_import(
             } else {
                 command.arg(source.unwrap());
             }
-            let mut child = command
-                .arg(&target)
-                .creation_flags(NO_WINDOW)
+            let mut child = prepare_child(command.arg(&target))
                 .stdin(Stdio::piped())
                 .stdout(Stdio::null())
                 .stderr(Stdio::piped())
@@ -390,7 +403,7 @@ fn start(app: tauri::AppHandle) {
             {
                 return Err("importPending".into());
             }
-            let bun = resource.join("bun.exe");
+            let bun = resource.join(BUN);
             let cached = resources::writable_resources(&resource, &cache_root(&app)?)?;
             let entry = cached.join("app/server/index.mjs");
             if !bun.is_file() || !entry.is_file() {
@@ -409,8 +422,8 @@ fn start(app: tauri::AppHandle) {
                 .env_remove("NITRO_HOST")
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .creation_flags(NO_WINDOW);
+                .stderr(Stdio::piped());
+            prepare_child(&mut command);
             let mut child = command.spawn().map_err(|e| e.to_string())?;
             let job = match job::Job::attach(&child) {
                 Ok(job) => job,
@@ -588,9 +601,19 @@ mod tests {
     #[test]
     fn closing_job_ends_owned_process_and_preserves_unrelated_process() {
         fn child() -> Child {
-            Command::new("cmd.exe")
-                .args(["/C", "ping", "-n", "60", "127.0.0.1"])
-                .creation_flags(NO_WINDOW)
+            #[cfg(windows)]
+            let mut command = {
+                let mut c = Command::new("cmd.exe");
+                c.args(["/C", "ping", "-n", "60", "127.0.0.1"]);
+                c
+            };
+            #[cfg(unix)]
+            let mut command = {
+                let mut c = Command::new("sleep");
+                c.arg("60");
+                c
+            };
+            prepare_child(&mut command)
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .spawn()
@@ -662,13 +685,21 @@ fn quit(app: tauri::AppHandle) {
         if let Some(request) = install {
             // Checked now that the service (the only other writer of that directory) has stopped.
             let started = update::verify(&request, Path::new(&data_dir)).and_then(|file| {
-                Command::new(file)
-                    .args(["/P", "/R", "/UPDATE"])
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .spawn()
-                    .map_err(|e| e.to_string())
+                #[cfg(windows)]
+                {
+                    Command::new(file)
+                        .args(["/P", "/R", "/UPDATE"])
+                        .stdin(Stdio::null())
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null())
+                        .spawn()
+                        .map_err(|e| e.to_string())
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = file;
+                    Err::<Child, String>("Application updates are only installed on Windows".into())
+                }
             });
             if started.is_err() {
                 let mut inner = state.lock().unwrap();

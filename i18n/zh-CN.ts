@@ -37,6 +37,7 @@ export default {
     // app/utils/platform-text.ts picks these; keys mirror the texts they replace.
     mac: {
       pathPlaceholder: '例如 /Volumes/models 或 ~/models',
+      setupPathHint: '也可以直接粘贴路径：在访达里选中文件夹，按 ⌥⌘C 复制路径。',
       dirPlaceholder: '例如 ~/llama.cpp/b1234',
       archivePlaceholder: '例如 ~/Downloads/llama-b1234.tar.gz',
       restartRequired: '端口已保存为 {port}，但当前进程仍在使用 {current}。关闭运行 start.command 的终端窗口后重新启动才会生效。',
@@ -61,6 +62,7 @@ export default {
     subtitle: '本地 LLM 控制台',
   },
   nav: {
+    guide: '新手引导',
     overview: '总览',
     models: '模型',
     logs: '日志',
@@ -1302,15 +1304,11 @@ export default {
   // First-run wizard.
   setup: {
     title: '欢迎使用 llama-web',
-    subtitle: '三步就能跑起来：告诉我模型放在哪里 → 启用想用的模型 → 点启动。',
-    steps: {
-      dir: { title: '选择模型目录', body: '模型 .gguf 文件所在的文件夹，可以添加多个。' },
-      enable: { title: '启用模型', body: '在「模型」页的「扫描发现」里，点想用的模型旁的「启用」。' },
-      start: { title: '启动并确认', body: '第一次点「启动」时，会问你思考、视觉、MTP 三个选项。' },
-    },
+    subtitle: '四步就能跑起来。每完成一步会自动打勾，添加模型后这个引导会从左侧消失。',
+    done: '已完成',
     dir: {
-      title: '第一步：选择模型目录',
-      hint: '会递归扫描子目录。模型分散在不同位置也没关系，可以添加多个目录；之后在设置页增删、停用。',
+      title: '选择模型目录',
+      hint: '模型 .gguf 文件所在的文件夹，会递归扫描子目录。可以添加多个，之后在设置页增删、停用。',
       pick: '选择文件夹…',
       picking: '请在弹出的窗口里选择……',
       path: '模型目录路径',
@@ -1319,11 +1317,29 @@ export default {
       added: '已添加的目录',
       found: '在这个目录里找到 {count} 个模型文件。',
       foundNone: '这个目录里没有找到 .gguf 模型文件，检查一下路径？',
-      next: '去「模型」页启用',
     },
-    skip: '先跳过，稍后在设置页里配置',
-    done: '已完成配置，不再显示这个向导',
-    finish: '完成，去启用模型',
+    runtime: {
+      title: '安装 llama.cpp 运行库',
+      hint: '真正跑模型的程序，来自官方发布页，下载后会校验。只需要装一次。',
+      installed: '已安装：{tag}',
+      missing: '还没有安装运行库。',
+      download: '下载并安装',
+      downloading: '正在下载…',
+      failed: '下载没有成功',
+    },
+    enable: {
+      title: '启用模型',
+      hint: '在「模型」页的「扫描发现」里，点想用的模型旁的「启用」。',
+      go: '去启用模型',
+      needDir: '先完成第一步。',
+      enabled: '已启用 {count} 个模型。',
+    },
+    start: {
+      title: '启动并确认',
+      hint: '在「模型」页点「启动」。第一次启动会问你思考、视觉、MTP 三个选项，之后就能用 API 或聊天客户端连接了。',
+    },
+    skip: '先跳过',
+    skipHint: '以后随时可以从设置页配置，引导也会一直留在左侧，直到你添加了模型。',
   },
   logs: {
     title: '日志',
@@ -1512,6 +1528,18 @@ export default {
     rollbackButton: '回退到 {tag}',
   },
   // Updates of llama-web itself (settings card + prompt in the layout).
+  // Shown only after the user started an update and github.com could not be reached (never for automatic checks).
+  mirror: {
+    title: '无法连接 GitHub',
+    body: '{what}没有成功：{reason}。可以改用公共镜像再试一次，请选择一个：',
+    whatLlama: 'llama.cpp 更新',
+    whatApp: 'llama-web 更新',
+    recommended: '推荐',
+    alternative: '备用',
+    use: '用 {host} 重试',
+    cancel: '先不用',
+    risk: '镜像由第三方运营。下载的文件仍会校验 SHA-256，但此时校验值也来自镜像，请只在信任它时使用。平时的自动检查不会使用镜像。',
+  },
   appUpdate: {
     title: '关于与更新',
     hint: '当前版本与 llama-web 应用更新。更新只替换程序文件，配置、API key、模型目录引用和已下载的 llama.cpp 都会保留。llama.cpp 的更新见上方「llama.cpp 版本」。',

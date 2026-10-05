@@ -1,6 +1,6 @@
 // Run with pinned Bun on native Windows. Build in an owned, isolated worktree.
 import { createHash } from 'node:crypto'
-import { cpSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import zh from '../i18n/zh-CN'
 
@@ -10,6 +10,10 @@ const work = join(root, '..', `lw-build-${crypto.randomUUID().slice(0, 8)}`)
 const BUN_VERSION = '1.3.14'
 // LLAMA_WEB_RELEASE=1 (the release workflow): versions.json carries the plain application version.
 const release = process.env.LLAMA_WEB_RELEASE === '1'
+// --dev (scripts/launch.ts desktop): macOS or Windows, reuse the .output of the working tree and the running Bun,
+// no isolated worktree, no licence collection. Never used for a release package.
+const dev = process.argv.includes('--dev')
+const bunName = process.platform === 'win32' ? 'bun.exe' : 'bun'
 const appVersion: string = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version
 async function run(argv: string[], cwd = root) {
   const p = Bun.spawn(argv, { cwd, stdout: 'inherit', stderr: 'inherit', stdin: 'ignore' })
@@ -45,6 +49,20 @@ function licenses(path: string, result: string[], base = path) {
       result.push(`\n--- ${full.slice(base.length)} ---\n${readFileSync(full, 'utf8')}`)
     }
   }
+}
+if (dev) {
+  if (!existsSync(join(root, '.output', 'server', 'index.mjs'))) throw new Error('Build the app first (bun run build)')
+  rmSync(resources, { recursive: true, force: true })
+  mkdirSync(resources, { recursive: true })
+  cpSync(join(root, '.output'), join(resources, 'app'), { recursive: true })
+  cpSync(process.execPath, join(resources, bunName))
+  await run([process.execPath, 'build', join(root, 'desktop', 'import-data.ts'), '--target=bun', '--outfile=' + join(resources, 'import-data.mjs')])
+  writeFileSync(join(root, 'desktop', 'ui', 'strings.json'), JSON.stringify(zh.desktop))
+  writeFileSync(join(resources, 'versions.json'), JSON.stringify({ application: `${appVersion}-dev`, bun: Bun.version,
+    bunSha256: digest(join(resources, bunName)), resourceId: resourceDigest(), target: `${process.platform}-${process.arch}-dev`, signature: 'none',
+    license: 'MIT', commit: 'dev' }, null, 2))
+  console.log('Prepared desktop resources (dev) from the current .output')
+  process.exit(0)
 }
 if (process.platform !== 'win32' || process.arch !== 'x64') throw new Error('Desktop packaging currently requires native Windows x64')
 if (Bun.version !== BUN_VERSION) throw new Error(`Use Bun ${BUN_VERSION}`)

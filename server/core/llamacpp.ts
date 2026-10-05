@@ -10,6 +10,7 @@ import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { checkExtractedTree, extractArchive, type ArchiveOptions } from './archive'
 import { pickCuda, type CudaLimits } from './cuda'
+import { apiFallbackCode, fetchExpandedAssets } from './github-feed'
 import { legacyWindows, targetKey, type RuntimeTarget } from './platform'
 
 const REPO = 'ggml-org/llama.cpp'
@@ -177,19 +178,38 @@ export async function getBody(fetchFn: FetchFn, url: string, kind: 'json' | 'tex
   }
 }
 
-/**
- * The official "latest" release only carries a pointer (nightly-tag.txt) to the newest binary
- * build; resolve it, then pick that build's CUDA assets.
- */
-export async function resolveLatest(fetchFn: FetchFn, cudaRuntime: string, platform = process.platform, net: NetOptions = {}, target?: RuntimeTarget, limits?: CudaLimits | null): Promise<LatestBuild> {
+async function resolveViaApi(fetchFn: FetchFn, net: NetOptions): Promise<{ tag: string, assets: ReleaseAsset[] }> {
   const stable = await getBody(fetchFn, `https://api.github.com/repos/${REPO}/releases/latest`, 'json', net) as { assets?: ReleaseAsset[] }
   const pointer = stable.assets?.find(a => a.name === 'nightly-tag.txt')
   if (!pointer) throw new RuntimeError('no-nightly-tag', 'nightly-tag.txt not found in the latest release')
   const tag = String(await getBody(fetchFn, pointer.browser_download_url, 'text', net)).trim()
   if (!TAG_RE.test(tag)) throw new RuntimeError('bad-tag', 'Unexpected nightly tag', tag)
   const rel = await getBody(fetchFn, `https://api.github.com/repos/${REPO}/releases/tags/${tag}`, 'json', net) as { assets?: ReleaseAsset[] }
+  return { tag, assets: rel.assets ?? [] }
+}
+
+/** Same answer without the API: the pointer file by its stable "latest download" URL, the assets from the release page. */
+async function resolveViaWeb(fetchFn: FetchFn, net: NetOptions): Promise<{ tag: string, assets: ReleaseAsset[] }> {
+  const tag = String(await getBody(fetchFn, `https://github.com/${REPO}/releases/latest/download/nightly-tag.txt`, 'text', net)).trim()
+  if (!TAG_RE.test(tag)) throw new RuntimeError('bad-tag', 'Unexpected nightly tag', tag)
+  return { tag, assets: await fetchExpandedAssets(fetchFn, REPO, tag, net) }
+}
+
+/**
+ * The official "latest" release only carries a pointer (nightly-tag.txt) to the newest binary
+ * build; resolve it, then pick that build's CUDA assets.
+ */
+export async function resolveLatest(fetchFn: FetchFn, cudaRuntime: string, platform = process.platform, net: NetOptions = {}, target?: RuntimeTarget, limits?: CudaLimits | null): Promise<LatestBuild> {
+  let found: { tag: string, assets: ReleaseAsset[] }
+  try {
+    found = await resolveViaApi(fetchFn, net)
+  } catch (e) {
+    // The API allows few anonymous requests an hour (and some mirrors do not forward it): the github.com pages carry the same facts.
+    if (!apiFallbackCode(e)) throw e
+    found = await resolveViaWeb(fetchFn, net)
+  }
+  const { tag, assets } = found
   const os = platform === 'win32' ? 'win' : 'linux'
-  const assets = rel.assets ?? []
   if (target && target.acceleration !== 'cuda') {
     const name = target.os === 'win32' ? `llama-${tag}-bin-win-cpu-${target.arch}.zip`
       : target.os === 'darwin' ? `llama-${tag}-bin-macos-${target.arch}.tar.gz` : ''
@@ -376,4 +396,5 @@ export type RuntimeStatus =
   | { state: 'disabled' }
   | { state: 'working', step: 'resolve' | 'download' | 'extract', detail: string, tag?: string }
   | { state: 'ready', tag: string, note?: 'latest' | 'updated' | 'pinned' | 'auto-off' | 'switched' | 'cached' | 'available', from?: string | null, latest?: string }
-  | { state: 'error', code: string, detail: string, using?: string | null }
+  /** `offer`: a user-started check / download failed in a way a mirror may fix; the page then asks which mirror to use (never set by automatic checks). */
+  | { state: 'error', code: string, detail: string, using?: string | null, offer?: 'check' | 'download' }

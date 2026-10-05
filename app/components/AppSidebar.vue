@@ -7,7 +7,10 @@ const { state, metrics, connected } = useLive()
 const route = useRoute()
 const L = t.layout
 
+// The guide stays in the menu until the first model is added.
+const showGuide = computed(() => !!state.value && state.value.models.length === 0)
 const nav = computed(() => [
+  ...(showGuide.value ? [{ to: '/setup', label: t.nav.guide, icon: 'i-lucide-compass', count: null }] : []),
   { to: '/', label: t.nav.overview, icon: 'i-lucide-layout-dashboard', count: null },
   { to: '/models', label: t.nav.models, icon: 'i-lucide-box', count: state.value?.models.length || null },
   { to: '/logs', label: t.nav.logs, icon: 'i-lucide-text', count: null },
@@ -64,7 +67,7 @@ const modes = [
       </span>
     </NuxtLink>
 
-    <nav :aria-label="L.mainNav" class="grid grid-cols-4 gap-1 min-[820px]:flex min-[820px]:flex-col min-[820px]:gap-0.5">
+    <nav :aria-label="L.mainNav" class="grid grid-flow-col auto-cols-fr gap-1 min-[820px]:flex min-[820px]:flex-col min-[820px]:gap-0.5">
       <NuxtLink
         v-for="n in nav"
         :key="n.to"
