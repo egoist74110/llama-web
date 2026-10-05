@@ -1,5 +1,12 @@
 # 交接记录
 
+## 2026-10-05 · 已有安装「按本机重新推荐」默认参数（关键决定 54 未做部分） · Claude
+- 用户确认三点：只重算全局默认（Windows GPU + CPU 两份，Mac 一份），模型 / 方案覆盖值不动；旧额外参数 `--jinja --props --slots -cb` 在预览里作为可勾选项（只去掉这四个，其他参数保留）；设置页按钮 + 差异弹窗 + 逐项勾选，确认才写入，取消不改。
+- 实现：`server/core/retune.ts`（纯模块，`planRetune` 只读、`applyRetune` 重新计算后只改勾选且仍在方案内的项；复用 `tunedDefaults`，没有第二套分档）；`GET /api/settings/retune`（重新检测硬件后预览）、`POST /api/settings/retune {ids}`（经 `updateSettings` 原子写 + 备份；非法 ids 400）；`SettingsRetuneModal.vue`，按钮在 `SettingsDefaults.vue`（有未保存修改时禁用，避免被覆盖）；文案 `settings.defaults.retune`。无新配置字段，无迁移；应用后把 `setup.tuned` 置 true。
+- 验证：新增 `tests/core/retune.test.ts` 9 项通过（分档边界、预览不写入、只改勾选项、空 / 未知 id 不改、Mac 只有一份、旧额外参数）；`bun run typecheck` 通过；全量 `bun test` 1060 pass / 64 fail，失败项与改动前（git stash 后）逐项一致（51 个 pre-commit 脚本等本机 Mac 原有，另含偶发 TunnelManager / registry / runner 端口等）。隔离数据目录 + `nuxt dev` 调接口：预览列出 4 项，只提交额外参数 id 时仅该项被写入（ctxSize 不变），settings 有备份，ids 非数组返回 400。
+- 未运行：弹窗界面的浏览器走查（只验证了接口与类型）；Windows 实机（GPU / CPU 两份、真实显存检测）；真实模型加载；分档数值仍是保守经验值。
+- 下一步：用户试用按钮；阶段 8 其余项（MTP 真机验收、镜像后续）与 Windows 试用关口不变。
+
 ## 2026-10-05 · A2 首次启动配置进入全局与单模型配置（关键决定 50） · Claude
 - 核对结果：单模型侧上下文 / 思考 / 上限 / mmproj / MTP 早已有共享控件；缺口在全局页（思考上限只有原始数字框，无 MTP）。用户确认：全局思考上限改快捷控件；MTP 不进全局；首次确认的「设为全局」加思考开关、上限两个勾选；常用项抽出置顶、其余折叠。
 - 服务端：`FirstSetup` 增加 `setGlobalThinking` / `setGlobalThinkingLimit`；`saveFirstSetup` 泛化为 ctxSize / reasoning / reasoningBudget 多字段同步（GPU + CPU，Mac 一份），先校验后写，模型写失败只回退改过的全局字段。无新配置字段、无迁移。

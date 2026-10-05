@@ -764,7 +764,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
     <li class="task" data-done="false"><span class="t">启动器统一（<code>scripts/launch.ts</code>，<code>start.bat</code> / <code>start.command</code> / <code>bun run start</code> 共用）：询问是否重新构建（按源码是否改动给默认）、构建前自动 <code>bun install</code>、默认运行桌面版、<code>web</code> 只起服务。Mac 终端已验证；<b>还差</b>：Windows 实机、Finder 双击</span><span class="when"></span></li>
     <li class="task" data-done="false"><span class="t">桌面壳在 Mac 上开发运行（用户 2026-10-05 要求，范围：开发运行，不含 DMG / 签名 / 公证）：Rust 壳按平台分支（进程组代替作业对象、sha2 代替 BCrypt、内置 <code>bun</code>），<code>desktop/prepare.ts --dev</code>，启动器编译并运行壳。Mac 上编译、<code>cargo test</code> 7 项、启动内置服务、强杀壳后服务自行退出均已验证；<b>还差</b>：窗口界面的肉眼检查、正常关窗退出、Windows 上重新编译 <code>cfg(windows)</code> 分支（本机无法交叉检查）</span><span class="when"></span></li>
     <li class="task" data-done="false"><span class="t">镜像后续（关键决定 53 的未做部分）：用户自填代理 / 镜像地址、读取系统代理、并发测速自动选镜像；镜像清单按实测会失效，需定期复查；经镜像下载的 llama-web 安装包做一次真机验证</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">已有安装的默认参数不自动改（保护用户现有设置）：旧的额外参数仍含 <code>--jinja --props --slots -cb</code>。是否提供「按本机重新推荐」的一键入口，待用户决定</span><span class="when"></span></li>
+    <li class="task" data-done="true"><span class="t">已有安装的默认参数不自动改（保护用户现有设置）：设置页「全局默认参数」加「按本机重新推荐」（用户 2026-10-05 确认）：只重算全局默认（Windows GPU + CPU 两份，Mac 一份）的上下文 / 批大小 / 微批大小，复用首次运行的分档；全局额外参数含旧的 <code>--jinja --props --slots -cb</code> 时作为单独一项，仅去掉这四个。弹窗逐项「旧值 → 推荐值」带勾选，默认全勾，确认才写入（只改勾选项，原子写入 + 备份），取消不改；模型 / 方案里的覆盖值不动。<code>server/core/retune.ts</code>、<code>/api/settings/retune</code>。<b>还差</b>：Windows 实机与界面走查</span><span class="when">2026-10-05</span></li>
   </ul>
 
   <h3>Mac 专项（决定 38，贯穿 8-1 至 8-6）</h3>
@@ -903,6 +903,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
     <tr><td>2026-10-05</td><td>统一启动器（scripts/launch.ts）与桌面壳在 Mac 上开发运行；Mac 默认参数 / Windows 首次按硬件调参（决定 54）；新手引导页重做并常驻左侧；修复 llama.cpp 状态一直「正在检查」；plan 增补相应任务与未完成项。</td></tr>
     <tr><td>2026-10-05</td><td>关键决定 53 落地：GitHub API 限流兜底（atom / 资产页）、内置公共镜像并只在用户发起的更新失败后弹窗二选一；经真实网络验证三个镜像的元数据与下载（SHA-256 通过）。</td></tr>
     <tr><td>2026-10-05</td><td>关键决定 54：首次运行按本机内存 / 显存给全局默认参数，内置额外参数精简；settings 升到版本 8。</td></tr>
+    <tr><td>2026-10-05</td><td>决定 54 补充：已有安装可手动「按本机重新推荐」全局默认（上下文 / 批大小 / 微批大小 + 旧额外参数），预览 → 勾选 → 确认才写入；不自动改、不改模型覆盖值。</td></tr>
     <tr><td>2026-10-05</td><td>记录两个试用问题（未排查、未修复）：Cloudflare token 给了 DNS Read / Write 仍报缺 Zone · DNS · Edit（决定 52）；检查更新常被 GitHub API 限流，希望失败时换镜像重试（决定 53，涉及更新源与下载校验的安全限制，需先确认）</td></tr>
     <tr><td>2026-10-05</td><td>记录两项后续需求（均未实现）：首次启动配置加入全局与单模型配置（决定 50）；模型删除按钮、二次确认及可选连同模型 / 草稿 / 视觉文件一起删除（决定 51）。发布 v0.1.0-beta.5（修复启动窗口一闪而过）</td></tr>
     <tr><td>2026-10-04</td><td>修复桌面版启动双窗口：不是第二个进程或重复创建窗口，而是启动器窗口与刚创建的主窗口在主页面加载期间同时可见（实测约 0.3 秒）。主窗口改为隐藏创建，页面加载完成（或 10 秒兜底）后显示并同时隐藏启动器；二次启动只唤起可见的主窗口。不改配置、依赖或其他行为</td></tr>

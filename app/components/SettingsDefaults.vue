@@ -16,6 +16,7 @@ const { doc, saving, save } = useSettings()
 const ui = usePlatformUi()
 const toast = useToast()
 const devices = useDevices()
+const retuneOpen = ref(false)
 
 const emptyState = (): FormState => ({ values: {}, gpu: emptyGpuForm(), extraArgs: '', limit: '0' })
 function from(d: Record<string, unknown>): FormState {
@@ -191,10 +192,14 @@ async function submit() {
       <UButton size="sm" color="neutral" variant="outline" icon="i-lucide-rotate-ccw" @click="restore">
         {{ s.restore }}
       </UButton>
+      <UButton size="sm" color="neutral" variant="outline" icon="i-lucide-cpu" :disabled="dirtyOf('defaults') || dirtyOf('defaultsCpu')" @click="retuneOpen = true">
+        {{ s.retune.button }}
+      </UButton>
       <UButton v-if="dirty" size="sm" color="neutral" variant="ghost" @click="reset(which)">
         {{ t.settings.reset }}
       </UButton>
       <span v-if="dirty" class="text-xs text-warning">{{ t.settings.dirty }}</span>
     </div>
+    <SettingsRetuneModal v-model:open="retuneOpen" />
   </AppCard>
 </template>
