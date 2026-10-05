@@ -38,7 +38,9 @@ export function checkTree(root: string, mode: 'resources' | 'installer', target:
   const markers = [
     { kind: 'home directory', value: homedir() },
     { kind: 'checkout path', value: resolve(import.meta.dir, '..') },
-    { kind: 'user name', value: userInfo().username.length >= 4 ? userInfo().username : '' },
+    // The macOS runner's account is called "runner", an ordinary word in the code itself; it is not a person's
+    // name, so the user-name marker is skipped on the GitHub macOS runner (home directory and checkout path still apply).
+    { kind: 'user name', value: userInfo().username.length >= 4 && !(process.platform === 'darwin' && process.env.GITHUB_ACTIONS === 'true') ? userInfo().username : '' },
   ].filter(m => m.value).flatMap(m => [m, { kind: m.kind, value: m.value.split('\\').join('/') }, { kind: m.kind, value: m.value.split('\\').join('\\\\') }])
   const list = files(root)
   let scanned = 0
