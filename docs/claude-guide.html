@@ -641,10 +641,10 @@ ol.steps li{margin:4px 0}
   <div class="pkg" id="p8-chat">
     <div class="pkg-head"><b>8-chat 内置聊天页「对话」</b><span class="m sonnet">Sonnet 5.5</span></div>
     <ul class="scope">
-      <li>范围以 plan 关键决定 55 和阶段 8 的「内置聊天页」任务为准：自己做界面，<b>不内嵌 llama-server 自带网页</b>；调用 <code>/v1/chat/completions</code> 流式；模型下拉只列运行中实例，固定 <code>名字:方案</code>；没有在线模型只提示不加载；对话只存浏览器本地（localStorage 要 try/catch）。</li>
-      <li>第一版不做图片上传、多会话列表、系统提示词 / 采样参数面板、导出，不要顺手实现。</li>
+      <li>范围以 plan 关键决定 55 和阶段 8 的「内置聊天页」任务为准：自己做界面，<b>不内嵌 llama-server 自带网页</b>；调用 <code>/v1/chat/completions</code> 流式；模型下拉只列运行中实例，固定 <code>名字:方案</code>；没有在线模型只提示不加载；对话只存浏览器本地。</li>
+      <li>用户 2026-10-05 追加：<b>图片上传（模型有 mmproj 才可选，作为 image_url 发送）和多会话列表（新建 / 切换 / 重命名 / 删除确认，标题默认取首条消息）都在本包内</b>；会话含图片，改存 IndexedDB（读写 try/catch，取不到页面照常用），单张图和总量设上限并提示。仍不做系统提示词 / 采样参数面板、导出，不要顺手实现。</li>
       <li>已有未提交草稿 <code>app/utils/chat.ts</code>（SSE 解析、读取 delta / timings、安全 Markdown，先转义）和 <code>tests/app/chat.test.ts</code>，先读再决定复用；页面、composable、菜单入口（<code>AppSidebar.vue</code>）、<code>i18n/zh-CN.ts</code> 文案都还没写。</li>
-      <li>验证：单元测试 + 构建后在 Mac 上用已有模型做一次真实流式对话（停止、思考折叠、速度显示、没有在线模型的空状态、深浅色）；没做的验证如实写明。Mac 上开发运行用隔离数据目录，不要读 <code>data/secrets.json</code>。</li>
+      <li>验证：单元测试 + 构建后在 Mac 上用已有模型做一次真实流式对话（停止、思考折叠、速度显示、没有在线模型的空状态、深浅色、多会话切换 / 重命名 / 删除、刷新后恢复；有 mmproj 的模型发图，没有则置灰）；没做的验证如实写明。Mac 上开发运行用隔离数据目录，不要读 <code>data/secrets.json</code>。</li>
       <li>做完提交并推送，不发版；plan 打勾与交接按会话收尾流程。</li>
     </ul>
     <div class="prompt"><button type="button">复制</button><pre>执行工作包 8-chat：内置聊天页「对话」（关键决定 55）。
