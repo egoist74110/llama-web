@@ -47,7 +47,7 @@ Windows 模式（`.exe` 安装包、`resources` 目录）的逻辑与允许清�
 | 为什么不要再手动签 Bun | 用 ad-hoc 重签会丢掉上面的权限，开了 hardened runtime 的 Bun 第一次 JIT 就会崩。所以**不加额外 entitlements 文件，也不 `--deep` 重签资源** |
 | sharp / libvips | 随 npm 包带的 `.node` 与 `.dylib` 是 linker 生成的 ad-hoc 签名；Bun 带 `disable-library-validation`，可加载 |
 | 从 DMG 取出的 `.app` 内 | 内置 Bun 的 JIT 循环、sharp 缩放 JPEG（libvips 8.18.7）、起服务并返回页面 200、`/v1/models` 空列表，均成功 |
-| 运行时下载的 llama.cpp | 由应用自己下载（无隔离属性）；CI 已用源码版 Bun 验证 `llama-server --version`，工作流里再用**包内 Bun** 验证一次（见上，**尚未在 runner 上运行**） |
+| 运行时下载的 llama.cpp | 由应用自己下载（无隔离属性）；CI 已用源码版 Bun 验证 `llama-server --version`，工作流里再用**包内 Bun** 验证一次（见上；runner 上已通过，run 37270349450） |
 | 模拟隔离属性（`com.apple.quarantine`） | 给 `.app` 根目录写“未批准”的隔离标记后，包内 Bun 被系统直接杀掉（退出码 137）；写“用户已批准”标记（Open Anyway 之后的状态）或去掉标记则正常。这是**手工模拟**，用户在 Mac 上实际走一遍流程后才能下结论 |
 
 未验证：整个应用窗口在真实“下载 → 挂载 DMG → 拖入 Applications → 首次打开”流程里的表现；Metal 推理；模型加载；退出后进程组清理（5-1 的 POSIX 逻辑只有构造测试 + CI）；不同 macOS 版本（本机是 macOS 27，工作流跑在 macos-15）。
