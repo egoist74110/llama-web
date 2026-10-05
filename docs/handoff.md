@@ -1,5 +1,14 @@
 # 交接记录
 
+## 2026-10-05 · 发布 v0.1.0-beta.6 + 一次「打不开」的排查 · Claude
+- 发布：v0.1.0-beta.6（提交 e94b239）由 Windows 草稿工作流构建成功（工作流内 bun test / typecheck / cargo test / 包内容检查通过），下载的安装包 SHA-256 与 SHA256SUMS 一致（6190b2d2…edc9）、清单 commit 正确后发布为预发布版。内容见 `docs/release-notes/v0.1.0-beta.6.md`（首次按本机调参、重新推荐、模型删除、镜像兜底与自定义镜像、引导页、Cloudflare 权限修复等）。
+- 用户反馈「打不开」（窗口：Service exited (exit code: 1) + Bun 版本号）。排查结论：用户机器上装的是 **beta.4**（resources/versions.json 为 0.1.0-beta.4），beta.6 并未装上；数据目录的 settings.json 已被用户之前用 start.bat 从源码运行时升到版本 8，而 beta.4 只支持到 7。装上 beta.6 后用户确认能正常打开。所以不是 beta.6 的问题。
+- 未证实的部分：beta.4 具体在哪一步因配置更新而退出。当前代码读到更新版本的 settings 只记「使用默认值」并照常启动（用版本号 99 的配置实测过），所以「启动时读到新版配置就崩」不成立；更可能是启动后某次写配置被 `newer-version` 拒绝，未在 beta.4 上复现。
+- 已撤回：曾做过一个「桌面壳识别新版配置并给中文提示」的改动（entry.ts / desktop-channel / main.rs / i18n），因为对应的启动失败路径实际不存在，没有提交，已还原。若以后要做类似提示，先在对应旧版上复现真实失败点。
+- 排查中的教训：让用户手动跑服务时不能取 `rc` 下第一个目录，要按安装包 resourceId 前 24 位取对应缓存目录（beta.6 是 437ecd7a06c54fa1183c17d9）；窗口里只留了服务 stderr 的最后一行（Bun 版本号），真实报错在它上面，桌面壳不保存完整 stderr。
+- 没验证：beta.6 安装包的完整安装与 beta.5 → beta.6 应用内更新、Windows 上的首次调参数值与回收站删除、大陆网络下镜像、真实模型 / GPU 推理。macOS CI 仍未通过，无 Mac 安装包。
+- 下一步：用户用 beta.6 继续试用；阶段 8 其余项（MTP 真机验收、镜像清单复查等）不变。
+
 ## 2026-10-05 · 镜像后续：用户自填镜像（关键决定 53 未做部分） · Claude
 - 用户确认三点：设置页一个「自定义镜像前缀」文本框，留空只用内置镜像，填了就在弹窗多出第三个选项；只接受 https，域名与重定向限制不变；新增 settings 字段并升版本、写迁移。
 - 实现：`settings.mirror.custom`（版本 9，迁移 8 补空值；手改成非法值加载时被丢弃）；`mirrors.ts` 新增 `normalizeCustomMirror`（https、公网 DNS 名，拒绝 IP / localhost / 单段与 .local 等内网名 / 端口 / 账号密码 / query / fragment，补尾部 `/`）、`customMirror`，`mirrorById(id, custom)` 的 id `custom` 由服务端取已保存前缀（浏览器不传 URL）；`mirrorFetch` 与重定向规则未改。Updater / AppUpdater 经 `customMirror()` 读设置；设置页 `SettingsMirror.vue`，保存走 `applySettingsPatch` 的 `mirror` 段（非法 400，原子写 + 备份）；弹窗打开时重新读设置。文案在 i18n `mirror`。
