@@ -274,11 +274,11 @@ describe('saving', () => {
   })
   test('global default device: valid value is stored, empty clears, bad or Mac is refused', () => {
     const s = defaultSettings()
-    applyDefaults(s, { device: 'CUDA0' })
+    applyDefaults(s, { device: 'CUDA0' }, 'defaults', { os: 'win32' })
     expect(s.defaults.device).toBe('CUDA0')
-    applyDefaults(s, { device: '' })
+    applyDefaults(s, { device: '' }, 'defaults', { os: 'win32' })
     expect('device' in s.defaults).toBe(false)
-    expect(() => applyDefaults(s, { device: 'CUDA0,CUDA1' })).toThrow(SettingsError)
+    expect(() => applyDefaults(s, { device: 'CUDA0,CUDA1' }, 'defaults', { os: 'win32' })).toThrow(SettingsError)
     expect(() => applyDefaults(s, { device: 'CUDA0' }, 'defaults', { os: 'darwin' })).toThrow(SettingsError)
     applyDefaults(s, { device: '' }, 'defaults', { os: 'darwin' }) // clearing is fine
     expect(() => applySettingsPatch(s, { defaults: { device: 'cpu' } }, { version: 1, models: [] }, { os: 'darwin' })).toThrow(SettingsError)

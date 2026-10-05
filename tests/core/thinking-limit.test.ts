@@ -40,7 +40,7 @@ function edit(overrides: object, limit?: unknown, extraArgs = '') {
   models.update(doc => { saveProfile(doc, model().id, model().activeProfile, form, []) })
 }
 function launch() {
-  const input = { dataDir: dir, settings: settings.get(), models: models.get(), host: '127.0.0.1', exists: () => true }
+  const input = { dataDir: dir, settings: settings.get(), models: models.get(), host: '127.0.0.1', exists: () => true, platform: 'win32' as const }
   const args = planLaunch({ modelId: model().id, profile: model().activeProfile }, input).args(7100)
   const preview = previewLaunch({ ...input, model: model(), form: { ...profile(), chatTemplate: null } })
   return { args, command: preview.command, warnings: preview.warnings }
@@ -90,7 +90,7 @@ describe('thinking shortcut persists through the existing profile and launch cha
     first()
     const before = readFileSync(join(dir, 'models.json'), 'utf8')
     const form = sanitizeForm({ overrides: profile().overrides, thinkingLimit: 768, extraArgs: '--reasoning-budget 32' })
-    const preview = previewLaunch({ dataDir: dir, settings: settings.get(), model: model(), form, host: '127.0.0.1', exists: () => true })
+    const preview = previewLaunch({ dataDir: dir, settings: settings.get(), model: model(), form, host: '127.0.0.1', exists: () => true, platform: 'win32' as const })
     expect(preview.command).toContain('--reasoning-budget 32')
     expect(preview.command).not.toContain('--reasoning-budget 768')
     expect(readFileSync(join(dir, 'models.json'), 'utf8')).toBe(before)

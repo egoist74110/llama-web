@@ -11,6 +11,7 @@
   "scripts": {
     "desktop:prepare": "bun desktop/prepare.ts",
     "desktop:build": "bun run desktop:prepare && tauri build --bundles nsis",
+    "desktop:build:mac": "bun run desktop:prepare && tauri build --bundles dmg",
     "dev": "nuxt dev",
     "build": "nuxt build",
     "preview": "bun .output/server/index.mjs",

@@ -88,7 +88,7 @@ describe('prepareCloudflared', () => {
   const noEnv = { PATH: '' }
 
   function release(body: string, opts: { digest?: string | null, omit?: boolean } = {}) {
-    const name = releaseAssetName()!
+    const name = releaseAssetName('win32', 'x64')!
     const calls: string[] = []
     const fetchFn = async (url: string) => {
       calls.push(url)
@@ -102,21 +102,23 @@ describe('prepareCloudflared', () => {
     return { fetchFn, calls }
   }
 
+  // These two look the installed build up through the real PATH and file system, so they run natively (the Windows-style lookup is covered by findCloudflared above).
+  const exeName = process.platform === 'win32' ? 'cloudflared.exe' : 'cloudflared'
   test('an installed cloudflared is copied under data/runtime/cloudflared and used from there', async () => {
-    const sys = join(dir, 'sys', 'cloudflared.exe')
+    const sys = join(dir, 'sys', exeName)
     mkdirSync(join(dir, 'sys'))
     writeFileSync(sys, 'SYSTEM-BUILD')
-    const r = await prepareCloudflared({ dataDir: dir, env: { PATH: join(dir, 'sys') }, platform: 'win32', fetch: release('x').fetchFn })
-    expect(r).toEqual({ exe: cloudflaredPath(dir, 'win32'), source: 'system' })
+    const r = await prepareCloudflared({ dataDir: dir, env: { PATH: join(dir, 'sys') }, platform: process.platform, arch: process.arch, fetch: release('x').fetchFn })
+    expect(r).toEqual({ exe: cloudflaredPath(dir, process.platform, process.arch), source: 'system' })
     expect(readFileSync(r.exe, 'utf8')).toBe('SYSTEM-BUILD')
   })
 
   test('the copy is refreshed only when the installed one changed', async () => {
     const sysDir = join(dir, 'sys')
     mkdirSync(sysDir)
-    const sys = join(sysDir, 'cloudflared.exe')
+    const sys = join(sysDir, exeName)
     writeFileSync(sys, 'V1')
-    const o: PrepareOptions = { dataDir: dir, env: { PATH: sysDir }, platform: 'win32' }
+    const o: PrepareOptions = { dataDir: dir, env: { PATH: sysDir }, platform: process.platform, arch: process.arch }
     const first = await prepareCloudflared(o)
     // Same content: the copy stays untouched (an old mtime on ours would be replaced by a re-copy).
     const old = new Date(Date.now() - 3_600_000)
@@ -132,29 +134,29 @@ describe('prepareCloudflared', () => {
   test('nothing installed: downloads the official build and verifies SHA-256', async () => {
     const rel = release('OFFICIAL-BINARY')
     const steps: string[] = []
-    const r = await prepareCloudflared({ dataDir: dir, env: noEnv, platform: 'win32', fetch: rel.fetchFn, exists: () => false, onStep: s => steps.push(s) })
+    const r = await prepareCloudflared({ dataDir: dir, env: noEnv, platform: 'win32', arch: 'x64', fetch: rel.fetchFn, exists: () => false, onStep: s => steps.push(s) })
     expect(r.source).toBe('downloaded')
     expect(readFileSync(r.exe, 'utf8')).toBe('OFFICIAL-BINARY')
     expect(steps).toEqual(['find', 'download'])
     // Already there: no second download.
     const before = rel.calls.length
-    expect((await prepareCloudflared({ dataDir: dir, env: noEnv, platform: 'win32', fetch: rel.fetchFn, exists: () => false })).source).toBe('downloaded')
+    expect((await prepareCloudflared({ dataDir: dir, env: noEnv, platform: 'win32', arch: 'x64', fetch: rel.fetchFn, exists: () => false })).source).toBe('downloaded')
     expect(rel.calls.length).toBe(before)
   })
 
   test('a download that fails verification leaves nothing behind', async () => {
     for (const rel of [release('BAD', { digest: `sha256:${sha('other')}` }), release('x', { digest: null }), release('x', { omit: true })]) {
-      const err = await prepareCloudflared({ dataDir: dir, env: noEnv, platform: 'win32', fetch: rel.fetchFn, exists: () => false }).catch(e => e)
+      const err = await prepareCloudflared({ dataDir: dir, env: noEnv, platform: 'win32', arch: 'x64', fetch: rel.fetchFn, exists: () => false }).catch(e => e)
       expect(err).toBeInstanceOf(TunnelError)
       expect((err as TunnelError).code).toBe('download-failed')
-      expect(existsSync(cloudflaredPath(dir, 'win32'))).toBe(false)
-      const d = join(cloudflaredPath(dir, 'win32'), '..')
+      expect(existsSync(cloudflaredPath(dir, 'win32', 'x64'))).toBe(false)
+      const d = join(cloudflaredPath(dir, 'win32', 'x64'), '..')
       expect(existsSync(d) ? readdirSync(d).length : 0).toBe(0)
     }
   })
 
   test('offline gives download-failed, not a crash', async () => {
-    const err = await prepareCloudflared({ dataDir: dir, env: noEnv, platform: 'win32', exists: () => false, fetch: async () => { throw new Error('offline') } }).catch(e => e)
+    const err = await prepareCloudflared({ dataDir: dir, env: noEnv, platform: 'win32', arch: 'x64', exists: () => false, fetch: async () => { throw new Error('offline') } }).catch(e => e)
     expect((err as TunnelError).code).toBe('download-failed')
   })
 })

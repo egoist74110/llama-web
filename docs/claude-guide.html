@@ -710,6 +710,19 @@ ol.steps li{margin:4px 0}
 文案放 i18n，浅 / 深色与窄屏都看一遍。做完按会话收尾流程结束，然后停下等我试用。</pre></div>
   </div>
 
+  <div class="pkg" id="p9-mac-dmg">
+    <div class="pkg-head"><b>9-mac-dmg Mac 打包第一步：arm64 构建与 DMG（不发布）</b><span class="m opus">Opus 5.5</span></div>
+    <ul class="scope">
+      <li>前提（用户 2026-10-05 确认）：没有 Apple 开发者证书，只出<b>未签名、未公证</b>的测试包，文案和 Release 说明不能宣称无提示安装；Mac 包日后与 Windows 同版本一起发，但<b>本包不发布</b>；只做 Apple Silicon（arm64），Intel 延后，不用 Rosetta 代替验证。</li>
+      <li>范围：① 先把 macOS CI 修到如实通过（先判断环境问题还是代码问题，不删测试、不放宽断言）；② 新增手动触发的 macOS runner 工作流，只产出草稿构建产物（不建 Release、不打 tag）：arm64 Tauri 壳、内置 Bun、sharp / libvips，产出 DMG 与 SHA256；③ 扩展 <code>desktop/check-package.ts</code> 覆盖 Mac 包（无 data / 密钥 / 个人路径，Bun 与原生依赖在位）；④ 评估 Bun JIT 所需 entitlements、ad-hoc 签名对内置 Bun 与下载的 llama.cpp 能否执行，并把首次打开步骤写进文档。</li>
+      <li>共用文件（<code>prepare.ts</code>、<code>check-package.ts</code>、CI）的改动必须保证 Windows 工作流行为不变并写明如何确认。</li>
+      <li>不碰 MTP 真机验收、阶段 9 其他项、应用内更新、Release。做完提交并推送，给出 DMG 下载位置与实际验证结果，然后停下等用户在 Mac 上安装试用。</li>
+    </ul>
+    <div class="prompt"><button type="button">复制</button><pre>执行 Mac 打包第一步：macOS arm64 构建与 DMG（不发布）。
+按 AGENTS.md 的规则开始：读 docs/claude-guide.html 的 9-mac-dmg 卡片与会话规则、docs/plan.html 阶段 5「Mac 单独处理」与阶段 9 对应任务、关键决定 24 / 38、docs/windows-desktop.md、docs/platform-foundation.md、docs/handoff.md 最上面三条、.github/workflows、desktop/、src-tauri/、scripts/launch.ts。
+先把方案简短告诉我确认再写代码。做完跑 bun test、bun run typecheck，如实汇报 runner 上跑过的和没跑过的，然后停下等我在 Mac 上试用；不做 Release、应用内更新。</pre></div>
+  </div>
+
   <div class="gatebox"><span class="m gate">阶段关口 9</span> 9-4 完成后停下，用户试用并确认。不自动发版。</div>
 </section>
 

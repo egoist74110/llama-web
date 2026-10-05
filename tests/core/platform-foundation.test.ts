@@ -221,6 +221,9 @@ test('owned POSIX group gets TERM, bounded wait, KILL; already-exited leader doe
   const sent: unknown[] = []
   await stopProcessGroup(12345, { signal: (_p, s) => { sent.push(s); throw Object.assign(new Error(), { code: 'ESRCH' }) } })
   expect(sent).toEqual(['SIGTERM'])
+  // macOS reports EPERM for a group that only holds unreaped zombies: that is "gone", not a failure.
+  await stopProcessGroup(12345, { signal: () => { throw Object.assign(new Error(), { code: 'EPERM' }) } })
+  await expect(stopProcessGroup(12345, { signal: () => { throw Object.assign(new Error(), { code: 'EIO' }) } })).rejects.toThrow()
 })
 test('data mutex rejects second owner before cleanup; dead parent can be reclaimed; duplicate release is safe', () => {
   const first = acquireDataLock(data, { pid: 1234, alive: () => true })

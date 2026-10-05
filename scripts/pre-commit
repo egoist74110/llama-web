@@ -57,23 +57,24 @@ RUN16="$R$R$R$R$R$R$R$R$R$R$R$R$R$R$R$R"
 #    (base64 starting eyJ), Cloudflare API token assignments and --token / TUNNEL_TOKEN values.
 file=""
 lineno=0
+# Case patterns inside $(...) carry a leading ( : bash 3.2 (macOS /bin/sh) rejects them otherwise.
 hits=$(git -c core.quotepath=off diff --cached -U0 --no-color --diff-filter=ACMR |
   while IFS= read -r line; do
     case "$line" in
-      '+++ b/'*) file=${line#'+++ b/'}; lineno=0; continue ;;
-      '@@'*) lineno=$(printf '%s' "$line" | sed -n 's/^@@ -[0-9,]* +\([0-9]*\).*/\1/p'); lineno=${lineno:-0}; continue ;;
-      '+++'*|'---'*) continue ;;
-      '+'*) ;;
-      *) continue ;;
+      ('+++ b/'*) file=${line#'+++ b/'}; lineno=0; continue ;;
+      ('@@'*) lineno=$(printf '%s' "$line" | sed -n 's/^@@ -[0-9,]* +\([0-9]*\).*/\1/p'); lineno=${lineno:-0}; continue ;;
+      ('+++'*|'---'*) continue ;;
+      ('+'*) ;;
+      (*) continue ;;
     esac
     body=${line#+}
     cur=$lineno
     lineno=$((lineno + 1))
-    case "$body" in *pre-commit:allow*) continue ;; esac
-    case "$body" in *$RUN16*) ;; *) continue ;; esac
+    case "$body" in (*pre-commit:allow*) continue ;; esac
+    case "$body" in (*$RUN16*) ;; (*) continue ;; esac
     # review reports quote commit hashes (40 hex); only hex runs are skipped there.
     hexcheck=1
-    case "$file" in docs/reviews/*) hexcheck=0 ;; esac
+    case "$file" in (docs/reviews/*) hexcheck=0 ;; esac
     reason=""
     if printf '%s\n' "$body" | grep -Eq '(^|[^A-Za-z0-9])sk-[A-Za-z0-9_-]{20,}'; then
       reason="sk- style key"

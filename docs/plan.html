@@ -833,6 +833,15 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
     <li class="task" data-done="false"><span class="t">模型页：行内显示预估占用与风险档；手动启动有风险时的确认框（可「仍然启动」）；放不下时的提示（可「先停止其他模型」）；请求被拦的事件在日志里可读</span><span class="when"></span></li>
   </ul>
 
+
+  <h3>9-mac-dmg · Mac 打包第一步：arm64 构建与 DMG，不发布（Opus 5.5，用户 2026-10-05 要求）</h3>
+  <p>前提：无 Apple 开发者证书，只出未签名 / 未公证测试包，不宣称无提示安装；只做 Apple Silicon；本包不创建 Release、不做应用内更新、不用 Rosetta 代替验证。</p>
+  <ul class="tasks">
+    <li class="task" data-done="false"><span class="t">修 macOS CI 到如实通过：先判断每类失败是环境还是代码问题。pre-commit 在 macOS bash 3.2 下语法错误属代码问题（<code>$(...)</code> 内 case 分支需前导括号）；其余写死 Windows 假设的测试改为按平台断言，不删测试、不放宽断言；TunnelManager 的 EPERM / 超时先查清原因</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">新增 <code>.github/workflows/release-macos.yml</code>（手动触发，版本须等于 package.json，只上传构建产物，不建 Release / tag）：macos-15 上冻结安装、测试、typecheck、构建 arm64 Tauri 壳（<code>tauri.macos.conf.json</code>，Windows 配置不动）、内置校验过摘要的 Bun、sharp / libvips；产出 <code>llama-web_&lt;ver&gt;_macos-arm64.dmg</code>、<code>.sha256</code> 与清单</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">扩展 <code>desktop/check-package.ts</code> 的 Mac 模式：检查挂载后的 .app（无 data / 密钥 / 个人路径，Bun 为 Mach-O arm64，sharp darwin-arm64 与 libvips 在位，无 win32 二进制）；Windows 模式行为不变并补回归测试</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">评估 Bun JIT 所需 entitlements 与 ad-hoc 签名对内置 Bun、运行时下载的 llama.cpp 能否执行（runner 实测）；把没有证书时用户首次打开的步骤写进文档，步骤在用户 Mac 上实际试过后再定稿；更新路径只记初步想法（手动下载新 DMG）</span><span class="when"></span></li>
+  </ul>
   <div class="accept"><h3>验收标准</h3>
     <ul>
       <li>默认配置（上限 1）行为与阶段 8 完全一致；调高后不同设备上的模型可同时在线并各自服务请求。</li>
@@ -900,6 +909,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 <section id="changelog">
   <h2>变更记录</h2>
   <table>
+    <tr><td>2026-10-05</td><td>新增阶段 9 任务 9-mac-dmg（Mac arm64 构建与 DMG，不发布；无证书只出未签名测试包，Mac 包日后与 Windows 同版本发），claude-guide 加对应卡片。</td></tr>
     <tr><td>2026-10-05</td><td>完成关键决定 50：首次确认项进入全局与单模型配置。全局页上下文 / 思考 / 思考上限（快捷控件）置顶为「常用设置」，其余折叠；模型参数页顶部「常用设置」含上下文、思考与上限、MTP，其余收进「更多参数」；首次确认框新增「思考开关 / 上限也设为全局默认」勾选（saveFirstSetup 泛化为多字段同步，失败回退）。MTP 不进全局（用户确认）。新增 8 项测试；全量失败项为本机 Mac 原有（另有 3 个偶发失败，重跑通过）</td></tr>
     <tr><td>2026-10-05</td><td>完成关键决定 51 模型删除：模型卡片与编辑抽屉加删除按钮，确认弹窗左下角勾选框（默认不勾，只删配置）可同时把模型 / 草稿 / 视觉文件移到系统回收站；用户确认回收站、共享文件跳过并提示、运行中拒绝。后端 model-ops.forget + model-remove.ts + trash.ts，路径限定在已登记目录并解析符号链接，分片全处理；17 项新测试，全量失败项与改动前一致（63 个本机原有）</td></tr>
     <tr><td>2026-10-05</td><td>关键决定 52 排查完成：Cloudflare token 报缺权限是真缺（需 4 条 policy，见决定 52），不是探测逻辑错误；错误码 9109 改判权限不足；教程与 README 按新版界面更新</td></tr>

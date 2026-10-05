@@ -129,7 +129,10 @@ export async function stopProcessGroup(pgid: number, deps: {
   const wait = deps.wait ?? (ms => new Promise(r => setTimeout(r, ms)))
   const send = (s: NodeJS.Signals | 0) => {
     try { signal(-pgid, s); return true } catch (e) {
-      if ((e as NodeJS.ErrnoException).code === 'ESRCH') return false
+      const code = (e as NodeJS.ErrnoException).code
+      // macOS answers EPERM, not ESRCH, while the group's only members are zombies that exit has not
+      // reaped yet. The group is ours, so this means there is nothing left to signal.
+      if (code === 'ESRCH' || code === 'EPERM') return false
       throw e
     }
   }

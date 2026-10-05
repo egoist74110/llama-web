@@ -263,16 +263,17 @@ describe('saving', () => {
     expect(d.models[0]!.devices).toBeUndefined()
     expect(() => setModelGpu(d, 'm', sanitizeGpuChoice({ devices: ['CUDA0', 'CUDA1'] })!, () => false)).toThrow(ProfileError)
   })
+  const WIN = { os: 'win32' as const } // the device fields are Windows-only: pin the host, not the machine running the test
   test('global defaults: a group is saved whole, a bad one or a Mac is refused', () => {
     const s = defaultSettings()
-    applyDefaults(s, { devices: ['CUDA0', 'CUDA1'], splitMode: 'tensor', tensorSplit: '2,1' })
+    applyDefaults(s, { devices: ['CUDA0', 'CUDA1'], splitMode: 'tensor', tensorSplit: '2,1' }, 'defaults', WIN)
     expect(s.defaults).toMatchObject({ devices: ['CUDA0', 'CUDA1'], splitMode: 'tensor', tensorSplit: '2,1' })
-    applyDefaults(s, { device: 'CUDA0', devices: [], splitMode: '', tensorSplit: '', mainGpu: '' })
+    applyDefaults(s, { device: 'CUDA0', devices: [], splitMode: '', tensorSplit: '', mainGpu: '' }, 'defaults', WIN)
     expect(s.defaults.devices).toBeUndefined()
     expect(s.defaults.device).toBe('CUDA0')
-    applyDefaults(s, { threads: 4 }) // other fields do not touch the choice
+    applyDefaults(s, { threads: 4 }, 'defaults', WIN) // other fields do not touch the choice
     expect(s.defaults.device).toBe('CUDA0')
-    expect(() => applyDefaults(s, { devices: ['CUDA0', 'CUDA1'], tensorSplit: '1' })).toThrow(SettingsError)
+    expect(() => applyDefaults(s, { devices: ['CUDA0', 'CUDA1'], tensorSplit: '1' }, 'defaults', WIN)).toThrow(SettingsError)
     expect(() => applyDefaults(s, { devices: ['CUDA0', 'CUDA1'] }, 'defaults', { os: 'darwin' })).toThrow(SettingsError)
   })
 })

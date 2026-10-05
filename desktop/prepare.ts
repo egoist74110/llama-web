@@ -1,4 +1,4 @@
-// Run with pinned Bun on native Windows. Build in an owned, isolated worktree.
+// Run with pinned Bun on native Windows x64 (NSIS installer) or native macOS arm64 (DMG). Build in an owned, isolated worktree.
 import { createHash } from 'node:crypto'
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
@@ -14,6 +14,10 @@ const release = process.env.LLAMA_WEB_RELEASE === '1'
 // no isolated worktree, no licence collection. Never used for a release package.
 const dev = process.argv.includes('--dev')
 const bunName = process.platform === 'win32' ? 'bun.exe' : 'bun'
+// Package target of the machine running this script; anything else is refused below (no cross-builds).
+const target = process.platform === 'win32' && process.arch === 'x64' ? 'windows-x64' : process.platform === 'darwin' && process.arch === 'arm64' ? 'macos-arm64' : null
+// Rust target triple whose dependency licences go into THIRD-PARTY-NOTICES.txt.
+const rustTarget = target === 'macos-arm64' ? 'aarch64-apple-darwin' : 'x86_64-pc-windows-msvc'
 const appVersion: string = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version
 async function run(argv: string[], cwd = root) {
   const p = Bun.spawn(argv, { cwd, stdout: 'inherit', stderr: 'inherit', stdin: 'ignore' })
@@ -64,7 +68,7 @@ if (dev) {
   console.log('Prepared desktop resources (dev) from the current .output')
   process.exit(0)
 }
-if (process.platform !== 'win32' || process.arch !== 'x64') throw new Error('Desktop packaging currently requires native Windows x64')
+if (!target) throw new Error('Desktop packaging requires native Windows x64 or native macOS arm64 (no cross builds, no Rosetta)')
 if (Bun.version !== BUN_VERSION) throw new Error(`Use Bun ${BUN_VERSION}`)
 let added = false
 try {
@@ -81,15 +85,16 @@ try {
   rmSync(resources, { recursive: true, force: true })
   mkdirSync(resources, { recursive: true })
   cpSync(join(work, '.output'), join(resources, 'app'), { recursive: true })
-  cpSync(process.execPath, join(resources, 'bun.exe'))
+  cpSync(process.execPath, join(resources, bunName))
   await run([process.execPath, 'build', join(root, 'desktop', 'import-data.ts'), '--target=bun', '--outfile=' + join(resources, 'import-data.mjs')])
   mkdirSync(join(root, 'src-tauri', 'icons'), { recursive: true })
-  cpSync(join(root, 'public', 'favicon.ico'), join(root, 'src-tauri', 'icons', 'icon.ico'))
+  // macOS uses the committed icon.icns (tauri.macos.conf.json); icon.ico is the Windows icon.
+  if (target === 'windows-x64') cpSync(join(root, 'public', 'favicon.ico'), join(root, 'src-tauri', 'icons', 'icon.ico'))
   writeFileSync(join(root, 'desktop', 'ui', 'strings.json'), JSON.stringify(zh.desktop))
   const notices: string[] = []
   licenses(join(work, 'node_modules'), notices)
   const cargo = Bun.spawn(['cargo', 'metadata', '--manifest-path', join(root, 'src-tauri', 'Cargo.toml'), '--locked',
-    '--format-version', '1', '--filter-platform', 'x86_64-pc-windows-msvc'], { stdout: 'pipe', stderr: 'inherit' })
+    '--format-version', '1', '--filter-platform', rustTarget], { stdout: 'pipe', stderr: 'inherit' })
   const metadata = JSON.parse(await new Response(cargo.stdout).text())
   if (await cargo.exited !== 0) throw new Error('Cannot obtain Rust dependency notices')
   for (const pkg of metadata.packages) {
@@ -107,7 +112,7 @@ try {
   cpSync(join(root, 'LICENSE'), join(resources, 'LICENSE.txt'))
   writeFileSync(join(resources, 'THIRD-PARTY-NOTICES.txt'), `Bun ${BUN_VERSION}\n${await bunLicense.text()}\n${notices.join('\n')}`)
   writeFileSync(join(resources, 'versions.json'), JSON.stringify({ application: release ? appVersion : `${appVersion}-local-test`, bun: BUN_VERSION,
-    bunSha256: digest(join(resources, 'bun.exe')), resourceId: resourceDigest(), target: 'windows-x64', signature: 'unsigned',
+    bunSha256: digest(join(resources, bunName)), resourceId: resourceDigest(), target, signature: 'unsigned',
     license: 'MIT', commit: (await gitHead()).slice(0, 40) }, null, 2))
   console.log('Prepared desktop resources from isolated build')
 } finally {

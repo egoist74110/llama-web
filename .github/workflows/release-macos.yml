@@ -1,0 +1,135 @@
+# macOS arm64 build (test package, nothing is published). Started by hand (Actions → "macOS arm64 build
+# (artifact only)" → Run workflow) with the version from package.json. It never creates a Release or a tag:
+# the DMG, its SHA-256 and a manifest are uploaded as a workflow artifact for download and trial on a Mac.
+# The app is ad-hoc signed only (no Apple Developer certificate): it is NOT notarized, so Gatekeeper warns on the
+# first open. Apple Silicon only; Intel is not built and Rosetta is not used.
+name: macOS arm64 build (artifact only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version without "v"; must equal package.json
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-macos
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: macos-15 # Apple Silicon (arm64)
+    timeout-minutes: 60
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      # rust-toolchain.toml lists only the Windows target; the macOS host target is always installed.
+      - name: Rust toolchain (version from rust-toolchain.toml)
+        run: |
+          channel=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)
+          rustup toolchain install "$channel" --profile minimal --no-self-update
+          rustc --version
+          cargo --version
+
+      - name: Check machine and version
+        run: |
+          test "$(uname -m)" = arm64 || { echo "This workflow needs an arm64 runner (got $(uname -m))"; exit 1; }
+          pkg=$(bun -e 'console.log(JSON.parse(await Bun.file("package.json").text()).version)')
+          test "$pkg" = "$VERSION" || { echo "package.json version $pkg differs from input $VERSION"; exit 1; }
+          sw_vers
+
+      - run: bun install --frozen-lockfile
+      - run: bun test
+      - run: bun run typecheck
+
+      - name: Build DMG
+        run: bun run desktop:build:mac
+        env:
+          LLAMA_WEB_RELEASE: '1'
+
+      # After the build: tauri-build needs the generated src-tauri/resources and launcher strings.
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+
+      - name: Package checks (allowlist, arm64 natives, no data / secrets / local paths, signatures)
+        run: |
+          dmg="src-tauri/target/release/bundle/dmg/llama-web_${VERSION}_aarch64.dmg"
+          test -f "$dmg" || { echo "DMG not found: $dmg"; ls -R src-tauri/target/release/bundle || true; exit 1; }
+          bun desktop/check-package.ts "$dmg"
+
+      # The point of this step: the bundled Bun (Developer ID + hardened runtime + JIT entitlements) keeps working
+      # inside an ad-hoc signed app. Everything runs from a copy of the .app taken out of the mounted DMG.
+      - name: Run the packaged service from the DMG
+        run: |
+          dmg="src-tauri/target/release/bundle/dmg/llama-web_${VERSION}_aarch64.dmg"
+          mnt="$RUNNER_TEMP/dmg-mount"; mkdir -p "$mnt"
+          hdiutil attach -readonly -nobrowse -noautoopen -mountpoint "$mnt" "$dmg" >/dev/null
+          trap 'hdiutil detach -force "$mnt" >/dev/null 2>&1 || true' EXIT
+          mkdir -p "$RUNNER_TEMP/inst" && cp -R "$mnt/llama-web.app" "$RUNNER_TEMP/inst/"
+          res="$RUNNER_TEMP/inst/llama-web.app/Contents/Resources/resources"
+          echo "--- codesign of the app and of the bundled Bun"
+          codesign -dv "$RUNNER_TEMP/inst/llama-web.app" 2>&1 | grep -E "Identifier|flags|Signature"
+          codesign -dv "$res/bun" 2>&1 | grep -E "Authority|flags" || true
+          echo "--- JIT and sharp (libvips) inside the package"
+          (cd "$res/app/server" && "$res/bun" -e '
+            let s = 0; for (let i = 0; i < 5e7; i++) s += i % 7
+            const sharp = (await import("sharp")).default
+            const out = await sharp({ create: { width: 1200, height: 800, channels: 3, background: "#369" } }).resize(200).jpeg().toBuffer()
+            if (s !== 149999997 || out.length < 100) throw new Error("unexpected result")
+            console.log("jit ok, sharp ok, vips", sharp.versions.vips)')
+          echo "--- the service starts from the package (isolated data dir, no model)"
+          data="$RUNNER_TEMP/data"; mkdir -p "$data"
+          NITRO_PORT=5993 NITRO_HOST=127.0.0.1 LLAMA_WEB_DATA="$data" "$res/bun" "$res/app/server/index.mjs" > "$RUNNER_TEMP/service.log" 2>&1 &
+          pid=$!
+          code=000
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:5993/ || true)
+            [ "$code" = 200 ] && break; sleep 1
+          done
+          models=$(curl -s http://127.0.0.1:5993/v1/models || true)
+          kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true
+          cat "$RUNNER_TEMP/service.log"
+          test "$code" = 200 || { echo "page returned $code"; exit 1; }
+          echo "models: $models"
+          echo "--- real llama.cpp for macOS, downloaded, extracted and executed by the PACKAGED Bun"
+          "$res/bun" scripts/ci-llamacpp-smoke.ts
+
+      - name: Assemble files
+        run: |
+          mkdir -p release
+          name="llama-web_${VERSION}_macos-arm64.dmg"
+          cp "src-tauri/target/release/bundle/dmg/llama-web_${VERSION}_aarch64.dmg" "release/$name"
+          cp src-tauri/resources/THIRD-PARTY-NOTICES.txt release/THIRD-PARTY-NOTICES.txt
+          cp LICENSE release/LICENSE.txt
+          (cd release && shasum -a 256 "$name" > "$name.sha256")
+          NAME="$name" bun -e '
+            const { readFileSync, writeFileSync, statSync } = await import("node:fs")
+            const v = JSON.parse(readFileSync("src-tauri/resources/versions.json", "utf8"))
+            const name = process.env.NAME, sha = readFileSync(`release/${name}.sha256`, "utf8").split(" ")[0]
+            const sh = (c) => new TextDecoder().decode(Bun.spawnSync(c).stdout).trim()
+            writeFileSync(`release/llama-web-${v.application}-macos-arm64-manifest.json`, JSON.stringify({
+              application: v.application, commit: process.env.GITHUB_SHA, target: "macos-arm64",
+              dmg: { name, sha256: sha, bytes: statSync(`release/${name}`).size },
+              signature: "ad-hoc (no Developer ID); not notarized; Gatekeeper warns on first open", license: "MIT",
+              bundled: { bun: v.bun, bunSha256: v.bunSha256, resourceId: v.resourceId },
+              toolchain: { rust: sh(["rustc", "--version"]), bunBuild: Bun.version, runner: `${process.env.ImageOS} ${process.env.ImageVersion}`, macos: sh(["sw_vers", "-productVersion"]) },
+              excludes: "llama.cpp, models and user data are not bundled; llama.cpp is downloaded on first start",
+              workflowRun: `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`,
+            }, null, 2))'
+          ls -l release
+
+      - name: Upload artifact (not a Release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: llama-web-${{ inputs.version }}-macos-arm64
+          path: release/
+          if-no-files-found: error
+          retention-days: 14

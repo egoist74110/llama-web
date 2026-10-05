@@ -193,7 +193,13 @@ export class RuntimeRegistry {
     let fromBackup: string | null = null
     const backups = join(this.dataDir, 'backups')
     try {
-      const names = readdirSync(backups).filter(n => /^runtimes\.\d{8}-\d{6}-\d{3}(?:-\d+)?\.json$/.test(n)).sort().reverse()
+      // Newest first. Same-millisecond backups carry a numeric suffix (`…-123-2.json`): compare it as a
+      // number, a plain string sort would rank `…-123.json` above the newer `…-123-1.json`.
+      const key = (n: string) => { const m = /^runtimes\.(\d{8}-\d{6}-\d{3})(?:-(\d+))?\.json$/.exec(n); return m ? [m[1]!, Number(m[2] ?? 0)] as const : null }
+      const names = readdirSync(backups).filter(n => key(n)).sort((x, y) => {
+        const a = key(x)!, b = key(y)!
+        return a[0] === b[0] ? b[1] - a[1] : a[0] < b[0] ? 1 : -1
+      })
       for (const n of names) {
         try {
           JSON.parse(readFileSync(join(backups, n), 'utf8'))

@@ -41,7 +41,7 @@ function launch(name = model().activeProfile, globalExtra = '--jinja') {
   settings.modelDirs = [{ id: 'main', path: join(dir, 'models'), enabled: true, maxDepth: 2 }]
   settings.llamacpp.current = 'b1'
   settings.defaults.extraArgs = globalExtra
-  const input = { dataDir: dir, settings, models: models.get(), host: '127.0.0.1', exists: () => true }
+  const input = { dataDir: dir, settings, models: models.get(), host: '127.0.0.1', exists: () => true, platform: 'win32' as const }
   return { args: planLaunch({ modelId: model().id, profile: name }, input).args(7100),
     preview: previewLaunch({ ...input, model: model(), form: { ...model().profiles[name]!, chatTemplate: null } }) }
 }

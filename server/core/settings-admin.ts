@@ -40,7 +40,8 @@ export function dirKey(path: string): string {
 
 /** A leading `~` (alone or before a separator) means the user's home folder; other forms are left alone. */
 export function expandHome(p: string, home: string = homedir()): string {
-  return p === '~' || /^~[\\/]/.test(p) ? join(home, p.slice(1)) : p
+  // slice(2) drops the separator itself: `~\models` must not become a path starting with a literal backslash on POSIX
+  return p === '~' ? home : /^~[\\/]/.test(p) ? join(home, p.slice(2)) : p
 }
 
 function cleanPath(raw: unknown): string {
