@@ -29,6 +29,7 @@ export function describeSettings(): SettingsDoc {
     builtinDefaults: DEFAULT_LAUNCH_DEFAULTS,
     ...(hasCpuChannel(ctx.platform) ? { defaultsCpu: s.defaultsCpu, builtinDefaultsCpu: DEFAULT_CPU_DEFAULTS } : {}),
     image: s.preprocess.image,
+    mirror: s.mirror,
     server: {
       port: s.server.port,
       portRange: s.scheduler.portRange,

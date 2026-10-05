@@ -3,12 +3,17 @@
 // GitHub could not be reached (the server marks the failure with `offer`), asks which public
 // mirror to retry through. Automatic checks never reach this dialog.
 import t from '~~/i18n/zh-CN'
-import { offeredMirrors } from '~~/server/core/mirrors'
+import { customMirror, offeredMirrors } from '~~/server/core/mirrors'
 
 const s = t.mirror
 const { state } = useLive()
 const toast = useToast()
-const mirrors = offeredMirrors()
+const { doc, load } = useSettings()
+// The user's own mirror (settings) comes last; read fresh when the dialog opens.
+const mirrors = computed(() => {
+  const own = customMirror(doc.value?.mirror.custom)
+  return [...offeredMirrors(), ...(own ? [own] : [])]
+})
 
 interface Offer {
   key: string
@@ -46,6 +51,7 @@ const offers = computed<Offer[]>(() => {
 // Cancelled offers stay closed until the failure goes away (a new attempt clears it).
 const dismissed = ref<string | null>(null)
 const current = computed(() => offers.value.find(o => o.key !== dismissed.value) ?? null)
+watch(() => current.value?.key, (k) => { if (k) void load() })
 watch(offers, (list) => { if (!list.length) dismissed.value = null })
 
 const busy = ref(false)
@@ -85,7 +91,7 @@ async function use(id: string) {
           @click="use(m.id)"
         >
           {{ fmt(s.use, { host: m.host }) }}
-          <span class="text-xs opacity-80">（{{ i === 0 ? s.recommended : s.alternative }}）</span>
+          <span class="text-xs opacity-80">（{{ m.id === 'custom' ? s.custom : i === 0 ? s.recommended : s.alternative }}）</span>
         </UButton>
         <p class="m-0 mt-1 text-xs text-muted">
           {{ s.risk }}

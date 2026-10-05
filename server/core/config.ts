@@ -4,6 +4,7 @@ import { DEFAULT_LAUNCH_DEFAULTS, type LaunchDefaults, type ParamOverrides } fro
 import { cleanStoredChoice, type GpuChoice } from './gpu-group'
 import type { FileRef, ModelDir } from './types'
 import type { Acceleration, PlatformInfo } from './platform'
+import { normalizeCustomMirror } from './mirrors'
 import { normalizeUsageKeepDays } from './usage'
 
 /** Name of the built-in profile created when a model is enabled or imported. */
@@ -61,6 +62,8 @@ export interface Settings {
   server: { host: string, port: number }
   public: { enabled: boolean, port: number, domain: string, tunnelEnabled: boolean, tunnelMode: TunnelMode, tunnelProtocol: TunnelProtocol, wizard: PublicWizard | null }
   modelDirs: ModelDir[]
+  /** Own GitHub mirror prefix (decision 53); '' = only the built-in public mirrors. Validated by normalizeCustomMirror. */
+  mirror: { custom: string }
   llamacpp: {
     /** Empty = automatic: the newest CUDA runtime the driver and GPU can run (decision 37); a version here is the user's override. */
     cudaRuntime: string
@@ -135,7 +138,7 @@ export interface ModelsDoc {
   models: ModelConfig[]
 }
 
-export const SETTINGS_VERSION = 8
+export const SETTINGS_VERSION = 9
 export const MODELS_VERSION = 1
 
 /**
@@ -215,6 +218,7 @@ export function defaultSettings(platform?: PlatformInfo): Settings {
     server: { host: '0.0.0.0', port: 5001 },
     public: { enabled: false, port: 8080, domain: '', tunnelEnabled: false, tunnelMode: 'token', tunnelProtocol: 'http2', wizard: null },
     modelDirs: [],
+    mirror: { custom: '' },
     llamacpp: { cudaRuntime: '', current: '', currentCpu: '', keepVersions: 2, autoUpdate: false, acceleration: 'auto' },
     scheduler: { maxLoaded: 1, loadTimeoutSec: 600, drainTimeoutSec: 300, heartbeatSec: 15, portRange: [7100, 7199] },
     defaults: windowsCuda ? { ...DEFAULT_LAUNCH_DEFAULTS } : {
@@ -284,6 +288,11 @@ export const SETTINGS_MIGRATIONS: Record<number, (old: any) => any> = {
     old.setup = { ...(isObj(old.setup) ? old.setup : { done: false }), tuned: true }
     return old
   },
+  // 9: own mirror prefix (decision 53), empty.
+  8: (old) => {
+    old.mirror = { custom: '', ...(isObj(old.mirror) ? old.mirror : {}) }
+    return old
+  },
 }
 
 export function defaultModels(): ModelsDoc {
@@ -318,6 +327,8 @@ export function normalizeSettings(doc: Settings): Settings {
   out.public.wizard = cleanWizard(out.public.wizard)
   if (!['auto', 'cuda', 'cpu', 'metal'].includes(out.llamacpp.acceleration)) throw new Error('Invalid llamacpp.acceleration')
   if (typeof out.llamacpp.autoUpdate !== 'boolean') throw new Error('Invalid llamacpp.autoUpdate')
+  // A hand-edited unacceptable mirror is dropped (= built-in mirrors only), never used.
+  out.mirror.custom = normalizeCustomMirror(out.mirror.custom) ?? ''
   // The global device choice is one valid value or nothing (a hand-edited bad one is dropped = automatic).
   // Same for a GPU group: it is valid as a whole (devices, mode, ratio) or dropped.
   for (const key of ['defaults', 'defaultsCpu'] as const) cleanStoredChoice(out[key])

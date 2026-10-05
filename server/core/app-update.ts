@@ -183,6 +183,8 @@ export interface AppUpdaterOptions {
    */
   feed?: string
   onChange?(): void
+  /** The user's own mirror prefix (settings.mirror.custom), read fresh. */
+  customMirror?(): string
   now?: () => number
   /** Delay of the startup check and the interval of later automatic checks (tests). */
   firstCheckMs?: number
@@ -293,7 +295,7 @@ export class AppUpdater {
   check(opts: { manual?: boolean, mirror?: string } = {}): Promise<void> {
     if (this.stopped) return Promise.resolve()
     if (this.downloadState.state === 'downloading' || this.downloadState.state === 'installing') return Promise.reject(new AppUpdateError('busy', 'Update download in progress'))
-    this.checking ??= this.runCheck(opts.manual === true, opts.mirror ? mirrorById(opts.mirror) : null).finally(() => {
+    this.checking ??= this.runCheck(opts.manual === true, opts.mirror ? mirrorById(opts.mirror, this.opts.customMirror?.()) : null).finally(() => {
       this.checking = null
       this.schedule(this.opts.everyMs ?? CHECK_EVERY_MS)
     })
@@ -378,7 +380,7 @@ export class AppUpdater {
   /** Download the offered installer and verify it (desktop only). Resolves when it is ready. */
   async download(opts: { mirror?: string, manual?: boolean } = {}): Promise<void> {
     const c = this.downloadable()
-    const mirror = opts.mirror ? mirrorById(opts.mirror) : null
+    const mirror = opts.mirror ? mirrorById(opts.mirror, this.opts.customMirror?.()) : null
     const fetchFn = mirror ? mirrorFetch(mirror, this.fetchFn) : this.fetchFn
     if (this.downloadState.state === 'ready' && this.downloadState.version === c.version) return
     const fail = (code: AppUpdateErrorCode) => {

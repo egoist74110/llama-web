@@ -21,7 +21,36 @@ export const MIRRORS: readonly Mirror[] = [
   { id: 'ghproxy-net', host: 'ghproxy.net', base: 'https://ghproxy.net/' },
 ]
 
-export const mirrorById = (id: unknown): Mirror | null => MIRRORS.find(m => m.id === id) ?? null
+/** Id of the user's own mirror (settings.mirror.custom); it is not part of MIRRORS. */
+export const CUSTOM_MIRROR_ID = 'custom'
+
+/**
+ * The user's own mirror prefix, normalized (ends with `/`): '' when empty, null when not acceptable.
+ * https only, a public-looking DNS name (no IP literal, no single-label / local names, so a typo or a
+ * hostile value cannot point requests at this machine or the LAN), no credentials, query or fragment.
+ */
+export function normalizeCustomMirror(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  const text = raw.trim()
+  if (!text) return ''
+  if (text.length > 200 || /[\u0000-\u0020\u007f]/.test(text)) return null
+  let u: URL
+  try { u = new URL(text) } catch { return null }
+  const h = u.hostname
+  if (u.protocol !== 'https:' || u.username || u.password || u.search || u.hash || u.port) return null
+  if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(h) || /^[\d.]+$/.test(h)) return null
+  if (h === 'localhost' || /\.(localhost|local|internal|lan|home|corp|test|invalid)$/.test(h)) return null
+  return u.pathname.endsWith('/') ? `https://${h}${u.pathname}` : `https://${h}${u.pathname}/`
+}
+
+export function customMirror(raw: unknown): Mirror | null {
+  const base = normalizeCustomMirror(raw)
+  return base ? { id: CUSTOM_MIRROR_ID, host: new URL(base).host, base } : null
+}
+
+/** `custom` is the saved settings.mirror.custom; the id `custom` resolves to it (the client never sends a URL). */
+export const mirrorById = (id: unknown, custom: unknown = ''): Mirror | null =>
+  id === CUSTOM_MIRROR_ID ? customMirror(custom) : MIRRORS.find(m => m.id === id) ?? null
 
 /** The mirrors offered after a failed manual update: the recommended one first, then one alternative. */
 export const offeredMirrors = (): Mirror[] => MIRRORS.slice(0, 2).map(m => ({ ...m }))

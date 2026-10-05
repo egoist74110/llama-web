@@ -802,6 +802,7 @@ export default {
       'bad-port-range': '端口范围必须是 1024 到 65535 之间的两个整数（起 ≤ 止），且不能包含监听端口或公网入口端口。',
       'bad-timeout': '超时必须是整数秒，并在允许的范围内：{detail}',
       'bad-public-port': '公网入口端口必须是 1024 到 65535 之间的整数，且不能和监听端口相同、不能在 llama-server 端口范围内。',
+      'bad-mirror': '自定义镜像前缀不合法：必须是 https:// 开头的公网域名，不能带账号密码、端口、参数，也不能是本机、内网或 IP 地址。',
       'bad-domain': '域名格式不对，只填主机名，例如 llm.example.com（不要带 https:// 或路径）：{detail}',
     },
     public: {
@@ -1602,6 +1603,11 @@ export default {
     alternative: '备用',
     use: '用 {host} 重试',
     cancel: '先不用',
+    custom: '你自己设置的镜像',
+    settingsTitle: '自定义镜像',
+    settingsHint: '留空则只用内置的公共镜像。填写后，检查或下载失败时的弹窗里会多出一个选项，由你选择才会使用；只对这一次操作生效，自动检查不会使用。格式：镜像前缀，原始地址接在它后面，例如 https://mirror.example.com/。只接受 https 公网域名；只有 github.com 的请求会经过镜像。',
+    settingsLabel: '镜像前缀',
+    settingsPlaceholder: 'https://mirror.example.com/',
     risk: '镜像由第三方运营。下载的文件仍会校验 SHA-256，但此时校验值也来自镜像，请只在信任它时使用。平时的自动检查不会使用镜像。',
   },
   appUpdate: {

@@ -1,5 +1,13 @@
 # 交接记录
 
+## 2026-10-05 · 镜像后续：用户自填镜像（关键决定 53 未做部分） · Claude
+- 用户确认三点：设置页一个「自定义镜像前缀」文本框，留空只用内置镜像，填了就在弹窗多出第三个选项；只接受 https，域名与重定向限制不变；新增 settings 字段并升版本、写迁移。
+- 实现：`settings.mirror.custom`（版本 9，迁移 8 补空值；手改成非法值加载时被丢弃）；`mirrors.ts` 新增 `normalizeCustomMirror`（https、公网 DNS 名，拒绝 IP / localhost / 单段与 .local 等内网名 / 端口 / 账号密码 / query / fragment，补尾部 `/`）、`customMirror`，`mirrorById(id, custom)` 的 id `custom` 由服务端取已保存前缀（浏览器不传 URL）；`mirrorFetch` 与重定向规则未改。Updater / AppUpdater 经 `customMirror()` 读设置；设置页 `SettingsMirror.vue`，保存走 `applySettingsPatch` 的 `mirror` 段（非法 400，原子写 + 备份）；弹窗打开时重新读设置。文案在 i18n `mirror`。
+- 系统代理：没做（要按平台读系统设置，非零成本）；测速自动选镜像：没做。
+- 验证：新增 `tests/core/custom-mirror.test.ts` 5 项（校验与非法地址、留空行为不变、id 解析、域名 / 重定向限制、保存与迁移）通过；`bun run typecheck` 通过；全量 `bun test` 1066 pass / 19 skip / 63 fail，失败项与改动前（git stash 后 64 个）逐项对比：无新增，仅少一个偶发的 TunnelManager。
+- 未运行：设置页与弹窗的浏览器走查（只过了类型检查与单测）；自填镜像的真实网络可用性；经镜像下载 llama-web 安装包；Windows；镜像清单复查。
+- 下一步：用户试用；阶段 8 其余项（MTP 真机验收、镜像清单复查等）不变。
+
 ## 2026-10-05 · 已有安装「按本机重新推荐」默认参数（关键决定 54 未做部分） · Claude
 - 用户确认三点：只重算全局默认（Windows GPU + CPU 两份，Mac 一份），模型 / 方案覆盖值不动；旧额外参数 `--jinja --props --slots -cb` 在预览里作为可勾选项（只去掉这四个，其他参数保留）；设置页按钮 + 差异弹窗 + 逐项勾选，确认才写入，取消不改。
 - 实现：`server/core/retune.ts`（纯模块，`planRetune` 只读、`applyRetune` 重新计算后只改勾选且仍在方案内的项；复用 `tunedDefaults`，没有第二套分档）；`GET /api/settings/retune`（重新检测硬件后预览）、`POST /api/settings/retune {ids}`（经 `updateSettings` 原子写 + 备份；非法 ids 400）；`SettingsRetuneModal.vue`，按钮在 `SettingsDefaults.vue`（有未保存修改时禁用，避免被覆盖）；文案 `settings.defaults.retune`。无新配置字段，无迁移；应用后把 `setup.tuned` 置 true。

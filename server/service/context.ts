@@ -274,6 +274,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
   const splitStats = new SplitStats(dataDir)
   const channelUpdater = (target: RuntimeTarget, withSelectionError: boolean) => new Updater({
     dataDir,
+    customMirror: () => getSettings().mirror.custom,
     target, selectionError: withSelectionError ? selectionError : undefined,
     llamacpp: () => ({ ...getSettings().llamacpp, current: currentTagFor(getSettings(), platform, target.acceleration) }),
     cudaLimits: () => (systemCache ? cudaLimitsFor(systemCache.info) : null),
@@ -302,7 +303,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     ? { accel: secondaryTarget.acceleration as RuntimeAccel, updater: channelUpdater(secondaryTarget, false), current: () => currentTagFor(getSettings(), platform, secondaryTarget.acceleration) }
     : null
   // LLAMA_WEB_UPDATE_FEED: loopback release list for local acceptance tests only (checked by AppUpdater).
-  const appUpdateOpts = { current: APP_VERSION, repo: APP_REPO, dataDir, onChange: () => live.notify() }
+  const appUpdateOpts = { current: APP_VERSION, repo: APP_REPO, dataDir, customMirror: () => getSettings().mirror.custom, onChange: () => live.notify() }
   let appUpdate: AppUpdater
   try { appUpdate = new AppUpdater({ ...appUpdateOpts, feed: process.env.LLAMA_WEB_UPDATE_FEED || undefined }) }
   catch (e) {

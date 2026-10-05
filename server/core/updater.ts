@@ -69,6 +69,8 @@ export interface UpdaterOptions extends Pick<InstallOptions, 'fetch' | 'extract'
   /** Tags a model or profile picked by hand: pruning keeps them (decision 35). */
   protect?(): ReadonlySet<string>
   onStatus?(s: RuntimeStatus): void
+  /** The user's own mirror prefix (settings.mirror.custom), read fresh. */
+  customMirror?(): string
   /** Version directories removed by pruning, and the ones that could not be removed. */
   onPrune?(r: PruneResult): void
 }
@@ -223,7 +225,7 @@ export class Updater {
 
   /** Startup check (single flight). Never throws: failures end in an `error` status. */
   run(opts: { force?: boolean, manual?: boolean, mirror?: string } = {}): Promise<RuntimeStatus> {
-    this.running ??= this.check(opts.force === true, opts.manual === true, opts.mirror ? mirrorById(opts.mirror) : null).finally(() => { this.running = null; this.scheduleChecks() })
+    this.running ??= this.check(opts.force === true, opts.manual === true, opts.mirror ? mirrorById(opts.mirror, this.opts.customMirror?.()) : null).finally(() => { this.running = null; this.scheduleChecks() })
     return this.running
   }
 

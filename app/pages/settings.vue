@@ -99,6 +99,7 @@ watch(() => route.hash, async () => { await nextTick(); goToHash() })
           <SettingsServer id="s-server" />
           <SettingsPublicAccess id="s-public" />
         </template>
+        <SettingsMirror v-if="doc" id="s-mirror" />
         <SettingsAbout id="s-about" />
         <ImportCard id="s-import" @imported="load" />
       </div>

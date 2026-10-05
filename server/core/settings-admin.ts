@@ -7,13 +7,14 @@ import { isAbsolute, join, resolve } from 'node:path'
 import { applyGpuChoice, hasGpuFields, sanitizeGpuChoice } from './gpu-group'
 import { ArgsSyntaxError, PARAM_DEFS, paramValueOk, splitArgs, type LaunchDefaults, type ParamValue } from './args'
 import { cleanWizard, hasCpuChannel, hasDeviceSelection, TUNNEL_MODES, TUNNEL_PROTOCOLS, type ModelsDoc, type Settings, type TunnelMode, type TunnelProtocol } from './config'
+import { normalizeCustomMirror } from './mirrors'
 import type { PublicStatus } from './public-entry'
 import type { ModelDir } from './types'
 
 export type SettingsErrorCode =
   | 'bad-request' | 'dir-path' | 'dir-duplicate' | 'dir-depth' | 'dir-in-use' | 'dir-limit'
   | 'bad-param' | 'bad-extra-args' | 'bad-image' | 'bad-port' | 'bad-port-range' | 'bad-timeout'
-  | 'bad-public-port' | 'bad-domain'
+  | 'bad-public-port' | 'bad-domain' | 'bad-mirror'
 
 export class SettingsError extends Error {
   constructor(public code: SettingsErrorCode, public detail = '') {
@@ -233,11 +234,13 @@ export interface SettingsPatch {
   server?: unknown
   public?: unknown
   llamacpp?: unknown
+  /** Own mirror prefix: { custom: string }. */
+  mirror?: unknown
   /** Marks the first-run wizard as finished (or skipped). */
   setupDone?: unknown
 }
 
-const SECTIONS = ['modelDirs', 'defaults', 'defaultsCpu', 'image', 'server', 'public', 'setupDone', 'llamacpp']
+const SECTIONS = ['modelDirs', 'defaults', 'defaultsCpu', 'image', 'server', 'public', 'setupDone', 'llamacpp', 'mirror']
 
 /** Apply every section present in the patch; validation of any section failing aborts the whole patch. */
 export function applySettingsPatch(draft: Settings, patch: unknown, models: ModelsDoc, host: { os: NodeJS.Platform } = { os: process.platform }): void {
@@ -257,6 +260,12 @@ export function applySettingsPatch(draft: Settings, patch: unknown, models: Mode
     if (!isObj(p.llamacpp) || typeof p.llamacpp.autoUpdate !== 'boolean' || Object.keys(p.llamacpp).some(k => k !== 'autoUpdate')) throw new SettingsError('bad-request')
     draft.llamacpp.autoUpdate = p.llamacpp.autoUpdate
   }
+  if (p.mirror !== undefined) {
+    if (!isObj(p.mirror) || Object.keys(p.mirror).some(k => k !== 'custom')) throw new SettingsError('bad-request')
+    const base = normalizeCustomMirror(p.mirror.custom)
+    if (base === null) throw new SettingsError('bad-mirror')
+    draft.mirror.custom = base
+  }
   if (p.setupDone !== undefined) {
     if (typeof p.setupDone !== 'boolean') throw new SettingsError('bad-request')
     draft.setup.done = p.setupDone
@@ -272,6 +281,7 @@ export interface SettingsDoc {
   defaultsCpu?: LaunchDefaults
   builtinDefaultsCpu?: LaunchDefaults
   image: Settings['preprocess']['image']
+  mirror: Settings['mirror']
   server: { port: number, portRange: [number, number], loadTimeoutSec: number, drainTimeoutSec: number, maxLoaded: number }
   public: Settings['public'] & {
     /** State of the public listener right now. */
