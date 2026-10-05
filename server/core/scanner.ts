@@ -49,7 +49,7 @@ interface Found {
   size: number
 }
 
-const SHARD_RE = /^(.*)-(\d{5})-of-(\d{5})\.gguf$/i
+export const SHARD_RE = /^(.*)-(\d{5})-of-(\d{5})\.gguf$/i
 const SKIP_DIR = /^(\.|\$)|^system volume information$/i
 /** macOS metadata: AppleDouble companions (`._x.gguf`, written on exFAT / network drives) are not models. */
 const SKIP_FILE = /^(\._|\.ds_store$)/i

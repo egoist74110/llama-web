@@ -22,6 +22,7 @@ const scan = ref<ScanDoc | null>(null)
 const scanFailed = ref(false)
 const loadError = ref('')
 const selected = ref('')
+const removing = ref(false)
 type EditTab = 'files' | 'profiles' | 'params'
 const editTab = ref<EditTab>('files')
 const editTabs: Array<{ value: EditTab, label: string }> = [
@@ -382,6 +383,12 @@ const pendingTitle = computed(() => {
           />
         </div>
       </template>
+    </template>
+    <template #footer>
+      <UButton size="sm" color="error" variant="outline" icon="i-lucide-trash-2" :disabled="!model" @click="removing = true">
+        {{ t.models.remove.open }}
+      </UButton>
+      <ModelRemoveModal v-model:open="removing" :model-id="modelId" :name="model?.name ?? ''" @removed="open = false" />
     </template>
   </USlideover>
 </template>

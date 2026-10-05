@@ -20,6 +20,7 @@ const failed = computed(() => state.value === 'failed' || state.value === 'crash
 const winding = computed(() => state.value === 'draining' || state.value === 'unloading')
 const editing = ref(false)
 const firstStart = ref(false)
+const removing = ref(false)
 const quant = computed(() => quantFromFile(props.model.files.model))
 const progress = computed(() => shown.value?.progress ?? null)
 // A model enabled from a scan asks its first-start questions before the first load.
@@ -63,6 +64,7 @@ const working = computed(() => !!(busy.value[`start:${props.model.id}`] || busy.
           />
         </div>
         <UButton size="sm" color="neutral" variant="outline" icon="i-lucide-pencil" :aria-label="t.models.edit.open" :title="t.models.edit.open" @click="editing = true" />
+        <UButton size="sm" color="neutral" variant="outline" icon="i-lucide-trash-2" :aria-label="t.models.remove.open" :title="t.models.remove.open" @click="removing = true" />
         <UButton
           v-if="state === 'stopped' && !queued"
           size="sm"
@@ -132,6 +134,7 @@ const working = computed(() => !!(busy.value[`start:${props.model.id}`] || busy.
       </p>
     </div>
     <ModelEditor v-model:open="editing" :model-id="model.id" />
+    <ModelRemoveModal v-model:open="removing" :model-id="model.id" :name="model.name" />
     <FirstStartDialog v-if="model.needsSetup" v-model:open="firstStart" :model-id="model.id" :name="model.name" />
   </div>
 </template>

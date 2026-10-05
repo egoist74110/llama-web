@@ -11,6 +11,13 @@ const LIVE: ReadonlySet<ModelState> = new Set(['loading', 'ready'])
 /** Has a process at all, including one on its way out. */
 const UP: ReadonlySet<ModelState> = new Set(['loading', 'ready', 'draining', 'unloading'])
 
+export class ModelBusyError extends Error {
+  constructor(public modelId: string) {
+    super(`model busy: ${modelId}`)
+    this.name = 'ModelBusyError'
+  }
+}
+
 export class ModelOps {
   private readonly gens = new Map<string, number>()
   /** Restarts waiting for the old process to stop, by model. */
@@ -86,6 +93,22 @@ export class ModelOps {
     const p = this.pending.get(modelId)
     if (p) names.add(p.profile)
     return [...names]
+  }
+
+  /** A process, a queued / running load or a pending restart: the model cannot be removed meanwhile. */
+  busy(modelId: string): boolean {
+    return this.inUseProfiles(modelId).length > 0
+  }
+
+  /**
+   * Before the model's configuration goes away: refuse while it is busy (never stops anything),
+   * otherwise withdraw later restarts and clear leftover failed / stopped marks.
+   */
+  async forget(modelId: string): Promise<void> {
+    if (this.busy(modelId)) throw new ModelBusyError(modelId)
+    this.bump(modelId)
+    await this.sched.stop(modelId)
+    this.gens.delete(modelId)
   }
 
   /**

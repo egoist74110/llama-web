@@ -1,6 +1,7 @@
 // Shared by the per-model action routes.
 import { fmt, t } from '../core/i18n'
 import { FilesError, ProfileError } from '../core/models-admin'
+import { RemoveError } from '../core/model-remove'
 import { SchedulerError } from '../core/scheduler'
 import { getContext } from './context'
 
@@ -58,4 +59,11 @@ export function background(what: string, job: () => Promise<unknown>): void {
     if (e instanceof SchedulerError && e.code === 'stopped') return
     console.error(`[llama-web] ${what}:`, (e as Error)?.message ?? e)
   })
+}
+
+/** Turn a model removal failure into an HTTP error with a Chinese message; other errors pass through. */
+export function removeError(e: unknown): never {
+  if (!(e instanceof RemoveError)) throw e
+  const status = e.code === 'model-not-found' ? 404 : e.code === 'trash-failed' ? 500 : e.code === 'in-use' ? 409 : 400
+  throw createError({ statusCode: status, message: fmt(t.models.remove.errors[e.code], { file: e.detail }) })
 }

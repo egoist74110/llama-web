@@ -1,5 +1,15 @@
 # 交接记录
 
+## 2026-10-05 · 模型删除按钮 + 二次确认（关键决定 51） · Claude
+- 用户确认三点：文件进系统回收站；共享的草稿 / 视觉文件跳过并提示（本模型自己的照删）；运行中 / 加载中 / 排队中拒绝删除，不自动停止。
+- 实现：`server/core/model-remove.ts`（planRemove / removeModel，纯模块，可注入 trash 与文件系统）、`trash.ts`（Windows PowerShell + VB 回收站，路径走环境变量，失败按序号回报；Mac 用 osascript 让 Finder 删，路径作 argv；其他平台 gio；失败即报失败，绝不永久删除）、`ModelOps.busy / forget`（忙则抛 ModelBusyError，否则清理 failed / stopped 残留）。接口 `GET /api/models/:id/remove-plan`（弹窗预览）、`POST /api/models/:id/remove {deleteFiles}`。界面 `ModelRemoveModal.vue`，卡片和编辑抽屉各一个按钮；文案在 i18n `models.remove`。
+- 规则：只处理已登记目录内、解析符号链接后仍在根内的 .gguf 常规文件；任一路径越界则整个「删文件」请求被拒（仍可只删配置），没有部分删除。分片按「前缀 + 总数」找全；同目录别的分片组不动。主模型文件移不进回收站 → 配置保留并报错；mmproj / 草稿失败只提示。配置沿用 modelsRef.update（原子写 + 备份）。
+- 验证：`bun test tests/core/model-remove.test.ts` 17 pass（运行中、共享、分片、越界 / 符号链接、不勾选只删配置、主文件失败、已不存在、trash 参数）；`bun run typecheck` 通过；全量 `bun test` 1044 pass / 19 skip / 63 fail，失败项数与改动前一致（本机 Mac 原有，无一涉及本改动）。Mac 上用真实 osascript 把临时中文文件名 .gguf 移进废纸篓成功，不存在的路径报失败。
+- 没验证：Windows 回收站路径（PowerShell 脚本未在 Windows 跑）；Windows 对超过回收站容量的大文件会弹系统确认框（选 AllDialogs 避免静默永久删除，隐藏进程下框能否点到未知，超时 10 分钟后该文件报失败）；浏览器里点按钮的界面走查未做（只过了 typecheck）；真实模型 / GPU。
+- 已知边界：检查忙碌与移回收站之间有几秒窗口，期间若有请求触发加载不会被拦（Windows 上占用中的文件会移失败）；不删除变空的目录。
+- 提示：Mac 探测用的临时文件已进废纸篓（~/.Trash 本会话无权限查看 / 清理，是个几字节的 lw-trash-probe 文件）。
+- 下一步：用户试用删除流程；Windows 上试一次回收站。A2（首次启动加全局与单模型配置）仍待用户启动，需先问清范围。
+
 ## 2026-10-05 · 决定 52 Cloudflare token 权限误报排查与教程修正 · Claude
 - 结论：不是程序误判。用用户桌面版保存的 token 只读探测 Cloudflare：verify 与 zones 为 200，但 dns_records、settings 均 403（错误码 10000）；用户在后台补齐权限并 Update token 后，一键配置第 4、5 步通过（未重新构建）。
 - 第 5 步先报「token 无效」：根因是缺 Account 级隧道权限，且错误码 9109（无权访问资源）被 `BAD_TOKEN_CODES` 当成无效 token。已移出该集合，改为 forbidden（权限不足）。另把 `dns_records` 探测的 per_page 由 1 改 5。
