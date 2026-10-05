@@ -1,5 +1,10 @@
 # 交接记录
 
+## 2026-10-05 · 准备 v0.1.0-beta.7（Windows + macOS arm64 同版本，只建草稿）· Claude
+- 用户要求 Mac 与 Windows 一起发，选择新版本 beta.7，且 DMG 尚未经用户在 Mac 上试用，所以先建草稿、首次打开步骤标注“未经真机验证”。已做：`package.json` → 0.1.0-beta.7；`docs/release-notes/v0.1.0-beta.7.md`；`release-macos.yml` 新增 `attach_to_draft`（只往已存在的草稿传，拒绝已公开 / 已有 DMG / 缺 Windows 安装包，合并 SHA256SUMS，Mac 许可汇总另名上传）；`server/entry.ts` 只在 Windows 注册应用内安装钩子（否则 Mac 会下载 .exe 然后在壳里报错）。`bun test` 1147 pass / 0 fail，typecheck 通过。
+- **待用户操作**（我的 `gh workflow run` 被权限拦截）：① 提交推送后先跑 `Windows release (draft)`（版本 0.1.0-beta.7）；② 再跑 `macOS arm64 build`（版本 0.1.0-beta.7，勾选 attach_to_draft）；③ 下载草稿里的包核对 SHA256SUMS、安装试用后，再公开草稿。公开前不要宣称 Mac 已验证。
+- 未验证：本次 Windows 工作流（beta.7）尚未运行；Mac 窗口里的真实使用同上一条。
+
 ## 2026-10-05 · 9-mac-dmg Mac 打包第一步（arm64 DMG，不发布）· Claude
 - 做了：① **CI 修绿**：runner 上 `bun test` 1147 pass / 19 skip / 0 fail，typecheck、启动脚本语法、真实 llama.cpp b11146 `--version` 全过（run 37269436428，commit 435a4f6）。根因分类：pre-commit 在 macOS bash 3.2 下语法错误（`$(...)` 里 case 分支要前导括号，51 项，**代码问题**）；`killpg` 对只剩未回收僵尸的组返回 EPERM 而非 ESRCH（`stopProcessGroup`，**代码问题**，本机用 `sh -c 'exit 0'` 复现）；`runtimes` 恢复备份按字符串排序，同毫秒的 `-1` 后缀被排在前面（**代码问题**，间歇失败）；`expandHome('~\\x')` 在 POSIX 得到字面反斜杠（**代码问题**）；其余是测试写死 Windows（设备字段、CMD 预览引号、cloudflared win32 资产、PATH 查找），改为固定主机 / 平台而不是跟随运行机器，没有删测试或放宽断言。② 新增 `.github/workflows/release-macos.yml`、`src-tauri/tauri.macos.conf.json`、`icons/icon.icns`（32px 放大的占位图标）、`desktop:build:mac`；`prepare.ts` 支持 macos-arm64（Windows 分支输出不变：`bun.exe`、`windows-x64`、icon.ico 复制、licence 的 rust target 都保持原值）。③ `desktop/check-package.ts` 加 `.app` / `.dmg` 模式，`tests/platform/check-package.test.ts` 加 Mac 与 Windows 回归用例。④ 文档：`docs/macos-desktop.md`（构建、工作流、检查、签名评估、首次打开步骤、更新路径）、claude-guide 9-mac-dmg 卡片、plan 阶段 9 任务。
 - **本机（arm64 Mac，Bun 1.3.14 临时副本）实测**：隔离工作树构建 → `tauri build --bundles dmg` 成功（34.9 MiB）；`check-package` 对 DMG 通过；从 DMG 取出的 .app 里包内 Bun 的 JIT、sharp、起服务（200）正常。关键发现：官方 Bun 自带 Developer ID + hardened runtime + `allow-jit` 等权限，Tauri 不会重签资源，所以**不能**自己再 ad-hoc 签 Bun；模拟“未批准的隔离属性”时包内 Bun 被杀（137），“已批准”或无标记正常——只是手工模拟，等用户真机走 Open Anyway 流程。

@@ -1,9 +1,11 @@
-# macOS arm64 build (test package, nothing is published). Started by hand (Actions → "macOS arm64 build
-# (artifact only)" → Run workflow) with the version from package.json. It never creates a Release or a tag:
-# the DMG, its SHA-256 and a manifest are uploaded as a workflow artifact for download and trial on a Mac.
+# macOS arm64 build. Started by hand (Actions → "macOS arm64 build" → Run workflow) with the version from
+# package.json. It never creates a Release or a tag: the DMG, its SHA-256 and a manifest are uploaded as a
+# workflow artifact. With attach_to_draft it also adds them to the DRAFT Release that the Windows workflow
+# ("Windows release (draft)") created for the same version (run that one first), and appends the DMG to the
+# draft's SHA256SUMS. Publishing the draft stays a manual step after the downloaded files were checked.
 # The app is ad-hoc signed only (no Apple Developer certificate): it is NOT notarized, so Gatekeeper warns on the
 # first open. Apple Silicon only; Intel is not built and Rosetta is not used.
-name: macOS arm64 build (artifact only)
+name: macOS arm64 build
 
 on:
   workflow_dispatch:
@@ -11,6 +13,10 @@ on:
       version:
         description: Version without "v"; must equal package.json
         required: true
+      attach_to_draft:
+        description: Also attach the files to the existing draft Release v<version> (run the Windows workflow first)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -23,6 +29,8 @@ jobs:
   build:
     runs-on: macos-15 # Apple Silicon (arm64)
     timeout-minutes: 60
+    permissions:
+      contents: write # only used by the attach step; the other steps never write
     env:
       VERSION: ${{ inputs.version }}
     steps:
@@ -133,3 +141,30 @@ jobs:
           path: release/
           if-no-files-found: error
           retention-days: 14
+
+      # Only on request. The Windows workflow must already have created the draft (with its installer and
+      # SHA256SUMS); this never creates a Release, never touches a published one, and never replaces a DMG.
+      - name: Attach to the draft Release
+        if: ${{ inputs.attach_to_draft }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v$VERSION"
+          info=$(gh release view "$tag" --json isDraft,assets) || { echo "No Release $tag: run 'Windows release (draft)' first"; exit 1; }
+          IS_DRAFT=$(echo "$info" | bun -e 'console.log(JSON.parse(await Bun.stdin.text()).isDraft)')
+          names=$(echo "$info" | bun -e 'console.log(JSON.parse(await Bun.stdin.text()).assets.map(a => a.name).join("\n"))')
+          test "$IS_DRAFT" = true || { echo "$tag is already published; refusing to change it"; exit 1; }
+          echo "$names" | grep -qx "llama-web_${VERSION}_x64-setup.exe" || { echo "The draft has no Windows installer yet"; exit 1; }
+          echo "$names" | grep -qx SHA256SUMS || { echo "The draft has no SHA256SUMS"; exit 1; }
+          dmg="llama-web_${VERSION}_macos-arm64.dmg"
+          if echo "$names" | grep -qx "$dmg"; then echo "$dmg is already attached; delete it from the draft first"; exit 1; fi
+          mkdir -p sums && gh release download "$tag" -p SHA256SUMS -D sums
+          cat "release/$dmg.sha256" >> sums/SHA256SUMS
+          cat sums/SHA256SUMS
+          test "$(grep -c . sums/SHA256SUMS)" = 2
+          # The draft already has the Windows THIRD-PARTY-NOTICES.txt: the Mac one goes up under its own name
+          # (no --clobber here, so nothing of the Windows side can be replaced).
+          cp release/THIRD-PARTY-NOTICES.txt sums/THIRD-PARTY-NOTICES-macos.txt
+          gh release upload "$tag" "release/$dmg" "release/$dmg.sha256" \
+            "release/llama-web-${VERSION}-macos-arm64-manifest.json" sums/THIRD-PARTY-NOTICES-macos.txt
+          gh release upload "$tag" sums/SHA256SUMS --clobber

@@ -1,6 +1,6 @@
 # macOS desktop（Apple Silicon，未签名测试包）
 
-状态（2026-10-05）：只出 **arm64** 的 DMG 测试包，**不发布**（没有 Release、没有 tag）。没有 Apple 开发者证书：应用只做了 ad-hoc 签名，**没有公证**，所以首次打开 macOS 会警告，不能说“无提示安装”。Intel Mac 不构建、不用 Rosetta 代替验证。Mac 包日后与 Windows 同版本一起发，那是单独的工作包。
+状态（2026-10-05）：只出 **arm64** 的 DMG。用户 2026-10-05 要求与 Windows 同版本（0.1.0-beta.7）一起发：先跑 Windows 工作流创建草稿 Release，再跑本工作流并勾选 `attach_to_draft`，把 DMG 挂到同一个**草稿**并把 DMG 追加进 `SHA256SUMS`；公开草稿由维护者核对下载包后手动执行。没有 Apple 开发者证书：应用只做了 ad-hoc 签名，**没有公证**，所以首次打开 macOS 会警告，不能说“无提示安装”。Intel Mac 不构建、不用 Rosetta 代替验证。Mac 包日后与 Windows 同版本一起发，那是单独的工作包。
 
 ## 构建
 
@@ -18,7 +18,7 @@ bun run desktop:build:mac     # = desktop:prepare + tauri build --bundles dmg
 
 ## GitHub Actions：`macOS arm64 build (artifact only)`
 
-`.github/workflows/release-macos.yml`，手动触发（输入版本，必须等于 `package.json`），`macos-15`（arm64），权限只有 `contents: read`，**不创建 Release、不打 tag**。步骤：冻结安装 → `bun test` → typecheck → 构建 DMG → `cargo test` → `desktop/check-package.ts`（DMG）→ 在从 DMG 取出的 `.app` 里用**包内的 Bun** 跑 JIT、sharp、起服务（隔离数据目录）并下载 / 解压 / 执行真实 llama.cpp 做 `--version` → 汇集产物并作为 workflow artifact 上传（保留 14 天）：
+`.github/workflows/release-macos.yml`，手动触发（输入版本，必须等于 `package.json`；可选 `attach_to_draft`），`macos-15`（arm64）。**本身不创建 Release、不打 tag**；只有勾选 `attach_to_draft` 时，最后一步才往**已存在的草稿** `v<版本>` 上传（草稿必须已有 Windows 安装包和 `SHA256SUMS`；已公开的 Release 或已有同名 DMG 会直接拒绝；Mac 的许可汇总以 `THIRD-PARTY-NOTICES-macos.txt` 上传，不覆盖 Windows 的）。工作流 `contents: write` 只给这一步用。步骤：冻结安装 → `bun test` → typecheck → 构建 DMG → `cargo test` → `desktop/check-package.ts`（DMG）→ 在从 DMG 取出的 `.app` 里用**包内的 Bun** 跑 JIT、sharp、起服务（隔离数据目录）并下载 / 解压 / 执行真实 llama.cpp 做 `--version` → 汇集产物并作为 workflow artifact 上传（保留 14 天）：
 
 - `llama-web_<版本>_macos-arm64.dmg`
 - `llama-web_<版本>_macos-arm64.dmg.sha256`
@@ -69,6 +69,6 @@ xattr -dr com.apple.quarantine /Applications/llama-web.app
 
 ## 更新路径（初步，本包不实现）
 
-- 现在：Mac 版没有应用内更新（`src-tauri/src/update.rs` 在非 Windows 上是空实现）。更新方式 = 下载新版本的 DMG，用它替换“应用程序”里的旧应用；数据在用户目录，不会丢。
+- 现在：Mac 版没有应用内更新：服务入口只在 Windows 上注册安装钩子（`server/entry.ts`），Mac 上「关于与更新」只显示新版本与发布页链接，不会下载 `.exe`（`src-tauri/src/update.rs` 在非 Windows 上也是空实现）。更新方式 = 下载新版本的 DMG，用它替换“应用程序”里的旧应用；数据在用户目录，不会丢。
 - 之后：Release 页合并 Windows / Mac 资产与统一 `SHA256SUMS`，应用内更新按 `macos-arm64` 后缀选资产。未签名应用在原位替换时会遇到隔离属性和权限问题，需要单独设计，不在本包。
 - 有证书之后：Developer ID 签名 + 公证 + staple，并重新评估 hardened runtime 与内置 Bun 的权限组合。
