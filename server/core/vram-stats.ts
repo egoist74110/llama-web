@@ -6,7 +6,7 @@
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { MemoryEstimate, Pool } from './memory-estimate'
+import type { MemoryEstimate, Pool, Tier } from './memory-estimate'
 import { tierOf, worstTier } from './memory-estimate'
 import { writeFileAtomic } from './store'
 
@@ -146,7 +146,9 @@ export function preferMeasured(est: MemoryEstimate, entry: StatsEntry | null): M
   const pools: Pool[] = est.pools.map((p, i) => {
     const exact = p.weightsMiB + p.kvMiB + p.stateMiB + p.mmprojMiB + p.draftMiB
     const totalMiB = Math.max(entry.measuredMiB[i]!, exact)
-    return { ...p, totalMiB, ...tierOf(totalMiB, p.budgetMiB) }
+    const t = tierOf(totalMiB, p.budgetMiB)
+    // A measurement says what a launch took, not what the budget is now: a pool whose budget was incomplete stays unknown.
+    return { ...p, totalMiB, ...(p.tier === 'unknown' && t.tier !== 'nofit' ? { ratio: t.ratio, tier: 'unknown' as Tier } : t) }
   })
   const total = { ...est.total, totalMiB: pools.reduce((n, p) => n + p.totalMiB, 0) }
   return { ...est, pools, total, tier: worstTier(pools.map(p => p.tier)), basis: 'measured' }

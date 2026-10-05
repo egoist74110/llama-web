@@ -256,7 +256,7 @@ test('tiers: up to 85% of the budget is ok, up to 100% risky, above that does no
   expect(tierOf(100.01, 100).tier).toBe('nofit')
   expect(tierOf(1, 0).tier).toBe('nofit')
   expect(tierOf(1, null)).toEqual({ ratio: null, tier: 'unknown' })
-  expect(worstTier(['ok', 'unknown', 'risky'])).toBe('risky')
+  expect(worstTier(['ok', 'unknown', 'risky'])).toBe('unknown')
   expect(worstTier(['ok', 'unknown'])).toBe('unknown')
   expect(worstTier(['risky', 'nofit', 'unknown'])).toBe('nofit')
   expect(worstTier([])).toBe('ok')
@@ -401,4 +401,15 @@ test('a file read from disk goes through the whole estimate', async () => {
   // KV: 4 layers x 1024 cells x 2 heads x 16 (= 64 / 4) x (2 + 2) bytes
   expect(e.pools[0]!.kvMiB).toBeCloseTo((4 * 1024 * 2 * 16 * 4) / MiB, 8)
   expect(e.pools[0]!.weightsMiB).toBeCloseTo((4 * 64 * 128 * 2 + 64 * 2 * 2) / MiB, 8)
+})
+
+test('an unreadable card is not hidden by a risky host pool: the aggregate stays unknown', () => {
+  const f = smol()
+  const cuda: DeviceInput = { id: 'CUDA0', name: 'GPU', memory: 'separate', freeMiB: null }
+  const hostTotal = estimateMemory({ model: f, params: { ctxSize: 8192, parallel: 1 }, devices: [cuda], system: { totalMiB: 16384, availableMiB: 1e6 } }).pools.find(p => p.kind === 'host')!.totalMiB
+  // host budget = available - reserve; pick it so the host pool sits at 95% of it (risky)
+  const available = systemReserveMiB(16384) + hostTotal / 0.95
+  const e = estimateMemory({ model: f, params: { ctxSize: 8192, parallel: 1 }, devices: [cuda], system: { totalMiB: 16384, availableMiB: available } })
+  expect(e.pools.map(p => p.tier).sort()).toEqual(['risky', 'unknown'])
+  expect(e.tier).toBe('unknown')
 })

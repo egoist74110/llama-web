@@ -92,6 +92,8 @@ export interface AppContext {
    * version; null when it cannot be run), the NVIDIA cards as a fallback for it, and the system memory.
    */
   getMemoryProbe(runtime?: string | null, opts?: { refresh?: boolean }): Promise<MemoryProbe>
+  /** Memory in use per pool around a load (replaceable in tests). */
+  measure: { used(ids: readonly string[]): Promise<Array<number | null>> }
   /** Row / tensor combinations the user confirmed or that failed to load (decision 45). */
   splitStats: SplitStats
   /** Record key of a group on the build `runtime` resolves to (empty = the global version); null when no build can be resolved. */
@@ -370,6 +372,11 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     if (!networkProbe.signal.aborted) live.notify()
   })
   const vramStats = new VramStats(dataDir)
+  // Counts every change of which models hold memory (a load starting, a model draining, stopping or crashing). A
+  // load measured while this did not move had the machine to itself (decision 43).
+  let memoryEvents = 0
+  const measure = { used: (ids: readonly string[]) => usedOf(ids, platform.os) }
+  const MEASURE_TIMEOUT_MS = 5000
   const scheduler: Scheduler = new Scheduler({
     // Read at every load: the switch and the limit apply to the next one without a restart.
     get maxLoaded() { return effectiveMaxLoaded(getSettings()) },
@@ -377,7 +384,10 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     get onNoRoom() { return getSettings().scheduler.onNoRoom },
     admit: admitTarget,
     get drainTimeoutMs() { return getSettings().scheduler.drainTimeoutSec * 1000 },
-    onEvent: (e) => { logSchedulerEvent(e); live.onSchedulerEvent(e) },
+    onEvent: (e) => {
+      if (e.type === 'state' && e.to !== 'ready') memoryEvents++
+      logSchedulerEvent(e); live.onSchedulerEvent(e)
+    },
     // Initial llama.cpp download still running (or not installed yet): not a model failure.
     isPrecondition: e => e instanceof LaunchConfigError && e.code === 'no-runtime',
     launch: async (target, admission) => {
@@ -405,7 +415,8 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
         for (const w of plan.warnings) log(`args ${plan.tag}: ${w.code} ${w.flag ?? ''} ${w.layer ?? ''}`.trim())
         log(`starting ${plan.tag}: ${plan.exe}`)
         // Memory before the process exists, to measure what this load really takes (serial loads: nothing else is loading).
-        const usedBefore = admitted?.statsKey ? await usedOf(admitted.sampleIds, platform.os) : null
+        const usedBefore = admitted?.statsKey ? await measure.used(admitted.sampleIds) : null
+        const eventsBefore = memoryEvents
         let launchArgs = plan.args
         if (admitted?.dropMlock) {
           const base = plan.args
@@ -431,24 +442,33 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
           })
           launching.delete(launchId) // runner.list() covers it from here on
           const combo = plan.combo
-          void rp.ready.then(async () => {
+          // The measurement belongs to the load: `ready` settles for the scheduler only after it, so the next load
+          // (which would add its own memory to the reading) cannot start before it is taken. A failing or slow
+          // measurement never fails the load.
+          const gated = rp.ready.then(async () => {
             stopTracking()
             if (combo) splitStats.succeed(combo)
             if (!admitted?.statsKey || !usedBefore) return
-            // What the load added per pool (decision 43). Loads are serial, so nothing else of ours was loading meanwhile.
-            const measured = loadDelta(usedBefore, await usedOf(admitted.sampleIds, platform.os))
-            const res = vramStats.record(admitted.statsKey, { estimateMiB: admitted.estimateMiB, measuredMiB: measured, exclusive: true })
-            if (res.significant && res.deviation !== null) {
-              log(`memory ${plan.tag}: the load took ${Math.round(res.deviation * 100)}% ${res.deviation > 0 ? 'more' : 'less'} than estimated, the next estimate uses the measurement`)
-              live.onGuard({ kind: 'vram-deviation', modelId: target.modelId, profile: target.profile, deviation: res.deviation })
-            }
-          }, stopTracking)
+            try {
+              const after = await Promise.race([measure.used(admitted.sampleIds), new Promise<null>(r => setTimeout(r, MEASURE_TIMEOUT_MS, null))])
+              if (!after) return
+              // What the load added per pool. Another model starting to stop or crash meanwhile frees memory and would make the
+              // difference too small, so then the sample is refused as not exclusive.
+              const measured = loadDelta(usedBefore, after)
+              const res = vramStats.record(admitted.statsKey, { estimateMiB: admitted.estimateMiB, measuredMiB: measured, exclusive: memoryEvents === eventsBefore })
+              if (res.significant && res.deviation !== null) {
+                log(`memory ${plan.tag}: the load took ${Math.round(res.deviation * 100)}% ${res.deviation > 0 ? 'more' : 'less'} than estimated, the next estimate uses the measurement`)
+                live.onGuard({ kind: 'vram-deviation', modelId: target.modelId, profile: target.profile, deviation: res.deviation })
+              }
+            } catch { /* statistics only */ }
+          }, (e) => { stopTracking(); throw e })
+          gated.catch(() => {})
           void rp.exited.then((x) => {
             stopTracking()
             run.append(`# llama-web: exited code=${x.code ?? '-'} signal=${x.signal ?? '-'}${x.requested ? ' (stopped by llama-web)' : ''}`)
             run.close()
           })
-          return rp
+          return { port: rp.port, ready: gated, exited: rp.exited, stop: () => rp.stop(), tail: n => rp.tail(n) }
         } catch (e) {
           launching.delete(launchId)
           stopTracking()
@@ -475,7 +495,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
   const watchdog = new Watchdog({
     sample: () => samplePools(platform.os),
     candidates: () => scheduler.candidates(),
-    unload: (t, cause) => scheduler.unload(t, cause),
+    unload: (t, cause, opts) => scheduler.unload(t, cause, opts),
     enabled: () => getSettings().scheduler.multiLoad,
     onEvent: (e) => {
       log(e.state === 'stopped'
@@ -608,6 +628,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
       const [devices, splitModes] = await Promise.all([deviceProbe.list(exe), deviceProbe.splitModes(exe)])
       return { devices, splitModes }
     },
+    measure,
     async getMemoryProbe(runtime, opts) {
       const exe = exeOf(runtime?.trim() || null)
       const list = exe ? await deviceProbe.list(exe, { refresh: opts?.refresh === true }) : null

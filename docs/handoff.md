@@ -1,5 +1,13 @@
 # 交接记录
 
+## 2026-10-05 · 9-5 审查意见修复 · Claude
+- 依据：`docs/reviews/code-audit-2026-10-05.md`（CR-001 至 CR-007，5 major / 2 minor）。每项先写失败测试再修（已对 CR-002 / CR-003 用旧代码确认会失败）。
+- 做了：① CR-002：`worstTier` 顺序改为 ok < risky < unknown < nofit，调度的未知拦截不再被另一池的 risky 盖住；测试里的错误断言已改。② CR-003：`preferMeasured` 里原来就是 unknown 的池，换成实测占用后仍是 unknown（除非已经 nofit）。③ CR-001：`Scheduler.unload(target, cause, { idleOnly })`，有在途请求就返回 false；看门狗采样后才取候选，并带 `idleOnly` 卸载。④ CR-005：看门狗按危险程度遍历全部告急池，选第一个有可停候选的池，每轮最多停一个；全部池都没有候选才报 blocked。⑤ CR-007：`context.ts` 里加载后的实测采样放在 `ready` 之前（返回给调度器的是包装对象，采样超时 5 秒、失败不影响加载）；`exclusive` 由「采样窗口内没有任何模型状态变化（加载 / 排空 / 卸载 / 崩溃）」决定；新增 `ctx.measure.used` 作为测试替换点。⑥ CR-004：`readDelta` 识别 `{error}` 事件，`streamChat` 抛出其 message（已收到的正文保留）。⑦ CR-006：`withTombstones(backend)`（`app/utils/chat-db.ts`），已删除会话的晚到保存被丢弃。
+- 验证：`bun test` 1321 pass / 20 skip / 0 fail；`bun run typecheck` 通过。新增用例：memory-estimate、vram-stats、watchdog（4）、scheduler-multi（1）、multi-load-run（真实子进程 + 假 llama-server，延迟采样不让下一次加载开始，两次实测各为自己的 1000）、chat（2）。
+- **没验证**：没有闭环复审（报告要求按原触发条件复审）；没有真实 GPU / Windows / 多卡；没有 `bun run build`；CR-006 只测了存储层的保护，没有在浏览器里跑「生成中删除会话」；CR-004 没有在浏览器里触发真实的代理流错误。报告里「仍需独立深审」的范围（用量持久化、8-7、MTP、回收站、重新推荐参数、桌面壳、更新发包）本包没有碰。
+- 取舍：CR-007 选了「采样纳入串行边界」，每次加载在 ready 前多等一次内存读取（有 5 秒上限）；CR-001 选了在调度器里原子检查，没有改看门狗的采样顺序以外的结构。
+- 下一步：用户试用阶段关口 9；然后交叉审查 / 复审本包的 7 项，并继续深审报告列出的未审范围。
+
 ## 2026-10-05 · 9-4 多模型与显存保护界面 · Claude
 - 做了：① 编辑抽屉（ProfileForm）：`MemoryEstimate.vue`（条 + 档位 + 明细 + 估算说明 + 参数检查列表），和命令预览同一防抖调 `POST /check`；保存前再取一次最新读数，估算「有风险 / 放不下」才弹 `SaveRiskModal`（仍然保存 / 回去改），「无法判断」不弹，不拒绝保存。② 设置页（SettingsServer）：多开开关、在线上限 1–99（开启后不超过端口数）、放不下时二选一（说明里写清只管请求触发，手动启动只被拦）。③ 模型页：`ModelCard` 占用 chip（实测 / 预估）+ 档位（模型在线时只显示数量）；手动启动被 409 拦住时 `StartGuardModal`：risky / unknown 可「仍然启动」（带 `confirm`），nofit / limit 只有「先停止其他模型」（没有强行启动）。④ 总览 `OnlineModels.vue`（至少 2 个在线时列出各自状态 / 速度 / 占用 / 停止，hero 里原来的「另外还有」去掉）、侧栏列出全部在线模型、GPU 卡片下标出在线模型（`modelsOnCard`）。⑤ 日志：no-room / watchdog 事件按错误色，503 `insufficient_memory` 的请求记录显示「放不下，没有加载」。
 - 逻辑放在 `app/utils/memory-check.ts`（可 bun 测试）和 `useMemoryChecks`（一个串行队列、15 秒内复用、在线集合变了就重算）；文案在 `i18n/zh-CN.ts` 的 `memory`、`models.guard`、`models.edit.risk`、`settings.server`。

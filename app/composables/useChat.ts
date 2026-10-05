@@ -2,7 +2,7 @@
 // chatted with right now, and the streaming request. The page only wires these to the UI.
 import t from '~~/i18n/zh-CN'
 import { newMessage, newId, streamChat, titleFrom, toRequestMessages, type ChatSession } from '~/utils/chat'
-import { idbBackend, memoryBackend, type ChatBackend } from '~/utils/chat-db'
+import { idbBackend, memoryBackend, withTombstones, type ChatBackend } from '~/utils/chat-db'
 
 export interface ChatModelOption { value: string, label: string, hasMmproj: boolean }
 
@@ -20,7 +20,7 @@ export function useChat() {
   const option = computed(() => options.value.find(o => o.value === selected.value) ?? null)
 
   // ---- conversations ----
-  let backend: ChatBackend = memoryBackend()
+  let backend: ChatBackend = withTombstones(memoryBackend())
   const loaded = ref(false)
   const persistent = ref(true)
   const sessions = ref<ChatSession[]>([])
@@ -32,7 +32,7 @@ export function useChat() {
   }
 
   onMounted(async () => {
-    try { backend = await idbBackend() } catch { persistent.value = false }
+    try { backend = withTombstones(await idbBackend()) } catch { persistent.value = false }
     try {
       sessions.value = (await backend.all()).sort((a, b) => b.updatedAt - a.updatedAt)
     } catch { persistent.value = false }

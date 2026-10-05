@@ -120,3 +120,16 @@ test('the estimate prefers the measurement of an identical launch, but never goe
   // the measured number makes a launch that the formula called fine "does not fit" when the device is smaller
   expect(preferMeasured(estimate(1500), { at: 1, estimateMiB: [p.totalMiB], measuredMiB: [1600] }).tier).toBe('nofit')
 })
+
+test('a measurement does not turn an unknown current budget into ok', () => {
+  // shared memory whose device limit could not be read: the formula tier is unknown
+  const e = estimateMemory({ model: facts, params: { ctxSize: 4096, parallel: 1 }, devices: [{ id: 'MTL0', name: 'M', memory: 'shared', freeMiB: null }], system: { totalMiB: 16384, availableMiB: 12000 } })
+  expect(e.tier).toBe('unknown')
+  const p = e.pools[0]!
+  const m = preferMeasured(e, { at: 1, estimateMiB: [p.totalMiB], measuredMiB: [p.totalMiB] })
+  expect(m.basis).toBe('measured')
+  expect(m.tier).toBe('unknown')
+  // a measurement that exceeds what is known of the budget is still a definite "does not fit"
+  const big = preferMeasured(e, { at: 1, estimateMiB: [p.totalMiB], measuredMiB: [1e6] })
+  expect(big.tier).toBe('nofit')
+})

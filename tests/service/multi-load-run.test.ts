@@ -2,7 +2,7 @@
 // wrapper): two models online at once on different ports, a request that needs room unloads the least recently used
 // one and really kills its process, a refusal starts nothing, and shutting down leaves no process behind.
 import { afterAll, beforeAll, expect, test } from 'bun:test'
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { defaultSettings } from '../../server/core/config'
@@ -95,6 +95,42 @@ t('two models run at once on different ports; a third that needs room unloads th
   expect(isAlive(n.pid!)).toBe(false)
   expect(pidOf('o')).toBeUndefined()
   expect(ctx!.runner.list()).toEqual([])
+}, 30000)
+
+t('the measurement after a load is taken before the next load starts, and each load records only its own memory', async () => {
+  free(22000)
+  const realUsed = ctx!.measure.used
+  const calls: string[] = []
+  let releaseAfter!: (v: Array<number | null>) => void
+  let n = 0
+  ctx!.measure.used = (ids) => {
+    n++
+    calls.push(`call${n}`)
+    if (n === 1) return Promise.resolve(ids.map(() => 100)) // before the first load
+    if (n === 2) return new Promise(r => { releaseAfter = r }) // after the first load: held back
+    return Promise.resolve(ids.map(() => (n === 3 ? 1100 : 2100))) // the second load: before 1100, after 2100
+  }
+  try {
+    const a = ctx!.scheduler.acquire(target('m')).then(l => l.release())
+    const b = ctx!.scheduler.acquire(target('n')).then(l => l.release())
+    const end = Date.now() + 10000
+    while (n < 2 && Date.now() < end) await new Promise(r => setTimeout(r, 10))
+    expect(n).toBe(2)
+    await new Promise(r => setTimeout(r, 400))
+    // The first model is up but its measurement is pending: the second load has not begun (no reading, no process).
+    expect(n).toBe(2)
+    expect(pidOf('n')).toBeUndefined()
+    releaseAfter([1100])
+    await Promise.all([a, b])
+    expect(pidOf('n')).toBeDefined()
+    const entries = Object.values(JSON.parse(readFileSync(join(dir, 'vram-stats.json'), 'utf8')).entries as Record<string, { measuredMiB: number[] }>)
+    // First load: 1100 - 100; second load: 2100 - 1100. Neither contains the other's memory.
+    expect(entries.map(e => e.measuredMiB[0]!).sort((x, y) => x - y)).toEqual([1000, 1000])
+  } finally {
+    ctx!.measure.used = realUsed
+    await ctx!.scheduler.unload(target('m'))
+    await ctx!.scheduler.unload(target('n'))
+  }
 }, 30000)
 
 t('after room is back the models load again; shutting down leaves no process', async () => {

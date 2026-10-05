@@ -111,3 +111,27 @@ test('memory backend stores copies', async () => {
   await b.remove('1')
   expect(await b.all()).toEqual([])
 })
+
+test('streamChat: an error event inside a 200 stream is thrown with its message; earlier text was already delivered', async () => {
+  const got: string[] = []
+  const run = sse([
+    'data: {"choices":[{"delta":{"content":"par"}}]}\n\n',
+    'data: {"error":{"message":"memory refused","code":"insufficient_memory"}}\n\n',
+  ])
+  await expect(streamChat(run, { model: 'm', messages: [] }, new AbortController().signal, d => got.push(d.content), s => `HTTP ${s}`)).rejects.toThrow('memory refused')
+  expect(got).toEqual(['par'])
+  // an event without a usable message falls back to the generic text
+  await expect(streamChat(sse(['data: {"error":{}}\n\n']), { model: 'm', messages: [] }, new AbortController().signal, () => {}, s => `HTTP ${s}`)).rejects.toThrow('HTTP 200')
+})
+
+test('a removed conversation is not written back by a save that comes later', async () => {
+  const { memoryBackend, withTombstones } = await import('../../app/utils/chat-db')
+  const b = withTombstones(memoryBackend())
+  const s = { id: 'x', title: 't', model: 'm', renamed: false, createdAt: 1, updatedAt: 1, messages: [] } as ChatSession
+  await b.put(s)
+  await b.remove('x')
+  await b.put(s) // the end of a reply that was being generated
+  expect(await b.all()).toEqual([])
+  await b.put({ ...s, id: 'y' })
+  expect((await b.all()).map(x => x.id)).toEqual(['y'])
+})

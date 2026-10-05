@@ -346,6 +346,18 @@ describe('unload() for the watchdog', () => {
     expect(sched.stateOf(A)).toBe('stopped')
   })
 
+  test('idleOnly: a model with a request running is not unloaded, its lease is not aborted', async () => {
+    const { sched, procs } = setup()
+    const lease = await sched.acquire(A)
+    expect(await sched.unload(A, null, { idleOnly: true })).toBe(false)
+    expect(sched.stateOf(A)).toBe('ready')
+    expect(procs[0]!.stopped).toBe(false)
+    expect(lease.signal.aborted).toBe(false)
+    lease.release()
+    expect(await sched.unload(A, null, { idleOnly: true })).toBe(true)
+    expect(sched.stateOf(A)).toBe('stopped')
+  })
+
   test('candidates() carries load and use order', async () => {
     const { sched } = setup()
     ;(await sched.acquire(A)).release()

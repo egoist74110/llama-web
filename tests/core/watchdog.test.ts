@@ -15,9 +15,10 @@ function setup(cands: Candidate[], readings: () => PoolReading[] | null, enabled
   const dog = new Watchdog({
     sample: async () => readings(),
     candidates: () => live,
-    unload: async (target, cause) => {
+    unload: async (target, cause, opts) => {
       const i = live.findIndex(c => c.target.modelId === target.modelId)
       if (i < 0) return false
+      if (opts.idleOnly && live[i]!.inflight > 0) return false
       live.splice(i, 1)
       stops.push({ target, cause })
       return true
@@ -148,5 +149,44 @@ describe('Watchdog', () => {
     expect(seen).toBeGreaterThan(1)
     await Bun.sleep(40)
     expect(n).toBe(seen)
+  })
+
+  test('the most endangered pool has only busy models: another pool in danger is still handled', async () => {
+    const { dog, stops } = setup(
+      [cand('gpu', { inflight: 1, pools: ['CUDA0'] }), cand('cpu', { pools: [] })],
+      () => [pool('CUDA0', 24000, 20), pool('system', 16000, 300)],
+    )
+    expect(await dog.tick()).toEqual(T('cpu'))
+    expect(stops.map(s => s.target.modelId)).toEqual(['cpu'])
+  })
+
+  test('blocked is told only when no pool in danger has a model that can be stopped', async () => {
+    const { dog, stops, events } = setup([cand('gpu', { inflight: 1 })], () => [pool('CUDA0', 24000, 20), pool('system', 16000, 300)])
+    expect(await dog.tick()).toBeNull()
+    expect(stops).toEqual([])
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({ state: 'blocked', pool: 'CUDA0' })
+  })
+
+  test('a request that starts while the memory is being read protects its model', async () => {
+    const live = [cand('a')]
+    const stops: string[] = []
+    const dog = new Watchdog({
+      sample: async () => { live[0]!.inflight = 1; return [pool('CUDA0', 24000, 100)] },
+      candidates: () => live.map(c => ({ ...c })),
+      unload: async (t, _c, opts) => { if (opts.idleOnly && live[0]!.inflight > 0) return false; stops.push(t.modelId); return true },
+      enabled: () => true, onEvent: () => {},
+    })
+    expect(await dog.tick()).toBeNull()
+    expect(stops).toEqual([])
+  })
+
+  test('a request that arrives between the pick and the unload makes the unload refuse; nothing is reported stopped', async () => {
+    const { dog, stops, events, live } = setup([cand('a')], () => [pool('CUDA0', 24000, 100)])
+    const orig = (dog as any).deps.candidates
+    ;(dog as any).deps.candidates = () => { const r = orig(); live[0]!.inflight = 1; return r.map((c: Candidate) => ({ ...c, inflight: 0 })) }
+    expect(await dog.tick()).toBeNull()
+    expect(stops).toEqual([])
+    expect(events).toEqual([])
   })
 })

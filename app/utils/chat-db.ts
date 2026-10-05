@@ -19,6 +19,20 @@ export function memoryBackend(): ChatBackend {
   }
 }
 
+/**
+ * A removed conversation stays removed: a save that was already on its way (the end of a reply that was being
+ * generated when the conversation was deleted) is dropped instead of writing the conversation back.
+ */
+export function withTombstones(inner: ChatBackend): ChatBackend {
+  const removed = new Set<string>()
+  return {
+    persistent: inner.persistent,
+    all: () => inner.all(),
+    put: async (s) => { if (!removed.has(s.id)) await inner.put(s) },
+    remove: async (id) => { removed.add(id); await inner.remove(id) },
+  }
+}
+
 const DB = 'llama-web-chat'
 const STORE = 'sessions'
 

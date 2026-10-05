@@ -843,6 +843,11 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
     <li class="task" data-done="false"><span class="t">9-1 至 9-3 完成后做一轮交叉审查：多进程生命周期与残留清理、并发加载 / 卸载竞态、公网请求能否绕过显存拦截、预估偏低时的失败路径、状态机与 <code>/v1</code> 路由是否仍满足「没有 model 字段时用哪个模型」的规则</span><span class="when"></span></li>
   </ul>
 
+  <h3>9-5 · 审查意见修复（2026-10-05 审核报告 <code>docs/reviews/code-audit-2026-10-05.md</code>）</h3>
+  <ul class="tasks">
+    <li class="task" data-done="true"><span class="t">修复 CR-001 至 CR-007：未知资源优先于 risky、实测不抹掉未知预算、看门狗不卸载有请求的模型并遍历全部告急池、加载后实测纳入串行加载边界、对话识别 SSE 错误、删除会话不被收尾写回；每项有先失败后通过的测试。<b>没有真实 GPU / Windows 验证，也没有复审</b>，按报告要求仍需闭环复审</span><span class="when">2026-10-05</span></li>
+  </ul>
+
   <h3>9-4 · 界面（Sonnet 5.5）</h3>
   <ul class="tasks">
     <li class="task" data-done="true"><span class="t">编辑抽屉：实时「显存预估」条 + 明细（Mac / 纯 CPU 显示「内存预估」，Mac 无 GPU 字样）；保存时有风险 / 放不下的确认对话框；参数合理性警告列表（MemoryEstimate.vue 与 SaveRiskModal.vue，ProfileForm 与命令预览同一防抖调 POST /check；保存前再取一次最新读数，只有「有风险 / 放不下」才弹确认，「无法判断」不弹；文案选择在 app/utils/memory-check.ts。Mac 浏览器里看过；带「显存」字样的 Windows 路径只有单元测试，没在 Windows 上看过）</span><span class="when">2026-10-05</span></li>
@@ -927,6 +932,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 <section id="changelog">
   <h2>变更记录</h2>
   <table>
+    <tr><td>2026-10-05</td><td>9-5 处理 2026-10-05 审核报告的 7 项意见：<code>worstTier</code> 改为 <code>unknown</code> 高于 <code>risky</code>（与 <code>admission.ts</code> 一致）；<code>preferMeasured</code> 保留当前预算的未知性；看门狗在采样后重取候选、遍历全部告急池，并通过 <code>scheduler.unload(…, { idleOnly: true })</code> 在同一个 tick 内检查在途请求；加载后实测采样放进 <code>ready</code> 之前（5 秒超时，失败不影响加载），<code>exclusive</code> 由「期间没有其它模型状态变化」决定；对话流识别 200 响应里的 SSE <code>error</code>；已删除的会话不再被晚到的保存写回（<code>withTombstones</code>）。规则与决定未变。</td></tr>
     <tr><td>2026-10-05</td><td>9-4 多模型与显存保护界面完成（阶段 9 关口，等用户试用）：编辑抽屉的「显存 / 内存预估」条与明细、参数检查列表、保存时有风险 / 放不下的确认；设置页多开开关 / 在线上限 / 放不下时二选一；模型页行内占用与档位、手动启动的确认与「先停止其他模型」；总览「在线的模型」列表、侧栏列出全部在线模型。没有改任何规则；新增的界面文案里 Mac 无 GPU / 显存字样（含只在 Mac 出现的事件文案变体）。多卡「标出每张卡上的在线模型」只有单元测试，Windows 真机界面未看。</td></tr>
     <tr><td>2026-10-05</td><td>9-3 调度支持多开完成（用户先确认规则文字）：「核心行为规则」新增「多模型并行」一节，决定 9 改为已放开。<code>scheduler.multiLoad</code>（默认关）/ <code>maxLoaded</code> 1–99 / <code>onNoRoom</code>（卸载上一个 | 服务端报错）进入 settings（版本 10，迁移只补缺省）；调度在多开时加载前检查，请求触发放不下按设置处理（503 <code>insufficient_memory</code>），手动启动不卸载别人（409 limit / nofit / risky / unknown）；无 model 字段取最近使用的 ready 模型；运行期看门狗（5% 危险线）；加载成功后写 <code>vram-stats.json</code> 并让下次预估取实测；下载前剩余空间 ≥ 3 倍。设置页控件、模型页与总览显示属 9-4。Windows 真机回归未做。</td></tr>
     <tr><td>2026-10-05</td><td>9-2 保存时检查与参数合理性完成：<code>POST /api/models/:id/check</code>（单个方案，或 <code>all</code> 逐个方案分别算）与保存接口共用一套检查，返回显存 / 内存三档 + 逐池明细 + 参数警告；只有实测证实必然启动失败的三类组合拒绝保存（400，错误码 check-failed）。V 缓存量化且 flash-attn 关在 Mac b11146 + Qwen3.5-2B 上仅用 CPU 实测退出码 1；上下文超训练长度、ubatch &gt; batch、CPU 设备写大层数 / 视觉模型选 CPU、mlock &gt; 可用内存、并行槽过多按实测或规则只警告。「别的在线模型取实测」拆出为 9-3 的未完成项（需要先接线加载成功后的记录）。CUDA / Windows 未实测。</td></tr>

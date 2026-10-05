@@ -351,7 +351,8 @@ export function tierOf(totalMiB: number, budgetMiB: number | null): { ratio: num
   return { ratio, tier: ratio <= RISKY_FROM ? 'ok' : ratio <= 1 ? 'risky' : 'nofit' }
 }
 
-const WORSE: Tier[] = ['ok', 'unknown', 'risky', 'nofit']
+// `unknown` outranks `risky`: a pool that cannot be read must not be hidden by another pool's known risk.
+const WORSE: Tier[] = ['ok', 'risky', 'unknown', 'nofit']
 export const worstTier = (tiers: Tier[]): Tier => tiers.reduce<Tier>((w, t) => (WORSE.indexOf(t) > WORSE.indexOf(w) ? t : w), 'ok')
 
 /** Estimate the memory one launch takes, per pool, with the three tiers (`ok` / `risky` / `nofit`; `unknown` without a budget). */

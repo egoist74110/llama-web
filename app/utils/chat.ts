@@ -3,7 +3,7 @@
 // never inject HTML; only the constructs below turn into tags.
 
 export interface ChatStats { tokens: number | null, perSec: number | null }
-export interface ChatDelta { content: string, reasoning: string, done: boolean, stats: ChatStats | null }
+export interface ChatDelta { content: string, reasoning: string, done: boolean, stats: ChatStats | null, /** An error event of the stream (message, possibly empty). */ error?: string }
 
 /** Split a growing SSE text into complete `data:` payloads and the unfinished rest. */
 export function parseSse(buffer: string): { data: string[], rest: string } {
@@ -23,6 +23,8 @@ export function readDelta(payload: string): ChatDelta {
   if (payload.trim() === '[DONE]') return { ...none, done: true }
   let j: any
   try { j = JSON.parse(payload) } catch { return none }
+  // The proxy reports a failure after the stream has begun (load failed, no room) as a last event with an `error`.
+  if (j?.error) return { ...none, error: typeof j.error?.message === 'string' && j.error.message ? j.error.message : typeof j.error === 'string' ? j.error : '' }
   const d = j?.choices?.[0]?.delta
   const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
   const timings = j?.timings
@@ -208,6 +210,11 @@ export async function streamChat(
     buf = rest
     for (const p of data) {
       const d = readDelta(p)
+      // Text that arrived before stays with the caller; the failure is thrown so it is shown next to it.
+      if (d.error !== undefined) {
+        reader.cancel().catch(() => {})
+        throw new Error(d.error || failed(res.status))
+      }
       if (d.stats) stats = d.stats
       onDelta(d)
     }

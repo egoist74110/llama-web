@@ -434,9 +434,9 @@ export class Scheduler {
 
   /**
    * Unload one target (not its model's other profiles). A load in progress is aborted and the requests waiting for it
-   * get `cause`; a ready one is drained and unloaded as usual. False when it is not loading or ready.
+   * get `cause`; a ready one is drained and unloaded as usual. False when it is not loading or ready, or (`idleOnly`) has a request running.
    */
-  async unload(target: Target, cause: NoRoomDetail | null = null): Promise<boolean> {
+  async unload(target: Target, cause: NoRoomDetail | null = null, opts: { idleOnly?: boolean } = {}): Promise<boolean> {
     const inst = this.instances.get(keyOf(target))
     if (!inst) return false
     if (inst.state === 'loading') {
@@ -445,6 +445,8 @@ export class Scheduler {
       return true
     }
     if (inst.state !== 'ready') return false
+    // The check and the move to draining happen in the same tick, so no request can slip in between.
+    if (opts.idleOnly && inst.inflight.size > 0) return false
     await this.evict(inst, false)
     return true
   }
