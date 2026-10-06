@@ -1,7 +1,7 @@
 // External upstreams (decision 56): names, addresses, prefix routing and the edits on the document.
 import { describe, expect, test } from 'bun:test'
 import {
-  cleanBaseUrl, createUpstream, defaultUpstreams, findExternal, listExternalNames, localConflict, upstreamPrefixClash, modelIdsOf, normalizeUpstreams,
+  cleanBaseUrl, createUpstream, defaultUpstreams, findExternal, listExternalNames, localConflict, selfPortsOf, upstreamPrefixClash, modelIdsOf, normalizeUpstreams,
   parseModelList, recordTest, removeUpstream, updateUpstream, UpstreamError, viewUpstreams, type EditContext, type UpstreamsDoc,
 } from '../../server/core/upstreams'
 import { defaultSecrets, normalizeSecrets, SECRETS_MIGRATIONS, SECRETS_VERSION } from '../../server/core/keys'
@@ -49,6 +49,13 @@ describe('names and routing', () => {
     expect(() => createUpstream(d, { name: 'Alpha', baseUrl: 'http://x/v1' }, ctx)).not.toThrow()
     expect(localConflict('Qwen3', ['Qwen3-8B'])).toBe('Qwen3-8B')
     expect(localConflict('Qwen', ['Qwen3-8B'])).toBeNull()
+  })
+
+  test('the public port is ours only while the public entry really listens', () => {
+    expect(selfPortsOf(5001, 5001, { state: 'listening', port: 8080 })).toEqual([5001, 5001, 8080])
+    // Switched on but the port is taken by another engine: not ours, an upstream there is fine.
+    expect(selfPortsOf(5001, 5001, { state: 'error', port: 8080 })).toEqual([5001, 5001])
+    expect(selfPortsOf(5001, 5001, { state: 'off' })).toEqual([5001, 5001])
   })
 
   test('a local model name is checked against the prefixes the other way round', () => {

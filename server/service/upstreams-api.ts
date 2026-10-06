@@ -1,7 +1,7 @@
 // Shared by the /api/upstreams routes: the list the page shows, the edit context and error mapping.
 import { fmt, t } from '../core/i18n'
 import { StoreError } from '../core/store'
-import { UpstreamError, viewUpstreams, type ConnectionView, type EditContext } from '../core/upstreams'
+import { selfPortsOf, UpstreamError, viewUpstreams, type ConnectionView, type EditContext } from '../core/upstreams'
 import { getContext } from './context'
 
 export function describeUpstreams(): { upstreams: ConnectionView[], exclusiveHolder: string | null } {
@@ -12,11 +12,12 @@ export function describeUpstreams(): { upstreams: ConnectionView[], exclusiveHol
   return { upstreams, exclusiveHolder: ctx.health.holder() }
 }
 
-/** Local model names (a prefix must not shadow them) and the ports llama-web itself listens on (no forwarding loops; the public port only while the public entry is on, since 8080 is also where other engines like to live). */
+/** Local model names (a prefix must not shadow them) and the ports llama-web itself listens on (no forwarding loops; the public port only while the public entry is really listening (not merely switched on: its port may be taken by another engine, like :8080), since 8080 is also where other engines like to live). */
 export function editContext(): EditContext {
   const ctx = getContext()
   const s = ctx.getSettings()
-  return { localNames: ctx.getModels().models.map(m => m.name), selfPorts: [s.server.port, ctx.bootPort, ...(s.public.enabled ? [s.public.port] : [])] }
+  const pub = ctx.publicEntry.status()
+  return { localNames: ctx.getModels().models.map(m => m.name), selfPorts: selfPortsOf(s.server.port, ctx.bootPort, pub) }
 }
 
 /** An API key from a form: undefined = keep, '' = remove, otherwise the new one. */

@@ -203,6 +203,14 @@ export interface UpstreamForm {
   manualModels?: unknown
 }
 
+/**
+ * Ports llama-web itself answers on. The public port counts only while the public entry is really listening: switched on
+ * but failed to bind (another engine owns :8080) it is not ours, and an upstream there is legitimate.
+ */
+export function selfPortsOf(serverPort: number, bootPort: number, publicEntry: { state: string, port?: number }): number[] {
+  return [serverPort, bootPort, ...(publicEntry.state === 'listening' && publicEntry.port ? [publicEntry.port] : [])]
+}
+
 export interface EditContext {
   localNames: readonly string[]
   selfPorts: readonly number[]
