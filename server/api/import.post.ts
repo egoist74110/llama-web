@@ -17,14 +17,15 @@ export default defineEventHandler(async (event) => {
   const dryRun = body?.dryRun === true
 
   const ctx = getContext()
+  const upstreamPrefixes = ctx.getUpstreams().upstreams.map(u => u.name)
   let result
   try {
     // Slow part (read + scan) first; then plan against the latest documents and save in one
     // synchronous step, so config changes made during the scan are not overwritten.
     const src = await readImportSource({ configPath: path, settings: ctx.getSettings() })
     result = dryRun
-      ? buildImport(src, { dataDir: ctx.dataDir, settings: ctx.getSettings(), models: ctx.getModels(), dryRun: true })
-      : commitImport(src, ctx)
+      ? buildImport(src, { dataDir: ctx.dataDir, settings: ctx.getSettings(), models: ctx.getModels(), upstreamPrefixes, dryRun: true })
+      : commitImport(src, ctx, upstreamPrefixes)
   } catch (e) {
     if (e instanceof ImportError) {
       throw createError({ statusCode: 400, message: fmt(t.import.errors[e.code], { detail: e.message }) })

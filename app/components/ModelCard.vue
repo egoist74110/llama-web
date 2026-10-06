@@ -17,6 +17,8 @@ const state = computed(() => shown.value?.state ?? 'stopped')
 const queued = computed(() => state.value === 'stopped' && !!live.value?.queue.some(q => q.modelId === props.model.id))
 const otherProfile = computed(() => (shown.value && shown.value.profile !== props.model.activeProfile ? shown.value.profile : null))
 const missing = computed(() => props.model.missing)
+// An external service holds the machine (decision 56 ⑨): local models cannot start while it does.
+const holder = computed(() => live.value?.exclusiveHolder ?? null)
 const failed = computed(() => state.value === 'failed' || state.value === 'crashed')
 const winding = computed(() => state.value === 'draining' || state.value === 'unloading')
 const editing = ref(false)
@@ -83,7 +85,7 @@ const working = computed(() => !!(busy.value[`start:${props.model.id}`] || busy.
           size="sm"
           icon="i-lucide-play"
           class="min-w-[76px] justify-center"
-          :disabled="missing.length > 0"
+          :disabled="missing.length > 0 || !!holder"
           :loading="working"
           @click="onStart"
         >
@@ -94,7 +96,7 @@ const working = computed(() => !!(busy.value[`start:${props.model.id}`] || busy.
           size="sm"
           icon="i-lucide-rotate-cw"
           class="min-w-[76px] justify-center"
-          :disabled="missing.length > 0"
+          :disabled="missing.length > 0 || !!holder"
           :loading="working"
           @click="retry(model.id, shown?.profile)"
         >
@@ -120,6 +122,9 @@ const working = computed(() => !!(busy.value[`start:${props.model.id}`] || busy.
       <div class="lw-bar warn flex-1"><span :style="{ width: `${progress ?? 0}%` }" /></div>
       <span v-if="progress !== null" class="lw-num w-10 text-right font-mono text-xs text-muted">{{ progress }}%</span>
     </div>
+    <p v-if="holder && (state === 'stopped' || failed)" class="m-0 flex items-center gap-1.5 text-xs text-muted">
+      <UIcon name="i-lucide-lock" class="size-3.5 shrink-0 lw-dot-warn" />{{ fmt(t.upstreams.page.blocked, { holder }) }}
+    </p>
     <p v-if="otherProfile" class="m-0 text-xs text-muted">
       {{ fmt(t.models.card.runningProfile, { profile: otherProfile }) }}
     </p>

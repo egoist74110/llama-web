@@ -151,6 +151,14 @@ test('a different template with the same name gets a new name; an identical one 
   expect(second.models.models[0]!.profiles['默认']!.chatTemplate).toBe('my-imported.jinja')
 })
 
+test('import skips a model whose name an upstream prefix would shadow', async () => {
+  writeGguf(join(root, 'Strata-Big-Q4_0.gguf'), modelSpec())
+  writeGguf(join(root, 'Plain-Q4_0.gguf'), modelSpec())
+  const { report } = await run(writeConfig(), { upstreamPrefixes: ['strata'] })
+  expect(report.imported.map(m => m.name)).toEqual(['Plain'])
+  expect(report.warnings.map(w => `${w.code}:${w.subject}:${w.detail}`)).toEqual(['upstream-conflict:Strata-Big:strata'])
+})
+
 test('dry run copies nothing', async () => {
   writeGguf(join(root, 'A-Q4_0.gguf'), modelSpec())
   const tpl = join(tmp, 'my.jinja')

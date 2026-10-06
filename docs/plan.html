@@ -888,7 +888,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
     <li class="task" data-done="true"><span class="t">新增纯模块 <code>server/core/upstreams.ts</code>：配置读写（<code>data/upstreams.json</code>，version、原子写入、备份）、前缀与 baseURL 校验（唯一、不与本地模型名冲突、不指向自己的端口）、上游 key 存 <code>secrets.json</code>（升版本 + 迁移）、模型 id ↔ 客户端名映射</span><span class="when">2026-10-06</span></li>
     <li class="task" data-done="true"><span class="t"><code>routing.ts</code> / <code>proxy.ts</code>：命中外部模型走新分支（复用预处理，按上游的压缩开关；去掉客户端 Authorization、换上游 key；不经 scheduler；流式透传与断开中止；502 中文错误）；本地路径行为不变；<code>/v1/models</code> 合并外部模型名；空 model 不落到外部</span><span class="when">2026-10-06</span></li>
     <li class="task" data-done="true"><span class="t">管理接口 <code>/api/upstreams</code>：列表、增、改、删、测试连接（请求上游 <code>/v1/models</code> 并缓存模型列表）、手填模型 id；上游保存时检查与本地模型名冲突；写请求沿用跨来源 / 非 JSON 拒绝</span><span class="when">2026-10-06</span></li>
-    <li class="task" data-done="false"><span class="t">本地侧防冲突：新建 / 改名本地模型时检查它的名字不以已有上游前缀开头（现在只有「上游保存时检查」+「路由时本地同名模型优先、不会被遮住」，后者让这个外部模型静默不可达）</span><span class="when"></span></li>
+    <li class="task" data-done="true"><span class="t">本地侧防冲突：新建 / 改名本地模型时检查它的名字不以已有上游前缀开头（现在只有「上游保存时检查」+「路由时本地同名模型优先、不会被遮住」，后者让这个外部模型静默不可达；2026-10-06 做完：启用模型 <code>planEnable</code> 与导入旧配置都会拒绝 / 跳过，本地模型目前没有「改名」入口）</span><span class="when">2026-10-06</span></li>
     <li class="task" data-done="true"><span class="t">测试：路由命中与前缀还原、key 替换且不泄露（响应、日志、事件）、客户端 Authorization 不转发、名称冲突拒绝、公网来源仍强制鉴权且外部模型同样受保护、断开中止上游、压缩开关三态、旧配置缺 <code>upstreams.json</code> 时正常</span><span class="when">2026-10-06</span></li>
   </ul>
 
@@ -906,8 +906,8 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 
   <h3>10-2 · 「接入」页（Sonnet 5.5）</h3>
   <ul class="tasks">
-    <li class="task" data-done="false"><span class="t">左侧菜单「接入」与页面 <code>/connections</code>：上游卡片列表（名称、地址、状态、模型数、监控页跳转）、添加 / 编辑 / 删除（二次确认）、测试连接、模型列表与手填、图片压缩三态、「在本机运行」与「独占本机」开关（运行中且独占时，模型页启动按钮置灰并说明原因）；用 <code>AppCard</code> 与 <code>useLive()</code>，文案全部在 <code>i18n/zh-CN.ts</code>，不写死中文</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">总览 / 日志里外部请求的模型名显示前缀；模型页不混入外部模型（它们不是本地模型）；深浅色与窄屏检查</span><span class="when"></span></li>
+    <li class="task" data-done="true"><span class="t">左侧菜单「接入」与页面 <code>/connections</code>：上游卡片列表（名称、地址、状态、模型数、监控页跳转）、添加 / 编辑 / 删除（二次确认）、测试连接、模型列表与手填、图片压缩三态、「在本机运行」与「独占本机」开关（运行中且独占时，模型页启动按钮置灰并说明原因）；用 <code>AppCard</code> 与 <code>useLive()</code>，文案全部在 <code>i18n/zh-CN.ts</code>，不写死中文</span><span class="when">2026-10-06</span></li>
+    <li class="task" data-done="true"><span class="t">总览 / 日志里外部请求的模型名显示前缀；模型页不混入外部模型（它们不是本地模型）；深浅色与窄屏检查</span><span class="when">2026-10-06</span></li>
     <li class="task" data-done="false"><span class="t">真实验证：用一个真实的外部 OpenAI 兼容服务（如本机的另一个引擎）走完一次文字请求、一次带图请求（确认压缩生效）、一次公网 / 隧道来源请求（确认必须带 llama-web 的 key）；没条件验证的如实标注</span><span class="when"></span></li>
   </ul>
 
@@ -978,6 +978,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 <section id="changelog">
   <h2>变更记录</h2>
   <table>
+    <tr><td>2026-10-06</td><td>10-2 完成：「接入」页（<code>/connections</code>）、模型页启动按钮在独占时置灰、总览 / 模型页 / 接入页的独占提示；本地侧防冲突补上（启用模型与导入旧配置遇到上游前缀时拒绝 / 跳过）。规则没有变化。</td></tr>
     <tr><td>2026-10-06</td><td>决定 56 增加 ⑨「独占本机」（用户确认）：上游可标「在本机运行」，默认「独占本机」开——探测到该上游运行时卸载全部本地 llama-server 并拒绝一切本地加载，关掉后回到阶段 9 的显存保护；不做显存预留与进程测量。阶段 10 新增 10-1b。</td></tr>
     <tr><td>2026-10-06</td><td>新增阶段 10「外部接入」与关键决定 56（用户确认）：把别人的 OpenAI 兼容服务当二等公民上游转发，模型名带上游前缀（<code>前缀-上游id</code>，前缀冲突直接拒绝），复用图片压缩（每个上游可开 / 关 / 沿用全局）与公网鉴权；左侧新增菜单「接入」。「不做什么」里「不支持其他后端」改为「不深度适配」。只改计划，尚未写代码。</td></tr>
     <tr><td>2026-10-05</td><td>用户要求「思考模式设成 off 就必须不思考」：请求路由新增一条——方案最终思考模式为 off 时，代理把请求里的 <code>chat_template_kwargs.enable_thinking</code> 强制改为 <code>false</code>（请求里没有该字段则不加）。起因：客户端每次都发 <code>enable_thinking: true</code>，会盖过 <code>--reasoning off</code>。实现在 <code>server/core/thinking-guard.ts</code>，只看 GPU 全局默认（CPU 版全局默认的思考值不参与判断）</td></tr>

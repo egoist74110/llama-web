@@ -107,6 +107,7 @@ const tokens = (n: number | null) => (n === null ? '–' : n.toLocaleString('zh-
     </div>
 
     <template v-else>
+      <ExclusiveNotice />
       <OverviewHero />
       <OnlineModels v-if="online > 1" />
 

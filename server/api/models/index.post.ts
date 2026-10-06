@@ -19,14 +19,14 @@ export default defineEventHandler(async (event) => {
     let created: ModelConfig | undefined
     // planEnable runs inside the update so a concurrent enable cannot create a duplicate.
     ctx.updateModels((doc) => {
-      created = planEnable(entry, doc)
+      created = planEnable(entry, doc, ctx.getUpstreams().upstreams.map(u => u.name))
       doc.models.push(created)
     })
     return { model: created }
   } catch (e) {
     if (e instanceof EnableError) {
       const status = e.code === 'not-found' ? 404 : 409
-      throw createError({ statusCode: status, message: fmt(t.models.errors[e.code], { file: body.rel }) })
+      throw createError({ statusCode: status, message: fmt(t.models.errors[e.code], { file: body.rel, prefix: e.detail }) })
     }
     throw e
   }

@@ -8,6 +8,7 @@ import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 
 import { DEFAULT_LAUNCH_DEFAULTS, PARAM_DEFS, quoteArg, splitArgs, type LaunchDefaults, type ParamKey, type ParamValue } from './args'
 import type { ModelConfig, ModelsDoc, Settings } from './config'
 import { scanModelDirs, type ScanEntry, type ScanResult } from './scanner'
+import { upstreamPrefixClash } from './upstreams'
 import type { FileRef, ModelDir } from './types'
 
 export type ImportErrorCode = 'unreadable' | 'invalid-json' | 'no-models-root' | 'config-invalid'
@@ -35,6 +36,7 @@ export type ImportWarningCode =
   | 'template-missing'
   | 'bad-extra-args'
   | 'draft-outside-root'
+  | 'upstream-conflict'
 
 export interface ImportWarning {
   code: ImportWarningCode
@@ -165,6 +167,8 @@ export interface PlanInput {
   existing: ModelsDoc
   /** Directory of the config file, for resolving relative template paths. */
   configDir: string
+  /** Upstream prefixes: a model whose name starts with `<prefix>-` is skipped (decision 56). */
+  upstreamPrefixes?: readonly string[]
   fileExists?: (path: string) => boolean
 }
 
@@ -227,6 +231,11 @@ export function planImport(input: PlanInput): PlanResult {
     if (excluded.has(alias.toLowerCase())) continue
     if (usedNames.has(alias.toLowerCase())) {
       warnings.push({ code: 'already-exists', subject: alias })
+      continue
+    }
+    const clash = upstreamPrefixClash(alias, input.upstreamPrefixes ?? [])
+    if (clash) {
+      warnings.push({ code: 'upstream-conflict', subject: alias, detail: clash })
       continue
     }
     const entry = byAlias.get(alias)!
@@ -400,7 +409,7 @@ function removeTemplates(dataDir: string, names: string[]): boolean {
  * The fast, synchronous half: plan against the given documents and copy templates (unless
  * dryRun). Being synchronous, it can run against the latest documents right before saving.
  */
-export function buildImport(src: ImportSource, opts: { dataDir: string, settings: Settings, models: ModelsDoc, dryRun?: boolean }): ImportResult {
+export function buildImport(src: ImportSource, opts: { dataDir: string, settings: Settings, models: ModelsDoc, upstreamPrefixes?: readonly string[], dryRun?: boolean }): ImportResult {
   const { config } = src
   const settings = structuredClone(opts.settings)
   let dir = settings.modelDirs.find(d => samePath(d.path, config.modelsRoot))
@@ -415,7 +424,7 @@ export function buildImport(src: ImportSource, opts: { dataDir: string, settings
   const warnings: ImportWarning[] = scan.warnings.filter(w => w.rel === '').map(() => ({ code: 'models-root-missing' as const, subject: config.modelsRoot }))
 
   const plan = planImport({
-    config, dir: scanDir, scan, settings, existing: opts.models, configDir: dirname(resolve(src.configPath)),
+    config, dir: scanDir, scan, settings, existing: opts.models, configDir: dirname(resolve(src.configPath)), upstreamPrefixes: opts.upstreamPrefixes,
   })
   warnings.push(...plan.warnings)
 
@@ -481,7 +490,7 @@ export interface ImportTarget {
  * setting `current`, a hand edit, which is re-read from disk first). If a save fails, whatever this import already
  * wrote is undone; ImportSaveError.rolledBack says whether that worked.
  */
-export function commitImport(src: ImportSource, target: ImportTarget): ImportResult {
+export function commitImport(src: ImportSource, target: ImportTarget, upstreamPrefixes: readonly string[] = []): ImportResult {
   // Hand edits already on disk but not yet reloaded by the watcher count as "latest" too.
   try {
     target.refresh?.()
@@ -489,7 +498,7 @@ export function commitImport(src: ImportSource, target: ImportTarget): ImportRes
     throw new ImportError('config-invalid', (e as Error).message)
   }
   const prevSettings = structuredClone(target.getSettings())
-  const result = buildImport(src, { dataDir: target.dataDir, settings: target.getSettings(), models: target.getModels() })
+  const result = buildImport(src, { dataDir: target.dataDir, settings: target.getSettings(), models: target.getModels(), upstreamPrefixes })
   if (result.report.imported.length === 0) return result
   let settingsSaved = false
   try {

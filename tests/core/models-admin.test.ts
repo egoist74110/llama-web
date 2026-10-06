@@ -48,6 +48,17 @@ describe('planEnable', () => {
     expect(m.id).toBe('x-model-2')
   })
 
+  test('refuses a name that an upstream prefix would shadow (decision 56), case-insensitively', () => {
+    let err: unknown
+    try { planEnable(entry('a/Strata-Local-Q4_K_M.gguf'), doc(), ['strata']) } catch (e) { err = e }
+    expect(err).toBeInstanceOf(EnableError)
+    expect((err as EnableError).code).toBe('upstream-conflict')
+    expect((err as EnableError).detail).toBe('strata')
+    // The prefix alone (no dash after it) and unrelated prefixes are fine.
+    expect(planEnable(entry('a/Strata-Q4_K_M.gguf'), doc(), ['strata']).name).toBe('Strata')
+    expect(planEnable(entry('a/Strata-Local-Q4_K_M.gguf'), doc(), ['other']).name).toBe('Strata-Local')
+  })
+
   test('refuses what cannot be a model', () => {
     const code = (fn: () => unknown) => {
       try { fn() } catch (e) { return e instanceof EnableError ? e.code : 'other' }

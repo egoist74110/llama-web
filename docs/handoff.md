@@ -1,5 +1,12 @@
 # 交接记录
 
+## 2026-10-06 · 10-2「接入」页 + 本地侧防冲突 · Claude
+- 依据：计划阶段 10 / 关键决定 56；后端规则没有改。
+- 做了：① 左侧菜单「接入」与 `app/pages/connections.vue`：数据只来自 `useLive()` 的 `state.connections` / `exclusiveHolder`；上游卡片（名称与前缀说明、地址、在线状态、模型数、最近检测、监控页新窗口链接、「在本机运行」、「独占本机」（仅本机运行时出现并带大白话说明）、图片压缩三选一、API key 是否已保存、测试连接、编辑、删除二次确认）；开关与压缩是即时保存（先本地显示，下一个快照覆盖）。添加 / 编辑用 `UpstreamEditor.vue`（抽屉；key 留空不改，可「清除」；手填模型 id 每行一个），服务端中文 message 原样显示；新添加后自动测一次连接。② `ExclusiveNotice.vue`：独占时在总览、模型页、接入页显示一条提示；`ModelCard` 的启动 / 重试置灰并写明「被外部服务「X」占着机器」。③ 本地侧防冲突：`upstreamPrefixClash()`；`planEnable` 抛 `EnableError('upstream-conflict')`（启用接口返回中文提示），导入旧配置时跳过并给 `upstream-conflict` 警告。本地模型目前没有「改名」入口，所以只有这两处会产生名字。④ 文案全在 `i18n/zh-CN.ts`（`nav.connections`、`upstreams.page / form / remove`、`models.errors.upstream-conflict`、`import.warnings.upstream-conflict`）。
+- 验证：`bun test` 1412 pass / 5 skip / 0 fail；`bun run typecheck` 通过（新增 3 项测试：planEnable 冲突、导入跳过、`upstreamPrefixClash`）。浏览器（`nuxt dev`，临时数据目录 `LLAMA_WEB_DATA`，已停服务并删除）实际走过：添加 `http://127.0.0.1:8080/v1`（无密钥）→ 在线、自动测试连接找到 1 个模型 → 压缩切「开」→ 经 llama-web `:3100/v1` 发一次文字请求 200（日志「请求」页模型名为 `Lab-qwen3.8-flash-next-iq3_xxs`）；模型页不混入外部模型、启动按钮置灰带原因；独占时调用启动接口，事件页显示「外部服务「Lab」正在独占本机，没有加载」；浅色桌面、深色 375 宽窄屏、删除确认框、重名错误提示都看过。
+- **没验证 / 没做**：没有 build / 打包后的 Bun 入口；没有真实带图请求、公网 / 隧道来源请求（10-1 冒烟时带图已验过，这次没重复；公网来源只有单元测试）；独占只用了没有本地模型在线的场景，没有占 GPU；`/api/models` 启用接口的冲突分支只有 `planEnable` 的单元测试，没有用真实 GGUF 走 HTTP（测试用的占位文件不是合法 GGUF）；抽屉里的「清除 key」按钮没在浏览器里点过；窄屏只看了接入页，没看总览 / 模型页的提示条。plan 里「真实验证」一项因公网 / 隧道没验，没有打勾。交叉审查（10-1 / 10-1b）仍未做。
+- 下一步：等用户试用 10-2；之后做 10-1 / 10-1b 的交叉审查，再补公网来源的真实验证。不自动发版。
+
 ## 2026-10-06 · 10-1 外部上游核心 + 10-1b 独占本机 · Claude
 - 依据：计划关键决定 56 / 阶段 10（用户 2026-10-06 在会话里确认；「在本机运行」默认开、「独占本机」默认开）。
 - 做了：① `server/core/upstreams.ts`（纯模块：校验、`<前缀>-<id>` 路由、增改删、视图；`data/upstreams.json` version 1）；上游 key 存 `secrets.json` 新字段 `upstreamKeys`（升到 version 3 → 4，有迁移）。② `proxy.ts`：命中外部模型走 `forwardExternal`（复用预处理，按上游「沿用全局 / 开 / 关」；丢客户端 `Authorization`、换上游 key；不经 scheduler；复用 `forward()` 的流式透传与断开中止；502 `upstream_unreachable`）；`/v1/models` 与 `/v1/models/:name` 合并外部名；本地同名模型优先（不被遮住）；空 model 不落到外部。③ `upstream-health.ts`（每 5 秒探测 `GET baseUrl/models`，连续 3 次失败才算不通）+ `scheduler` 新选项 `blocked` / 拒绝原因 `exclusive`（带 `holder`）+ `ModelOps.stopAll()` / `anyUp()`；`context.ts` 接线：独占上游在线时每轮探测后卸载全部本地模型（先排空），并拒绝一切本地加载。④ 管理接口 `/api/upstreams`（列表、增、改、删、测试连接），实时快照增加 `connections` / `exclusiveHolder`；文案在 `i18n/zh-CN.ts` 的 `upstreams`、`api.noRoom.exclusive`、`api.externalUnreachable`。

@@ -184,6 +184,12 @@ export function localConflict(prefix: string, localNames: readonly string[]): st
   return localNames.find(n => n.toLowerCase().startsWith(p)) ?? null
 }
 
+/** The upstream prefix a new local model name would be shadowed by (`Prefix-...`, case-insensitive), or null. */
+export function upstreamPrefixClash(modelName: string, prefixes: readonly string[]): string | null {
+  const n = modelName.toLowerCase()
+  return prefixes.find(p => n.startsWith(`${p.toLowerCase()}-`)) ?? null
+}
+
 // ---------------------------------------------------------------------------------------
 // Edits (on a draft of the document)
 

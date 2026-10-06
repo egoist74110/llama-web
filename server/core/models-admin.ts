@@ -6,6 +6,7 @@ import { applyGpuChoice, hasGpuFields, sanitizeGpuChoice } from './gpu-group'
 import { ArgsSyntaxError, normalizeDevice, PARAM_DEFS, paramValueOk, splitArgs, type ParamOverrides, type ParamValue } from './args'
 import { DEFAULT_PROFILE, type ModelConfig, type ModelsDoc, type Profile } from './config'
 import { aliasOf } from './importer'
+import { upstreamPrefixClash } from './upstreams'
 import { parseRuntimeRef } from './runtimes'
 import { resolveFileRef, type ScanEntry } from './scanner'
 import type { FileRef, ModelDir } from './types'
@@ -18,10 +19,11 @@ export { DEFAULT_PROFILE } from './config'
 
 export type ModelFile = 'model' | 'mmproj' | 'draft'
 
-export type EnableErrorCode = 'not-found' | 'not-model' | 'incomplete' | 'already-enabled'
+export type EnableErrorCode = 'not-found' | 'not-model' | 'incomplete' | 'already-enabled' | 'upstream-conflict'
 
 export class EnableError extends Error {
-  constructor(public code: EnableErrorCode, message = code) {
+  /** `upstream-conflict`: the upstream prefix the name would collide with. */
+  constructor(public code: EnableErrorCode, message = code, public detail = '') {
     super(message)
     this.name = 'EnableError'
   }
@@ -63,7 +65,7 @@ export function enabledIdOf(doc: ModelsDoc, ref: FileRef): string | null {
  * default profile, no mmproj / draft (same-directory candidates are only offered, never
  * picked). Throws EnableError.
  */
-export function planEnable(entry: ScanEntry | undefined, doc: ModelsDoc): ModelConfig {
+export function planEnable(entry: ScanEntry | undefined, doc: ModelsDoc, upstreamPrefixes: readonly string[] = []): ModelConfig {
   if (!entry) throw new EnableError('not-found')
   if (entry.kind !== 'model') throw new EnableError('not-model')
   if (!entry.complete) throw new EnableError('incomplete')
@@ -74,6 +76,9 @@ export function planEnable(entry: ScanEntry | undefined, doc: ModelsDoc): ModelC
   const ids = new Set(doc.models.map(m => m.id))
   let name = base
   for (let n = 2; names.has(name.toLowerCase()); n++) name = `${base}-${n}`
+  // A name starting with an upstream's `<prefix>-` would be shadowed by that upstream's models (decision 56).
+  const clash = upstreamPrefixClash(name, upstreamPrefixes)
+  if (clash) throw new EnableError('upstream-conflict', 'upstream-conflict', clash)
   const idBase = slug(name)
   let id = idBase
   for (let n = 2; ids.has(id); n++) id = `${idBase}-${n}`

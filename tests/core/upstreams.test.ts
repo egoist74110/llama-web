@@ -1,7 +1,7 @@
 // External upstreams (decision 56): names, addresses, prefix routing and the edits on the document.
 import { describe, expect, test } from 'bun:test'
 import {
-  cleanBaseUrl, createUpstream, defaultUpstreams, findExternal, listExternalNames, localConflict, modelIdsOf, normalizeUpstreams,
+  cleanBaseUrl, createUpstream, defaultUpstreams, findExternal, listExternalNames, localConflict, upstreamPrefixClash, modelIdsOf, normalizeUpstreams,
   parseModelList, recordTest, removeUpstream, updateUpstream, UpstreamError, viewUpstreams, type EditContext, type UpstreamsDoc,
 } from '../../server/core/upstreams'
 import { defaultSecrets, normalizeSecrets, SECRETS_MIGRATIONS, SECRETS_VERSION } from '../../server/core/keys'
@@ -49,6 +49,12 @@ describe('names and routing', () => {
     expect(() => createUpstream(d, { name: 'Alpha', baseUrl: 'http://x/v1' }, ctx)).not.toThrow()
     expect(localConflict('Qwen3', ['Qwen3-8B'])).toBe('Qwen3-8B')
     expect(localConflict('Qwen', ['Qwen3-8B'])).toBeNull()
+  })
+
+  test('a local model name is checked against the prefixes the other way round', () => {
+    expect(upstreamPrefixClash('Strata-Local', ['strata'])).toBe('strata')
+    expect(upstreamPrefixClash('Strata', ['strata'])).toBeNull()
+    expect(upstreamPrefixClash('Stratagem-1', ['strata'])).toBeNull()
   })
 
   test('<prefix>-<id> finds the upstream and its own model id, with any dashes after the first', () => {

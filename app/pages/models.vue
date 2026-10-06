@@ -32,6 +32,8 @@ const shown = computed(() => (needle.value ? list.value.filter(m => m.name.toLow
   <div class="flex flex-col gap-[18px]">
     <PageHeader :title="t.models.title" :subtitle="t.models.enabled.hint" />
 
+    <ExclusiveNotice />
+
     <div class="flex flex-wrap items-center justify-between gap-2.5">
       <div class="lw-seg" role="tablist">
         <button
