@@ -221,12 +221,12 @@ const checkError = ref('')
 const checking = ref(false)
 let checkSeq = 0
 
-async function refreshCheck() {
+async function refreshCheck(fresh = false) {
   const mine = ++checkSeq
   checking.value = true
   try {
     const r = await $fetch<CheckDoc>(`/api/models/${encodeURIComponent(props.modelId)}/check`, {
-      method: 'POST', body: { profile: props.name, form: toForm(), files: props.files },
+      method: 'POST', body: { profile: props.name, form: toForm(), files: props.files, ...(fresh ? { fresh: true } : {}) },
     })
     if (mine === checkSeq) { check.value = r; checkError.value = '' }
   } catch (e) {
@@ -290,7 +290,7 @@ const globalExtra = computed(() => props.defaults.extraArgs?.trim())
           {{ edit.form.commonTitle }}
         </h4>
         <p class="text-xs text-muted">
-          {{ edit.form.commonHint }} {{ edit.form.hint }}
+          {{ formHintText('commonHint', ui.isMac) }} {{ edit.form.hint }}
         </p>
       </div>
       <div v-else-if="b.id === 'mtp'" class="space-y-2">
@@ -345,7 +345,7 @@ const globalExtra = computed(() => props.defaults.extraArgs?.trim())
         <component :is="b.id === 'common' ? 'div' : 'details'" :open="b.id === 'cpu' ? advancedOpen || undefined : b.id === 'more' ? moreOpen || undefined : undefined" :class="b.id === 'common' ? 'mt-1' : 'border-t border-default'">
           <summary v-if="b.id !== 'common'" class="cursor-pointer select-none py-3 text-sm font-medium text-highlighted">
             {{ b.id === 'cpu' ? rd.advanced : edit.form.moreTitle }}
-            <span class="block text-xs font-normal text-muted">{{ b.id === 'cpu' ? rd.advancedHint : edit.form.moreHint }}</span>
+            <span class="block text-xs font-normal text-muted">{{ b.id === 'cpu' ? rd.advancedHint : formHintText('moreHint', ui.isMac) }}</span>
           </summary>
           <div class="divide-y divide-default">
             <div v-for="f in b.fields" :key="f.key" class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3">

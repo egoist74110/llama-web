@@ -112,6 +112,13 @@ describe('no model field with several models online (decision 41)', () => {
     expect(resolveTarget(doc, '', [at('qwen', 'RP', 'loading', null), at('colon', 'main', 'ready', 1)])).toMatchObject({ target: { modelId: 'colon' } })
   })
 
+  test('the same millisecond: the scheduler use counter decides, not the list order (CR-017)', () => {
+    const seq = (m: ModelSnapshot, useSeq: number): ModelSnapshot => ({ ...m, useSeq })
+    const list = [seq(at('qwen', 'RP', 'ready', 123), 9), seq(at('colon', 'main', 'ready', 123), 8)]
+    expect(resolveTarget(doc, '', list)).toMatchObject({ target: { modelId: 'qwen' } })
+    expect(resolveTarget(doc, '', [...list].reverse())).toMatchObject({ target: { modelId: 'qwen' } })
+  })
+
   test('one online model behaves as before', () => {
     expect(resolveTarget(doc, undefined, [at('qwen', 'RP', 'ready', 1), at('colon', 'main', 'stopped', 9)])).toMatchObject({ target: { modelId: 'qwen' } })
   })

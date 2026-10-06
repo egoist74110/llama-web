@@ -189,7 +189,10 @@ const gib = (miB: number | null) => (miB === null ? '?' : `${(miB / 1024).toFixe
 /** Chinese reason of a refused load (decision 42): numbers included, no paths or names beyond the model. */
 export function noRoomText(d: NoRoomDetail | undefined, model: string): string {
   const vars = { model, estimate: gib(d?.estimateMiB ?? null), available: gib(d?.availableMiB ?? null), limit: String(d?.limit ?? '') }
-  return fmt(t.api.noRoom[d?.reason ?? 'memory'], vars)
+  const reason = d?.reason ?? 'memory'
+  const mac = process.platform === 'darwin'
+  const template = mac && reason === 'unknown' ? t.platform.mac.apiNoRoomUnknown : mac && reason === 'watchdog' ? t.platform.mac.apiNoRoomWatchdog : t.api.noRoom[reason]
+  return fmt(template, vars)
 }
 
 // ---------------------------------------------------------------------------------------

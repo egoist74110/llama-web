@@ -41,9 +41,12 @@ export type AdmitTier = 'ok' | 'risky' | 'nofit' | 'unknown'
 export interface NoRoomDetail {
   /**
    * `limit` = the online limit is reached, `memory` = it does not fit next to what is online, `unknown` = the free memory
-   * could not be read, `watchdog` = the memory ran short while it was loading or running (decision 44).
+   * could not be read, `watchdog` = the memory ran short while it was loading or running (decision 44), `unconfirmed` =
+   * a manual start was only confirmed for the answer it got at the interface, and the answer at load time is worse.
    */
-  reason: 'limit' | 'memory' | 'unknown' | 'watchdog'
+  reason: 'limit' | 'memory' | 'unknown' | 'watchdog' | 'unconfirmed'
+  /** `unconfirmed` only: what the check at load time said (`risky` or `unknown`). */
+  tier?: 'risky' | 'unknown'
   estimateMiB: number | null
   availableMiB: number | null
   /** The memory pool that decided (device id, `host`, ...). */
@@ -141,6 +144,8 @@ export interface ModelSnapshot {
   port: number | null
   inflight: number
   lastUsedAt: number | null
+  /** Monotonic use counter: orders models whose `lastUsedAt` is the same millisecond. */
+  useSeq?: number
   error: unknown
 }
 
@@ -201,6 +206,8 @@ interface Instance {
 interface Waiter {
   /** Manual start()/retry() callers: they get no lease and are not cancellable. */
   manual: boolean
+  /** Manual start only: `true` = the user accepted a `risky` / `unknown` answer; anything else has not accepted it. */
+  confirmed?: boolean
   resolve: (inst: Instance) => void
   reject: (e: SchedulerError) => void
 }
@@ -303,19 +310,19 @@ export class Scheduler {
    * `reload`: the configuration changed; a process started before this call is unloaded
    * (after its requests) and the target is launched again.
    */
-  start(target: Target, opts: { last?: boolean, reload?: boolean } = {}): Promise<void> {
+  start(target: Target, opts: { last?: boolean, reload?: boolean, confirmed?: boolean } = {}): Promise<void> {
     if (this.shuttingDown) return Promise.reject(new SchedulerError('shutdown', target))
     const inst = this.instances.get(keyOf(target))
     if (inst?.state === 'ready' && !opts.last && !opts.reload) return Promise.resolve()
     return new Promise<void>((resolve, reject) => {
       const job = opts.last || opts.reload ? this.newJob(target, true) : this.jobFor(target, true)
       if (opts.reload) job.reloadAfter = this.seq
-      job.waiters.push({ manual: true, resolve: () => resolve(), reject })
+      job.waiters.push({ manual: true, confirmed: opts.confirmed, resolve: () => resolve(), reject })
     })
   }
 
-  retry(target: Target): Promise<void> {
-    return this.start(target)
+  retry(target: Target, opts: { confirmed?: boolean } = {}): Promise<void> {
+    return this.start(target, opts)
   }
 
   /**
@@ -411,6 +418,7 @@ export class Scheduler {
       port: i.proc?.port ?? null,
       inflight: i.inflight.size,
       lastUsedAt: i.lastUsedAt,
+      useSeq: i.useSeq,
       error: i.error,
     }))
     // A cancelled running job (manual stop, withdrawn start) only winds down; it will not load.
@@ -542,7 +550,11 @@ export class Scheduler {
     // Make room. Without multi-load: evict least-recently-used ready models until below the limit. With it: the limit and
     // the memory check decide; a manual start is refused, a request unloads (or is refused, `onNoRoom`).
     const multi = this.multi
-    const byRequest = job.waiters.some(w => !w.manual)
+    // Who is waiting changes while the memory check is awaited (requests are cancelled, other starts join the same load),
+    // so these are read again after every await. A load is not "unconfirmed" when any waiter accepts the risk: a request
+    // (the plan loads risky for requests) or a manual start with `confirm`. A start that says nothing is not a confirmation.
+    const byRequest = () => job.waiters.some(w => !w.manual)
+    const unconfirmed = () => job.waiters.length > 0 && !job.waiters.some(w => !w.manual || w.confirmed === true)
     let admission: Admission | undefined
     for (;;) {
       if (job.cancelled) return this.rejectAll(job, this.shuttingDown ? 'shutdown' : 'stopped')
@@ -557,10 +569,11 @@ export class Scheduler {
         // `unknown` cannot be told apart from "fits" for a manual start (the interface asked the user first) or when
         // nothing else is online (the same as a single-model start); next to other models it counts as "does not fit".
         if (admission.tier === 'nofit') why = { reason: 'memory', ...admission.detail }
-        else if (admission.tier === 'unknown' && byRequest && others.length > 0) why = { reason: 'unknown', ...admission.detail }
+        else if (admission.tier === 'unknown' && byRequest() && others.length > 0) why = { reason: 'unknown', ...admission.detail }
+        else if (unconfirmed() && (admission.tier === 'risky' || admission.tier === 'unknown')) why = { reason: 'unconfirmed', tier: admission.tier, ...admission.detail }
       }
       if (!why) break
-      if (multi && (!byRequest || this.opts.onNoRoom === 'error' || others.length === 0)) return this.refuse(job, why)
+      if (multi && (!byRequest() || this.opts.onNoRoom === 'error' || others.length === 0)) return this.refuse(job, why)
       const victim = others.filter(i => i.state === 'ready').sort((a, b) => a.useSeq - b.useSeq)[0]
       if (victim) {
         if (multi) this.emit({ type: 'make-room', target, victim: victim.target, detail: why })

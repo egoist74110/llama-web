@@ -193,9 +193,9 @@ test('deviceInputs: auto settles on the biggest card, a group shares by --tensor
   expect(deviceInputs({ os: 'win32', device: 'cpu', list: l })).toEqual([])
   expect(deviceInputs({ os: 'win32', device: 'CUDA0', cpuBuild: true, list: l })).toEqual([])
   const group = deviceInputs({ os: 'win32', device: 'CUDA0,CUDA1', list: l })
-  expect(group.map(d => d.share)).toEqual([0.25, 0.75])
-  expect(deviceInputs({ os: 'win32', device: 'CUDA0,CUDA1', list: l, tensorSplit: '1,1' }).map(d => d.share)).toEqual([0.5, 0.5])
-  expect(deviceInputs({ os: 'win32', device: 'CUDA0,CUDA1', list: l, tensorSplit: '1,2,3' }).map(d => d.share)).toEqual([0.25, 0.75]) // wrong count: ignored
+  expect(group.map(d => d.share)).toEqual([7000, 21000]) // raw: the estimate repeats llama.cpp's float32 accumulation
+  expect(deviceInputs({ os: 'win32', device: 'CUDA0,CUDA1', list: l, tensorSplit: '1,1' }).map(d => d.share)).toEqual([1, 1])
+  expect(deviceInputs({ os: 'win32', device: 'CUDA0,CUDA1', list: l, tensorSplit: '1,2,3' }).map(d => d.share)).toEqual([7000, 21000]) // wrong count: ignored
   // no list at all: one card of unknown memory (never a CPU run), or the nvidia-smi cards
   expect(deviceInputs({ os: 'win32', device: 'auto', list: null })).toEqual([expect.objectContaining({ id: 'auto', freeMiB: null, share: 1 })])
   expect(deviceInputs({ os: 'win32', device: 'auto', list: null, fallbackGpus: [gpu('CUDA0', 8000, 6000)] })[0]).toMatchObject({ id: 'CUDA0', freeMiB: 6000 })
@@ -220,4 +220,24 @@ test('the draft model follows the main model\'s context unless told otherwise', 
   const withDraft = checkLaunch(base({ args: ['-c', '4096'], draft: { facts: facts() } }))
   expect(withDraft.estimate!.total.draftMiB).toBeGreaterThan(0)
   expect(withDraft.estimate!.total.totalMiB).toBeGreaterThan(without.estimate!.total.totalMiB)
+})
+
+test('--no-mmproj-offload reaches the estimate: the projector counts on the host, the last of the two flags wins (CR-011)', async () => {
+  const { finalParams, toEstimateParams } = await import('../../server/core/model-check')
+  expect(finalParams(['--no-mmproj-offload']).mmprojOnHost).toBe(true)
+  expect(finalParams(['--no-mmproj-offload', '--mmproj-offload']).mmprojOnHost).toBe(false)
+  expect(finalParams([]).mmprojOnHost).toBe(false)
+  expect(toEstimateParams(finalParams(['--no-mmproj-offload'])).mmprojOnHost).toBe(true)
+})
+
+test('row / tensor split over several cards is not judged: the cards are unknown (or nofit by the layer formula), layer is judged', () => {
+  const l = list(gpu('CUDA0', 24000, 22000), gpu('CUDA1', 24000, 22000))
+  const run = (mode: string) => checkLaunch(base({ device: 'CUDA0,CUDA1', list: l, args: ['-c', '4096', '-ts', '1,1', '-sm', mode] }))
+  expect(run('layer').estimate!.pools.find(p => p.id === 'CUDA0')!.tier).toBe('ok')
+  for (const mode of ['row', 'tensor']) {
+    const c = run(mode)
+    expect(c.estimate!.pools.filter(p => p.kind === 'separate').map(p => p.tier)).toEqual(['unknown', 'unknown'])
+    expect(c.estimate!.notes).toContain('split-mode-unmodelled')
+    expect(c.tier).toBe('unknown')
+  }
 })

@@ -4,6 +4,7 @@ import { type FirstSetup } from '../../../core/models-admin'
 import { saveFirstSetup } from '../../../core/first-setup'
 import { scanModelDirs } from '../../../core/scanner'
 import { t } from '../../../core/i18n'
+import { checkedStart } from '../../../service/admission'
 import { getContext } from '../../../service/context'
 import { background, editError, requireModel } from '../../../service/models-api'
 
@@ -32,6 +33,11 @@ export default defineEventHandler(async (event) => {
     editError(e)
   }
   const profile = ctx.getModels().models.find(m => m.id === model.id)?.activeProfile ?? model.activeProfile
-  if (body.start === true) background(`start ${model.id}:${profile}`, () => ctx.ops.start({ modelId: model.id, profile }))
+  if (body.start === true) {
+    // Same contract as the start route: the memory answer comes first, a risky / unknown one needs `confirm`.
+    const confirm = body.confirm === true
+    await checkedStart({ modelId: model.id, profile }, confirm)
+    background(`start ${model.id}:${profile}`, () => ctx.ops.start({ modelId: model.id, profile }, { confirmed: confirm }))
+  }
   return { ok: true }
 })

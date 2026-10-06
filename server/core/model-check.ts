@@ -13,7 +13,7 @@
 import { canonicalFlag, groupArgs, groupValue, type ArgGroup, type ArgWarning, type ParamValue } from './args'
 import { deviceMissing, type DeviceList, type GpuDevice } from './devices'
 import {
-  estimateMemory, type DeviceInput, type DraftInput, type EstimateParams, type MemoryEstimate, type ModelFacts, type SystemMemory, type Tier,
+  estimateMemory, type DeviceInput, type DraftInput, type EstimateParams, type MemoryEstimate, type ModelFacts, type SystemMemory, type Tier, worstTier,
 } from './memory-estimate'
 
 export type CheckCode =
@@ -41,9 +41,13 @@ export interface FinalParams {
   mlock: boolean
   swaFull: boolean
   kvOnHost: boolean
+  /** `--no-mmproj-offload` (the last of it and `--mmproj-offload` wins). */
+  mmprojOnHost: boolean
   /** Any RoPE / YaRN scaling option is set. */
   ropeScaling: boolean
   tensorSplit: string | null
+  /** `--split-mode` (`layer` | `row` | `tensor` | `none`), null = not given (layer). */
+  splitMode: string | null
 }
 
 const num = (v: string | undefined): number | null => {
@@ -61,12 +65,15 @@ export function finalParams(args: string[]): FinalParams {
   const last = new Map<string, ArgGroup>()
   let kvOnHost = false
   let swaFull = false
+  let mmprojOnHost = false
   let ropeScaling = false
   for (const g of groupArgs(args)) {
     const flag = g.flag
     if (!flag) continue
     if (flag === '-nkvo' || flag === '--no-kv-offload') kvOnHost = true
     else if (flag === '-kvo' || flag === '--kv-offload') kvOnHost = false
+    else if (flag === '--no-mmproj-offload') mmprojOnHost = true
+    else if (flag === '--mmproj-offload') mmprojOnHost = false
     else if (flag === '--swa-full') swaFull = true
     else if (flag === '--rope-scale' || flag === '--rope-freq-scale' || flag === '--yarn-orig-ctx') ropeScaling = true
     else if (flag === '--rope-scaling') ropeScaling = groupValue(g).toLowerCase() !== 'none'
@@ -91,14 +98,15 @@ export function finalParams(args: string[]): FinalParams {
     ubatch: num(val('--ubatch-size')),
     parallel: num(val('--parallel')),
     mlock: last.has(canonicalFlag('--mlock')) || mode === 'mlock' || mode === 'mmap+mlock',
-    swaFull, kvOnHost, ropeScaling,
+    swaFull, kvOnHost, mmprojOnHost, ropeScaling,
     tensorSplit: text('--tensor-split'),
+    splitMode: text('--split-mode')?.toLowerCase() ?? null,
   }
 }
 
 export const toEstimateParams = (p: FinalParams): EstimateParams => ({
   ctxSize: p.ctx, cacheTypeK: p.cacheTypeK, cacheTypeV: p.cacheTypeV, flashAttn: p.flashAttn, gpuLayers: p.gpuLayers,
-  batchSize: p.batch, ubatchSize: p.ubatch, parallel: p.parallel, swaFull: p.swaFull, kvOnHost: p.kvOnHost, mlock: p.mlock,
+  batchSize: p.batch, ubatchSize: p.ubatch, parallel: p.parallel, swaFull: p.swaFull, kvOnHost: p.kvOnHost, mlock: p.mlock, mmprojOnHost: p.mmprojOnHost,
 })
 
 export interface CheckInput {
@@ -167,9 +175,9 @@ export function deviceInputs(i: Pick<CheckInput, 'os' | 'device' | 'cpuBuild' | 
     const g = gpus.find(x => x.id === id)
     return { id, name: g?.name ?? id, memory: 'separate', freeMiB: g?.freeMiB ?? null }
   })
+  // The raw split values: the estimate repeats llama.cpp's own float32 accumulation over them.
   const shares = sharesOf(out, i.tensorSplit ?? null)
-  const sum = shares.reduce((a, b) => a + b, 0)
-  return out.map((d, n) => ({ ...d, share: shares[n]! / sum }))
+  return out.map((d, n) => ({ ...d, share: shares[n]! }))
 }
 
 export function checkLaunch(input: CheckInput): ModelCheck {
@@ -219,6 +227,12 @@ export function checkLaunch(input: CheckInput): ModelCheck {
       draft: input.draft ? { ...input.draft, params: input.draft.params ?? { ctxSize: params.ctx, cacheTypeK: params.cacheTypeK, cacheTypeV: params.cacheTypeV, gpuLayers: params.gpuLayers } } : null,
       devices: deviceInputs({ ...input, tensorSplit: params.tensorSplit }), system: input.system,
     })
+    // Only the layer split is modelled. With several cards, row / tensor place weights, cache and buffers differently:
+    // the per-card numbers are not reliable, so they are not judged (a pool that does not fit even by the layer formula stays nofit).
+    if ((params.splitMode === 'row' || params.splitMode === 'tensor') && estimate.pools.filter(p => p.kind === 'separate').length > 1) {
+      const pools = estimate.pools.map(p => (p.kind === 'separate' && p.tier !== 'nofit' ? { ...p, tier: 'unknown' as Tier } : p))
+      estimate = { ...estimate, pools, tier: worstTier(pools.map(p => p.tier)), notes: [...estimate.notes, 'split-mode-unmodelled'] }
+    }
     if (estimate.mlockMiB > 0 && input.system.availableMiB !== null && estimate.mlockMiB > input.system.availableMiB) {
       warn('mlock-exceeds-memory', { mlockMiB: Math.round(estimate.mlockMiB), availableMiB: Math.round(input.system.availableMiB) })
     }

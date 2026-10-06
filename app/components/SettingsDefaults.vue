@@ -141,7 +141,7 @@ async function submit() {
       <component :is="b.id === 'common' ? 'div' : 'details'" :open="b.id === 'cpu' ? advancedOpen || undefined : undefined" :class="b.id === 'common' ? '' : 'border-t border-default'">
           <summary v-if="b.id !== 'common'" class="cursor-pointer select-none py-3 text-sm font-medium text-highlighted">
             {{ b.id === 'cpu' ? s.advanced : s.moreTitle }}
-            <span class="block text-xs font-normal text-muted">{{ b.id === 'cpu' ? s.advancedHint : s.moreHint }}</span>
+            <span class="block text-xs font-normal text-muted">{{ b.id === 'cpu' ? s.advancedHint : formHintText('defaultsMoreHint', ui.isMac) }}</span>
           </summary>
           <div class="divide-y divide-default">
             <div v-for="f in b.fields" :key="f.key" class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3" :class="{ 'first:pt-0': b.id === 'common' && !showDevice }">

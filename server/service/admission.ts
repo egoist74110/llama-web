@@ -89,5 +89,5 @@ export async function precheckStart(target: Target, confirm: boolean): Promise<v
   const extra = { tier: a.tier, ...a.detail }
   if (a.tier === 'nofit') fail('nofit', fmt(t.models.start.nofit, vars), extra)
   if (!confirm && a.tier === 'risky') fail('risky', fmt(t.models.start.risky, vars), extra)
-  if (!confirm && a.tier === 'unknown') fail('unknown', fmt(t.models.start.unknown, vars), extra)
+  if (!confirm && a.tier === 'unknown') fail('unknown', fmt(process.platform === 'darwin' ? t.platform.mac.startUnknown : t.models.start.unknown, vars), extra)
 }

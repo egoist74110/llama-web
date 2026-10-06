@@ -3,9 +3,9 @@
 // profile save. Nothing here writes configuration.
 import type { ModelConfig } from '../core/config'
 import { t } from '../core/i18n'
-import { previewLaunch, requestedRuntime, type LaunchPreview } from '../core/launch'
+import { previewLaunch, requestedRuntime, runtimeKeyOf, type LaunchPreview } from '../core/launch'
 import { checkLaunch, type CheckIssue, type ModelCheck } from '../core/model-check'
-import { fileBytes, loadModelFacts } from '../core/model-facts'
+import { fileBytes, fileStamp, loadModelFacts } from '../core/model-facts'
 import { preferMeasured, statsKey } from '../core/vram-stats'
 import { ProfileError, sanitizeForm } from '../core/models-admin'
 import { readGpuChoice } from '../core/gpu-group'
@@ -51,7 +51,9 @@ export async function buildPreview(model: ModelConfig, body: PreviewBody | undef
 }
 
 /** Check one profile (saved, or as it is on screen when `body.form` / `body.files` carry values). */
-export interface ProfileCheck extends ModelCheck {
+export interface ProfileCheck extends Omit<ModelCheck, 'params'> {
+  /** The final parameters; on a Mac `gpuLayers` is named `acceleratedLayers`. */
+  params: ModelCheck['params'] | (Omit<ModelCheck['params'], 'gpuLayers'> & { acceleratedLayers: number | null })
   online: boolean
   /** `measured` = the estimate uses what an earlier identical launch really took (decision 43). */
   basis: 'measured' | 'formula'
@@ -84,7 +86,9 @@ export async function checkProfile(model: ModelConfig, profile: string, body?: P
     list: probe.list, fallbackGpus: probe.fallbackGpus, system: probe.system, missing: preview.missing,
   })
   // The measurement of an identical earlier launch replaces the formula (never below what is known exactly).
-  const key = statsKey([model.id, profile, preview.device, preview.args.join('\u0000')])
+  // A record only belongs to the same build and the same files: a replaced model file or another llama.cpp build is a new launch.
+  const stamps = await Promise.all([abs(shown.file), mm, dr].map(fileStamp))
+  const key = statsKey([model.id, profile, preview.device, preview.args.join('\u0000'), runtimeKeyOf(preview.runtime), preview.runtime.ref, ...stamps])
   let basis: 'measured' | 'formula' = 'formula'
   let { estimate, tier } = check
   if (estimate) {
@@ -95,7 +99,13 @@ export async function checkProfile(model: ModelConfig, profile: string, body?: P
   }
   const mlockDropped = settings.scheduler.multiLoad && !!estimate && estimate.mlockMiB > 0
     && probe.system.availableMiB !== null && estimate.mlockMiB > probe.system.availableMiB
-  return { ...check, estimate, tier, online: ctx.ops.upProfiles(model.id).length > 0, basis, statsKey: key, mlockDropped }
+  // A Mac has no GPU layers to speak of: the interface-facing numbers name them as accelerated layers.
+  let params: ProfileCheck['params'] = check.params
+  if (ctx.platform.os === 'darwin') {
+    const { gpuLayers, ...rest } = check.params
+    params = { ...rest, acceleratedLayers: gpuLayers }
+  }
+  return { ...check, params, estimate, tier, online: ctx.ops.upProfiles(model.id).length > 0, basis, statsKey: key, mlockDropped }
 }
 
 /** Chinese text of one issue. */

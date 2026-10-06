@@ -24,7 +24,7 @@ function harness() {
     const code = new Bun.Transpiler({ loader: 'ts' }).transformSync(source)
     return new Function(...Object.keys(deps), `${code}\nreturn ${name}()`)(...Object.values(deps))
   }
-  const common = { computed, watch, useState, useLive: () => live, t }
+  const common = { computed, watch, useState, useLive: () => live, t, useStartGuard: () => ({ open: (g: unknown) => guards.push(g) }) }
   const feedback = load('useModelStartFeedback', 'useModelStartFeedback', common) as ReturnType<typeof import('../../app/composables/useModelStartFeedback').useModelStartFeedback>
   scope.run(() => feedback.follow())
   const actions = load('useModelActions', 'useModelActions', {
@@ -235,5 +235,27 @@ describe('manual model start feedback', () => {
       expect(h.guards).toHaveLength(0)
       expect(h.feedback.notice.value).toMatchObject({ modelId: 'm1', kind: 'unknown' })
     } finally { h.close() }
+  })
+})
+
+describe('a start refused after it was accepted (CR-021)', () => {
+  test('manual no-room / unconfirmed clears the pending attempt and opens the start dialog with the tier', async () => {
+    const h = harness()
+    const attempt = h.feedback.begin('m1', 'default')
+    h.feedback.accepted(attempt)
+    h.live.events.value = [{ kind: 'no-room', id: 50, at: Date.now(), modelId: 'm1', profile: 'default', reason: 'unconfirmed', tier: 'unknown', estimateMiB: 100, availableMiB: 90, pool: 'system', manual: true }, ...h.live.events.value] as never
+    expect(h.guards).toMatchObject([{ modelId: 'm1', profile: 'default', action: 'start', guard: { reason: 'unknown', estimateMiB: 100 } }])
+    expect(h.feedback.notice.value).toBeNull()
+    h.close()
+  })
+
+  test('a request refusal (not manual) and old replayed events open nothing', () => {
+    const h = harness()
+    h.live.events.value = [
+      { kind: 'no-room', id: 60, at: Date.now(), modelId: 'm1', profile: 'default', reason: 'memory', estimateMiB: 1, availableMiB: 1, pool: null, manual: false },
+      { kind: 'no-room', id: 61, at: Date.now() - 120_000, modelId: 'm1', profile: 'default', reason: 'memory', estimateMiB: 1, availableMiB: 1, pool: null, manual: true },
+    ] as never
+    expect(h.guards).toEqual([])
+    h.close()
   })
 })

@@ -10,6 +10,8 @@ export const checkKey = (modelId: string, profile: string) => `${modelId}\u0000$
 // One queue for the whole page; the answers live in useState so every component sees them.
 let chain: Promise<void> = Promise.resolve()
 const inflight = new Set<string>()
+// A forced check that arrived while the same key was on its way: its answer is stale, so it is asked again afterwards.
+const dirty = new Set<string>()
 
 export function useMemoryChecks() {
   const { state } = useLive()
@@ -18,19 +20,29 @@ export function useMemoryChecks() {
 
   function request(modelId: string, profile: string, force = false) {
     const key = checkKey(modelId, profile)
-    if (inflight.has(key) || (!force && Date.now() - (at.value[key] ?? 0) < FRESH_MS)) return
+    if (inflight.has(key)) {
+      if (force) dirty.add(key)
+      return
+    }
+    if (!force && Date.now() - (at.value[key] ?? 0) < FRESH_MS) return
     inflight.add(key)
     chain = chain.then(async () => {
+      let stale = false
       try {
         const r = await $fetch<CheckDoc>(`/api/models/${encodeURIComponent(modelId)}/check`, { method: 'POST', body: { profile } })
-        docs.value = { ...docs.value, [key]: r }
+        stale = dirty.has(key)
+        if (!stale) docs.value = { ...docs.value, [key]: r }
       } catch {
+        stale = dirty.has(key)
         // The chip simply stays away; the edit drawer shows its own error.
-        docs.value = { ...docs.value, [key]: null }
+        if (!stale) docs.value = { ...docs.value, [key]: null }
       } finally {
-        at.value = { ...at.value, [key]: Date.now() }
+        // Only an answer that is still current counts as fresh.
+        if (!stale) at.value = { ...at.value, [key]: Date.now() }
+        dirty.delete(key)
         inflight.delete(key)
       }
+      if (stale) request(modelId, profile, true)
     })
   }
 

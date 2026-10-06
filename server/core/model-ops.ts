@@ -36,14 +36,15 @@ export class ModelOps {
     return this.sched.snapshot().models.filter(s => s.modelId === modelId)
   }
 
-  start(target: Target): Promise<void> {
+  /** `confirmed: false` = the interface asked and got no OK for a `risky` / `unknown` answer; the load re-checks with that. */
+  start(target: Target, opts: { confirmed?: boolean } = {}): Promise<void> {
     this.bump(target.modelId)
-    return this.sched.start(target)
+    return this.sched.start(target, opts)
   }
 
-  retry(target: Target): Promise<void> {
+  retry(target: Target, opts: { confirmed?: boolean } = {}): Promise<void> {
     this.bump(target.modelId)
-    return this.sched.retry(target)
+    return this.sched.retry(target, opts)
   }
 
   /** A management start that queues after everything already waiting (see Scheduler.start `last`). */

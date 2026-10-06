@@ -22,6 +22,7 @@ export interface ModelStartNotice {
 
 export function useModelStartFeedback() {
   const { state, events } = useLive()
+  const guard = useStartGuard()
   const pending = useState<Record<string, Attempt>>('model-start-pending', () => ({}))
   const notices = useState<ModelStartNotice[]>('model-start-notices', () => [])
   const seq = useState('model-start-seq', () => 0)
@@ -51,9 +52,31 @@ export function useModelStartFeedback() {
     notices.value = [...notices.value, { modelId: attempt.modelId, profile: attempt.profile, name: attempt.name, kind, message }]
   }
 
+  // A start the memory check refused after the request was accepted (the answer changed while it waited, or it came from a
+  // profile switch / restart that asked nobody) becomes the usual start dialog; risky / unknown can be confirmed there.
+  let seenNoRoom: number | null = null
+  function refused(e: Extract<ActivityEvent, { kind: 'no-room' }>) {
+    const p = pending.value[e.modelId]
+    if (p) cancel(e.modelId)
+    const reason = e.reason === 'memory' ? 'nofit' : e.reason === 'unconfirmed' ? (e.tier ?? 'risky') : e.reason === 'limit' || e.reason === 'unknown' ? e.reason : null
+    if (!reason) return
+    const model = state.value?.models.find(m => m.id === e.modelId)
+    guard.open({
+      modelId: e.modelId, profile: e.profile, name: model?.name ?? e.modelId, action: 'start',
+      guard: { reason, limit: null, estimateMiB: e.estimateMiB, availableMiB: e.availableMiB, pool: e.pool },
+    })
+  }
+
   function receive(list: ActivityEvent[]) {
-    // A reconnect sends history too. Only events newer than the user's action belong to it.
+    // The first batch is history (a reconnect sends history too): only later no-room events open a dialog.
+    if (seenNoRoom === null) seenNoRoom = Math.max(0, ...list.map(e => e.id))
+    // Only events newer than the user's action belong to it.
     for (const e of [...list].sort((a, b) => a.id - b.id)) {
+      if (e.kind === 'no-room' && e.manual && e.id > seenNoRoom) {
+        seenNoRoom = e.id
+        if (Date.now() - e.at < 30_000) refused(e) // an old one replayed after a reconnect is history
+        continue
+      }
       if (e.kind !== 'state') continue
       const p = pending.value[e.modelId]
       if (!p || e.id <= p.after || (p.profile !== undefined && e.profile !== p.profile)) continue

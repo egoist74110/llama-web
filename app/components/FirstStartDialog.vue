@@ -3,6 +3,7 @@
 import t from '~~/i18n/zh-CN'
 import { MTP_DEFAULT_N, mtpValid, type MtpInput } from '~~/server/core/mtp'
 import { validThinkingLimit } from '~~/server/core/thinking-limit'
+import { readStartGuard } from '~/utils/memory-check'
 
 interface Ref { dirId: string, rel: string }
 interface Candidate { ref: Ref, fileName: string, size: number }
@@ -13,6 +14,7 @@ const props = defineProps<{ modelId: string, name: string }>()
 const open = defineModel<boolean>('open', { required: true })
 const { busy } = useModelActions()
 const feedback = useModelStartFeedback()
+const guard = useStartGuard()
 const ui = usePlatformUi()
 
 const info = ref<SetupDoc | null>(null)
@@ -92,7 +94,13 @@ async function confirm() {
     feedback.accepted(attempt)
     open.value = false
   } catch (e) {
-    feedback.httpFailure(e, attempt)
+    // The answers are saved before the memory check: a refused start becomes the usual start dialog (risky / unknown can be confirmed there).
+    const g = readStartGuard(e)
+    if (g) {
+      feedback.cancel(props.modelId)
+      guard.open({ modelId: props.modelId, profile: undefined, name: props.name, action: 'start', guard: g })
+      open.value = false
+    } else feedback.httpFailure(e, attempt)
   } finally {
     saving.value = false
   }

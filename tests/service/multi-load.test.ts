@@ -160,11 +160,34 @@ test('a measured record replaces the formula for the same launch shape', async (
   expect((await svc!.checkProfile(model(), '锁定')).basis).toBe('formula')
 })
 
+test('a measurement does not outlive the model file it was taken for (CR-020)', async () => {
+  multi(true)
+  freeOf(22000)
+  const c = await svc!.checkProfile(model(), '默认')
+  ctx!.vramStats.record(c.statsKey, { estimateMiB: c.estimate!.pools.map(p => p.totalMiB), measuredMiB: c.estimate!.pools.map(p => p.totalMiB + 100), exclusive: true })
+  expect((await svc!.checkProfile(model(), '默认')).basis).toBe('measured')
+  const file = join(dir, 'models', 'm.gguf')
+  const bigger = spec()
+  bigger.tensors!.push({ dims: [256, 256], type: 12, name: 'blk.8.attn_q.weight' })
+  writeGguf(file, bigger) // same path and arguments, other content
+  const after = await svc!.checkProfile(model(), '默认')
+  expect(after.statsKey).not.toBe(c.statsKey)
+  expect(after.basis).toBe('formula')
+  writeGguf(file, spec())
+})
+
 test('mlock that would lock more than the free memory is dropped (only with the switch on)', async () => {
   ctx!.getMemoryProbe = async () => ({ list: devices, fallbackGpus: [], system: { totalMiB: 64000, availableMiB: 0.0001 } })
+  // The Windows CUDA defaults carry `--load-mode mlock` and every profile inherits them; the control profile needs defaults without it.
+  const defaultExtra = ctx!.getSettings().defaults.extraArgs
   try {
     multi(true)
     freeOf(22000)
+    if (win) {
+      expect(defaultExtra).toContain('mlock')
+      expect((await svc!.checkProfile(model(), '默认')).mlockDropped).toBe(true) // inherited, so dropped as well
+    }
+    ctx!.updateSettings((s) => { s.defaults.extraArgs = '' })
     const on = await svc!.checkProfile(model(), '锁定')
     expect(on.mlockDropped).toBe(true)
     expect((await adm!.admitTarget({ modelId: 'm', profile: '锁定' }, [])).data).toMatchObject({ dropMlock: true })
@@ -172,6 +195,7 @@ test('mlock that would lock more than the free memory is dropped (only with the 
     multi(false)
     expect((await svc!.checkProfile(model(), '锁定')).mlockDropped).toBe(false)
   } finally {
+    ctx!.updateSettings((s) => { s.defaults.extraArgs = defaultExtra })
     ctx!.getMemoryProbe = async () => ({ list: devices, fallbackGpus: [], system: { totalMiB: 64000, availableMiB: 60000 } })
   }
 })

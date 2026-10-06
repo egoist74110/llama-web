@@ -254,10 +254,47 @@ describe('a manual start', () => {
   })
 })
 
+describe('a manual start without confirmation (CR-013)', () => {
+  test('risky at load time and no confirm: refused with `unconfirmed`, nothing is launched', async () => {
+    const { sched, procs, noRoom } = setup({ total: 1000, need: { a: 550, b: 400 } })
+    ;(await sched.acquire(A)).release() // 450 free, b needs 400: risky (0.89)
+    const e = await sched.start(B, { confirmed: false }).catch(x => x)
+    expect((e as SchedulerError).code).toBe('no-room')
+    expect(detailOf(e).reason).toBe('unconfirmed')
+    expect(procs).toHaveLength(1)
+    expect(noRoom()).toMatchObject([{ target: B, manual: true }])
+  })
+
+  test('the same start with confirm goes on; a start that says nothing is not a confirmation', async () => {
+    const { sched } = setup({ total: 1000, need: { a: 550, b: 400, c: 400 } })
+    ;(await sched.acquire(A)).release()
+    await sched.start(B, { confirmed: true })
+    expect(sched.stateOf(B)).toBe('ready')
+    const again = setup({ total: 1000, need: { a: 550, b: 400 } })
+    ;(await again.sched.acquire(A)).release()
+    const e = await again.sched.start(B).catch(x => x)
+    expect(detailOf(e).reason).toBe('unconfirmed')
+    expect(again.sched.stateOf(B)).toBe('stopped')
+  })
+
+  test('unknown at load time and no confirm: refused, even with nothing else online', async () => {
+    const { sched } = setup({ unknownWhen: () => true })
+    const e = await sched.start(A, { confirmed: false }).catch(x => x)
+    expect(detailOf(e).reason).toBe('unconfirmed')
+    expect(sched.stateOf(A)).toBe('stopped')
+  })
+
+  test('an ok answer needs no confirmation', async () => {
+    const { sched } = setup()
+    await sched.start(A, { confirmed: false })
+    expect(sched.stateOf(A)).toBe('ready')
+  })
+})
+
 describe('free memory that cannot be read', () => {
   test('a manual start goes on (the interface asked the user), a request next to other models does not', async () => {
     const { sched, noRoom } = setup({ policy: 'error', unknownWhen: () => true })
-    await sched.start(A) // nothing else online: same as a single-model start
+    await sched.start(A, { confirmed: true }) // nothing else online: same as a single-model start (confirmed in the interface)
     const e = await sched.acquire(B).catch(x => x)
     expect((e as SchedulerError).code).toBe('no-room')
     expect(detailOf(e).reason).toBe('unknown')
@@ -366,5 +403,44 @@ describe('unload() for the watchdog', () => {
     const [a, b] = sched.candidates()
     expect(a!.loadSeq).toBeLessThan(b!.loadSeq)
     expect(a!.useSeq).toBeGreaterThan(b!.useSeq)
+  })
+})
+
+describe('who waits changes while the memory check is awaited (CR-018)', () => {
+  function gated(tier: 'risky' | 'ok' = 'risky') {
+    let release!: () => void
+    const gate = new Promise<void>((r) => { release = r })
+    let launches = 0
+    const sched = new Scheduler({
+      maxLoaded: 5, multiLoad: true, onNoRoom: 'unload', drainTimeoutMs: 2000,
+      admit: async () => { await gate; return { tier, detail: { estimateMiB: 1, availableMiB: 1, pool: 'CUDA0' }, pools: ['CUDA0'] } },
+      launch: async (target) => { launches++; const p = new FakeProc(target, 7300); queueMicrotask(() => p.succeed()); return p },
+    })
+    return { sched, release, launches: () => launches }
+  }
+
+  test('the request that started the load leaves and an unconfirmed start is all that remains: refused', async () => {
+    const g = gated()
+    const ctl = new AbortController()
+    const req = g.sched.acquire(A, { signal: ctl.signal }).catch(x => x)
+    await tick(5)
+    const manual = g.sched.start(A, { confirmed: false }).catch(x => x)
+    ctl.abort()
+    await req
+    g.release()
+    const e = await manual
+    expect(detailOf(e).reason).toBe('unconfirmed')
+    expect(g.launches()).toBe(0)
+  })
+
+  test('a confirmed start joins an unconfirmed one: the load goes on for both', async () => {
+    const g = gated()
+    const first = g.sched.start(A, { confirmed: false })
+    await tick(5)
+    const second = g.sched.start(A, { confirmed: true })
+    g.release()
+    await Promise.all([first, second])
+    expect(g.sched.stateOf(A)).toBe('ready')
+    expect(g.launches()).toBe(1)
   })
 })

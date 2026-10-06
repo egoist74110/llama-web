@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { readGguf, tensorBytes, TENSOR_BLOCK, type GgufArch, type GgufLayout, type GgufMeta } from '../../server/core/gguf'
 import {
-  assignLayers, CACHE_BYTES, estimateMemory, kvCells, layerKinds, recurrentStateBytes, systemReserveMiB, tierOf, worstTier,
+  assignLayers, assignOutput, CACHE_BYTES, estimateMemory, kvCells, layerKinds, recurrentStateBytes, systemReserveMiB, tierOf, worstTier,
   type DeviceInput, type ModelFacts,
 } from '../../server/core/memory-estimate'
 import { modelSpec, writeGguf } from '../fixtures/gguf-builder'
@@ -204,7 +204,7 @@ test('several devices: layers follow the share, each device gets its own fixed o
   const e = estimateMemory({ model: f, params: { ctxSize: 512, parallel: 1 }, devices: [a, b], system: sys })
   const pa = e.pools.find(p => p.id === 'C0')!
   const pb = e.pools.find(p => p.id === 'C1')!
-  expect(pa.kvMiB).toBeCloseTo(pb.kvMiB * 3, 6) // 6 layers against 2
+  expect(pa.kvMiB).toBeCloseTo(pb.kvMiB * 7, 6) // llama.cpp's thresholds over 8 layers + the output layer: 7 against 1
   expect(pa.computeMiB).toBeGreaterThan(0)
   expect(pb.computeMiB).toBeGreaterThan(0)
   expect(e.notes).toContain('unverified-multi-device')

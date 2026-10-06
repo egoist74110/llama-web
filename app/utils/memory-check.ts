@@ -95,7 +95,7 @@ export function issueText(i: CheckIssue, isMac: boolean): string {
 /** Notes about what the estimate could not model; the ones about a card's memory are left out where there is none. */
 export function noteTexts(est: MemoryEstimate, isMac: boolean): string[] {
   const texts = m.notes as Record<string, string>
-  const gpuOnly = new Set(['unverified-separate-memory', 'unverified-multi-device'])
+  const gpuOnly = new Set(['unverified-separate-memory', 'unverified-multi-device', 'split-mode-unmodelled'])
   return est.notes.filter(n => !(isMac && gpuOnly.has(n))).map(n => texts[n] ?? n)
 }
 

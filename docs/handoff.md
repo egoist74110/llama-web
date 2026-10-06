@@ -1,5 +1,20 @@
 # 交接记录
 
+## 2026-10-06 · 9-5 第四轮返工（复审 CR-013 / 016 / 018–021 及 row/tensor）· Claude
+- 依据：`docs/reviews/code-audit-2026-10-06-gpt-r2.md`。
+- 做了：① CR-018：调度器每次 admission 返回后按当时的等待者重算「有请求 / 无确认」；任一请求或 `confirmed:true` 的手动启动即视为接受风险。② CR-013 剩余：`confirmed` 只有明确的 `true` 才算确认（未带标志的内部 restart / 切方案 / 保存后重启不再豁免）；多开开启时它们遇到 risky / unknown 会被拒绝，CR-021 的对话框给出确认路径。③ CR-021：`useModelStartFeedback` 处理手动 `no-room` 事件（清除等待中的启动、打开启动确认框，`unconfirmed` 带 `tier`；30 秒前的重放事件不弹）。④ CR-019：`assignLayers` 用 `Math.fround` 重复 llama.cpp 的 float32 累计/归一化；`deviceInputs` 传原始份额。⑤ CR-020：实测记录的 key 加入运行时标识与主模型（全部分片）/视觉/草稿文件的大小+修改时间。⑥ CR-016：Mac 的 watchdog 代理拒绝文案改为内存口径。⑦ row/tensor：多卡时每张卡标 `unknown` + 提示 `split-mode-unmodelled`（层公式本身已 nofit 的仍是 nofit），不再给出「放得下」。⑧ 保存前的重新检查带 `fresh:true`。
+- 验证：`bun test` 1358 pass / 5 skip / 0 fail（整套，row/tensor 之前）；改完 row/tensor 与 fresh 后 `bun test tests/core tests/app` 1250 pass，`bun run typecheck` 通过。新增用例：scheduler-multi（等待者变化 2 项、unconfirmed 改为严格）、memory-estimate（三卡 1,2,7 边界）、multi-load（文件替换后记录失效）、model-start-feedback（拒绝后弹框 2 项）、model-check（row/tensor）。
+- **没验证 / 没做**：没有 build、浏览器、真机；采样外部干扰（待确认第 2 项）要在 WDDM 真机上校准；row/tensor 真实占用模型没做（只是不判断）；自定义运行时同名原地替换不会使记录失效；没有为 Mac watchdog 文案单独写用例（依赖 process.platform）。
+- 下一步：复审；真机验证前先告诉用户（会占 GPU）。
+
+## 2026-10-06 · 9-5 第三轮审查返工（CR-010 至 CR-017）· Claude
+- 依据：`docs/reviews/code-audit-2026-10-06-gpt.md`（4 major / 4 minor）。逐项核对过代码后修复。
+- 做了：① CR-010：`loadModelFacts` 读全部分片的张量布局并合并（`mergeLayouts`）；读不到某一片时 `sharded: true`，估算不再信任按比例放大的层权重，改用文件大小估（带 `layout-unknown`）。② CR-011：`finalParams` 解析 `--no-mmproj-offload` / `--mmproj-offload`（后者覆盖前者），`EstimateParams.mmprojOnHost` 把视觉权重与缓冲算进主机池。③ CR-012：`assignLayers` 改为 llama.cpp 的累计阈值公式（输出层参与，`act = min(ngl, n+1)`），新增 `assignOutput` 决定输出层所在设备；旧的「按比例向下取整」用例已改。④ CR-013：`Scheduler.start/retry` 与 `ops.start/retry` 带 `confirmed`；start / retry / setup 路由传入是否确认；加载时最终 admission 若是 risky/unknown 而本次没有确认，以 `no-room`（原因 `unconfirmed`）拒绝，不起进程。setup 的 `start:true` 先走 `checkedStart`（409 时首次设置对话框转为普通启动确认框）。⑤ CR-014：`useMemoryChecks` 在途时的强制重算记为 dirty，旧响应不发布、不刷新缓存时间，结束后再查一次。⑥ CR-015：mlock 用例显式清空全局 extraArgs 作对照，并断言 Windows 默认方案继承 mlock 也会被去掉（产品逻辑未改）。⑦ CR-016：Mac 的检查结果里 `gpuLayers` 改名 `acceleratedLayers`；参数分组说明、手动启动 unknown 拒绝、代理 unknown 拒绝文案按平台切换。⑧ CR-017：快照带单调 `useSeq`，同毫秒时路由用它决定最近使用。
+- 新增/改的测试：memory-estimate（分片布局不可信、双卡分层、视觉 offload）、model-facts（新文件）、model-check（视觉开关解析）、scheduler-multi（unconfirmed 4 项）、routing（同毫秒）、memory-checks-composable（新文件）、multi-load（mlock 夹具）。
+- 验证：`bun test` 1353 pass / 5 skip / 0 fail；`bun run typecheck` 通过。没有 build、浏览器、真机（CUDA / 双卡 / Mac）验证；首次设置对话框转确认框、Mac 文案没在浏览器里看过。
+- 没改 / 取舍：保存后重启、切换方案等内部 `ops.start`（不带 `confirmed`）仍不判定确认（只有界面手动启动路由带它）；报告「待确认」的 4 项（实测记录失效条件、采样外部干扰、row/tensor 模式、重新检查探针新鲜度）和 Windows/CUDA 未验证假设未处理。row/tensor 分层仍沿用 layer 公式。
+- 下一步：复审本次返工；真机验证前先告诉用户（会占 GPU）。
+
 ## 2026-10-05 · 9-5 复审返工（CR-008 / CR-009）· Claude
 - 依据：`docs/reviews/code-audit-2026-10-05-r2.md`。CR-008：进程在加载后采样期间退出，调度器仍标 ready。CR-009：新增测试读到前序用例留下的统计记录。
 - 做了：① CR-008：`context.ts` 的 `gated` 在采样期间同时等待 `rp.exited`，采样结束后进程已退出就抛 `LoadError('exited')`，不会被「统计失败不影响加载」的 catch 吞掉；采样返回、超时、进程退出三种结束方式都先检查退出。② CR-009：延迟采样用例只看最新的两条记录（本用例的两次加载）。③ 加强 CR-005 测试：空闲候选限定 `pools: ['system']` 并断言事件的池为 `system`。

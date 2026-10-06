@@ -22,11 +22,11 @@ export const CACHE_BYTES: Readonly<Record<string, number>> = {
 /** What the estimate needs to know about one model (all shards together). */
 export interface ModelFacts {
   meta: GgufMeta
-  /** Per-layer tensor bytes of the first shard; null = unknown (a uniform split of the file size is used). */
+  /** Per-layer tensor bytes of ALL shards together; null = unknown (a uniform split of the file size is used). */
   layout: GgufLayout | null
   /** Sum of the file sizes of all shards. */
   totalBytes: number
-  /** More than one shard: `layout` only covers the first, so its numbers are scaled up to `totalBytes`. */
+  /** `layout` covers only some of the shards: the per-layer numbers cannot be trusted, so they are not used. */
   sharded?: boolean
 }
 
@@ -49,6 +49,8 @@ export interface EstimateParams {
   kvOnHost?: boolean
   /** The weights are locked in RAM (`--load-mode mlock` / `--mlock`). */
   mlock?: boolean
+  /** `--no-mmproj-offload`: the vision projector runs on the CPU, so it takes system memory, not the device's. */
+  mmprojOnHost?: boolean
 }
 
 export interface DraftInput {
@@ -65,7 +67,7 @@ export interface DeviceInput {
   freeMiB: number | null
   /** Upper limit of a `shared` device (the OS working-set cap), null = none known. */
   capMiB?: number | null
-  /** Fraction of the layers on this device when several are used (default: an equal split). */
+  /** The device's raw share of the layers when several are used, as `--tensor-split` gives it (default: an equal split). */
   share?: number
   /** Context / runtime memory the device takes besides the model (default by kind, see `FIXED_OVERHEAD_MIB`). */
   fixedMiB?: number
@@ -131,7 +133,7 @@ export interface MemoryEstimate {
 export type EstimateNote =
   | 'ctx-from-model' | 'layout-unknown' | 'arch-incomplete' | 'unverified-separate-memory' | 'unverified-multi-device'
   | 'unverified-moe-compute' | 'unverified-mla' | 'window-pattern-guessed' | 'budget-unknown' | 'unverified-draft-compute'
-  | 'mmproj-compute-single-sample'
+  | 'mmproj-compute-single-sample' | 'split-mode-unmodelled'
 
 /** Per-device context memory besides the model; CUDA numbers are a safe guess, not measured (no such machine here). */
 export const FIXED_OVERHEAD_MIB = { separate: 512, shared: 0 }
@@ -211,10 +213,10 @@ interface LayerWeights {
 
 function weightsOf(f: ModelFacts, layers: number): { w: LayerWeights, guessed: boolean } {
   const lay = f.layout
-  if (lay && lay.tensorBytes > 0) {
-    const k = f.sharded ? f.totalBytes / lay.tensorBytes : 1
-    const perLayer = Array.from({ length: layers }, (_, i) => (lay.layerBytes[i] ?? 0) * k)
-    return { w: { perLayer, embed: lay.embedBytes * k, output: lay.outputBytes * k, tiedOutput: lay.tiedOutput, other: lay.otherBytes * k, total: lay.tensorBytes * k }, guessed: false }
+  // A layout that covers only some shards says nothing about the layers in the others: not used (a guess, flagged).
+  if (lay && lay.tensorBytes > 0 && !f.sharded) {
+    const perLayer = Array.from({ length: layers }, (_, i) => lay.layerBytes[i] ?? 0)
+    return { w: { perLayer, embed: lay.embedBytes, output: lay.outputBytes, tiedOutput: lay.tiedOutput, other: lay.otherBytes, total: lay.tensorBytes }, guessed: false }
   }
   // No tensor infos: 3% of the file for embedding + output, the rest evenly over the layers.
   const body = f.totalBytes * 0.94
@@ -226,19 +228,44 @@ function weightsOf(f: ModelFacts, layers: number): { w: LayerWeights, guessed: b
 
 const zero = (): Breakdown => ({ weightsMiB: 0, kvMiB: 0, stateMiB: 0, computeMiB: 0, mmprojMiB: 0, draftMiB: 0, fixedMiB: 0, totalMiB: 0 })
 
-/** Layers on the host first (the first ones stay there), then the devices in order by their share. Returns the owner per layer (-1 = host). */
+/**
+ * llama.cpp's layer split (`llama_model::load_tensors`): with `ngl` layers offloaded, the last `act = min(ngl, n + 1)`
+ * of the n repeating layers plus the output layer (counted as layer n) are spread over the devices; the device of
+ * offloaded layer `il` is the first one whose cumulative, normalised share is above `(il - start) / act`.
+ */
+function splitDevice(il: number, start: number, act: number, shares: number[]): number {
+  // llama.cpp does this in float32: raw shares are accumulated, divided by the total, and compared with a float position;
+  // the strict `>` (upper_bound) makes the exact boundaries depend on those roundings, so they are repeated here.
+  const f = Math.fround
+  const cum: number[] = []
+  let acc = 0
+  for (const sh of shares) { acc = f(acc + f(sh)); cum.push(acc) }
+  const total = cum[cum.length - 1] || 1
+  const x = f(f(il - start) / f(act))
+  for (let d = 0; d < cum.length; d++) if (f(cum[d]! / total) > x) return d
+  return shares.length - 1
+}
+
+function offloadWindow(layers: number, gpuLayers: number | null | undefined): { start: number, act: number } {
+  const ngl = gpuLayers === null || gpuLayers === undefined || gpuLayers < 0 ? layers + 1 : gpuLayers
+  return { start: Math.max(layers + 1 - ngl, 0), act: Math.min(ngl, layers + 1) }
+}
+
+/** The owner per repeating layer (-1 = host): the first layers stay on the host, the rest follow the split. */
 export function assignLayers(layers: number, gpuLayers: number | null | undefined, shares: number[]): number[] {
   const out = new Array<number>(layers).fill(-1)
   if (!shares.length) return out
-  // llama.cpp counts the output layer as the last one offloaded.
-  const onDevice = gpuLayers === null || gpuLayers === undefined || gpuLayers < 0 ? layers : Math.min(layers, Math.max(0, gpuLayers - 1))
-  const sum = shares.reduce((a, b) => a + b, 0) || 1
-  let from = layers - onDevice
-  const counts = shares.map(s => Math.floor((s / sum) * onDevice))
-  let rest = onDevice - counts.reduce((a, b) => a + b, 0)
-  for (let i = shares.length - 1; rest > 0; i = (i - 1 + shares.length) % shares.length, rest--) counts[i]! += 1
-  for (let d = 0; d < shares.length; d++) for (let n = 0; n < counts[d]!; n++) out[from++] = d
+  const { start, act } = offloadWindow(layers, gpuLayers)
+  if (act <= 0) return out
+  for (let il = start; il < layers; il++) out[il] = splitDevice(il, start, act, shares)
   return out
+}
+
+/** The device that holds the output layer (-1 = host): it takes part in the same split as layer n. */
+export function assignOutput(layers: number, gpuLayers: number | null | undefined, shares: number[]): number {
+  if (!shares.length) return -1
+  const { start, act } = offloadWindow(layers, gpuLayers)
+  return act <= 0 ? -1 : splitDevice(layers, start, act, shares)
 }
 
 interface ModelParts {
@@ -274,7 +301,7 @@ function modelParts(f: ModelFacts, p: EstimateParams, devices: DeviceInput[], sh
   const keyBytes = CACHE_BYTES[p.cacheTypeK ?? 'f16'] ?? 2
   const valBytes = CACHE_BYTES[p.cacheTypeV ?? 'f16'] ?? 2
   const owner = assignLayers(L, p.gpuLayers, shares)
-  const outDev = shares.length && (p.gpuLayers === null || p.gpuLayers === undefined || p.gpuLayers < 0 || p.gpuLayers >= 1) ? shares.length - 1 : -1
+  const outDev = assignOutput(L, p.gpuLayers, shares)
   // One memory for everything: a Mac / integrated device, or no device at all (CPU only).
   const sharedPool = devices.every(d => d.memory === 'shared')
 
@@ -379,7 +406,7 @@ export function estimateMemory(input: EstimateInput): MemoryEstimate {
 
   const devPools: Breakdown[] = devices.map((_, i) => sumBreakdown(...parts.map(p => p.dev[i]!)))
   const hostPool = sumBreakdown(...parts.map(p => p.host))
-  if (mmTotal > 0) (devices.length ? devPools[0]! : hostPool).mmprojMiB += mmTotal
+  if (mmTotal > 0) (devices.length && !params.mmprojOnHost ? devPools[0]! : hostPool).mmprojMiB += mmTotal
   devices.forEach((d, i) => {
     const used = devPools[i]!.weightsMiB + devPools[i]!.kvMiB + devPools[i]!.stateMiB + devPools[i]!.draftMiB + devPools[i]!.mmprojMiB > 0
     if (used) devPools[i]!.fixedMiB = d.fixedMiB ?? FIXED_OVERHEAD_MIB[d.memory]

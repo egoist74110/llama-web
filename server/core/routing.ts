@@ -25,10 +25,18 @@ function withProfile(model: ModelConfig, profile: string): RouteResult {
   return { ok: true, target: { modelId: model.id, profile }, model, profile: p }
 }
 
-/** The most recently used of these (a never-used one counts as oldest; later in the list wins a tie). */
+/**
+ * The most recently used of these (a never-used one counts as oldest). The same millisecond is decided by the
+ * scheduler's use counter; without one, later in the list wins.
+ */
 function latestUsed(list: ModelSnapshot[]): ModelSnapshot | undefined {
   let best: ModelSnapshot | undefined
-  for (const s of list) if (!best || (s.lastUsedAt ?? -1) >= (best.lastUsedAt ?? -1)) best = s
+  for (const s of list) {
+    if (!best) { best = s; continue }
+    const a = s.lastUsedAt ?? -1
+    const b = best.lastUsedAt ?? -1
+    if (a > b || (a === b && (s.useSeq === undefined || best.useSeq === undefined || s.useSeq >= best.useSeq))) best = s
+  }
   return best
 }
 

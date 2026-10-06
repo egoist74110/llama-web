@@ -28,3 +28,9 @@ export function failureAdvice(kind: string, isMac: boolean): string {
 }
 
 export const dirPathPlaceholder = (isMac: boolean) => (isMac ? mac.pathPlaceholder : t.settings.dirs.pathPlaceholder)
+
+/** Group notes of the parameter form / the global defaults: the Mac wording names no GPU or video memory. */
+export function formHintText(key: 'commonHint' | 'moreHint' | 'defaultsMoreHint', isMac: boolean): string {
+  if (isMac) return mac.form[key]
+  return key === 'commonHint' ? t.models.edit.form.commonHint : key === 'moreHint' ? t.models.edit.form.moreHint : t.settings.defaults.moreHint
+}
