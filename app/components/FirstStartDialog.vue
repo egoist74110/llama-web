@@ -13,6 +13,7 @@ const props = defineProps<{ modelId: string, name: string }>()
 const open = defineModel<boolean>('open', { required: true })
 const { busy } = useModelActions()
 const feedback = useModelStartFeedback()
+const ui = usePlatformUi()
 
 const info = ref<SetupDoc | null>(null)
 const ctxSize = ref<number | string>('')
@@ -23,6 +24,7 @@ const thinking = ref(true)
 const thinkingLimit = ref<number | string>(0)
 const thinkingLimitOk = computed(() => thinkingLimit.value !== '' && validThinkingLimit(Number(thinkingLimit.value)))
 const vision = ref(false)
+const offload = ref(true)
 const mmprojKey = ref('')
 const mtp = ref<MtpInput>({ enabled: false, mode: null, draft: null, n: MTP_DEFAULT_N })
 const saving = ref(false)
@@ -57,6 +59,7 @@ watch(open, async (v) => {
     mtp.value = { enabled: false, mode: null, draft: null, n: r.mtpN }
     mmprojKey.value = r.candidates.mmproj[0] ? key(r.candidates.mmproj[0].ref) : ''
     vision.value = !!r.candidates.mmproj.length
+    offload.value = true
   } catch (e) {
     fail(e)
     open.value = false
@@ -78,6 +81,7 @@ async function confirm() {
         thinking: thinking.value,
         thinkingLimit: Number(thinkingLimit.value),
         mmproj: vision.value ? find(info.value.candidates.mmproj, mmprojKey.value) : null,
+        ...(vision.value && ui.value.hasGpu ? { mmprojOffload: offload.value } : {}),
         mtp: mtp.value.enabled,
         mtpMode: mtp.value.mode,
         draft: mtpAnswer.value.draft,
@@ -152,6 +156,15 @@ async function confirm() {
               {{ s.vision.found }}
             </p>
             <USelect v-if="vision" v-model="mmprojKey" :items="items(info.candidates.mmproj)" size="sm" class="font-mono" :aria-label="s.vision.title" />
+            <template v-if="vision && ui.hasGpu">
+              <div class="flex items-center justify-between gap-3">
+                <span class="text-sm">{{ s.vision.offload }}</span>
+                <USwitch v-model="offload" :aria-label="s.vision.offload" />
+              </div>
+              <p class="m-0 text-xs text-muted">
+                {{ offload ? s.vision.offloadOn : s.vision.offloadOff }}
+              </p>
+            </template>
           </template>
           <p v-else class="m-0 text-xs text-warning">
             {{ s.vision.none }}

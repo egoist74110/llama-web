@@ -21,6 +21,8 @@ export interface LaunchParams {
   reasoning: ParamValue
   reasoningFormat: ParamValue
   reasoningBudget: ParamValue
+  /** Vision projector on the GPU (`on`, llama.cpp default) or kept in system memory (`off` = `--no-mmproj-offload`). Only passed when an mmproj file is loaded. */
+  mmprojOffload: ParamValue
   /** CPU tuning (decision 39): thread count, NUMA strategy, affinity mask. Null = do not pass. */
   threads: ParamValue
   numa: ParamValue
@@ -59,6 +61,7 @@ export const PARAM_DEFS: ReadonlyArray<{ key: ParamKey, flag: string, aliases: s
   { key: 'reasoning', flag: '--reasoning', aliases: [] },
   { key: 'reasoningFormat', flag: '--reasoning-format', aliases: [] },
   { key: 'reasoningBudget', flag: '--reasoning-budget', aliases: [] },
+  { key: 'mmprojOffload', flag: '--mmproj-offload', aliases: ['--no-mmproj-offload'] },
   { key: 'threads', flag: '--threads', aliases: ['-t'] },
   { key: 'numa', flag: '--numa', aliases: [] },
   { key: 'cpuMask', flag: '--cpu-mask', aliases: ['-C'] },
@@ -73,6 +76,7 @@ export const NUMA_MODES = ['distribute', 'isolate', 'numactl']
 export function paramValueOk(key: ParamKey, v: ParamValue): boolean {
   if (v === null) return true
   if (key === 'threads') return typeof v === 'number' ? Number.isInteger(v) && v >= -1 && v <= 4096 : /^-?\d{1,4}$/.test(v) && Number(v) >= -1
+  if (key === 'mmprojOffload') return v === 'on' || v === 'off'
   if (key === 'numa') return typeof v === 'string' && NUMA_MODES.includes(v)
   if (key === 'cpuMask') return typeof v === 'string' && /^(0x)?[0-9a-fA-F]{1,1024}$/.test(v)
   return true
@@ -90,6 +94,7 @@ export const DEFAULT_LAUNCH_DEFAULTS: LaunchDefaults = {
   reasoning: 'on',
   reasoningFormat: 'auto',
   reasoningBudget: -1,
+  mmprojOffload: null,
   threads: null,
   numa: null,
   cpuMask: null,
@@ -397,11 +402,14 @@ export function buildLaunchArgs(input: BuildInput): BuildResult {
   for (const d of PARAM_DEFS) {
     const v = effective[d.key]
     if (v === null) continue
+    // A boolean flag pair: nothing to pass without a projector or when GPU offload (the default) is wanted.
+    if (d.key === 'mmprojOffload' && (!input.paths.mmproj || v !== 'off')) continue
     if (extraCanon.has(d.flag)) {
       warnings.push({ code: 'extra-overrides-form', severity: 'warning', flag: d.flag })
       continue
     }
-    args.push(d.flag, String(v))
+    if (d.key === 'mmprojOffload') args.push('--no-mmproj-offload')
+    else args.push(d.flag, String(v))
   }
   for (const [flag, value] of deviceArgs(device, input.group ?? null)) {
     if (extraCanon.has(flag)) {

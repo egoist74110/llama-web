@@ -3,9 +3,9 @@ import { COMMON_FIELDS, MORE_FIELDS, PARAM_FIELDS } from '../../app/composables/
 
 describe('parameter groups (common vs more)', () => {
   test('common = the first-start items; context and thinking, no duplicates anywhere', () => {
-    expect(COMMON_FIELDS.map(f => f.key)).toEqual(['ctxSize', 'reasoning'])
+    expect(COMMON_FIELDS.map(f => f.key)).toEqual(['ctxSize', 'reasoning', 'mmprojOffload'])
     const more = MORE_FIELDS.map(f => f.key)
-    expect(more.some(k => ['ctxSize', 'reasoning'].includes(k))).toBe(false)
+    expect(more.some(k => ['ctxSize', 'reasoning', 'mmprojOffload'].includes(k))).toBe(false)
   })
 
   test('every main parameter is shown exactly once; the raw thinking limit is replaced by the shortcut', () => {

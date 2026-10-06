@@ -185,3 +185,14 @@ test('default defaults match the plan and produce a sane command', () => {
   expect(r.args).toContain('--no-prefill-assistant')
   expect(r.args).not.toContain('--jinja') // on by default in llama-server
 })
+
+test('mmprojOffload off passes --no-mmproj-offload only with a projector; on / unset pass nothing', () => {
+  const paths = { model: 'X:\models\m.gguf', mmproj: 'X:\models\mm.gguf' }
+  const off = defaults({ mmprojOffload: 'off' })
+  expect(build({ paths, defaults: off }).args).toContain('--no-mmproj-offload')
+  expect(build({ defaults: off }).args).not.toContain('--no-mmproj-offload')
+  expect(build({ paths, defaults: defaults({ mmprojOffload: 'on' }) }).args.join(' ')).not.toContain('mmproj-offload')
+  expect(build({ paths }).args.join(' ')).not.toContain('mmproj-offload')
+  const r = build({ paths, defaults: off, profile: { extraArgs: '--mmproj-offload' } })
+  expect(r.args.filter(a => a.includes('mmproj-offload'))).toEqual(['--mmproj-offload'])
+})

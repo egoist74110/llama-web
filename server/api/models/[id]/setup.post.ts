@@ -21,7 +21,7 @@ export default defineEventHandler(async (event) => {
   if (typeof body?.thinking !== 'boolean' || typeof body?.mtp !== 'boolean' || typeof body?.mtpN !== 'number') {
     throw createError({ statusCode: 400, message: t.models.errors.badRequest })
   }
-  const input: FirstSetup = { thinking: body.thinking, thinkingLimit: body.thinkingLimit as FirstSetup['thinkingLimit'], mmproj: ref(body.mmproj), mtp: body.mtp, mtpMode: body.mtpMode as FirstSetup['mtpMode'], draft: ref(body.draft), mtpN: body.mtpN,
+  const input: FirstSetup = { thinking: body.thinking, thinkingLimit: body.thinkingLimit as FirstSetup['thinkingLimit'], mmproj: ref(body.mmproj), mmprojOffload: body.mmprojOffload as FirstSetup['mmprojOffload'], mtp: body.mtp, mtpMode: body.mtpMode as FirstSetup['mtpMode'], draft: ref(body.draft), mtpN: body.mtpN,
     ctxSize: body.ctxSize as FirstSetup['ctxSize'], setGlobalContext: body.setGlobalContext as FirstSetup['setGlobalContext'],
     setGlobalThinking: body.setGlobalThinking as FirstSetup['setGlobalThinking'], setGlobalThinkingLimit: body.setGlobalThinkingLimit as FirstSetup['setGlobalThinkingLimit'] }
   const ctx = getContext()

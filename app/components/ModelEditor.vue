@@ -349,7 +349,6 @@ const pendingTitle = computed(() => {
 
         <!-- All profile forms stay mounted so unsaved edits survive switching profiles / tabs. -->
         <div v-show="editTab === 'params'" class="flex flex-col gap-4">
-          <ModelRuntimeBox :model-id="modelId" :runtime="model.runtime" :gpu="model" :running="anyUp" @saved="loadDetail()" />
           <div class="flex flex-wrap items-center gap-2">
             <span class="text-xs text-dimmed">{{ edit.paramsFor }}</span>
             <USelect

@@ -178,6 +178,8 @@ export interface FirstSetup {
   thinkingLimit?: number
   /** Vision projector file (must be a scanned mmproj); null = no vision. */
   mmproj: FileRef | null
+  /** Load the vision projector on the GPU (true) or keep it in system memory (false). Absent leaves the profile as is. */
+  mmprojOffload?: boolean
   mtp: boolean
   /** Explicit choice when MTP is enabled; no candidate-based capability inference. */
   mtpMode?: MtpMode | null
@@ -220,7 +222,9 @@ export function applyFirstSetup(doc: ModelsDoc, modelId: string, input: FirstSet
   const files: FilesPatch = { mmproj: input.mmproj, draft: input.mtp ? input.draft : null }
   applyFiles(doc, modelId, files, entries)
 
-  profile.overrides = { ...profile.overrides, ...(input.ctxSize === undefined ? {} : { ctxSize: input.ctxSize }), reasoning: input.thinking ? 'on' : 'off',
+  if (input.mmprojOffload !== undefined && typeof input.mmprojOffload !== 'boolean') throw new ProfileError('bad-setup')
+  profile.overrides = { ...profile.overrides, ...(input.ctxSize === undefined ? {} : { ctxSize: input.ctxSize }),
+    ...(input.mmprojOffload === undefined || !input.mmproj ? {} : { mmprojOffload: input.mmprojOffload ? 'on' : 'off' }), reasoning: input.thinking ? 'on' : 'off',
     ...(input.thinkingLimit !== undefined ? { reasoningBudget: thinkingBudget(input.thinkingLimit) } : input.thinking ? { reasoningBudget: -1 } : {}) }
   profile.extraArgs = mtpExtraArgs(profile.extraArgs, mtp)
   model.confirmed = true

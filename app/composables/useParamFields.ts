@@ -23,10 +23,11 @@ export const PARAM_FIELDS: ParamField[] = [
   { key: 'reasoning', kind: 'select', options: ['on', 'off', 'auto'] },
   { key: 'reasoningFormat', kind: 'select', options: ['auto', 'none', 'deepseek', 'deepseek-legacy'] },
   { key: 'reasoningBudget', kind: 'number' },
+  { key: 'mmprojOffload', kind: 'select', options: ['on', 'off'] },
 ]
 
 /** The few settings the first-start dialog asks about; shown first, the rest sits under "more". The thinking limit hangs off `reasoning`. */
-export const COMMON_KEYS: ParamKey[] = ['ctxSize', 'reasoning']
+export const COMMON_KEYS: ParamKey[] = ['ctxSize', 'reasoning', 'mmprojOffload']
 export const COMMON_FIELDS: ParamField[] = PARAM_FIELDS.filter(f => COMMON_KEYS.includes(f.key))
 /** Everything else in the main list; the raw thinking-limit row is replaced by the shortcut control. */
 export const MORE_FIELDS: ParamField[] = PARAM_FIELDS.filter(f => !COMMON_KEYS.includes(f.key) && f.key !== 'reasoningBudget')
