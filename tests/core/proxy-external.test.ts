@@ -81,6 +81,19 @@ test('<prefix>-<id> goes to the upstream with its own id, the upstream key and w
   expect(s.acquired()).toBe(0)
 })
 
+test('every client parameter (thinking, sampling, tools, unknown fields) reaches the upstream untouched; only the model id changes', async () => {
+  const up = fakeUpstream()
+  const s = setup({ upstreamUrl: up.url })
+  const sent = {
+    messages: [{ role: 'user', content: 'hi' }], stream: true, stream_options: { include_usage: true },
+    reasoning_effort: 'high', chat_template_kwargs: { enable_thinking: true, thinking_budget: 8192 }, enable_thinking: true,
+    thinking: { type: 'enabled', budget_tokens: 4096 }, temperature: 0.6, top_p: 0.95, top_k: 20, max_tokens: 2048, max_completion_tokens: 4096,
+    tools: [{ type: 'function', function: { name: 'f', parameters: { type: 'object', properties: {} } } }], tool_choice: 'auto', some_vendor_field: { x: 1 },
+  }
+  await (await s.post({ model: 'Strata-qwen-x', ...sent })).text()
+  expect(up.seen[0]!.body).toEqual({ model: 'qwen-x', ...sent })
+})
+
 test('the request record names the external model and carries neither the key nor the conversation', async () => {
   const up = fakeUpstream()
   const s = setup({ upstreamUrl: up.url })
