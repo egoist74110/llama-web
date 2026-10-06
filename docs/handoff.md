@@ -1,5 +1,12 @@
 # 交接记录
 
+## 2026-10-06 · 10-3 外部上游手动启动（用户追加）· Claude
+- 依据：用户要求「接入里已存在的服务检测到不在线时可手动启用，要输入启动命令，一直探测到模型出现才算成功」；已写成决定 56 ⑩ 与阶段 10 的 10-3。
+- 做了：① `Upstream` 新增 `startCommand` / `startCwd`（可选；旧配置缺省补空；`cleanStartCommand` 校验长度、控制字符、引号）。② `server/core/upstream-launcher.ts`：命令按 `splitArgs` 拆成参数数组、不经 shell（Windows 的 .bat / .cmd 自动用 `cmd.exe /c`）；分离启动、隐藏窗口、不读输出、不记 pids.json、llama-web 退出不结束它；每 2 秒做连接测试，列出模型（或有手填模型且已应答）即成功并保存模型列表；非 0 退出码 = 失败，退出码 0 继续等，默认等 10 分钟超时（不结束进程），取消 = 停止等待并结束我们启动的进程。③ 接口 `POST /api/upstreams/[id]/start`、`/start-cancel`；快照 `connections[].launch`。④ 页面：离线且有命令时出现「启动」（确认框显示完整命令与工作目录，独占时提示会卸载本地模型）、等待中显示已等时间与取消、失败原因；没命令时提示「设置启动命令」；编辑抽屉加启动命令 / 工作目录与「不知道怎么写」教程（Windows / macOS 示例、可复制给 AI 助手的提示词；示例路径用占位值）。⑤ AGENTS.md 补了模块清单与「启动命令不记 pids、不随退出结束」这条例外。
+- 验证：`bun test` 1429 pass / 5 skip / 0 fail；`bun run typecheck` 通过。新增：upstream-launcher（15 项：参数拆分、.bat 包装、拒绝、等待成功 / 退出码 / 超时 / 取消 / 删除 / 关闭，另有 1 条真实 bun 子进程先“加载”再列模型）、upstreams 校验与旧配置。浏览器（打包产物 + 临时数据目录，已清理）：假引擎脚本经 `bun.cmd`（走 cmd 包装）从页面确认框启动 → 「正在启动，已等 N 秒」→ 6 秒后自动变在线并保存模型；教程折叠块显示正常。
+- **没验证 / 没做**：没有对用户真实的外部服务做启动（不知道它的命令，也不想在它占着显存时拉起第二个）；Mac 的 `open -a` / zsh 脚本没试（只有 Linux 平台的单元测试路径）；取消只结束我们启动的进程树，启动器自己拉起的、已脱离的服务不会被结束；超时 10 分钟与 2 秒间隔写死；失败时看不到子进程输出（设计如此，教程提示先在终端里手动运行）；没有 HTTP 层测试（路由是薄封装）；窄屏没看这块新界面；交叉审查没有覆盖这个功能（它执行用户配置的命令，建议审查时一并看：命令来源、公网入口是否真的碰不到 /api、参数里的密钥会不会进日志）。
+- 下一步：用户试用启动；之后做 10-1 / 10-1b / 10-3 的交叉审查。
+
 ## 2026-10-06 · 10-2「接入」页 + 本地侧防冲突 · Claude
 - 依据：计划阶段 10 / 关键决定 56；后端规则没有改。
 - 做了：① 左侧菜单「接入」与 `app/pages/connections.vue`：数据只来自 `useLive()` 的 `state.connections` / `exclusiveHolder`；上游卡片（名称与前缀说明、地址、在线状态、模型数、最近检测、监控页新窗口链接、「在本机运行」、「独占本机」（仅本机运行时出现并带大白话说明）、图片压缩三选一、API key 是否已保存、测试连接、编辑、删除二次确认）；开关与压缩是即时保存（先本地显示，下一个快照覆盖）。添加 / 编辑用 `UpstreamEditor.vue`（抽屉；key 留空不改，可「清除」；手填模型 id 每行一个），服务端中文 message 原样显示；新添加后自动测一次连接。② `ExclusiveNotice.vue`：独占时在总览、模型页、接入页显示一条提示；`ModelCard` 的启动 / 重试置灰并写明「被外部服务「X」占着机器」。③ 本地侧防冲突：`upstreamPrefixClash()`；`planEnable` 抛 `EnableError('upstream-conflict')`（启用接口返回中文提示），导入旧配置时跳过并给 `upstream-conflict` 警告。本地模型目前没有「改名」入口，所以只有这两处会产生名字。④ 文案全在 `i18n/zh-CN.ts`（`nav.connections`、`upstreams.page / form / remove`、`models.errors.upstream-conflict`、`import.warnings.upstream-conflict`）。

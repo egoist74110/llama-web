@@ -46,7 +46,9 @@ import { AppUpdater } from '../core/app-update'
 import { Hold } from '../core/write-pair'
 import { cloudflareHooks } from './cloudflare-hooks'
 import { acquireDataLock, type DataLock } from '../core/data-lock'
-import { defaultUpstreams, normalizeUpstreams, UPSTREAMS_VERSION, viewUpstreams, type UpstreamsDoc } from '../core/upstreams'
+import { defaultUpstreams, normalizeUpstreams, recordTest, UPSTREAMS_VERSION, viewUpstreams, type UpstreamsDoc } from '../core/upstreams'
+import { UpstreamLauncher } from '../core/upstream-launcher'
+import { testConnection } from '../core/upstream-test'
 import { httpProbe, UpstreamHealth } from '../core/upstream-health'
 import { detectPlatform, runtimeTarget, type PlatformInfo, type RuntimeTarget } from '../core/platform'
 
@@ -75,6 +77,8 @@ export interface AppContext {
   updateUpstreams(fn: (draft: UpstreamsDoc) => UpstreamsDoc | void): UpstreamsDoc
   /** Probes the upstreams; holds the machine-exclusive state. */
   health: UpstreamHealth
+  /** Starts an upstream by hand with its saved command and waits for its models (decision 56 ⑩). */
+  launcher: UpstreamLauncher
   /** Re-read both files now (hand edits the watcher has not reported yet). Throws StoreError if one is invalid. */
   refresh(): void
   /** State of the llama.cpp startup check / download. */
@@ -377,7 +381,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
       // Job and its version from one view: the page orders snapshots and HTTP responses by it.
       ...(({ job, rev }) => ({ cloudflare: job, cloudflareRev: rev }))(cloudflare.view()),
       firstRun: isFirstRun(getSettings(), getModels()),
-      connections: viewUpstreams(upstreamsRef.get(), secretsRef.get().upstreamKeys).map(u => ({ ...u, up: health.isUp(u.id), checkedAt: health.state(u.id)?.checkedAt ?? null })),
+      connections: viewUpstreams(upstreamsRef.get(), secretsRef.get().upstreamKeys).map(u => ({ ...u, up: health.isUp(u.id), checkedAt: health.state(u.id)?.checkedAt ?? null, launch: launcher.state(u.id) })),
       exclusiveHolder: health.holder(),
     }),
   })
@@ -537,6 +541,20 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
   })
   health.start()
   startupClose.push(() => health.stop())
+  const launcher = new UpstreamLauncher({
+    upstreams: () => upstreamsRef.get().upstreams,
+    check: async (u) => {
+      const r = await testConnection(u, secretsRef.get().upstreamKeys[u.id] ?? '')
+      return r.ok ? { ok: true, models: r.models } : { ok: false, models: [] }
+    },
+    onReady: (u, models) => {
+      if (models.length) { try { upstreamsRef.update((draft) => { recordTest(draft, u.id, models) }) } catch (e) { logError('could not save the model list of a started upstream:', (e as Error).message) } }
+      void health.tick()
+    },
+    onChange: () => live.notify(),
+    log,
+  })
+  startupClose.push(() => launcher.close())
   // Reads free memory every two seconds, but only has work while several models may be online and one is loading or ready.
   const watchdog = new Watchdog({
     sample: () => samplePools(platform.os),
@@ -648,7 +666,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
   return {
     dataDir, bootPort: getSettings().server.port, getSettings, getModels, updateSettings: settingsRef.update, updateModels: modelsRef.update,
     platform, runtimeTarget: selectedTarget,
-    getSecrets: secretsRef.get, updateSecrets: secretsRef.update, getUpstreams: upstreamsRef.get, updateUpstreams: upstreamsRef.update, health, tunnel, applyTunnel, cloudflare,
+    getSecrets: secretsRef.get, updateSecrets: secretsRef.update, getUpstreams: upstreamsRef.get, updateUpstreams: upstreamsRef.update, health, launcher, tunnel, applyTunnel, cloudflare,
     refresh: () => { settingsRef.refresh(); modelsRef.refresh(); upstreamsRef.refresh() },
     getRuntimeStatus: () => updater.getStatus(), updater, secondary,
     async downloadSecondary() {
@@ -715,6 +733,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
         secretsStore.close()
         upstreamsStore.close()
         health.stop()
+        launcher.close()
         gpu.stop()
         watchdog.stop()
         await scheduler.shutdown()

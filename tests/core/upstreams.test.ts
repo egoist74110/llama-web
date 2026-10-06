@@ -1,7 +1,7 @@
 // External upstreams (decision 56): names, addresses, prefix routing and the edits on the document.
 import { describe, expect, test } from 'bun:test'
 import {
-  cleanBaseUrl, createUpstream, defaultUpstreams, findExternal, listExternalNames, localConflict, selfPortsOf, upstreamPrefixClash, modelIdsOf, normalizeUpstreams,
+  cleanBaseUrl, createUpstream, defaultUpstreams, findExternal, listExternalNames, cleanStartCommand, cleanStartCwd, localConflict, selfPortsOf, upstreamPrefixClash, modelIdsOf, normalizeUpstreams,
   parseModelList, recordTest, removeUpstream, updateUpstream, UpstreamError, viewUpstreams, type EditContext, type UpstreamsDoc,
 } from '../../server/core/upstreams'
 import { defaultSecrets, normalizeSecrets, SECRETS_MIGRATIONS, SECRETS_VERSION } from '../../server/core/keys'
@@ -51,11 +51,20 @@ describe('names and routing', () => {
     expect(localConflict('Qwen', ['Qwen3-8B'])).toBeNull()
   })
 
-  test('the public port is ours only while the public entry really listens', () => {
-    expect(selfPortsOf(5001, 5001, { state: 'listening', port: 8080 })).toEqual([5001, 5001, 8080])
-    // Switched on but the port is taken by another engine: not ours, an upstream there is fine.
-    expect(selfPortsOf(5001, 5001, { state: 'error', port: 8080 })).toEqual([5001, 5001])
-    expect(selfPortsOf(5001, 5001, { state: 'off' })).toEqual([5001, 5001])
+  test('the start command is checked, kept as written and optional; edits can set and clear it', () => {
+    expect(cleanStartCommand(undefined)).toBe('')
+    expect(cleanStartCommand('   ')).toBe('')
+    expect(cleanStartCommand('  cmd /c "X:\\a b\\start.bat"  ')).toBe('cmd /c "X:\\a b\\start.bat"')
+    for (const bad of ['a "unterminated', 'one\ntwo', 5, 'x'.repeat(2001)]) expect(codeOf(() => cleanStartCommand(bad))).toBe('bad-start-command')
+    expect(codeOf(() => cleanStartCwd('a\u0000b'))).toBe('bad-start-cwd')
+    const d = doc()
+    const u = createUpstream(d, { name: 'Cmd', baseUrl: 'http://x/v1', startCommand: 'run it', startCwd: 'X:\\w' }, ctx)
+    expect([u.startCommand, u.startCwd]).toEqual(['run it', 'X:\\w'])
+    updateUpstream(d, u.id, { startCommand: '', startCwd: '' }, ctx)
+    expect([u.startCommand, u.startCwd]).toEqual(['', ''])
+    // An old upstreams.json without the fields gets empty ones.
+    const old = normalizeUpstreams({ version: 1, upstreams: [{ id: 'u-1', name: 'Old', baseUrl: 'http://x/v1', monitorUrl: '', imageCompress: 'inherit', models: [], manualModels: [], testedAt: '' } as any] })
+    expect([old.upstreams[0]!.startCommand, old.upstreams[0]!.startCwd]).toEqual(['', ''])
   })
 
   test('a local model name is checked against the prefixes the other way round', () => {

@@ -1,13 +1,14 @@
 // Shared by the /api/upstreams routes: the list the page shows, the edit context and error mapping.
 import { fmt, t } from '../core/i18n'
 import { StoreError } from '../core/store'
+import { LaunchError } from '../core/upstream-launcher'
 import { selfPortsOf, UpstreamError, viewUpstreams, type ConnectionView, type EditContext } from '../core/upstreams'
 import { getContext } from './context'
 
 export function describeUpstreams(): { upstreams: ConnectionView[], exclusiveHolder: string | null } {
   const ctx = getContext()
   const upstreams = viewUpstreams(ctx.getUpstreams(), ctx.getSecrets().upstreamKeys).map(u => ({
-    ...u, up: ctx.health.isUp(u.id), checkedAt: ctx.health.state(u.id)?.checkedAt ?? null,
+    ...u, up: ctx.health.isUp(u.id), checkedAt: ctx.health.state(u.id)?.checkedAt ?? null, launch: ctx.launcher.state(u.id),
   }))
   return { upstreams, exclusiveHolder: ctx.health.holder() }
 }
@@ -37,4 +38,14 @@ export function upstreamsError(e: unknown): never {
   // upstreams.json / secrets.json is broken (hand edit): never overwrite it with the cached copy.
   if (e instanceof StoreError) throw createError({ statusCode: 409, message: fmt(t.upstreams.errors['store'], { detail: e.message }) })
   throw e
+}
+
+/** Turn a start failure into an HTTP error with a Chinese message; other errors pass through. */
+export function launchError(e: unknown): never {
+  if (e instanceof LaunchError) {
+    const errors = t.upstreams.launch.errors as Record<string, string>
+    const status = e.code === 'not-found' ? 404 : e.code === 'already-up' || e.code === 'already-starting' ? 409 : 400
+    throw createError({ statusCode: status, message: fmt(errors[e.code] ?? e.code, { detail: e.detail }) })
+  }
+  return upstreamsError(e)
 }

@@ -86,6 +86,51 @@ function onSaved(name: string, createdId: string | null, isNew: boolean) {
   }
 }
 
+// Manual start (decision 56 ⑩): confirm what will run, then follow `launch` in the live snapshot.
+const starting = ref<ConnectionView | null>(null)
+const startOpen = computed({
+  get: () => starting.value !== null,
+  set: (v: boolean) => { if (!v) starting.value = null },
+})
+const prevLaunch = new Map<string, string>()
+watch(rows, (list) => {
+  for (const u of list) {
+    const was = prevLaunch.get(u.id)
+    if (was === 'starting' && u.launch.state === 'idle' && u.up) toast.add({ title: fmt(p.start.done, { name: u.name }), color: 'success', icon: 'i-lucide-check' })
+    prevLaunch.set(u.id, u.launch.state)
+  }
+})
+
+function start() {
+  const u = starting.value
+  if (!u) return
+  return run(`start:${u.id}`, async () => {
+    try {
+      await $fetch(url(u, '/start'), { method: 'POST' })
+      starting.value = null
+    } catch (e) {
+      fail(p.start.startFailed, e)
+    }
+  })
+}
+
+function cancelStart(u: ConnectionView) {
+  return run(`startcancel:${u.id}`, async () => {
+    try {
+      await $fetch(url(u, '/start-cancel'), { method: 'POST' })
+    } catch (e) {
+      fail(p.start.cancelFailed, e)
+    }
+  })
+}
+
+const canStart = (u: ConnectionView) => u.checkedAt !== null && !u.up
+const waited = (u: ConnectionView) => (u.launch.state === 'starting' ? formatDuration(Math.max(0, serverNow.value - u.launch.since)) : '')
+const launchFailure = (u: ConnectionView) => {
+  const l = u.launch
+  return l.state === 'failed' ? fmt(p.start.failed[l.code], { detail: l.detail }) : ''
+}
+
 function remove() {
   const u = removing.value
   if (!u) return
@@ -143,6 +188,32 @@ const example = (u: ConnectionView) => `${u.name}-${allModels(u)[0] ?? 'model-id
           <a v-if="u.monitorUrl" :href="u.monitorUrl" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-primary" :title="p.monitorOpen">
             <UIcon name="i-lucide-external-link" class="size-3.5" />{{ p.monitor }}
           </a>
+        </div>
+
+        <div v-if="canStart(u) || u.launch.state !== 'idle'" class="flex flex-col gap-2 rounded-[10px] bg-[var(--lw-sunken)] px-3.5 py-3">
+          <div v-if="u.launch.state === 'starting'" class="flex flex-wrap items-center justify-between gap-2">
+            <span class="flex items-center gap-2 text-[13px]">
+              <UIcon name="i-lucide-loader-circle" class="size-4 shrink-0 animate-spin lw-dot-warn" />{{ fmt(p.start.waiting, { time: waited(u) }) }}
+            </span>
+            <UButton size="sm" color="neutral" variant="outline" :title="p.start.cancelHint" :loading="!!busy[`startcancel:${u.id}`]" @click="cancelStart(u)">
+              {{ p.start.cancel }}
+            </UButton>
+          </div>
+          <div v-else-if="u.startCommand" class="flex flex-wrap items-center justify-between gap-2">
+            <span class="text-xs text-muted">{{ p.start.hint }}</span>
+            <UButton size="sm" icon="i-lucide-play" @click="starting = u">
+              {{ p.start.button }}
+            </UButton>
+          </div>
+          <div v-else class="flex flex-wrap items-center justify-between gap-2">
+            <span class="text-xs text-muted">{{ p.start.noCommand }}</span>
+            <UButton size="sm" color="neutral" variant="outline" icon="i-lucide-terminal" @click="openEditor(u)">
+              {{ p.start.setCommand }}
+            </UButton>
+          </div>
+          <p v-if="launchFailure(u)" role="alert" class="m-0 text-xs text-error">
+            {{ launchFailure(u) }}
+          </p>
         </div>
 
         <p class="m-0 text-[13px] text-muted">
@@ -229,6 +300,30 @@ const example = (u: ConnectionView) => `${u.name}-${allModels(u)[0] ?? 'model-id
     </AppCard>
 
     <UpstreamEditor v-model:open="editorOpen" :upstream="editing" @saved="onSaved" />
+
+    <UModal v-model:open="startOpen" :title="starting ? fmt(p.start.confirmTitle, { name: starting.name }) : ''" :description="p.start.confirmBody">
+      <template #body>
+        <div v-if="starting" class="flex flex-col gap-2">
+          <pre class="m-0 whitespace-pre-wrap break-all rounded-lg bg-[var(--lw-sunken)] p-3 font-mono text-xs">{{ starting.startCommand }}</pre>
+          <p v-if="starting.startCwd" class="m-0 break-all text-xs text-muted">
+            {{ fmt(p.start.confirmCwd, { cwd: starting.startCwd }) }}
+          </p>
+          <p v-if="starting.local && starting.exclusive" class="m-0 text-xs lw-dot-warn">
+            {{ p.start.confirmExclusive }}
+          </p>
+        </div>
+      </template>
+      <template #footer>
+        <div class="flex w-full justify-end gap-2">
+          <UButton color="neutral" variant="ghost" @click="starting = null">
+            {{ t.upstreams.form.cancel }}
+          </UButton>
+          <UButton icon="i-lucide-play" :loading="!!starting && !!busy[`start:${starting.id}`]" @click="start">
+            {{ p.start.confirm }}
+          </UButton>
+        </div>
+      </template>
+    </UModal>
 
     <UModal v-model:open="removeOpen" :title="removing ? fmt(t.upstreams.remove.title, { name: removing.name }) : ''" :description="removing ? fmt(t.upstreams.remove.body, { name: removing.name }) : ''">
       <template #footer>

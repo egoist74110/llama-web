@@ -2,6 +2,8 @@
 // Nitro). The list lives in data/upstreams.json; the upstream API keys live in data/secrets.json
 // (`upstreamKeys`, by upstream id) and never appear in a view, a log or an event.
 import { randomBytes } from 'node:crypto'
+import { ArgsSyntaxError, splitArgs } from './args'
+import type { LaunchState } from './upstream-launcher'
 
 export type ImageCompressMode = 'inherit' | 'on' | 'off'
 
@@ -18,6 +20,13 @@ export interface Upstream {
   local: boolean
   /** While it runs, llama-web's own llama-servers are unloaded and none may load (default true; only used when `local`). */
   exclusive: boolean
+  /**
+   * How to start the service by hand when it is not up (decision 56 ⑩): one command line, split into an argument array
+   * (never run through a shell); '' = none. Only the management API sets it.
+   */
+  startCommand: string
+  /** Working directory of the start command; '' = llama-web's own. */
+  startCwd: string
   /** Model ids from the last successful connection test. */
   models: string[]
   /** Model ids typed in by hand (for upstreams without `/v1/models`). */
@@ -45,7 +54,7 @@ const isObj = (v: unknown): v is Record<string, any> => !!v && typeof v === 'obj
 export type UpstreamErrorCode =
   | 'bad-key'
   | 'bad-name' | 'name-taken' | 'name-local-conflict' | 'bad-url' | 'url-self' | 'bad-monitor-url'
-  | 'bad-model' | 'not-found' | 'too-many' | 'bad-mode'
+  | 'bad-model' | 'not-found' | 'too-many' | 'bad-mode' | 'bad-start-command' | 'bad-start-cwd'
 
 export class UpstreamError extends Error {
   constructor(public code: UpstreamErrorCode, public detail = '') {
@@ -93,6 +102,32 @@ export function cleanMonitorUrl(raw: unknown): string {
   return u.toString()
 }
 
+export const MAX_START_COMMAND = 2000
+
+/** A start command line: at least one token once split (quotes understood), no control characters. '' = none. */
+export function cleanStartCommand(raw: unknown): string {
+  if (raw === undefined || raw === null) return ''
+  if (typeof raw !== 'string') throw new UpstreamError('bad-start-command')
+  const text = raw.trim()
+  if (!text) return ''
+  if (text.length > MAX_START_COMMAND || /[\u0000-\u001f\u007f]/.test(text)) throw new UpstreamError('bad-start-command')
+  try {
+    if (splitArgs(text).length === 0) throw new UpstreamError('bad-start-command')
+  } catch (e) {
+    if (e instanceof ArgsSyntaxError) throw new UpstreamError('bad-start-command', e.message)
+    throw e
+  }
+  return text
+}
+
+export function cleanStartCwd(raw: unknown): string {
+  if (raw === undefined || raw === null) return ''
+  if (typeof raw !== 'string') throw new UpstreamError('bad-start-cwd')
+  const text = raw.trim()
+  if (text.length > 500 || /[\u0000-\u001f\u007f]/.test(text)) throw new UpstreamError('bad-start-cwd')
+  return text
+}
+
 export function cleanModelIds(raw: unknown): string[] {
   if (raw === undefined || raw === null) return []
   if (!Array.isArray(raw)) throw new UpstreamError('bad-model')
@@ -131,6 +166,8 @@ export function normalizeUpstreams(doc: UpstreamsDoc): UpstreamsDoc {
       u.imageCompress = cleanMode(u.imageCompress)
       u.models = cleanModelIds(u.models)
       u.manualModels = cleanModelIds(u.manualModels)
+      u.startCommand = cleanStartCommand(u.startCommand)
+      u.startCwd = cleanStartCwd(u.startCwd)
     } catch (e) {
       throw new Error(`upstream "${u.id}": ${(e as Error).message}`)
     }
@@ -201,6 +238,8 @@ export interface UpstreamForm {
   local?: unknown
   exclusive?: unknown
   manualModels?: unknown
+  startCommand?: unknown
+  startCwd?: unknown
 }
 
 /**
@@ -235,6 +274,7 @@ export function createUpstream(draft: UpstreamsDoc, form: UpstreamForm, ctx: Edi
   const u: Upstream = {
     id, name, baseUrl: cleanBaseUrl(form.baseUrl, ctx.selfPorts), monitorUrl: cleanMonitorUrl(form.monitorUrl),
     imageCompress: cleanMode(form.imageCompress), local: form.local !== false, exclusive: form.exclusive !== false,
+    startCommand: cleanStartCommand(form.startCommand), startCwd: cleanStartCwd(form.startCwd),
     models: [], manualModels: cleanModelIds(form.manualModels), testedAt: '',
   }
   draft.upstreams.push(u)
@@ -259,6 +299,8 @@ export function updateUpstream(draft: UpstreamsDoc, id: unknown, form: UpstreamF
   if (form.local !== undefined) u.local = form.local === true
   if (form.exclusive !== undefined) u.exclusive = form.exclusive === true
   if (form.manualModels !== undefined) u.manualModels = cleanModelIds(form.manualModels)
+  if (form.startCommand !== undefined) u.startCommand = cleanStartCommand(form.startCommand)
+  if (form.startCwd !== undefined) u.startCwd = cleanStartCwd(form.startCwd)
   return u
 }
 
@@ -290,6 +332,8 @@ export interface ConnectionView extends UpstreamView {
   up: boolean
   /** Epoch ms of the last probe; null = none yet. */
   checkedAt: number | null
+  /** The manual start (decision 56 ⑩). */
+  launch: LaunchState
 }
 
 export function viewUpstreams(doc: UpstreamsDoc, keys: Record<string, string>): UpstreamView[] {
