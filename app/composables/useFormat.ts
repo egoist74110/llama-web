@@ -90,7 +90,7 @@ export function eventText(e: ActivityEvent, modelName: (id: string) => string, i
   if (e.kind === 'no-room') {
     const key = e.manual ? 'manual' : 'request'
     const template = noRoomReasonTemplate(e.reason, isMac)
-    return fmt(t.events.noRoom[key], { model: modelName(e.modelId), profile: e.profile, reason: fmt(template, { estimate: gibText(e.estimateMiB), available: gibText(e.availableMiB) }) })
+    return fmt(t.events.noRoom[key], { model: modelName(e.modelId), profile: e.profile, reason: fmt(template, { estimate: gibText(e.estimateMiB), available: gibText(e.availableMiB), holder: e.holder ?? '' }) })
   }
   if (e.kind === 'make-room') {
     return fmt(t.events.makeRoom, { model: modelName(e.modelId), profile: e.profile, victim: modelName(e.victimModelId), victimProfile: e.victimProfile })

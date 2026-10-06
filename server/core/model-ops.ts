@@ -79,6 +79,21 @@ export class ModelOps {
     }
   }
 
+  /**
+   * Stop every model that is up or loading (an external upstream took the machine, decision 56). Each one drains its
+   * running requests first; queued requests are rejected like with a manual stop. Resolves with how many were asked to stop.
+   */
+  async stopAll(): Promise<number> {
+    const ids = [...new Set(this.sched.snapshot().models.filter(s => UP.has(s.state)).map(s => s.modelId))]
+    await Promise.all(ids.map(id => this.stop(id)))
+    return ids.length
+  }
+
+  /** True when some model has a process (or one on its way out). */
+  anyUp(): boolean {
+    return this.sched.snapshot().models.some(s => UP.has(s.state))
+  }
+
   /** Profiles with a process, including ones winding down (for display). */
   upProfiles(modelId: string): string[] {
     return this.instances(modelId).filter(s => UP.has(s.state)).map(s => s.profile)

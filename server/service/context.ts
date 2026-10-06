@@ -46,6 +46,8 @@ import { AppUpdater } from '../core/app-update'
 import { Hold } from '../core/write-pair'
 import { cloudflareHooks } from './cloudflare-hooks'
 import { acquireDataLock, type DataLock } from '../core/data-lock'
+import { defaultUpstreams, normalizeUpstreams, UPSTREAMS_VERSION, viewUpstreams, type UpstreamsDoc } from '../core/upstreams'
+import { httpProbe, UpstreamHealth } from '../core/upstream-health'
 import { detectPlatform, runtimeTarget, type PlatformInfo, type RuntimeTarget } from '../core/platform'
 
 export interface MemoryProbe {
@@ -68,6 +70,11 @@ export interface AppContext {
   /** data/secrets.json (API keys). Never send `key` values anywhere except the reveal / create responses. */
   getSecrets(): SecretsDoc
   updateSecrets(fn: (draft: SecretsDoc) => SecretsDoc | void): SecretsDoc
+  /** data/upstreams.json (external OpenAI-compatible services, decision 56); their keys are in secrets.json. */
+  getUpstreams(): UpstreamsDoc
+  updateUpstreams(fn: (draft: UpstreamsDoc) => UpstreamsDoc | void): UpstreamsDoc
+  /** Probes the upstreams; holds the machine-exclusive state. */
+  health: UpstreamHealth
   /** Re-read both files now (hand edits the watcher has not reported yet). Throws StoreError if one is invalid. */
   refresh(): void
   /** State of the llama.cpp startup check / download. */
@@ -234,6 +241,10 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     dataDir, name: 'secrets.json', version: SECRETS_VERSION, defaults: defaultSecrets, validate: normalizeSecrets, migrations: SECRETS_MIGRATIONS,
   })
   startupClose.push(() => secretsStore.close())
+  const upstreamsStore = new JsonStore<UpstreamsDoc>({
+    dataDir, name: 'upstreams.json', version: UPSTREAMS_VERSION, defaults: defaultUpstreams, validate: normalizeUpstreams,
+  })
+  startupClose.push(() => upstreamsStore.close())
   const changed = () => live.notify()
   // Settings edits (page or by hand) also start / stop / move the public listener.
   // `hold` is raised while a pair of writes is in flight (see onSaved of the Cloudflare setup): nothing reacts to half of it, one reconciliation runs afterwards.
@@ -242,6 +253,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
   const modelsRef = openStore(modelsStore, defaultModels, changed)
   // An unreadable secrets.json falls back to "no keys": every public request is refused. A new tunnel token restarts the tunnel.
   const secretsRef = openStore(secretsStore, defaultSecrets, () => { if (!hold.held) applyTunnel() })
+  const upstreamsRef = openStore(upstreamsStore, defaultUpstreams, changed)
   const getSettings = settingsRef.get
   let selectedTarget: RuntimeTarget, selectionError: string | undefined
   try { selectedTarget = runtimeTarget(platform, getSettings().llamacpp.acceleration) }
@@ -365,6 +377,8 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
       // Job and its version from one view: the page orders snapshots and HTTP responses by it.
       ...(({ job, rev }) => ({ cloudflare: job, cloudflareRev: rev }))(cloudflare.view()),
       firstRun: isFirstRun(getSettings(), getModels()),
+      connections: viewUpstreams(upstreamsRef.get(), secretsRef.get().upstreamKeys).map(u => ({ ...u, up: health.isUp(u.id), checkedAt: health.state(u.id)?.checkedAt ?? null })),
+      exclusiveHolder: health.holder(),
     }),
   })
   void detectLanAddress({ signal: networkProbe.signal }).then(host => {
@@ -383,6 +397,8 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     get multiLoad() { return getSettings().scheduler.multiLoad },
     get onNoRoom() { return getSettings().scheduler.onNoRoom },
     admit: admitTarget,
+    // An external upstream that runs here and wants the machine to itself (decision 56): no local load meanwhile.
+    blocked: () => health.holder(),
     get drainTimeoutMs() { return getSettings().scheduler.drainTimeoutSec * 1000 },
     onEvent: (e) => {
       if (e.type === 'state' && e.to !== 'ready') memoryEvents++
@@ -498,6 +514,25 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     },
   })
   const ops = new ModelOps(scheduler)
+  // Probes the external upstreams every few seconds. While one that runs on this machine wants it to itself, the models
+  // llama-web started are stopped (running requests finish first) and the scheduler refuses every load (`blocked`).
+  let enforcing = false
+  const health: UpstreamHealth = new UpstreamHealth({
+    upstreams: () => upstreamsRef.get().upstreams,
+    probe: httpProbe(id => secretsRef.get().upstreamKeys[id] ?? ''),
+    onChange: () => {
+      const h = health.holder()
+      log(h ? `upstream ${h}: running on this machine and exclusive, local models are stopped and cannot load` : 'upstream: nothing holds the machine any more, local models may load again')
+      live.notify()
+    },
+    afterTick: () => {
+      if (enforcing || !health.holder() || !ops.anyUp()) return
+      enforcing = true
+      ops.stopAll().then(n => log(`upstream ${health.holder()}: stopped ${n} local model(s)`), e => logError('could not stop the local models for an exclusive upstream:', (e as Error).message)).finally(() => { enforcing = false })
+    },
+  })
+  health.start()
+  startupClose.push(() => health.stop())
   // Reads free memory every two seconds, but only has work while several models may be online and one is loading or ready.
   const watchdog = new Watchdog({
     sample: () => samplePools(platform.os),
@@ -518,6 +553,8 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     onRequest: (r) => { logs.appendRequest(r); usage.record(r); live.onRequest(r) },
     speed,
     progressOf: t => live.progressOf(t.modelId, t.profile),
+    getUpstreams: upstreamsRef.get,
+    getUpstreamKey: id => secretsRef.get().upstreamKeys[id] ?? '',
   })
   const publicEntry: PublicListener = new PublicListener((req, ip) => handlePublic(req, {
     authenticate: header => authenticate(secretsRef.get(), header),
@@ -607,8 +644,8 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
   return {
     dataDir, bootPort: getSettings().server.port, getSettings, getModels, updateSettings: settingsRef.update, updateModels: modelsRef.update,
     platform, runtimeTarget: selectedTarget,
-    getSecrets: secretsRef.get, updateSecrets: secretsRef.update, tunnel, applyTunnel, cloudflare,
-    refresh: () => { settingsRef.refresh(); modelsRef.refresh() },
+    getSecrets: secretsRef.get, updateSecrets: secretsRef.update, getUpstreams: upstreamsRef.get, updateUpstreams: upstreamsRef.update, health, tunnel, applyTunnel, cloudflare,
+    refresh: () => { settingsRef.refresh(); modelsRef.refresh(); upstreamsRef.refresh() },
     getRuntimeStatus: () => updater.getStatus(), updater, secondary,
     async downloadSecondary() {
       if (!secondary) throw new Error('No second channel on this computer')
@@ -672,6 +709,8 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
         settingsStore.close()
         modelsStore.close()
         secretsStore.close()
+        upstreamsStore.close()
+        health.stop()
         gpu.stop()
         watchdog.stop()
         await scheduler.shutdown()

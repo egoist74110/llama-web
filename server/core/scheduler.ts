@@ -42,9 +42,10 @@ export interface NoRoomDetail {
   /**
    * `limit` = the online limit is reached, `memory` = it does not fit next to what is online, `unknown` = the free memory
    * could not be read, `watchdog` = the memory ran short while it was loading or running (decision 44), `unconfirmed` =
-   * a manual start was only confirmed for the answer it got at the interface, and the answer at load time is worse.
+   * a manual start was only confirmed for the answer it got at the interface, and the answer at load time is worse,
+   * `exclusive` = an external upstream that runs on this machine wants it to itself (decision 56, `holder` names it).
    */
-  reason: 'limit' | 'memory' | 'unknown' | 'watchdog' | 'unconfirmed'
+  reason: 'limit' | 'memory' | 'unknown' | 'watchdog' | 'unconfirmed' | 'exclusive'
   /** `unconfirmed` only: what the check at load time said (`risky` or `unknown`). */
   tier?: 'risky' | 'unknown'
   estimateMiB: number | null
@@ -53,6 +54,8 @@ export interface NoRoomDetail {
   pool: string | null
   /** The online limit (reason `limit`). */
   limit?: number
+  /** The upstream holding the machine (reason `exclusive`). */
+  holder?: string
 }
 
 export interface Admission {
@@ -127,6 +130,8 @@ export interface SchedulerOptions {
    * `multiLoad` off) there is no check and only the online limit applies.
    */
   admit?: (target: Target, online: Target[]) => Promise<Admission>
+  /** Name of what holds the machine for itself right now (decision 56): every load is refused meanwhile. Null = nothing does. */
+  blocked?: () => string | null
   drainTimeoutMs: number
   onEvent?: (e: SchedulerEvent) => void
   /**
@@ -546,6 +551,10 @@ export class Scheduler {
     if (inst?.state === 'failed' && !manual) return this.failAll(job, inst.error)
     // The same target may still be on its way out (manual stop); let it finish first.
     if (inst?.evicting) await inst.evicting
+
+    // An external upstream that wants the machine to itself: nothing loads, whatever the memory looks like.
+    const holder = this.opts.blocked?.()
+    if (holder) return this.refuse(job, { reason: 'exclusive', estimateMiB: null, availableMiB: null, pool: null, holder })
 
     // Make room. Without multi-load: evict least-recently-used ready models until below the limit. With it: the limit and
     // the memory check decide; a manual start is refused, a request unloads (or is refused, `onNoRoom`).

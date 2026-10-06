@@ -23,9 +23,11 @@ export interface SecretsDoc {
   tunnelToken: string
   /** Cloudflare API token for the one-click tunnel setup; '' = none. Same rules as `tunnelToken`. */
   cloudflareToken: string
+  /** API keys of the external upstreams (decision 56), by upstream id. Same rules as `tunnelToken`: never in logs, events or API responses. */
+  upstreamKeys: Record<string, string>
 }
 
-export const SECRETS_VERSION = 3
+export const SECRETS_VERSION = 4
 
 /** `migrations[n]` turns a version-n secrets.json into version n + 1. */
 export const SECRETS_MIGRATIONS: Record<number, (old: any) => any> = {
@@ -33,10 +35,12 @@ export const SECRETS_MIGRATIONS: Record<number, (old: any) => any> = {
   1: old => ({ ...old, tunnelToken: '' }),
   // 3: Cloudflare API token (one-click tunnel setup).
   2: old => ({ ...old, cloudflareToken: '' }),
+  // 4: API keys of external upstreams.
+  3: old => ({ ...old, upstreamKeys: {} }),
 }
 
 export function defaultSecrets(): SecretsDoc {
-  return { version: SECRETS_VERSION, apiKeys: [], tunnelToken: '', cloudflareToken: '' }
+  return { version: SECRETS_VERSION, apiKeys: [], tunnelToken: '', cloudflareToken: '', upstreamKeys: {} }
 }
 
 const isObj = (v: unknown): v is Record<string, any> => !!v && typeof v === 'object' && !Array.isArray(v)
@@ -50,6 +54,9 @@ export function normalizeSecrets(doc: SecretsDoc): SecretsDoc {
   if (typeof doc.tunnelToken !== 'string') throw new Error('"tunnelToken" must be a string')
   if (doc.cloudflareToken === undefined || doc.cloudflareToken === null) doc.cloudflareToken = ''
   if (typeof doc.cloudflareToken !== 'string') throw new Error('"cloudflareToken" must be a string')
+  if (doc.upstreamKeys === undefined || doc.upstreamKeys === null) doc.upstreamKeys = {}
+  if (!isObj(doc.upstreamKeys)) throw new Error('"upstreamKeys" must be an object')
+  for (const [id, v] of Object.entries(doc.upstreamKeys)) if (typeof v !== 'string') throw new Error(`upstream key "${id}" must be a string`)
   const ids = new Set<string>()
   for (const k of doc.apiKeys) {
     if (!isObj(k) || typeof k.id !== 'string' || !k.id) throw new Error('every API key needs a string "id"')

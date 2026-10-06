@@ -13,6 +13,7 @@ import { fmt, t } from './i18n'
 import { resolvePreprocessOptions, runPreprocess, type PreprocessResult } from './preprocess'
 import { sourceOf, summarizeImages, summarizeParams, UsageTap, type RequestMeta, type RequestRecord } from './request-log'
 import { findModel, hasImages, listModelNames, resolveTarget, type RouteResult } from './routing'
+import { findExternal, listExternalNames, type ExternalRoute, type UpstreamsDoc } from './upstreams'
 import { diagnose } from './errors'
 import { effectiveReasoning, forceThinkingOff } from './thinking-guard'
 import type { SpeedMeter } from './speed'
@@ -76,6 +77,12 @@ export interface ProxyDeps {
   onRequest?(r: RequestRecord): void
   /** Live speed tracking for streaming responses (estimate per chunk, exact timings at the end). */
   speed?: SpeedMeter
+  /** External upstreams (decision 56); absent = none. */
+  getUpstreams?(): UpstreamsDoc
+  /** API key of an upstream ('' = none). Never leaves this process except in the request to that upstream. */
+  getUpstreamKey?(id: string): string
+  /** `fetch` used for external upstreams (tests). */
+  fetchImpl?: typeof fetch
 }
 
 // ---------------------------------------------------------------------------------------
@@ -188,7 +195,7 @@ const gib = (miB: number | null) => (miB === null ? '?' : `${(miB / 1024).toFixe
 
 /** Chinese reason of a refused load (decision 42): numbers included, no paths or names beyond the model. */
 export function noRoomText(d: NoRoomDetail | undefined, model: string): string {
-  const vars = { model, estimate: gib(d?.estimateMiB ?? null), available: gib(d?.availableMiB ?? null), limit: String(d?.limit ?? '') }
+  const vars = { model, estimate: gib(d?.estimateMiB ?? null), available: gib(d?.availableMiB ?? null), limit: String(d?.limit ?? ''), holder: d?.holder ?? '' }
   const reason = d?.reason ?? 'memory'
   const mac = process.platform === 'darwin'
   const template = mac && reason === 'unknown' ? t.platform.mac.apiNoRoomUnknown : mac && reason === 'watchdog' ? t.platform.mac.apiNoRoomWatchdog : t.api.noRoom[reason]
@@ -256,6 +263,10 @@ interface UpstreamCall {
   path: string
   body: Uint8Array<ArrayBuffer> | null
   headers?: Headers
+  /** Full URL instead of the leased llama-server's (external upstreams). */
+  url?: string
+  /** Response for a call that could not be made (external upstreams); default: the llama-server one. */
+  failure?: (e: unknown) => Response
 }
 
 export function createProxy(deps: ProxyDeps) {
@@ -281,7 +292,7 @@ export function createProxy(deps: ProxyDeps) {
     call.req.signal.addEventListener('abort', onClient, { once: true })
     call.lease.signal.addEventListener('abort', onLease, { once: true })
     try {
-      const res = await fetch(`http://${host}:${call.lease.port}${call.path}`, {
+      const res = await (call.url ? (deps.fetchImpl ?? fetch) : fetch)(call.url ?? `http://${host}:${call.lease.port}${call.path}`, {
         method: call.req.method,
         headers: call.headers ?? forwardRequestHeaders(call.req.headers),
         body: call.body && call.req.method !== 'GET' && call.req.method !== 'HEAD' ? call.body : undefined,
@@ -309,7 +320,7 @@ export function createProxy(deps: ProxyDeps) {
       up = await callUpstream(call)
     } catch (e) {
       call.lease.release()
-      const failure = upstreamFailure(e, call.lease, modelName)
+      const failure = call.failure ? call.failure(e) : upstreamFailure(e, call.lease, modelName)
       trace?.finish(failure.status, call.lease.signal.aborted || call.req.signal.aborted ? 'aborted' : 'error', codeOf(failure))
       return failure
     }
@@ -484,7 +495,9 @@ export function createProxy(deps: ProxyDeps) {
 
   function modelsList(): Response {
     const created = Math.floor(Date.now() / 1000)
-    const data = listModelNames(deps.getModels()).map(id => ({ id, object: 'model', created, owned_by: 'llama-web' }))
+    const ext = deps.getUpstreams ? listExternalNames(deps.getUpstreams()) : []
+    const names = [...new Set([...listModelNames(deps.getModels()), ...ext])]
+    const data = names.map(id => ({ id, object: 'model', created, owned_by: 'llama-web' }))
     return Response.json({ object: 'list', data })
   }
 
@@ -503,13 +516,57 @@ export function createProxy(deps: ProxyDeps) {
     return res
   }
 
+  /**
+   * `<prefix>-<id>` of an upstream, unless a local model of exactly that name exists (the local one is never shadowed).
+   */
+  function externalOf(field: unknown): ExternalRoute | null {
+    const doc = deps.getUpstreams?.()
+    const ext = findExternal(doc, field)
+    if (!ext) return null
+    return findModel(deps.getModels().models, ext.name) ? null : ext
+  }
+
+  /**
+   * Forward to an external upstream (decision 56): same image compression (per upstream: follow the global switch / on /
+   * off), no scheduler, no lease, no load. The client's own `Authorization` is dropped and replaced by the upstream's key.
+   */
+  async function forwardExternal(req: Request, trace: RequestTrace, ext: ExternalRoute, raw: Uint8Array<ArrayBuffer> | null, json: any, url: URL): Promise<Response> {
+    const { upstream: u } = ext
+    trace.modelId = `upstream:${u.id}`
+    trace.modelName = ext.name
+    let body = raw
+    if (json && typeof json === 'object') {
+      const global = deps.getSettings().preprocess
+      const image = { ...global.image, ...(u.imageCompress === 'inherit' ? {} : { enabled: u.imageCompress === 'on' }) }
+      try {
+        const result = await runPreprocess(json, { options: { image } })
+        trace.images = summarizeImages(result.reports.image)
+      } catch (e) {
+        return errorResponse(500, 'preprocess_failed', fmt(t.api.preprocessFailed, { detail: String((e as Error)?.message ?? e) }))
+      }
+      json.model = ext.modelId
+      body = new TextEncoder().encode(JSON.stringify(json))
+    }
+    const headers = forwardRequestHeaders(req.headers)
+    const key = deps.getUpstreamKey?.(u.id) ?? ''
+    if (key) headers.set('authorization', `Bearer ${key}`)
+    const idle = new AbortController() // never aborts: nothing here can unload an upstream
+    const lease: Lease = { target: { modelId: `upstream:${u.id}`, profile: '-' }, port: 0, signal: idle.signal, release() {} }
+    const failure = (e: unknown) => {
+      deps.onEvent?.({ type: 'upstream-error', target: lease.target, error: e })
+      return errorResponse(502, 'upstream_unreachable', fmt(t.api.externalUnreachable, { upstream: u.name, detail: String((e as Error)?.message ?? e) }))
+    }
+    const path = url.pathname.replace(/^\/v1(?=\/|$)/, '') + url.search
+    return forward({ lease, req, path, body, headers, url: `${u.baseUrl}${path}`, failure }, ext.name, trace)
+  }
+
   async function handleV1Inner(req: Request, trace: RequestTrace): Promise<Response> {
     const url = new URL(req.url)
     const path = url.pathname
     if (req.method === 'GET' && (path === '/v1/models' || path === '/v1/models/')) return modelsList()
     if (req.method === 'GET' && path.startsWith('/v1/models/')) {
       const name = decodeURIComponent(path.slice('/v1/models/'.length))
-      if (!resolveTarget(deps.getModels(), name).ok) {
+      if (!resolveTarget(deps.getModels(), name).ok && !externalOf(name)) {
         return errorResponse(404, 'model_not_found', fmt(t.api.modelNotFound, { name }))
       }
       return Response.json({ id: name, object: 'model', created: Math.floor(Date.now() / 1000), owned_by: 'llama-web' })
@@ -535,6 +592,8 @@ export function createProxy(deps: ProxyDeps) {
     trace.stream = !!json && typeof json === 'object' && json.stream === true
     trace.params = summarizeParams(json)
     const models = deps.getModels()
+    const ext = json && typeof json === 'object' ? externalOf(json.model) : null
+    if (ext) return forwardExternal(req, trace, ext, raw, json, url)
     const route = resolveTarget(models, json && typeof json === 'object' ? json.model : undefined, deps.scheduler.snapshot().models)
     if (!route.ok) return routeErrorResponse(route)
     const { target, model, profile } = route

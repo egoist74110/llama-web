@@ -1,5 +1,13 @@
 # 交接记录
 
+## 2026-10-06 · 10-1 外部上游核心 + 10-1b 独占本机 · Claude
+- 依据：计划关键决定 56 / 阶段 10（用户 2026-10-06 在会话里确认；「在本机运行」默认开、「独占本机」默认开）。
+- 做了：① `server/core/upstreams.ts`（纯模块：校验、`<前缀>-<id>` 路由、增改删、视图；`data/upstreams.json` version 1）；上游 key 存 `secrets.json` 新字段 `upstreamKeys`（升到 version 3 → 4，有迁移）。② `proxy.ts`：命中外部模型走 `forwardExternal`（复用预处理，按上游「沿用全局 / 开 / 关」；丢客户端 `Authorization`、换上游 key；不经 scheduler；复用 `forward()` 的流式透传与断开中止；502 `upstream_unreachable`）；`/v1/models` 与 `/v1/models/:name` 合并外部名；本地同名模型优先（不被遮住）；空 model 不落到外部。③ `upstream-health.ts`（每 5 秒探测 `GET baseUrl/models`，连续 3 次失败才算不通）+ `scheduler` 新选项 `blocked` / 拒绝原因 `exclusive`（带 `holder`）+ `ModelOps.stopAll()` / `anyUp()`；`context.ts` 接线：独占上游在线时每轮探测后卸载全部本地模型（先排空），并拒绝一切本地加载。④ 管理接口 `/api/upstreams`（列表、增、改、删、测试连接），实时快照增加 `connections` / `exclusiveHolder`；文案在 `i18n/zh-CN.ts` 的 `upstreams`、`api.noRoom.exclusive`、`api.externalUnreachable`。
+- 验证：`bun test` 1404 pass / 5 skip / 0 fail（新增 45 项：upstreams、upstream-health、upstream-test、proxy-external、service/upstream-exclusive）；`bun run typecheck` 通过。新增用例覆盖：key 替换且不泄露（响应 / 记录 / 事件 / 实时快照）、客户端 key 不转发、公网来源仍需 llama-web 自己的 key、压缩三态、流式与客户端断开、502、本地同名优先、探测抖动不卸载、独占开 / 关 / 上游消失后恢复、`stopAll` 先排空。
+- **没验证 / 没做**：没有 build、浏览器、真机（没有连真实的外部引擎，E:\AIMods 的那个也没有试）；`/api/upstreams` 路由本身没有单独的 HTTP 层测试（逻辑都在被测的纯模块里，路由只是薄封装）；界面（10-2）完全没做；**本地侧防冲突没做**——新建 / 改名本地模型时不检查是否以上游前缀开头，现在靠「上游保存时检查」和「路由时本地同名优先」，后者会让该外部模型静默不可达（已在计划里记为未完成任务）；探测间隔 5 秒、失败 3 次是写死的常量；key 已存在 `secrets.json`，但没有给「查看 key」做接口（页面里只显示是否已保存）。
+- 取舍：上游 key 放 `secrets.json` 而不是 `upstreams.json`（和计划一致）；`modelId` 记录为 `upstream:<id>`、profile 为空，用量与日志按 `modelName`（带前缀）显示。
+- 下一步：交叉审查 10-1 / 10-1b（key 不泄露、公网鉴权、转发环路、流式取消、迁移）；然后 10-2「接入」页。
+
 ## 2026-10-06 · 9-5 第四轮返工（复审 CR-013 / 016 / 018–021 及 row/tensor）· Claude
 - 依据：`docs/reviews/code-audit-2026-10-06-gpt-r2.md`。
 - 做了：① CR-018：调度器每次 admission 返回后按当时的等待者重算「有请求 / 无确认」；任一请求或 `confirmed:true` 的手动启动即视为接受风险。② CR-013 剩余：`confirmed` 只有明确的 `true` 才算确认（未带标志的内部 restart / 切方案 / 保存后重启不再豁免）；多开开启时它们遇到 risky / unknown 会被拒绝，CR-021 的对话框给出确认路径。③ CR-021：`useModelStartFeedback` 处理手动 `no-room` 事件（清除等待中的启动、打开启动确认框，`unconfirmed` 带 `tier`；30 秒前的重放事件不弹）。④ CR-019：`assignLayers` 用 `Math.fround` 重复 llama.cpp 的 float32 累计/归一化；`deviceInputs` 传原始份额。⑤ CR-020：实测记录的 key 加入运行时标识与主模型（全部分片）/视觉/草稿文件的大小+修改时间。⑥ CR-016：Mac 的 watchdog 代理拒绝文案改为内存口径。⑦ row/tensor：多卡时每张卡标 `unknown` + 提示 `split-mode-unmodelled`（层公式本身已 nofit 的仍是 nofit），不再给出「放得下」。⑧ 保存前的重新检查带 `fresh:true`。
