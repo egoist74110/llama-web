@@ -517,12 +517,16 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
   // Probes the external upstreams every few seconds. While one that runs on this machine wants it to itself, the models
   // llama-web started are stopped (running requests finish first) and the scheduler refuses every load (`blocked`).
   let enforcing = false
+  let announcedHolder: string | null = null
   const health: UpstreamHealth = new UpstreamHealth({
     upstreams: () => upstreamsRef.get().upstreams,
     probe: httpProbe(id => secretsRef.get().upstreamKeys[id] ?? ''),
     onChange: () => {
       const h = health.holder()
-      log(h ? `upstream ${h}: running on this machine and exclusive, local models are stopped and cannot load` : 'upstream: nothing holds the machine any more, local models may load again')
+      if (h !== announcedHolder) {
+        announcedHolder = h
+        log(h ? `upstream ${h}: running on this machine and exclusive, local models are stopped and cannot load` : 'upstream: nothing holds the machine any more, local models may load again')
+      }
       live.notify()
     },
     afterTick: () => {
