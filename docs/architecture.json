@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "llama-web 架构总览",
+    "output": "architecture.html",
+    "quality_profile": "showcase",
+    "locale": "zh-CN",
+    "views": [
+      { "id": "request-path", "label": "一次 OpenAI 请求", "focus": ["client", "entry", "proxy", "scheduler", "runner", "llama"], "note": "从 /v1/* 进入，按 model 排队加载，就绪后转发到该模型的本地端口。" },
+      { "id": "public-entry", "label": "公网入口与隧道", "focus": ["cf", "public", "proxy"], "note": "cloudflared 只把流量送到 127.0.0.1:8080，校验 key 后才进入 /v1 代理。" },
+      { "id": "management", "label": "管理界面与运行库", "focus": ["ui", "api", "data", "updater", "llama"], "note": "界面读写配置与日志，更新器把官方 llama.cpp 版本放进 data/runtime。" }
+    ]
+  },
+  "components": [
+    { "id": "ui", "type": "frontend", "label": "管理界面", "sublabel": "Nuxt SPA · 中文", "pos": [270, 40], "size": [150, 64] },
+    { "id": "public", "type": "security", "label": "公网入口", "sublabel": "127.0.0.1:8080", "pos": [500, 40], "size": [150, 64], "tag": "Bearer key" },
+    { "id": "cf", "type": "cloud", "label": "Cloudflare 隧道", "sublabel": "cloudflared 子进程", "pos": [730, 40], "size": [150, 64] },
+
+    { "id": "client", "type": "external", "label": "OpenAI 客户端", "sublabel": "curl / 聊天应用", "pos": [40, 190], "size": [130, 64] },
+    { "id": "entry", "type": "backend", "label": "Bun 入口", "sublabel": "server/entry.ts :5001", "pos": [270, 190], "size": [150, 64] },
+    { "id": "proxy", "type": "backend", "label": "/v1 代理", "sublabel": "proxy.ts · 图片压缩", "pos": [500, 190], "size": [150, 64] },
+    { "id": "llama", "type": "external", "label": "llama-server", "sublabel": "data/runtime/llama.cpp", "pos": [960, 190], "size": [160, 64] },
+
+    { "id": "api", "type": "backend", "label": "管理 API", "sublabel": "Nitro · server/api/*", "pos": [270, 340], "size": [150, 64] },
+    { "id": "scheduler", "type": "backend", "label": "调度器", "sublabel": "排队切换 · 内存准入 · 看门狗", "pos": [500, 340], "size": [170, 72] },
+    { "id": "runner", "type": "backend", "label": "Runner", "sublabel": "spawn argv · /health", "pos": [730, 340], "size": [150, 64] },
+    { "id": "updater", "type": "backend", "label": "更新器", "sublabel": "llama.cpp · 应用更新", "pos": [960, 340], "size": [150, 64] },
+
+    { "id": "data", "type": "database", "label": "data/", "sublabel": "settings · models · secrets · logs", "pos": [500, 490], "size": [170, 64] }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "llama-web 进程（Bun + Nitro）", "wraps": ["public", "entry", "proxy", "api", "scheduler", "runner", "updater"] }
+  ],
+  "connections": [
+    { "id": "client-to-entry", "from": "client", "to": "entry", "label": "OpenAI 请求", "variant": "emphasis" },
+    { "id": "entry-to-proxy", "from": "entry", "to": "proxy", "label": "/v1/* 原生", "variant": "emphasis" },
+    { "id": "proxy-to-llama", "from": "proxy", "to": "llama", "label": "http://127.0.0.1:<port>", "variant": "emphasis", "labelDy": -27 },
+    { "id": "proxy-to-scheduler", "from": "proxy", "to": "scheduler", "label": "acquire(model)", "fromSide": "bottom", "toSide": "top" },
+    { "id": "scheduler-to-runner", "from": "scheduler", "to": "runner", "label": "启动 / 卸载" },
+    { "id": "runner-to-llama", "from": "runner", "to": "llama", "label": "argv 启动 · /health" },
+    { "id": "entry-to-api", "from": "entry", "to": "api", "label": "localFetch", "fromSide": "bottom", "toSide": "top", "labelDy": 24 },
+    { "id": "api-to-scheduler", "from": "api", "to": "scheduler", "label": "ModelOps" },
+    { "id": "ui-to-entry", "from": "ui", "to": "entry", "label": "/api/* · SSE", "fromSide": "bottom", "toSide": "top", "labelDy": 24 },
+    { "id": "public-to-proxy", "from": "public", "to": "proxy", "label": "校验 API key", "variant": "security", "fromSide": "bottom", "toSide": "top", "labelDy": 24 },
+    { "id": "cf-to-public", "from": "cf", "to": "public", "label": "127.0.0.1:8080", "variant": "security" },
+    { "id": "api-to-data", "from": "api", "to": "data", "label": "settings / models / secrets", "variant": "dashed" },
+    { "id": "runner-to-data", "from": "runner", "to": "data", "label": "pids.json", "variant": "dashed" },
+    { "id": "updater-to-llama", "from": "updater", "to": "llama", "label": "下载 · 校验 SHA-256", "variant": "dashed", "fromSide": "top", "toSide": "bottom" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "请求路径", "items": ["/v1/* 由 Bun 入口原生处理，不经过 Nitro", "按请求里的 model 排队加载或切换，默认同一时间在线 1 个", "模型就绪后转发到它自己的本地端口，断连即中止"] },
+    { "dot": "emerald", "title": "进程与显存", "items": ["Runner 用参数数组启动 llama-server，--host / --port 由 llama-web 分配", "加载前做内存准入；多开时看门狗按剩余显存卸载模型", "子进程记在 data/run/pids.json，清理只结束 data/runtime 下的进程"] },
+    { "dot": "rose", "title": "公网与更新", "items": ["公网入口只绑 127.0.0.1、只开放 /v1/*、必须带 API key", "cloudflared 由 llama-web 托管，随进程启停并自动重试", "llama.cpp 与 llama-web 各自检查官方 Release，保留旧版本可回退"] }
+  ]
+}
