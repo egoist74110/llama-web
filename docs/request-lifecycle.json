@@ -1,0 +1,122 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "llama-web 一次 OpenAI 请求的完整生命周期",
+    "output": "docs/request-lifecycle.html",
+    "quality_profile": "showcase",
+    "locale": "zh-CN",
+    "viewBox": [1085, 700],
+    "column_fit": "spread",
+    "repository": {
+      "url": "https://github.com/egoist74110/llama-web.git",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "d6606f198663f7b57035c91553c4f17cc491066b"
+    },
+    "views": [
+      { "id": "load-path", "label": "模型不在内存：排队并加载", "focus": ["client", "entry", "proxy", "scheduler", "runner", "llama"], "note": "acquire 触发加载任务，Runner 启动 llama-server，/health 通过之后才拿到 Lease。" },
+      { "id": "stream-path", "label": "转发与流式返回", "focus": ["proxy", "llama", "client", "live"], "note": "转发到该模型自己的本地端口，返回逐条推给客户端，请求摘要进实时流与日志。" },
+      { "id": "abort-path", "label": "客户端断开与卸载", "focus": ["client", "proxy", "scheduler", "runner", "llama"], "note": "AbortSignal 一路传导：释放租约、drain、结束整个进程树。" }
+    ]
+  },
+  "participants": [
+    { "id": "client", "type": "external", "label": "OpenAI 客户端", "sublabel": "curl / 聊天应用" },
+    {
+      "id": "entry", "type": "backend", "label": "Bun 入口", "sublabel": "server/entry.ts",
+      "sources": [{ "path": "server/entry.ts", "line": 38, "label": "handleV1 分流" }]
+    },
+    {
+      "id": "proxy", "type": "backend", "label": "/v1 代理", "sublabel": "proxy.ts · 图片压缩",
+      "sources": [{ "path": "server/core/proxy.ts", "line": 506, "end_line": 573, "label": "handleV1Inner" }]
+    },
+    {
+      "id": "scheduler", "type": "backend", "label": "调度器", "sublabel": "FIFO 队列 · 准入",
+      "sources": [
+        { "path": "server/core/scheduler.ts", "line": 273, "label": "acquire" },
+        { "path": "server/core/scheduler.ts", "line": 518, "label": "pump 队列" }
+      ]
+    },
+    {
+      "id": "runner", "type": "backend", "label": "Runner", "sublabel": "spawn · /health",
+      "sources": [
+        { "path": "server/core/runner.ts", "line": 320, "label": "spawn(exe, argv)" },
+        { "path": "server/core/runner.ts", "line": 110, "label": "killTree" }
+      ]
+    },
+    {
+      "id": "llama", "type": "external", "label": "llama-server", "sublabel": "本地端口",
+      "sources": [{ "path": "server/core/launch.ts", "line": 232, "label": "planLaunch" }]
+    },
+    {
+      "id": "live", "type": "messagebus", "label": "实时流", "sublabel": "/api/stream",
+      "sources": [{ "path": "server/core/live.ts", "line": 403, "label": "handleStream" }]
+    }
+  ],
+  "segments": [
+    { "from": 160, "to": 240, "label": "进入与预处理" },
+    { "from": 248, "to": 384, "label": "排队与加载" },
+    { "from": 392, "to": 496, "label": "转发与返回" },
+    { "from": 504, "to": 604, "label": "断开与卸载" }
+  ],
+  "messages": [
+    { "id": "post-chat", "from": "client", "to": "entry", "y": 172, "label": "POST /v1/chat/completions", "variant": "emphasis" },
+    { "id": "native-dispatch", "from": "entry", "to": "proxy", "y": 200, "label": "handleV1(req, ip)", "variant": "emphasis" },
+    { "id": "acquire-model", "from": "proxy", "to": "scheduler", "y": 228, "label": "acquire(model)", "variant": "emphasis" },
+
+    { "id": "launch-target", "from": "scheduler", "to": "runner", "y": 256, "label": "launch(target)", "variant": "emphasis" },
+    { "id": "spawn-server", "from": "runner", "to": "llama", "y": 284, "label": "spawn(argv)", "variant": "emphasis" },
+    { "id": "health-ok", "from": "llama", "to": "runner", "y": 312, "label": "/health 200", "variant": "return" },
+    { "id": "load-ready", "from": "runner", "to": "scheduler", "y": 340, "label": "ready", "variant": "return" },
+    { "id": "state-ready", "from": "scheduler", "to": "live", "y": 368, "label": "loading → ready", "variant": "dashed" },
+
+    { "id": "lease-port", "from": "scheduler", "to": "proxy", "y": 396, "label": "Lease(port)", "variant": "return" },
+    { "id": "forward-upstream", "from": "proxy", "to": "llama", "y": 424, "label": "POST http://127.0.0.1:<port>", "variant": "emphasis" },
+    { "id": "sse-chunks", "from": "llama", "to": "proxy", "y": 452, "label": "SSE chunks", "variant": "return" },
+    { "id": "stream-back", "from": "proxy", "to": "client", "y": 480, "label": "流式返回 / 200 JSON", "variant": "return" },
+
+    { "id": "client-abort", "from": "client", "to": "proxy", "y": 508, "label": "断开 AbortSignal", "variant": "dashed" },
+    { "id": "release-lease", "from": "proxy", "to": "scheduler", "y": 536, "label": "release / 中止", "variant": "dashed" },
+    { "id": "drain-stop", "from": "scheduler", "to": "runner", "y": 564, "label": "drain → stop", "variant": "dashed" },
+    { "id": "kill-tree", "from": "runner", "to": "llama", "y": 592, "label": "结束进程树", "variant": "dashed" }
+  ],
+  "activations": [
+    { "participant": "entry", "from": 170, "to": 206, "type": "backend" },
+    { "participant": "proxy", "from": 200, "to": 596, "type": "backend" },
+    { "participant": "scheduler", "from": 228, "to": 540, "type": "backend" },
+    { "participant": "runner", "from": 256, "to": 568, "type": "backend" },
+    { "participant": "llama", "from": 284, "to": 596, "type": "external" },
+    { "participant": "live", "from": 366, "to": 376, "type": "messagebus" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "排队与切换",
+      "items": [
+        "请求体里的图片先由 sharp 压缩，再进入调度",
+        "默认同一时间只在线 1 个模型，后来的请求进 FIFO 队列排队",
+        "拿到 Lease 才转发，端口由 llama-web 从 settings.scheduler.portRange 分配",
+        "流式请求遇到模型还在加载时走 streamWhileLoading：先推加载进度和心跳",
+        "请求只记录白名单参数与 token 数，不保存对话内容"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "内存准入",
+      "items": [
+        "加载前按 GGUF 估算与当前空闲内存判定能不能装得下",
+        "多开时看门狗按剩余显存卸载最久没被请求的模型",
+        "每次加载实测的显存写回 data/vram-stats.json，下次估算优先用实测值"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "断开与清理",
+      "items": [
+        "客户端断开通过 AbortSignal 传导，租约立即释放",
+        "切换前 drain 在途请求，超时后剩余请求被打断",
+        "停止时用 taskkill /T /F 结束整棵进程树，只清理 data/runtime 下的进程"
+      ]
+    }
+  ]
+}

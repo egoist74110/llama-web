@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="generator" content="archify 3.0.1">
   <meta name="archify-reader-contract" content="declared-wide-v1">
-  <title>llama-web 架构总览</title>
+  <title>llama-web 一次 OpenAI 请求的完整生命周期</title>
   <script>
     // Resolve the theme before first paint so light-preference users don't
     // see a dark flash. The toolbar script below re-applies with UI state.
@@ -4978,18 +4978,18 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
            data-preset-badge-blueprint="蓝图 / 修订 01"
            data-preset-badge-editorial="编辑风格 / 现场笔记">
         <div class="pulse-dot"></div>
-        <h1>llama-web 架构总览</h1>
+        <h1>llama-web 一次 OpenAI 请求的完整生命周期</h1>
       </div>
     </div>
 
-    <script id="archify-source-evidence-data" type="application/json">{"schemaVersion":1,"verified":true,"repository":{"url":"https://github.com/egoist74110/llama-web","revision":"d6606f198663f7b57035c91553c4f17cc491066b","shortRevision":"d6606f1","label":"egoist74110/llama-web","href":"https://github.com/egoist74110/llama-web/tree/d6606f198663f7b57035c91553c4f17cc491066b"},"referenceCount":22,"nodes":{"ui":[{"path":"app/composables/useLive.ts","line":32,"label":"EventSource('/api/stream')","href":"https://github.com/egoist74110/llama-web/blob/d6606f198663f7b57035c91553c4f17cc491066b/app/composables/useLive.ts#L32"}],"public":[{"path":"server/core/public-entry.ts","line":39,"label":"handlePublic","href":"https://github.com/egoist74110/llama-web/blob/d6606f198663f7b57035c91553c4f17cc491066b/server/core/public-entry.ts#L39"},{"path":"server/core/keys.ts","line":170,"label":"authenticate","href":"https://github.com/egoist74110/llama-web/blob/d6606f198663f7b57035c91553c4f17cc491066b/server/core/keys.ts#L170"}],"cf":[{"path":"server/core/tunnel.ts","line":416,"label":"TunnelManager","href":"https://github.com/egoist74110/llama-web/blob/d6606f198663f7b57035c91553c4f17cc491066b/server/core/tunnel.ts#L416"},{"path":"server/core/tunnel.ts","line":86,"label":"cloudflaredName","href":"https://github.com/egoist74110/llama-web/blob/d6606f198663f7b57035c91553c4f17cc491066b/server/core/tunnel.ts#L86"}],"entry":[{"path":"server/entry.ts","line":31,"endLine":79,"label":"Bun.serve 分流","href":"https://github.com/egoist74110/llama-web/blob/d6606f198663f7b57035c91553c4f17cc491066b/server/entry.ts#L31-L79"}],"proxy":[{"path":"server/core/proxy.ts","line":506,"endLine":573,"label":"handleV1Inner","href":"https://github.com/egoist74110/llama-web/blob/d6606f198663f7b57035c91553c4f17cc491066b/server/core/proxy.ts#L506-L573"}],"llama":[{"path":"server/core/launch.ts","line":232,"label":"planLaunch","href":"https://github.com/egoist74110/llama-web/blob/d6606f198663f7b57035c91553c4f17cc491066b/server/core/launch.ts#L232"},{"path":"server/core/runner.ts","line":320,"label":"spawn(exe, argv)","href":"https://github.com/egoist74110/llama-web/blob/d6606f198663f7b57035c91553c4f17cc491066b/server/core/runner.ts#L320"}],"api":[{"path":"server/plugins/app.ts","line":6,"label":"getContext()","href":"https://github.com/egoist74110/llama-web/blob/d6606f198663f7b57035c91553c4f17cc491066b/server/plugins/app.ts#L6"},{"path":"server/api/state.get.ts","line":4,"label":"live.snapshot()","href":"https://github.com/egoist74110/llama-web/blob/d6606f198663f7b57035c91553c4f17cc491066b/server/api/state.get.ts#L4"},{"path":"server/api/models/[id]/start.post.ts","line":15,"label":"ops.start","href":"https://github.com/egoist74110/llama-web/blob/d6606f198663f7b57035c91553c4f17cc491066b/server/api/models/%5Bid%5D/start.post.ts#L15"}],"scheduler":[{"path":"server/core/scheduler.ts","line":22,"label":"ModelState","href":"https://github.com/egoist74110/llama-web/blob/d6606f198663f7b57035c91553c4f17cc491066b/server/core/scheduler.ts#L22"},{"path":"server/core/scheduler.ts","line":273,"label":"acquire","href":"https://github.com/egoist74110/llama-web/blob/d6606f198663f7b57035c91553c4f17cc491066b/server/core/scheduler.ts#L273"},{"path":"server/core/watchdog.ts","line":32,"label":"Watchdog","href":"https://github.com/egoist74110/llama-web/blob/d6606f198663f7b57035c91553c4f17cc491066b/server/core/watchdog.ts#L32"}],"runner":[{"path":"server/core/runner.ts","line":221,"label":"class Runner","href":"https://github.com/egoist74110/llama-web/blob/d6606f198663f7b57035c91553c4f17cc491066b/server/core/runner.ts#L221"},{"path":"server/core/runner.ts","line":110,"label":"killTree","href":"https://github.com/egoist74110/llama-web/blob/d6606f198663f7b57035c91553c4f17cc491066b/server/core/runner.ts#L110"}],"updater":[{"path":"server/core/updater.ts","line":105,"label":"class Updater","href":"https://github.com/egoist74110/llama-web/blob/d6606f198663f7b57035c91553c4f17cc491066b/server/core/updater.ts#L105"},{"path":"server/core/llamacpp.ts","line":260,"label":"SHA-256 校验","href":"https://github.com/egoist74110/llama-web/blob/d6606f198663f7b57035c91553c4f17cc491066b/server/core/llamacpp.ts#L260"}],"data":[{"path":"server/core/store.ts","line":91,"label":"class JsonStore","href":"https://github.com/egoist74110/llama-web/blob/d6606f198663f7b57035c91553c4f17cc491066b/server/core/store.ts#L91"},{"path":"server/core/store.ts","line":38,"label":"renameSync 原子写","href":"https://github.com/egoist74110/llama-web/blob/d6606f198663f7b57035c91553c4f17cc491066b/server/core/store.ts#L38"},{"path":"server/core/logs.ts","line":125,"label":"LogStore","href":"https://github.com/egoist74110/llama-web/blob/d6606f198663f7b57035c91553c4f17cc491066b/server/core/logs.ts#L125"}]}}</script>
+    <script id="archify-source-evidence-data" type="application/json">{"schemaVersion":1,"verified":true,"repository":{"url":"https://github.com/egoist74110/llama-web","revision":"d6606f198663f7b57035c91553c4f17cc491066b","shortRevision":"d6606f1","label":"egoist74110/llama-web","href":"https://github.com/egoist74110/llama-web/tree/d6606f198663f7b57035c91553c4f17cc491066b"},"referenceCount":8,"nodes":{"entry":[{"path":"server/entry.ts","line":38,"label":"handleV1 分流","href":"https://github.com/egoist74110/llama-web/blob/d6606f198663f7b57035c91553c4f17cc491066b/server/entry.ts#L38"}],"proxy":[{"path":"server/core/proxy.ts","line":506,"endLine":573,"label":"handleV1Inner","href":"https://github.com/egoist74110/llama-web/blob/d6606f198663f7b57035c91553c4f17cc491066b/server/core/proxy.ts#L506-L573"}],"scheduler":[{"path":"server/core/scheduler.ts","line":273,"label":"acquire","href":"https://github.com/egoist74110/llama-web/blob/d6606f198663f7b57035c91553c4f17cc491066b/server/core/scheduler.ts#L273"},{"path":"server/core/scheduler.ts","line":518,"label":"pump 队列","href":"https://github.com/egoist74110/llama-web/blob/d6606f198663f7b57035c91553c4f17cc491066b/server/core/scheduler.ts#L518"}],"runner":[{"path":"server/core/runner.ts","line":320,"label":"spawn(exe, argv)","href":"https://github.com/egoist74110/llama-web/blob/d6606f198663f7b57035c91553c4f17cc491066b/server/core/runner.ts#L320"},{"path":"server/core/runner.ts","line":110,"label":"killTree","href":"https://github.com/egoist74110/llama-web/blob/d6606f198663f7b57035c91553c4f17cc491066b/server/core/runner.ts#L110"}],"llama":[{"path":"server/core/launch.ts","line":232,"label":"planLaunch","href":"https://github.com/egoist74110/llama-web/blob/d6606f198663f7b57035c91553c4f17cc491066b/server/core/launch.ts#L232"}],"live":[{"path":"server/core/live.ts","line":403,"label":"handleStream","href":"https://github.com/egoist74110/llama-web/blob/d6606f198663f7b57035c91553c4f17cc491066b/server/core/live.ts#L403"}]}}</script>
     <script id="archify-i18n-data" type="application/json">{"locale":"zh-CN","messages":{"viewer.kind.frontend":"前端","viewer.kind.backend":"后端","viewer.kind.database":"数据库","viewer.kind.cloud":"云服务","viewer.kind.security":"安全","viewer.kind.messagebus":"消息总线","viewer.kind.external":"外部系统","viewer.kind.neutral":"中性","viewer.kind.node":"节点","viewer.kind.start":"开始","viewer.kind.active":"活动","viewer.kind.waiting":"等待","viewer.kind.decision":"决策","viewer.kind.success":"成功","viewer.kind.failure":"失败","viewer.toolbar.actions":"图表操作","viewer.theme.toggle.title":"切换主题（T）","viewer.theme.toggle":"切换颜色主题","viewer.theme.dark":"深色","viewer.theme.light":"浅色","viewer.preset.choose.title":"选择视觉风格（S 循环切换）","viewer.preset.choose":"选择视觉风格","viewer.preset.style":"风格","viewer.preset.menu":"视觉风格","viewer.preset.identity":"视觉表达","viewer.preset.cycles":"循环切换","viewer.preset.classic":"经典","viewer.preset.classic.short":"经典","viewer.preset.classic.hint":"稳定的技术默认风格","viewer.preset.flow":"信号流","viewer.preset.flow.short":"流动","viewer.preset.flow.hint":"突出动态流向","viewer.preset.blueprint":"蓝图","viewer.preset.blueprint.hint":"工程评审","viewer.preset.editorial":"编辑风格","viewer.preset.editorial.hint":"适合发布与上线说明","viewer.preset.badge.signalFlow":"信号流","viewer.preset.badge.blueprint":"蓝图 / 修订 01","viewer.preset.badge.editorial":"编辑风格 / 现场笔记","viewer.preset.badge.editorialPlate":"ARCHIFY / 图版 04","viewer.preset.current":"当前视觉风格：{style}。选择视觉风格","viewer.motion.live":"动态","viewer.motion.still":"静态","viewer.motion.pause":"暂停动效","viewer.motion.resume":"恢复动效","viewer.motion.reduced":"已根据减少动态效果偏好暂停动效","viewer.motion.hidden":"页面不可见时已暂停动效","viewer.motion.yielding":"暂停动效；当前让位于{owner}","viewer.motion.yielding.title":"动态预览已启用 · 正在让位于{owner}","viewer.owner.route":"路径探测","viewer.owner.lens":"语义透镜","viewer.owner.relationship":"关系预览","viewer.owner.intent":"意图追踪","viewer.owner.focus":"语义聚焦","viewer.owner.legend":"图例预览","viewer.owner.reader":"读者交互","viewer.present.enter":"进入演示模式","viewer.present.enter.title":"演示模式（F）","viewer.present.exit":"退出演示模式","viewer.present.exit.title":"退出演示模式（F 或 Escape）","viewer.present.present":"演示","viewer.present.exit.label":"退出","viewer.export.button":"导出","viewer.export.button.title":"导出图表（E）","viewer.export.diagram":"导出图表","viewer.export.menu":"导出","viewer.export.subtitle":"便携、整洁的输出","viewer.export.share":"分享","viewer.export.shareCard":"分享卡片","viewer.export.routeShareCard":"路径分享卡片","viewer.export.reachShareCard":"可达范围分享卡片","viewer.export.copyDiagram":"复制图表","viewer.export.clipboardPng":"复制 PNG 到剪贴板","viewer.export.raster":"位图","viewer.export.image":"图像","viewer.export.lossless":"无损图像","viewer.export.compact":"紧凑图像","viewer.export.modern":"现代图像格式","viewer.export.vectorMotion":"矢量与动效","viewer.export.vectorMotion.heading":"矢量与动效","viewer.export.editable":"可编辑矢量图","viewer.export.svg.auto":"SVG · 自动","viewer.export.svg.auto.hint":"匹配宿主主题","viewer.export.svg.light":"SVG · 浅色","viewer.export.svg.light.hint":"始终浅色","viewer.export.svg.dark":"SVG · 深色","viewer.export.svg.dark.hint":"始终深色","viewer.export.motion6s":"6 秒动效","viewer.export.unsupported":"当前浏览器不支持","viewer.export.clipboardUnsupported":"当前浏览器不支持写入图片剪贴板","viewer.export.clipboardUnsupported.short":"此浏览器不支持写入图片剪贴板。","viewer.export.motionUnavailable":"当前浏览器无法录制动效","viewer.export.webmUnavailable":"当前浏览器不支持 WebM","viewer.export.failed":"导出失败：{message}","viewer.export.unknownVariant":"未知的分享卡片类型：{variant}","viewer.export.routeRequired":"请先追踪路径，再导出路径分享卡片","viewer.export.reachRequired":"请先追踪编写可达范围，再导出可达范围分享卡片","viewer.export.unknown":"未知错误","viewer.export.routeFailed":"路径分享卡片导出失败：{message}","viewer.export.reachFailed":"可达范围分享卡片导出失败：{message}","viewer.export.copyFailed":"复制失败：{message}","viewer.export.copiedPng":"已将 PNG 复制到剪贴板","viewer.export.downloadedRoute":"已下载路径分享卡片","viewer.export.downloadedReach":"已下载可达范围分享卡片","viewer.export.downloadedWebm":"已下载 WebM","viewer.export.recording":"正在录制 6 秒动效…","viewer.export.card.routeSummary.one":"路径：{source} → {target} · {count} 步","viewer.export.card.routeSummary.other":"路径：{source} → {target} · {count} 步","viewer.export.card.reachSummary":"从{origin}开始的编写{direction} · {nodes} · {links} · 最深 {hops}","viewer.export.card.node.one":"{count} 个节点","viewer.export.card.node.other":"{count} 个节点","viewer.export.card.link.one":"{count} 条连接","viewer.export.card.link.other":"{count} 条连接","viewer.export.card.hop.one":"{count} 跳","viewer.export.card.hop.other":"{count} 跳","viewer.export.card.routeBadge":"ARCHIFY · 路径 · {hops}","viewer.export.card.reachBadge":"ARCHIFY · {direction}可达范围","viewer.export.direction.upstream":"上游","viewer.export.direction.downstream":"下游","viewer.export.error.canvasUnavailable":"无法为{label}使用画布","viewer.export.error.contextUnavailable":"无法为{label}创建二维画布上下文","viewer.export.error.toBlobUnavailable":"{label}无法使用 canvas.toBlob","viewer.export.error.toBlobNull":"{label}的 canvas.toBlob 未返回数据","viewer.export.error.variantsCombined":"无法同时组合多种分享卡片类型","viewer.export.error.viewerState":"分享卡片导出无法移除临时 Viewer 状态","viewer.export.error.routeState":"路径卡片导出无法安全保留已解析路径","viewer.export.error.reachState":"可达范围卡片导出无法安全保留编写的可达范围","viewer.export.error.webmRequirements":"WebM 动效导出需要追踪动画及浏览器 MediaRecorder 支持","viewer.export.error.mediaRecorder":"MediaRecorder 录制失败","viewer.export.error.emptyWebm":"MediaRecorder 生成了空的 WebM","viewer.export.error.webmBackground":"无法为 WebM 导出加载 SVG 背景","viewer.guide.title":"探索此系统","viewer.focus.selectedNodes":"已选择 {count} 个节点","viewer.guide.eyebrow":"图表指南","viewer.guide.close":"关闭图表指南","viewer.guide.inspecting":"正在检查已编译语义","viewer.guide.actions":"图表探索操作","viewer.guide.find":"查找任意节点","viewer.guide.find.hint":"搜索标签、职责、类型和稳定 ID。","viewer.guide.route":"追踪路径","viewer.guide.route.aria":"追踪有向路径","viewer.guide.route.hint":"查看两个语义节点如何按编写方向连接。","viewer.guide.map":"查看完整系统","viewer.guide.map.hint":"打开带实时视口和稳定节点的语义雷达。","viewer.guide.lens":"比较语义类型","viewer.guide.lens.hint":"统计角色、显示流量并比较直接编写的连接。","viewer.guide.present":"进入演示模式","viewer.guide.present.hint":"让实时图表占满视口，同时不改变导出。","viewer.guide.shortcuts":"其他键盘快捷键","viewer.guide.shortcut.export":"导出","viewer.guide.shortcut.theme":"主题","viewer.guide.shortcut.style":"风格","viewer.guide.shortcut.reset":"重置","viewer.guide.shortcut.zoomIn":"放大","viewer.guide.shortcut.zoomOut":"缩小","viewer.guide.shortcut.close":"关闭","viewer.guide.facts":"{nodes} · {relationships}","viewer.guide.fact.node.one":"{count} 个语义节点","viewer.guide.fact.node.other":"{count} 个语义节点","viewer.guide.fact.relationship.one":"{count} 条关系","viewer.guide.fact.relationship.other":"{count} 条关系","viewer.guide.open":"打开图表指南","viewer.finder.title":"查找节点","viewer.finder.close":"关闭节点查找器","viewer.finder.placeholder":"搜索标签或 ID","viewer.finder.search":"搜索图表节点","viewer.finder.results":"图表节点","viewer.finder.empty":"没有匹配的节点","viewer.finder.result.focus":"聚焦{label}","viewer.finder.result.routeStart":"选择{label}作为路径起点","viewer.finder.result.routeTarget":"选择{label}作为路径终点，{links}","viewer.finder.status.empty":"没有匹配的节点","viewer.finder.status.count.one":"{count} 个匹配节点","viewer.finder.status.count.other":"{count} 个匹配节点","viewer.finder.noun.nodes":"个节点","viewer.finder.link.one":"{count} 条连接","viewer.finder.link.other":"{count} 条连接","viewer.finder.result.focus.one":"聚焦{label}，{count} 条相关连接","viewer.finder.result.focus.other":"聚焦{label}，{count} 条相关连接","viewer.finder.status.filtered":"{visible}/{available} {noun}","viewer.finder.status.all":"{available} {noun}","viewer.passport.eyebrow":"语义护照","viewer.passport.metadata":"节点元数据","viewer.passport.evidence":"已验证的源代码证据","viewer.passport.verified":"已验证来源","viewer.passport.verificationScope":"已按固定修订版本验证本地 Git 证据，未检查远程访问权限。","viewer.passport.reach":"编写可达范围","viewer.passport.reach.trace":"追踪编写的可达性","viewer.passport.upstream":"上游","viewer.passport.downstream":"下游","viewer.passport.upstream.trace":"追踪上游编写可达性","viewer.passport.downstream.trace":"追踪下游编写可达性","viewer.passport.close":"关闭语义护照","viewer.passport.move":"移动语义护照。可拖动、使用方向键移动，或按 Home 恢复自动位置。","viewer.passport.copy":"复制链接","viewer.passport.copy.focus":"复制聚焦节点的链接","viewer.passport.relations":"关系","viewer.passport.relations.show":"显示关联关系","viewer.passport.relations.hide":"隐藏关联关系","viewer.passport.relations.list":"关联关系","viewer.passport.copyRelation":"复制关系","viewer.passport.copyNode":"复制节点","viewer.passport.copyPinned":"复制固定关系的链接","viewer.passport.copySource":"复制来源节点的链接","viewer.passport.copy.focused.success":"已复制聚焦节点链接","viewer.passport.copy.pinned.success":"已复制固定关系链接","viewer.passport.copy.focused.failed":"无法复制聚焦节点链接","viewer.passport.copy.pinned.failed":"无法复制固定关系链接","viewer.passport.relationship.none":"没有关联关系","viewer.passport.relationship.count.one":"{count} 条关系","viewer.passport.relationship.count.other":"{count} 条关系","viewer.passport.relationship.show.one":"显示 {count} 条关联关系","viewer.passport.relationship.show.other":"显示 {count} 条关联关系","viewer.passport.relationship.summary":"{out} 条出向 · {in} 条入向{loops}","viewer.passport.relationship.loops":" · {count} 条自环","viewer.passport.relationship.explorer":"直接关系浏览器","viewer.passport.relationship.help":"使用方向键浏览关系。按 Enter 或空格键固定详情；按 Escape 清除。","viewer.passport.relationship.loopsBack":"回环","viewer.passport.relationship.connectsTo":"连接到","viewer.passport.relationship.connectsFrom":"连接自","viewer.passport.relationship.pinned":"已固定关系 · {from} → {to} · {label}","viewer.passport.relationship.inspect":"检查第 {index}/{total} 条关系：{from} 到 {to}，{label}。按 Enter 查看详情。","viewer.passport.relationship.group.out":"出向","viewer.passport.relationship.group.in":"入向","viewer.passport.relationship.group.loop":"自环","viewer.passport.relationship.row":"{group}：{relationship}，{neighbor}","viewer.passport.relationship.direction.out":"出 →","viewer.passport.relationship.direction.in":"← 入","viewer.passport.relationship.direction.loop":"自环","viewer.passport.sourceCount.one":"{count} 个已验证来源引用","viewer.passport.sourceCount.other":"{count} 个已验证来源引用","viewer.passport.sourceMarker":"来源","viewer.passport.beacon.one":"{count} 个已验证来源；聚焦此节点以检查","viewer.passport.beacon.other":"{count} 个已验证来源；聚焦此节点以检查","viewer.passport.repository.open":"打开已验证的仓库修订版本 {revision}","viewer.passport.source.open":"打开修订版本 {revision} 中已验证的来源 {path}","viewer.passport.source.openLink":"打开 ↗","viewer.passport.reach.upstream.one":"追踪 {count} 个上游编写节点","viewer.passport.reach.upstream.other":"追踪 {count} 个上游编写节点","viewer.passport.reach.downstream.one":"追踪 {count} 个下游编写节点","viewer.passport.reach.downstream.other":"追踪 {count} 个下游编写节点","viewer.passport.reach.noUpstream":"没有上游编写节点","viewer.passport.reach.noDownstream":"没有下游编写节点","viewer.passport.reach.status":"{direction} · {nodes} 个节点 · {links} 条连接 · 最深 {hops} 跳","viewer.route.eyebrow":"路径","viewer.route.start":"点击路径的起点","viewer.route.start.find":"查找起点","viewer.route.start.find.aria":"查找路径起点","viewer.route.copy":"复制链接","viewer.route.copy.aria":"复制已追踪路径的链接","viewer.route.clear":"清除","viewer.route.clear.aria":"清除路径探测","viewer.route.traced":"路径","viewer.route.pickTwo":"在图上点两个节点","viewer.route.pickOne":"在图上点一个节点","viewer.route.controls":"路径旅程控制","viewer.route.previous":"上一个路径位置","viewer.route.play":"播放路径旅程","viewer.route.pause":"暂停路径旅程","viewer.route.replay":"重播路径旅程","viewer.route.next":"下一个路径位置","viewer.route.journey":"旅程","viewer.route.pause.label":"暂停","viewer.route.replay.label":"重播","viewer.route.overview":"总览","viewer.route.overview.aria":"显示完整路径总览","viewer.route.instructions":"先点起点，再点终点，沿箭头方向找路。","viewer.route.destination":"从{label}出发，走到哪里？","viewer.route.destination.find":"查找目标","viewer.route.destination.find.aria":"查找可达的路径目标","viewer.route.differentDestination":"选择其他目标","viewer.route.distinct":"请选两个不同的节点。","viewer.route.unreachable":"走不到{label}","viewer.route.unreachable.detail":"沿箭头方向，从{source}走不到{target}。请选一个高亮节点。","viewer.route.start.instructions":"接着选终点，能走到的节点会亮起。","viewer.route.copy.success":"已复制路径链接","viewer.route.copy.failed":"无法复制路径链接","viewer.route.position":"路径位置 {index}/{total}：{label}","viewer.route.step":"第 {index}/{total} 步 · {phase} · {label}","viewer.route.motionRequired":"自动旅程需要动态模式","viewer.route.trigger.clear":"清除已追踪路径","viewer.route.overview.status":"{nodes} · {hops} · 最短路径","viewer.route.overview.node.one":"{count} 个节点","viewer.route.overview.node.other":"{count} 个节点","viewer.route.overview.hop.one":"{count} 步","viewer.route.overview.hop.other":"{count} 步","viewer.route.phase.playing":"播放中","viewer.route.phase.complete":"已完成","viewer.route.phase.inspecting":"检查中","viewer.route.destination.count.one":"有 {count} 个能走到的节点已高亮，点一下。","viewer.route.destination.count.other":"有 {count} 个能走到的节点已高亮，点一个。","viewer.route.noOutgoing":"这个节点没有向外的箭头。清除后换一个起点。","viewer.route.result.title":"{source} 到 {target}","viewer.route.finder.source.title":"选择路径起点","viewer.route.finder.source.placeholder":"搜索路径来源","viewer.route.finder.source.empty":"没有匹配的路径来源","viewer.route.finder.source.results":"可作为路径起点的节点","viewer.route.finder.source.noun":"个路径来源","viewer.route.finder.source.badge":"起点","viewer.route.finder.target.title":"从{label}出发的目标","viewer.route.finder.target.placeholder":"搜索可达目标","viewer.route.finder.target.empty":"没有匹配的可达目标","viewer.route.finder.target.results":"可达路径目标","viewer.route.finder.target.noun":"个可达目标","viewer.route.hop.one":"{count} 跳","viewer.route.hop.other":"{count} 跳","viewer.lens.eyebrow":"语义透镜","viewer.lens.title":"比较系统角色","viewer.lens.close":"关闭语义透镜","viewer.lens.instruction":"最多选择两种语义类型。选择一种可显示其真实流量；选择两种只比较直接编写的关系。","viewer.lens.kinds":"语义类型","viewer.lens.choose":"选择一种类型以检查其节点和相连关系。","viewer.lens.copy":"复制语义透镜链接","viewer.lens.clear":"清除语义透镜","viewer.lens.open":"打开语义透镜","viewer.lens.openActive":"打开当前语义透镜","viewer.lens.legend":"语义图例","viewer.lens.legend.inspect.one":"检查{label}，{count} 个节点","viewer.lens.legend.inspect.other":"检查{label}，{count} 个节点","viewer.lens.kind.count.one":"{label}，{count} 个节点","viewer.lens.kind.count.other":"{label}，{count} 个节点","viewer.lens.compare.one":"{first} → {second}：{forward} · {second} → {first}：{reverse} · 共 {count} 条直接关系","viewer.lens.compare.other":"{first} → {second}：{forward} · {second} → {first}：{reverse} · 共 {count} 条直接关系","viewer.lens.single":"{nodes} · {relationships} · 已连接节点保持可见","viewer.lens.node.one":"{count} 个{label}节点","viewer.lens.node.other":"{count} 个{label}节点","viewer.lens.relationship.one":"{count} 条相连关系","viewer.lens.relationship.other":"{count} 条相连关系","viewer.radar.title":"语义雷达","viewer.radar.building":"正在构建总览","viewer.radar.openFull":"打开完整语义雷达","viewer.radar.open":"打开雷达","viewer.radar.close":"关闭语义雷达","viewer.radar.surface":"图表总览。点击节点进行聚焦，或使用方向键平移。","viewer.radar.click":"点击节点","viewer.radar.drag":"拖动平移","viewer.radar.space":"语义雷达需要更多地图可见空间。","viewer.radar.nodes":"语义图表雷达节点","viewer.radar.focus":"从语义雷达聚焦{label}","viewer.radar.status":"{count} 个节点 · {viewport}","viewer.radar.fullMap":"{count} 个节点 · 完整地图","viewer.radar.compacted":"已收紧雷达，避免遮挡语义护照或地图控件。","viewer.radar.cancelWaiting":"取消等待更多地图空间的语义雷达","viewer.radar.needsSpace":"语义雷达需要更多可见地图空间","viewer.radar.viewport.full":"完整地图","viewer.radar.viewport.width":"宽度 {percent}%","viewer.radar.viewport.scale":"视口 {percent}%","viewer.nav.controls":"图表视图控制","viewer.nav.route":"追踪有向路径","viewer.nav.route.title":"追踪路径（R）","viewer.nav.route.short":"路径","viewer.nav.radar":"打开语义雷达","viewer.nav.radar.title":"语义雷达（M）","viewer.nav.radar.short":"地图","viewer.nav.lens":"打开语义透镜","viewer.nav.lens.title":"语义透镜（L）","viewer.nav.lens.short":"透镜","viewer.nav.find":"查找节点","viewer.nav.find.title":"查找节点（/）","viewer.outline.title":"节点索引","viewer.rail.show":"要点与索引","viewer.rail.controls":"侧栏","viewer.rail.collapse":"收起侧栏","viewer.rail.bottom":"移到图下方","viewer.rail.right":"移到图右侧","viewer.nav.guide":"打开图表指南","viewer.nav.guide.title":"图表指南（?）","viewer.nav.zoomOut":"缩小","viewer.nav.zoomOut.title":"缩小（-）","viewer.nav.reset":"重置图表视图","viewer.nav.reset.title":"重置视图（0）","viewer.nav.read":"阅读","viewer.nav.zoomIn":"放大","viewer.nav.zoomIn.title":"放大（+）","viewer.nav.camera":"{hint}。重置图表视图","viewer.nav.camera.title":"{semantic}{hint} · 重置视图（0）","viewer.nav.camera.semantic":"语义相机已启用 · ","viewer.nav.level.map":"概览","viewer.nav.level.read":"阅读","viewer.nav.level.full":"完整","viewer.nav.level.auto":"自动","viewer.nav.detail.map":"放大以显示关系标签和节点上下文","viewer.nav.detail.read":"再次放大以显示标签和注释","viewer.nav.detail.full":"完整图表详情","viewer.intent.summary":"{label}。{out} 条出向，{in} 条入向{loops}。共 {total} 条连接。按 Enter 查看详情。","viewer.intent.loops":"，{count} 条自环","viewer.common.copied":"已复制","viewer.common.copyFailed":"复制失败","viewer.common.copyLink":"复制链接","viewer.common.clear":"清除","viewer.common.close":"关闭"}}</script>
     <!-- Main Diagram -->
     <div class="diagram-container" data-detail-level="read"
          data-preset-badge-editorial-plate="ARCHIFY / 图版 04">
-      <svg viewBox="0 0 1185 622" role="img" lang="zh-CN" aria-labelledby="archify-diagram-title archify-diagram-description" data-preset="classic" data-quality-profile="showcase" data-reader-fit="intrinsic-height" data-reader-min-text="7.5" data-reader-primary-text="14">
-        <title id="archify-diagram-title">llama-web 架构总览</title>
-        <desc id="archify-diagram-description">由 Archify 生成的架构图。</desc>
+      <svg viewBox="0 0 1085 700" data-sequence-column-fit="spread" role="img" lang="zh-CN" aria-labelledby="archify-diagram-title archify-diagram-description" data-preset="classic" data-quality-profile="showcase">
+        <title id="archify-diagram-title">llama-web 一次 OpenAI 请求的完整生命周期</title>
+        <desc id="archify-diagram-description">由 Archify 生成的时序图。</desc>
         <!-- Definitions -->
         <defs>
           <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
@@ -5012,298 +5012,282 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <!-- Background Grid -->
         <rect width="100%" height="100%" fill="url(#grid)" />
 
-        <!-- Boundaries (behind everything) -->
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="region" data-composition-frame-id="0" data-composition-frame-label="llama-web 进程（Bun + Nitro）" x="240" y="10" width="905" height="422" rx="12" class="c-region" stroke-width="1"/>
+        <!-- Time Segments -->
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="segment" data-composition-frame-id="0" x="48" y="160" width="989" height="80" rx="10" class="c-lane" stroke-width="1"/>
 
-        <!-- Connection paths (before components for correct z-order) -->
-        <g data-graph-role="automatic-crossover" style="--step:0">
-          <path data-graph-role="automatic-crossover-underlay" d="M 170 222 L 270 222" fill="none" stroke="var(--mask)" stroke-width="5.8" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="client" data-edge-to="entry" data-edge-label="OpenAI 请求" data-edge-key="0" data-edge-id="client-to-entry" data-composition-points="170,222;270,222" data-composition-crossover="halo" data-composition-independent="true" d="M 170 222 L 270 222" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="segment" data-composition-frame-id="1" x="48" y="248" width="989" height="136" rx="10" class="c-lane" stroke-width="1"/>
+
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="segment" data-composition-frame-id="2" x="48" y="392" width="989" height="104" rx="10" class="c-lane" stroke-width="1"/>
+
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="segment" data-composition-frame-id="3" x="48" y="504" width="989" height="100" rx="10" class="c-lane" stroke-width="1"/>
+
+        <!-- Lifelines -->
+        <path d="M 118.5 142 L 118.5 604" class="a-default" stroke-width="0.8" stroke-dasharray="3,7"/>
+        <path d="M 263.5 142 L 263.5 604" class="a-default" stroke-width="0.8" stroke-dasharray="3,7"/>
+        <path d="M 408.5 142 L 408.5 604" class="a-default" stroke-width="0.8" stroke-dasharray="3,7"/>
+        <path d="M 553.5 142 L 553.5 604" class="a-default" stroke-width="0.8" stroke-dasharray="3,7"/>
+        <path d="M 698.5 142 L 698.5 604" class="a-default" stroke-width="0.8" stroke-dasharray="3,7"/>
+        <path d="M 843.5 142 L 843.5 604" class="a-default" stroke-width="0.8" stroke-dasharray="3,7"/>
+        <path d="M 988.5 142 L 988.5 604" class="a-default" stroke-width="0.8" stroke-dasharray="3,7"/>
+
+        <!-- Activations -->
+        <rect x="258.5" y="170" width="10" height="36" rx="3" class="c-mask"/>
+        <rect x="258.5" y="170" width="10" height="36" rx="3" class="c-backend" stroke-width="1"/>
+        <rect x="403.5" y="200" width="10" height="396" rx="3" class="c-mask"/>
+        <rect x="403.5" y="200" width="10" height="396" rx="3" class="c-backend" stroke-width="1"/>
+        <rect x="548.5" y="228" width="10" height="312" rx="3" class="c-mask"/>
+        <rect x="548.5" y="228" width="10" height="312" rx="3" class="c-backend" stroke-width="1"/>
+        <rect x="693.5" y="256" width="10" height="312" rx="3" class="c-mask"/>
+        <rect x="693.5" y="256" width="10" height="312" rx="3" class="c-backend" stroke-width="1"/>
+        <rect x="838.5" y="284" width="10" height="312" rx="3" class="c-mask"/>
+        <rect x="838.5" y="284" width="10" height="312" rx="3" class="c-external" stroke-width="1"/>
+        <rect x="983.5" y="366" width="10" height="10" rx="3" class="c-mask"/>
+        <rect x="983.5" y="366" width="10" height="10" rx="3" class="c-messagebus" stroke-width="1"/>
+
+        <!-- Messages -->
+        <g data-edge-from="client" data-edge-to="entry" data-edge-label="POST /v1/chat/completions" data-edge-key="0" data-edge-id="post-chat">
+          <path data-composition-edge-from="client" data-composition-edge-to="entry" data-composition-edge-id="post-chat" data-composition-points="125.5,172;256.5,172" d="M 125.5 172 L 256.5 172" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <g data-detail="context">
+          <rect x="102.5" y="152" width="177" height="18" rx="3" class="c-mask"/>
+          <text x="191" y="162" class="t-edge-emphasis" font-size="11" text-anchor="middle">POST /v1/chat/completions</text>
         </g>
-        <g data-graph-role="automatic-crossover" style="--step:1">
-          <path data-graph-role="automatic-crossover-underlay" d="M 420 222 L 510 222" fill="none" stroke="var(--mask)" stroke-width="5.8" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="entry" data-edge-to="proxy" data-edge-label="/v1/* 原生" data-edge-key="1" data-edge-id="entry-to-proxy" data-composition-points="420,222;510,222" data-composition-crossover="halo" data-composition-independent="true" d="M 420 222 L 510 222" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        </g>
-        <g data-graph-role="automatic-crossover" style="--step:2">
-          <path data-graph-role="automatic-crossover-underlay" d="M 660 215 L 960 215" fill="none" stroke="var(--mask)" stroke-width="5.8" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="proxy" data-edge-to="llama" data-edge-label="http://127.0.0.1:&lt;port&gt;" data-edge-key="2" data-edge-id="proxy-to-llama" data-composition-points="660,215;960,215" data-composition-crossover="halo" data-composition-independent="true" d="M 660 215 L 960 215" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        </g>
-        <g data-graph-role="automatic-crossover" style="--step:3">
-          <path data-graph-role="automatic-crossover-underlay" d="M 585 254 L 585 340" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="proxy" data-edge-to="scheduler" data-edge-label="acquire(model)" data-edge-key="3" data-edge-id="proxy-to-scheduler" data-composition-points="585,254;585,340" data-composition-crossover="halo" data-composition-independent="true" d="M 585 254 L 585 340" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
-        </g>
-        <g data-graph-role="automatic-crossover" style="--step:4">
-          <path data-graph-role="automatic-crossover-underlay" d="M 670 365 L 730 365" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="scheduler" data-edge-to="runner" data-edge-label="启动 / 卸载" data-edge-key="4" data-edge-id="scheduler-to-runner" data-composition-points="670,365;730,365" data-composition-crossover="halo" data-composition-independent="true" d="M 670 365 L 730 365" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
-        </g>
-        <g data-graph-role="automatic-crossover" style="--step:5">
-          <path data-graph-role="automatic-crossover-underlay" d="M 880 372 L 912 372 Q 920 372 920 364 L 920 238.05 Q 920 230.05 928 230.05 L 960 230.05" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="runner" data-edge-to="llama" data-edge-label="argv 启动 · /health" data-edge-key="5" data-edge-id="runner-to-llama" data-composition-points="880,372;920,372;920,230.05;960,230.05" data-composition-crossover="halo" data-composition-independent="true" d="M 880 372 L 912 372 Q 920 372 920 364 L 920 238.05 Q 920 230.05 928 230.05 L 960 230.05" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
-        </g>
-        <g data-graph-role="automatic-crossover" style="--step:6">
-          <path data-graph-role="automatic-crossover-underlay" d="M 345 254 L 345 340" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="entry" data-edge-to="api" data-edge-label="localFetch" data-edge-key="6" data-edge-id="entry-to-api" data-composition-points="345,254;345,340" data-composition-crossover="halo" data-composition-independent="true" d="M 345 254 L 345 340" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
-        </g>
-        <g data-graph-role="automatic-crossover" style="--step:7">
-          <path data-graph-role="automatic-crossover-underlay" d="M 420 365 L 500 365" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="api" data-edge-to="scheduler" data-edge-label="ModelOps" data-edge-key="7" data-edge-id="api-to-scheduler" data-composition-points="420,365;500,365" data-composition-crossover="halo" data-composition-independent="true" d="M 420 365 L 500 365" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
-        </g>
-        <g data-graph-role="automatic-crossover" style="--step:8">
-          <path data-graph-role="automatic-crossover-underlay" d="M 345 104 L 345 190" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="ui" data-edge-to="entry" data-edge-label="/api/* · SSE" data-edge-key="8" data-edge-id="ui-to-entry" data-composition-points="345,104;345,190" data-composition-crossover="halo" data-composition-independent="true" d="M 345 104 L 345 190" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
-        </g>
-        <g data-graph-role="automatic-crossover" style="--step:9">
-          <path data-graph-role="automatic-crossover-underlay" d="M 585 104 L 585 190" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="public" data-edge-to="proxy" data-edge-label="校验 API key" data-edge-key="9" data-edge-id="public-to-proxy" data-composition-points="585,104;585,190" data-composition-crossover="halo" data-composition-independent="true" d="M 585 104 L 585 190" class="a-security" stroke-width="1.5" marker-end="url(#arrowhead-security)"/>
-        </g>
-        <g data-graph-role="automatic-crossover" style="--step:10">
-          <path data-graph-role="automatic-crossover-underlay" d="M 740 72 L 660 72" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="cf" data-edge-to="public" data-edge-label="127.0.0.1:8080" data-edge-key="10" data-edge-id="cf-to-public" data-composition-points="740,72;660,72" data-composition-crossover="halo" data-composition-independent="true" d="M 740 72 L 660 72" class="a-security" stroke-width="1.5" marker-end="url(#arrowhead-security)"/>
-        </g>
-        <g data-graph-role="automatic-crossover" style="--step:11">
-          <path data-graph-role="automatic-crossover-underlay" d="M 420 379 L 452 379 Q 460 379 460 387 L 460 514 Q 460 522 468 522 L 500 522" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="api" data-edge-to="data" data-edge-label="settings / models / secrets" data-edge-key="11" data-edge-id="api-to-data" data-composition-points="420,379;460,379;460,522;500,522" data-composition-crossover="halo" data-composition-independent="true" d="M 420 379 L 452 379 Q 460 379 460 387 L 460 514 Q 460 522 468 522 L 500 522" class="a-dashed" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
-        </g>
-        <g data-graph-role="automatic-crossover" style="--step:12">
-          <path data-graph-role="automatic-crossover-underlay" d="M 730 379 L 708 379 Q 700 379 700 387 L 700 514 Q 700 522 692 522 L 670 522" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="runner" data-edge-to="data" data-edge-label="pids.json" data-edge-key="12" data-edge-id="runner-to-data" data-composition-points="730,379;700,379;700,522;670,522" data-composition-crossover="halo" data-composition-independent="true" d="M 730 379 L 708 379 Q 700 379 700 387 L 700 514 Q 700 522 692 522 L 670 522" class="a-dashed" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
-        </g>
-        <g data-graph-role="automatic-crossover" style="--step:13">
-          <path data-graph-role="automatic-crossover-underlay" d="M 1040 340 L 1040 254" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="updater" data-edge-to="llama" data-edge-label="下载 · 校验 SHA-256" data-edge-key="13" data-edge-id="updater-to-llama" data-composition-points="1040,340;1040,254" data-composition-crossover="halo" data-composition-independent="true" d="M 1040 340 L 1040 254" class="a-dashed" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
         </g>
 
-        <!-- Components -->
-        <g id="node-ui" data-node-id="ui" data-node-label="管理界面" tabindex="0" role="button" aria-label="聚焦管理界面，Nuxt SPA · 中文, 架构组件" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="Nuxt SPA · 中文" data-node-context="架构组件">
-          <title>管理界面 · Nuxt SPA · 中文 · 架构组件</title>
-          <rect x="270" y="40" width="150" height="64" rx="6" class="c-mask"/>
-          <rect x="270" y="40" width="150" height="64" rx="6" class="c-frontend" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="frontend" class="semantic-sigil s-frontend" transform="translate(276 46) scale(0.6875)">
-            <rect x="2" y="3" width="12" height="10" rx="2"/>
-            <path d="M2 6.5h12"/>
-            <circle cx="4.1" cy="4.8" r=".7" class="sigil-fill"/>
-            <circle cx="6.3" cy="4.8" r=".7" class="sigil-fill"/>
-          </g>
-          <text data-node-label="" data-detail-anchor="" x="345" y="70" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">管理界面</text>
-        <text data-detail="context" x="345" y="86" class="t-muted" font-size="9" text-anchor="middle">Nuxt SPA · 中文</text>
+        <g data-edge-from="entry" data-edge-to="proxy" data-edge-label="handleV1(req, ip)" data-edge-key="1" data-edge-id="native-dispatch">
+          <path data-composition-edge-from="entry" data-composition-edge-to="proxy" data-composition-edge-id="native-dispatch" data-composition-points="270.5,200;401.5,200" d="M 270.5 200 L 401.5 200" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <g data-detail="context">
+          <rect x="273.9" y="180" width="124.19999999999999" height="18" rx="3" class="c-mask"/>
+          <text x="336" y="190" class="t-edge-emphasis" font-size="11" text-anchor="middle">handleV1(req, ip)</text>
+        </g>
         </g>
 
-        <g id="node-public" data-node-id="public" data-node-label="公网入口" tabindex="0" role="button" aria-label="聚焦公网入口，127.0.0.1:8080, llama-web 进程（Bun + Nitro）" aria-pressed="false" data-node-kind="security" data-node-sublabel="127.0.0.1:8080" data-node-tag="Bearer key" data-node-context="llama-web 进程（Bun + Nitro）">
-          <title>公网入口 · 127.0.0.1:8080 · llama-web 进程（Bun + Nitro） · Bearer key</title>
-          <rect x="510" y="40" width="150" height="64" rx="6" class="c-mask"/>
-          <rect x="510" y="40" width="150" height="64" rx="6" class="c-security" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(516 46) scale(0.6875)">
-            <path d="M8 2.2 13 4v3.5c0 3.1-1.8 5.4-5 6.5-3.2-1.1-5-3.4-5-6.5V4Z"/>
-            <path d="m5.8 8 1.5 1.5 3-3"/>
-          </g>
-          <text data-node-label="" data-detail-anchor="" x="585" y="70" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">公网入口</text>
-        <text data-detail="context" x="585" y="86" class="t-muted" font-size="9" text-anchor="middle">127.0.0.1:8080</text>
-        <text data-detail="fine" x="585" y="96" class="t-security" font-size="7" text-anchor="middle">Bearer key</text>
+        <g data-edge-from="proxy" data-edge-to="scheduler" data-edge-label="acquire(model)" data-edge-key="2" data-edge-id="acquire-model">
+          <path data-composition-edge-from="proxy" data-composition-edge-to="scheduler" data-composition-edge-id="acquire-model" data-composition-points="415.5,228;546.5,228" d="M 415.5 228 L 546.5 228" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <g data-detail="context">
+          <rect x="428.8" y="208" width="104.39999999999999" height="18" rx="3" class="c-mask"/>
+          <text x="481" y="218" class="t-edge-emphasis" font-size="11" text-anchor="middle">acquire(model)</text>
+        </g>
         </g>
 
-        <g id="node-cf" data-node-id="cf" data-node-label="Cloudflare 隧道" tabindex="0" role="button" aria-label="聚焦Cloudflare 隧道，cloudflared 子进程, 架构组件" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="cloudflared 子进程" data-node-context="架构组件">
-          <title>Cloudflare 隧道 · cloudflared 子进程 · 架构组件</title>
-          <rect x="740" y="40" width="150" height="64" rx="6" class="c-mask"/>
-          <rect x="740" y="40" width="150" height="64" rx="6" class="c-cloud" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="cloud" class="semantic-sigil s-cloud" transform="translate(746 46) scale(0.6875)">
-            <path d="M4.3 12.5h7.3a2.4 2.4 0 0 0 .2-4.8 4 4 0 0 0-7.5-1.3A3.1 3.1 0 0 0 4.3 12.5Z"/>
-          </g>
-          <text data-node-label="" data-detail-anchor="" x="815" y="70" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Cloudflare 隧道</text>
-        <text data-detail="context" x="815" y="86" class="t-muted" font-size="9" text-anchor="middle">cloudflared 子进程</text>
+        <g data-edge-from="scheduler" data-edge-to="runner" data-edge-label="launch(target)" data-edge-key="3" data-edge-id="launch-target">
+          <path data-composition-edge-from="scheduler" data-composition-edge-to="runner" data-composition-edge-id="launch-target" data-composition-points="560.5,256;691.5,256" d="M 560.5 256 L 691.5 256" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <g data-detail="context">
+          <rect x="573.8" y="236" width="104.39999999999999" height="18" rx="3" class="c-mask"/>
+          <text x="626" y="246" class="t-edge-emphasis" font-size="11" text-anchor="middle">launch(target)</text>
+        </g>
         </g>
 
-        <g id="node-client" data-node-id="client" data-node-label="OpenAI 客户端" tabindex="0" role="button" aria-label="聚焦OpenAI 客户端，curl / 聊天应用, 架构组件" aria-pressed="false" data-node-kind="external" data-node-sublabel="curl / 聊天应用" data-node-context="架构组件">
-          <title>OpenAI 客户端 · curl / 聊天应用 · 架构组件</title>
-          <rect x="40" y="190" width="130" height="64" rx="6" class="c-mask"/>
-          <rect x="40" y="190" width="130" height="64" rx="6" class="c-external" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(46 196) scale(0.6875)">
+        <g data-edge-from="runner" data-edge-to="llama" data-edge-label="spawn(argv)" data-edge-key="4" data-edge-id="spawn-server">
+          <path data-composition-edge-from="runner" data-composition-edge-to="llama" data-composition-edge-id="spawn-server" data-composition-points="705.5,284;836.5,284" d="M 705.5 284 L 836.5 284" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <g data-detail="context">
+          <rect x="728.7" y="264" width="84.6" height="18" rx="3" class="c-mask"/>
+          <text x="771" y="274" class="t-edge-emphasis" font-size="11" text-anchor="middle">spawn(argv)</text>
+        </g>
+        </g>
+
+        <g data-edge-from="llama" data-edge-to="runner" data-edge-label="/health 200" data-edge-key="5" data-edge-id="health-ok">
+          <path data-composition-edge-from="llama" data-composition-edge-to="runner" data-composition-edge-id="health-ok" data-composition-points="836.5,312;705.5,312" d="M 836.5 312 L 705.5 312" class="a-default" stroke-width="1.4" stroke-dasharray="3,5" marker-end="url(#arrowhead)"/>
+        <g data-detail="context">
+          <rect x="728.7" y="292" width="84.6" height="18" rx="3" class="c-mask"/>
+          <text x="771" y="302" class="t-muted" font-size="11" text-anchor="middle">/health 200</text>
+        </g>
+        </g>
+
+        <g data-edge-from="runner" data-edge-to="scheduler" data-edge-label="ready" data-edge-key="6" data-edge-id="load-ready">
+          <path data-composition-edge-from="runner" data-composition-edge-to="scheduler" data-composition-edge-id="load-ready" data-composition-points="691.5,340;560.5,340" d="M 691.5 340 L 560.5 340" class="a-default" stroke-width="1.4" stroke-dasharray="3,5" marker-end="url(#arrowhead)"/>
+        <g data-detail="context">
+          <rect x="603.5" y="320" width="45" height="18" rx="3" class="c-mask"/>
+          <text x="626" y="330" class="t-muted" font-size="11" text-anchor="middle">ready</text>
+        </g>
+        </g>
+
+        <g data-edge-from="scheduler" data-edge-to="live" data-edge-label="loading → ready" data-edge-key="7" data-edge-id="state-ready">
+          <path data-composition-edge-from="scheduler" data-composition-edge-to="live" data-composition-edge-id="state-ready" data-composition-points="560.5,368;981.5,368" d="M 560.5 368 L 981.5 368" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+        <g data-detail="context">
+          <rect x="715.5" y="348" width="111" height="18" rx="3" class="c-mask"/>
+          <text x="771" y="358" class="t-edge-dashed" font-size="11" text-anchor="middle">loading → ready</text>
+        </g>
+        </g>
+
+        <g data-edge-from="scheduler" data-edge-to="proxy" data-edge-label="Lease(port)" data-edge-key="8" data-edge-id="lease-port">
+          <path data-composition-edge-from="scheduler" data-composition-edge-to="proxy" data-composition-edge-id="lease-port" data-composition-points="546.5,396;415.5,396" d="M 546.5 396 L 415.5 396" class="a-default" stroke-width="1.4" stroke-dasharray="3,5" marker-end="url(#arrowhead)"/>
+        <g data-detail="context">
+          <rect x="438.7" y="376" width="84.6" height="18" rx="3" class="c-mask"/>
+          <text x="481" y="386" class="t-muted" font-size="11" text-anchor="middle">Lease(port)</text>
+        </g>
+        </g>
+
+        <g data-edge-from="proxy" data-edge-to="llama" data-edge-label="POST http://127.0.0.1:&lt;port&gt;" data-edge-key="9" data-edge-id="forward-upstream">
+          <path data-composition-edge-from="proxy" data-composition-edge-to="llama" data-composition-edge-id="forward-upstream" data-composition-points="415.5,424;836.5,424" d="M 415.5 424 L 836.5 424" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <g data-detail="context">
+          <rect x="527.6" y="404" width="196.79999999999998" height="18" rx="3" class="c-mask"/>
+          <text x="626" y="414" class="t-edge-emphasis" font-size="11" text-anchor="middle">POST http://127.0.0.1:&lt;port&gt;</text>
+        </g>
+        </g>
+
+        <g data-edge-from="llama" data-edge-to="proxy" data-edge-label="SSE chunks" data-edge-key="10" data-edge-id="sse-chunks">
+          <path data-composition-edge-from="llama" data-composition-edge-to="proxy" data-composition-edge-id="sse-chunks" data-composition-points="836.5,452;415.5,452" d="M 836.5 452 L 415.5 452" class="a-default" stroke-width="1.4" stroke-dasharray="3,5" marker-end="url(#arrowhead)"/>
+        <g data-detail="context">
+          <rect x="587" y="432" width="78" height="18" rx="3" class="c-mask"/>
+          <text x="626" y="442" class="t-muted" font-size="11" text-anchor="middle">SSE chunks</text>
+        </g>
+        </g>
+
+        <g data-edge-from="proxy" data-edge-to="client" data-edge-label="流式返回 / 200 JSON" data-edge-key="11" data-edge-id="stream-back">
+          <path data-composition-edge-from="proxy" data-composition-edge-to="client" data-composition-edge-id="stream-back" data-composition-points="401.5,480;125.5,480" d="M 401.5 480 L 125.5 480" class="a-default" stroke-width="1.4" stroke-dasharray="3,5" marker-end="url(#arrowhead)"/>
+        <g data-detail="context">
+          <rect x="194.8" y="460" width="137.39999999999998" height="18" rx="3" class="c-mask"/>
+          <text x="263.5" y="470" class="t-muted" font-size="11" text-anchor="middle">流式返回 / 200 JSON</text>
+        </g>
+        </g>
+
+        <g data-edge-from="client" data-edge-to="proxy" data-edge-label="断开 AbortSignal" data-edge-key="12" data-edge-id="client-abort">
+          <path data-composition-edge-from="client" data-composition-edge-to="proxy" data-composition-edge-id="client-abort" data-composition-points="125.5,508;401.5,508" d="M 125.5 508 L 401.5 508" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+        <g data-detail="context">
+          <rect x="204.7" y="488" width="117.6" height="18" rx="3" class="c-mask"/>
+          <text x="263.5" y="498" class="t-edge-dashed" font-size="11" text-anchor="middle">断开 AbortSignal</text>
+        </g>
+        </g>
+
+        <g data-edge-from="proxy" data-edge-to="scheduler" data-edge-label="release / 中止" data-edge-key="13" data-edge-id="release-lease">
+          <path data-composition-edge-from="proxy" data-composition-edge-to="scheduler" data-composition-edge-id="release-lease" data-composition-points="415.5,536;546.5,536" d="M 415.5 536 L 546.5 536" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+        <g data-detail="context">
+          <rect x="428.8" y="516" width="104.39999999999999" height="18" rx="3" class="c-mask"/>
+          <text x="481" y="526" class="t-edge-dashed" font-size="11" text-anchor="middle">release / 中止</text>
+        </g>
+        </g>
+
+        <g data-edge-from="scheduler" data-edge-to="runner" data-edge-label="drain → stop" data-edge-key="14" data-edge-id="drain-stop">
+          <path data-composition-edge-from="scheduler" data-composition-edge-to="runner" data-composition-edge-id="drain-stop" data-composition-points="560.5,564;691.5,564" d="M 560.5 564 L 691.5 564" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+        <g data-detail="context">
+          <rect x="580.4" y="544" width="91.19999999999999" height="18" rx="3" class="c-mask"/>
+          <text x="626" y="554" class="t-edge-dashed" font-size="11" text-anchor="middle">drain → stop</text>
+        </g>
+        </g>
+
+        <g data-edge-from="runner" data-edge-to="llama" data-edge-label="结束进程树" data-edge-key="15" data-edge-id="kill-tree">
+          <path data-composition-edge-from="runner" data-composition-edge-to="llama" data-composition-edge-id="kill-tree" data-composition-points="705.5,592;836.5,592" d="M 705.5 592 L 836.5 592" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+        <g data-detail="context">
+          <rect x="732" y="572" width="78" height="18" rx="3" class="c-mask"/>
+          <text x="771" y="582" class="t-edge-dashed" font-size="11" text-anchor="middle">结束进程树</text>
+        </g>
+        </g>
+
+        <!-- Segment Labels -->
+        <g data-graph-role="segment-label" data-segment-id="0">
+          <rect x="56" y="116" width="76.4" height="18" rx="3" class="c-mask"/>
+          <text x="62" y="129" class="t-dim" font-size="9" font-weight="600">进入与预处理</text>
+        </g>
+        <g data-graph-role="segment-label" data-segment-id="1">
+          <rect x="56" y="226" width="66" height="18" rx="3" class="c-mask"/>
+          <text x="62" y="239" class="t-dim" font-size="9" font-weight="600">排队与加载</text>
+        </g>
+        <g data-graph-role="segment-label" data-segment-id="2">
+          <rect x="56" y="370" width="66" height="18" rx="3" class="c-mask"/>
+          <text x="62" y="383" class="t-dim" font-size="9" font-weight="600">转发与返回</text>
+        </g>
+        <g data-graph-role="segment-label" data-segment-id="3">
+          <rect x="56" y="482" width="66" height="18" rx="3" class="c-mask"/>
+          <text x="62" y="495" class="t-dim" font-size="9" font-weight="600">断开与卸载</text>
+        </g>
+
+        <!-- Participants -->
+        <g id="node-client" data-node-id="client" data-node-label="OpenAI 客户端" tabindex="0" role="button" aria-label="聚焦OpenAI 客户端，curl / 聊天应用, 时序参与者" aria-pressed="false" data-node-kind="external" data-node-sublabel="curl / 聊天应用" data-node-context="时序参与者">
+          <title>OpenAI 客户端 · curl / 聊天应用 · 时序参与者</title>
+          <rect x="62" y="72" width="113" height="60" rx="6" class="c-mask"/>
+          <rect x="62" y="72" width="113" height="60" rx="6" class="c-external" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(68 78) scale(0.6875)">
             <rect x="2.5" y="5" width="8.5" height="8" rx="1.5"/>
             <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="105" y="220" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">OpenAI 客户端</text>
-        <text data-detail="context" x="105" y="236" class="t-muted" font-size="9" text-anchor="middle">curl / 聊天应用</text>
+          <text data-node-label="" data-detail-anchor="" x="118.5" y="108" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">OpenAI 客户端</text>
+          <text data-detail="context" x="118.5" y="122" class="t-muted" font-size="7" text-anchor="middle">curl / 聊天应用</text>
         </g>
 
-        <g id="node-entry" data-node-id="entry" data-node-label="Bun 入口" tabindex="0" role="button" aria-label="聚焦Bun 入口，server/entry.ts :5001, llama-web 进程（Bun + Nitro）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="server/entry.ts :5001" data-node-context="llama-web 进程（Bun + Nitro）">
-          <title>Bun 入口 · server/entry.ts :5001 · llama-web 进程（Bun + Nitro）</title>
-          <rect x="270" y="190" width="150" height="64" rx="6" class="c-mask"/>
-          <rect x="270" y="190" width="150" height="64" rx="6" class="c-backend" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(276 196) scale(0.6875)">
+        <g id="node-entry" data-node-id="entry" data-node-label="Bun 入口" tabindex="0" role="button" aria-label="聚焦Bun 入口，server/entry.ts, 时序参与者" aria-pressed="false" data-node-kind="backend" data-node-sublabel="server/entry.ts" data-node-context="时序参与者">
+          <title>Bun 入口 · server/entry.ts · 时序参与者</title>
+          <rect x="207" y="72" width="113" height="60" rx="6" class="c-mask"/>
+          <rect x="207" y="72" width="113" height="60" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(213 78) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="345" y="220" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Bun 入口</text>
-        <text data-detail="context" x="345" y="236" class="t-muted" font-size="9" text-anchor="middle">server/entry.ts :5001</text>
+          <text data-node-label="" data-detail-anchor="" x="263.5" y="108" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Bun 入口</text>
+          <text data-detail="context" x="263.5" y="122" class="t-muted" font-size="7" text-anchor="middle">server/entry.ts</text>
         </g>
 
-        <g id="node-proxy" data-node-id="proxy" data-node-label="/v1 代理" tabindex="0" role="button" aria-label="聚焦/v1 代理，proxy.ts · 图片压缩, llama-web 进程（Bun + Nitro）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="proxy.ts · 图片压缩" data-node-context="llama-web 进程（Bun + Nitro）">
-          <title>/v1 代理 · proxy.ts · 图片压缩 · llama-web 进程（Bun + Nitro）</title>
-          <rect x="510" y="190" width="150" height="64" rx="6" class="c-mask"/>
-          <rect x="510" y="190" width="150" height="64" rx="6" class="c-backend" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(516 196) scale(0.6875)">
+        <g id="node-proxy" data-node-id="proxy" data-node-label="/v1 代理" tabindex="0" role="button" aria-label="聚焦/v1 代理，proxy.ts · 图片压缩, 时序参与者" aria-pressed="false" data-node-kind="backend" data-node-sublabel="proxy.ts · 图片压缩" data-node-context="时序参与者">
+          <title>/v1 代理 · proxy.ts · 图片压缩 · 时序参与者</title>
+          <rect x="352" y="72" width="113" height="60" rx="6" class="c-mask"/>
+          <rect x="352" y="72" width="113" height="60" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(358 78) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="585" y="220" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">/v1 代理</text>
-        <text data-detail="context" x="585" y="236" class="t-muted" font-size="9" text-anchor="middle">proxy.ts · 图片压缩</text>
+          <text data-node-label="" data-detail-anchor="" x="408.5" y="108" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">/v1 代理</text>
+          <text data-detail="context" x="408.5" y="122" class="t-muted" font-size="7" text-anchor="middle">proxy.ts · 图片压缩</text>
         </g>
 
-        <g id="node-llama" data-node-id="llama" data-node-label="llama-server" tabindex="0" role="button" aria-label="聚焦llama-server，data/runtime/llama.cpp, 架构组件" aria-pressed="false" data-node-kind="external" data-node-sublabel="data/runtime/llama.cpp" data-node-context="架构组件">
-          <title>llama-server · data/runtime/llama.cpp · 架构组件</title>
-          <rect x="960" y="190" width="160" height="64" rx="6" class="c-mask"/>
-          <rect x="960" y="190" width="160" height="64" rx="6" class="c-external" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(966 196) scale(0.6875)">
+        <g id="node-scheduler" data-node-id="scheduler" data-node-label="调度器" tabindex="0" role="button" aria-label="聚焦调度器，FIFO 队列 · 准入, 时序参与者" aria-pressed="false" data-node-kind="backend" data-node-sublabel="FIFO 队列 · 准入" data-node-context="时序参与者">
+          <title>调度器 · FIFO 队列 · 准入 · 时序参与者</title>
+          <rect x="497" y="72" width="113" height="60" rx="6" class="c-mask"/>
+          <rect x="497" y="72" width="113" height="60" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(503 78) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="553.5" y="108" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">调度器</text>
+          <text data-detail="context" x="553.5" y="122" class="t-muted" font-size="7" text-anchor="middle">FIFO 队列 · 准入</text>
+        </g>
+
+        <g id="node-runner" data-node-id="runner" data-node-label="Runner" tabindex="0" role="button" aria-label="聚焦Runner，spawn · /health, 时序参与者" aria-pressed="false" data-node-kind="backend" data-node-sublabel="spawn · /health" data-node-context="时序参与者">
+          <title>Runner · spawn · /health · 时序参与者</title>
+          <rect x="642" y="72" width="113" height="60" rx="6" class="c-mask"/>
+          <rect x="642" y="72" width="113" height="60" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(648 78) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="698.5" y="108" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Runner</text>
+          <text data-detail="context" x="698.5" y="122" class="t-muted" font-size="7" text-anchor="middle">spawn · /health</text>
+        </g>
+
+        <g id="node-llama" data-node-id="llama" data-node-label="llama-server" tabindex="0" role="button" aria-label="聚焦llama-server，本地端口, 时序参与者" aria-pressed="false" data-node-kind="external" data-node-sublabel="本地端口" data-node-context="时序参与者">
+          <title>llama-server · 本地端口 · 时序参与者</title>
+          <rect x="787" y="72" width="113" height="60" rx="6" class="c-mask"/>
+          <rect x="787" y="72" width="113" height="60" rx="6" class="c-external" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(793 78) scale(0.6875)">
             <rect x="2.5" y="5" width="8.5" height="8" rx="1.5"/>
             <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="1040" y="220" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">llama-server</text>
-        <text data-detail="context" x="1040" y="236" class="t-muted" font-size="9" text-anchor="middle">data/runtime/llama.cpp</text>
+          <text data-node-label="" data-detail-anchor="" x="843.5" y="108" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">llama-server</text>
+          <text data-detail="context" x="843.5" y="122" class="t-muted" font-size="7" text-anchor="middle">本地端口</text>
         </g>
 
-        <g id="node-api" data-node-id="api" data-node-label="管理 API" tabindex="0" role="button" aria-label="聚焦管理 API，Nitro · server/api/*, llama-web 进程（Bun + Nitro）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="Nitro · server/api/*" data-node-context="llama-web 进程（Bun + Nitro）">
-          <title>管理 API · Nitro · server/api/* · llama-web 进程（Bun + Nitro）</title>
-          <rect x="270" y="340" width="150" height="64" rx="6" class="c-mask"/>
-          <rect x="270" y="340" width="150" height="64" rx="6" class="c-backend" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(276 346) scale(0.6875)">
-            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+        <g id="node-live" data-node-id="live" data-node-label="实时流" tabindex="0" role="button" aria-label="聚焦实时流，/api/stream, 时序参与者" aria-pressed="false" data-node-kind="messagebus" data-node-sublabel="/api/stream" data-node-context="时序参与者">
+          <title>实时流 · /api/stream · 时序参与者</title>
+          <rect x="932" y="72" width="113" height="60" rx="6" class="c-mask"/>
+          <rect x="932" y="72" width="113" height="60" rx="6" class="c-messagebus" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="messagebus" class="semantic-sigil s-messagebus" transform="translate(938 78) scale(0.6875)">
+            <path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/>
+            <circle cx="5" cy="4.5" r="1" class="sigil-fill"/>
+            <circle cx="10.5" cy="8" r="1" class="sigil-fill"/>
+            <circle cx="7" cy="11.5" r="1" class="sigil-fill"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="345" y="370" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">管理 API</text>
-        <text data-detail="context" x="345" y="386" class="t-muted" font-size="9" text-anchor="middle">Nitro · server/api/*</text>
-        </g>
-
-        <g id="node-scheduler" data-node-id="scheduler" data-node-label="调度器" tabindex="0" role="button" aria-label="聚焦调度器，排队切换 · 内存准入 · 看门狗, llama-web 进程（Bun + Nitro）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="排队切换 · 内存准入 · 看门狗" data-node-context="llama-web 进程（Bun + Nitro）">
-          <title>调度器 · 排队切换 · 内存准入 · 看门狗 · llama-web 进程（Bun + Nitro）</title>
-          <rect x="500" y="340" width="170" height="72" rx="6" class="c-mask"/>
-          <rect x="500" y="340" width="170" height="72" rx="6" class="c-backend" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(506 346) scale(0.6875)">
-            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
-          </g>
-          <text data-node-label="" data-detail-anchor="" x="585" y="374" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">调度器</text>
-        <text data-detail="context" x="585" y="390" class="t-muted" font-size="9" text-anchor="middle">排队切换 · 内存准入 · 看门狗</text>
-        </g>
-
-        <g id="node-runner" data-node-id="runner" data-node-label="Runner" tabindex="0" role="button" aria-label="聚焦Runner，spawn argv · /health, llama-web 进程（Bun + Nitro）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="spawn argv · /health" data-node-context="llama-web 进程（Bun + Nitro）">
-          <title>Runner · spawn argv · /health · llama-web 进程（Bun + Nitro）</title>
-          <rect x="730" y="340" width="150" height="64" rx="6" class="c-mask"/>
-          <rect x="730" y="340" width="150" height="64" rx="6" class="c-backend" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(736 346) scale(0.6875)">
-            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
-          </g>
-          <text data-node-label="" data-detail-anchor="" x="805" y="370" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Runner</text>
-        <text data-detail="context" x="805" y="386" class="t-muted" font-size="9" text-anchor="middle">spawn argv · /health</text>
-        </g>
-
-        <g id="node-updater" data-node-id="updater" data-node-label="更新器" tabindex="0" role="button" aria-label="聚焦更新器，llama.cpp · 应用更新, llama-web 进程（Bun + Nitro）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="llama.cpp · 应用更新" data-node-context="llama-web 进程（Bun + Nitro）">
-          <title>更新器 · llama.cpp · 应用更新 · llama-web 进程（Bun + Nitro）</title>
-          <rect x="965" y="340" width="150" height="64" rx="6" class="c-mask"/>
-          <rect x="965" y="340" width="150" height="64" rx="6" class="c-backend" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(971 346) scale(0.6875)">
-            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
-          </g>
-          <text data-node-label="" data-detail-anchor="" x="1040" y="370" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">更新器</text>
-        <text data-detail="context" x="1040" y="386" class="t-muted" font-size="9" text-anchor="middle">llama.cpp · 应用更新</text>
-        </g>
-
-        <g id="node-data" data-node-id="data" data-node-label="data/" tabindex="0" role="button" aria-label="聚焦data/，settings · models · secrets · logs, 架构组件" aria-pressed="false" data-node-kind="database" data-node-sublabel="settings · models · secrets · logs" data-node-context="架构组件">
-          <title>data/ · settings · models · secrets · logs · 架构组件</title>
-          <rect x="500" y="490" width="170" height="64" rx="6" class="c-mask"/>
-          <rect x="500" y="490" width="170" height="64" rx="6" class="c-database" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(506 496) scale(0.6875)">
-            <ellipse cx="8" cy="4" rx="5" ry="2"/>
-            <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
-          </g>
-          <text data-node-label="" data-detail-anchor="" x="585" y="520" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">data/</text>
-        <text data-detail="context" x="585" y="536" class="t-muted" font-size="7.9" text-anchor="middle">settings · models · secrets · logs</text>
-        </g>
-
-        <!-- Connection labels -->
-        <g data-detail="context" data-edge-from="client" data-edge-to="entry" data-edge-label="OpenAI 请求" data-edge-key="0" data-edge-id="client-to-entry">
-          <rect x="188.6" y="202" width="62.8" height="14" rx="3" class="c-mask"/>
-          <text x="220" y="212" class="t-edge-emphasis" font-size="8" text-anchor="middle">OpenAI 请求</text>
-        </g>
-        <g data-detail="context" data-edge-from="entry" data-edge-to="proxy" data-edge-label="/v1/* 原生" data-edge-key="1" data-edge-id="entry-to-proxy">
-          <rect x="436" y="202" width="58" height="14" rx="3" class="c-mask"/>
-          <text x="465" y="212" class="t-edge-emphasis" font-size="8" text-anchor="middle">/v1/* 原生</text>
-        </g>
-        <g data-detail="context" data-edge-from="proxy" data-edge-to="llama" data-edge-label="http://127.0.0.1:&lt;port&gt;" data-edge-key="2" data-edge-id="proxy-to-llama">
-          <rect x="749.8" y="168" width="120.39999999999999" height="14" rx="3" class="c-mask"/>
-          <text x="810" y="178" class="t-edge-emphasis" font-size="8" text-anchor="middle">http://127.0.0.1:&lt;port&gt;</text>
-        </g>
-        <g data-detail="context" data-edge-from="proxy" data-edge-to="scheduler" data-edge-label="acquire(model)" data-edge-key="3" data-edge-id="proxy-to-scheduler">
-          <rect x="501.79999999999995" y="290" width="77.2" height="14" rx="3" class="c-mask"/>
-          <text x="540.4" y="300" class="t-edge-default" font-size="8" text-anchor="middle">acquire(model)</text>
-        </g>
-        <g data-detail="context" data-edge-from="scheduler" data-edge-to="runner" data-edge-label="启动 / 卸载" data-edge-key="4" data-edge-id="scheduler-to-runner">
-          <rect x="668.6" y="345" width="62.8" height="14" rx="3" class="c-mask"/>
-          <text x="700" y="355" class="t-edge-default" font-size="8" text-anchor="middle">启动 / 卸载</text>
-        </g>
-        <g data-detail="context" data-edge-from="runner" data-edge-to="llama" data-edge-label="argv 启动 · /health" data-edge-key="5" data-edge-id="runner-to-llama">
-          <rect x="869.4" y="281.025" width="101.2" height="14" rx="3" class="c-mask"/>
-          <text x="920" y="291.025" class="t-edge-default" font-size="8" text-anchor="middle">argv 启动 · /health</text>
-        </g>
-        <g data-detail="context" data-edge-from="entry" data-edge-to="api" data-edge-label="localFetch" data-edge-key="6" data-edge-id="entry-to-api">
-          <rect x="316" y="258" width="58" height="14" rx="3" class="c-mask"/>
-          <text x="345" y="268" class="t-edge-default" font-size="8" text-anchor="middle">localFetch</text>
-        </g>
-        <g data-detail="context" data-edge-from="api" data-edge-to="scheduler" data-edge-label="ModelOps" data-edge-key="7" data-edge-id="api-to-scheduler">
-          <rect x="435.8" y="345" width="48.4" height="14" rx="3" class="c-mask"/>
-          <text x="460" y="355" class="t-edge-default" font-size="8" text-anchor="middle">ModelOps</text>
-        </g>
-        <g data-detail="context" data-edge-from="ui" data-edge-to="entry" data-edge-label="/api/* · SSE" data-edge-key="8" data-edge-id="ui-to-entry">
-          <rect x="311.2" y="108" width="67.6" height="14" rx="3" class="c-mask"/>
-          <text x="345" y="118" class="t-edge-default" font-size="8" text-anchor="middle">/api/* · SSE</text>
-        </g>
-        <g data-detail="context" data-edge-from="public" data-edge-to="proxy" data-edge-label="校验 API key" data-edge-key="9" data-edge-id="public-to-proxy">
-          <rect x="551.2" y="108" width="67.6" height="14" rx="3" class="c-mask"/>
-          <text x="585" y="118" class="t-edge-security" font-size="8" text-anchor="middle">校验 API key</text>
-        </g>
-        <g data-detail="context" data-edge-from="cf" data-edge-to="public" data-edge-label="127.0.0.1:8080" data-edge-key="10" data-edge-id="cf-to-public">
-          <rect x="661.4" y="52" width="77.2" height="14" rx="3" class="c-mask"/>
-          <text x="700" y="62" class="t-edge-security" font-size="8" text-anchor="middle">127.0.0.1:8080</text>
-        </g>
-        <g data-detail="context" data-edge-from="api" data-edge-to="data" data-edge-label="settings / models / secrets" data-edge-key="11" data-edge-id="api-to-data">
-          <rect x="390.2" y="430.5" width="139.6" height="14" rx="3" class="c-mask"/>
-          <text x="460" y="440.5" class="t-edge-dashed" font-size="8" text-anchor="middle">settings / models / secrets</text>
-        </g>
-        <g data-detail="context" data-edge-from="runner" data-edge-to="data" data-edge-label="pids.json" data-edge-key="12" data-edge-id="runner-to-data">
-          <rect x="673.4" y="430.5" width="53.199999999999996" height="14" rx="3" class="c-mask"/>
-          <text x="700" y="440.5" class="t-edge-dashed" font-size="8" text-anchor="middle">pids.json</text>
-        </g>
-        <g data-detail="context" data-edge-from="updater" data-edge-to="llama" data-edge-label="下载 · 校验 SHA-256" data-edge-key="13" data-edge-id="updater-to-llama">
-          <rect x="989.4" y="320" width="101.2" height="14" rx="3" class="c-mask"/>
-          <text x="1040" y="330" class="t-edge-dashed" font-size="8" text-anchor="middle">下载 · 校验 SHA-256</text>
-        </g>
-
-        <!-- Boundary labels (foreground masks keep routes out of titles) -->
-        <g data-graph-role="structural-frame-label" data-composition-frame-id="0" data-composition-frame-kind="region" data-composition-frame-label="llama-web 进程（Bun + Nitro）">
-          <rect data-graph-role="structural-frame-label-mask" x="244" y="20" width="166.6" height="16" rx="3" class="c-mask"/>
-          <text data-boundary-label="" x="248" y="33" class="t-cloud" font-size="9" font-weight="600">llama-web 进程（Bun + Nitro）</text>
+          <text data-node-label="" data-detail-anchor="" x="988.5" y="108" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">实时流</text>
+          <text data-detail="context" x="988.5" y="122" class="t-muted" font-size="7" text-anchor="middle">/api/stream</text>
         </g>
 
         <!-- Legend -->
-        <g data-legend="" data-legend-bridge="">
-          <text x="40" y="586" class="t-primary" font-size="12" font-weight="650">图例</text>
-          <g data-legend-semantic-kind="frontend" data-legend-kind="frontend" data-legend-label="前端" data-legend-x="40" data-legend-baseline="606" data-legend-width="63">
-            <rect x="40" y="597" width="16" height="10" rx="2.5" class="c-frontend" stroke-width="1"/>
-            <text x="62" y="606" class="t-muted" font-size="10" font-weight="500">前端</text>
+        <g data-legend="">
+          <text x="40" y="626" class="t-primary" font-size="12" font-weight="650">图例</text>
+          <g data-legend-semantic-kind="emphasis" data-legend-x="40" data-legend-baseline="646" data-legend-width="93">
+            <path d="M 40 643 L 74 643" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+            <text x="83" y="646" class="t-muted" font-size="10" font-weight="500">主路径请求</text>
           </g>
-          <g data-legend-semantic-kind="backend" data-legend-kind="backend" data-legend-label="后端" data-legend-x="125" data-legend-baseline="606" data-legend-width="63">
-            <rect x="125" y="597" width="16" height="10" rx="2.5" class="c-backend" stroke-width="1"/>
-            <text x="147" y="606" class="t-muted" font-size="10" font-weight="500">后端</text>
+          <g data-legend-semantic-kind="return" data-legend-x="155" data-legend-baseline="646" data-legend-width="63">
+            <path d="M 155 643 L 189 643" class="a-default" stroke-width="1.4" stroke-dasharray="3,5" marker-end="url(#arrowhead)"/>
+            <text x="198" y="646" class="t-muted" font-size="10" font-weight="500">返回</text>
           </g>
-          <g data-legend-semantic-kind="database" data-legend-kind="database" data-legend-label="数据库" data-legend-x="210" data-legend-baseline="606" data-legend-width="73">
-            <rect x="210" y="597" width="16" height="10" rx="2.5" class="c-database" stroke-width="1"/>
-            <text x="232" y="606" class="t-muted" font-size="10" font-weight="500">数据库</text>
-          </g>
-          <g data-legend-semantic-kind="cloud" data-legend-kind="cloud" data-legend-label="云服务" data-legend-x="305" data-legend-baseline="606" data-legend-width="73">
-            <rect x="305" y="597" width="16" height="10" rx="2.5" class="c-cloud" stroke-width="1"/>
-            <text x="327" y="606" class="t-muted" font-size="10" font-weight="500">云服务</text>
-          </g>
-          <g data-legend-semantic-kind="security" data-legend-kind="security" data-legend-label="安全" data-legend-x="400" data-legend-baseline="606" data-legend-width="63">
-            <rect x="400" y="597" width="16" height="10" rx="2.5" class="c-security" stroke-width="1"/>
-            <text x="422" y="606" class="t-muted" font-size="10" font-weight="500">安全</text>
-          </g>
-          <g data-legend-semantic-kind="external" data-legend-kind="external" data-legend-label="外部系统" data-legend-x="485" data-legend-baseline="606" data-legend-width="83">
-            <rect x="485" y="597" width="16" height="10" rx="2.5" class="c-external" stroke-width="1"/>
-            <text x="507" y="606" class="t-muted" font-size="10" font-weight="500">外部系统</text>
+          <g data-legend-semantic-kind="dashed" data-legend-x="240" data-legend-baseline="646" data-legend-width="83">
+            <path d="M 240 643 L 274 643" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+            <text x="283" y="646" class="t-muted" font-size="10" font-weight="500">异步追踪</text>
           </g>
         </g>
       </svg>
@@ -5485,47 +5469,38 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       <div class="card">
         <div class="card-header">
           <div class="card-dot cyan"></div>
-          <h3>请求路径</h3>
+          <h3>排队与切换</h3>
         </div>
         <ul>
-          <li>/v1/* 由 Bun 入口原生处理，不经过 Nitro</li>
-          <li>按请求里的 model 排队加载或切换，默认同一时间在线 1 个</li>
-          <li>模型就绪后转发到它自己的本地端口，客户端断连即中止</li>
+          <li>请求体里的图片先由 sharp 压缩，再进入调度</li>
+          <li>默认同一时间只在线 1 个模型，后来的请求进 FIFO 队列排队</li>
+          <li>拿到 Lease 才转发，端口由 llama-web 从 settings.scheduler.portRange 分配</li>
+          <li>流式请求遇到模型还在加载时走 streamWhileLoading：先推加载进度和心跳</li>
+          <li>请求只记录白名单参数与 token 数，不保存对话内容</li>
         </ul>
       </div>
 
       <div class="card">
         <div class="card-header">
           <div class="card-dot emerald"></div>
-          <h3>进程与显存</h3>
+          <h3>内存准入</h3>
         </div>
         <ul>
-          <li>Runner 用参数数组启动 llama-server，--host / --port 由 llama-web 分配</li>
-          <li>加载前做内存准入；多开时看门狗按剩余显存卸载模型</li>
-          <li>子进程记在 data/run/pids.json，清理只结束 data/runtime 下的进程</li>
+          <li>加载前按 GGUF 估算与当前空闲内存判定能不能装得下</li>
+          <li>多开时看门狗按剩余显存卸载最久没被请求的模型</li>
+          <li>每次加载实测的显存写回 data/vram-stats.json，下次估算优先用实测值</li>
         </ul>
       </div>
 
       <div class="card">
         <div class="card-header">
           <div class="card-dot rose"></div>
-          <h3>公网与更新</h3>
+          <h3>断开与清理</h3>
         </div>
         <ul>
-          <li>公网入口只绑 127.0.0.1、只开放 /v1/*、必须带 API key</li>
-          <li>cloudflared 由 llama-web 托管，随进程启停并自动重试</li>
-          <li>llama.cpp 与 llama-web 各自检查官方 Release，保留旧版本可回退</li>
-        </ul>
-      </div>
-
-      <div class="card">
-        <div class="card-header">
-          <div class="card-dot slate"></div>
-          <h3>证据范围</h3>
-        </div>
-        <ul>
-          <li>源码证据固定在提交 d6606f198663f7b57035c91553c4f17cc491066b</li>
-          <li>生成时工作区还有 src-tauri/Cargo.lock 未提交改动，它不是本图的证据</li>
+          <li>客户端断开通过 AbortSignal 传导，租约立即释放</li>
+          <li>切换前 drain 在途请求，超时后剩余请求被打断</li>
+          <li>停止时用 taskkill /T /F 结束整棵进程树，只清理 data/runtime 下的进程</li>
         </ul>
       </div>
     </div>

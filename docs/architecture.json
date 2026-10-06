@@ -3,31 +3,97 @@
   "diagram_type": "architecture",
   "meta": {
     "title": "llama-web 架构总览",
-    "output": "architecture.html",
+    "output": "docs/architecture.html",
     "quality_profile": "showcase",
     "locale": "zh-CN",
+    "repository": {
+      "url": "https://github.com/egoist74110/llama-web.git",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "d6606f198663f7b57035c91553c4f17cc491066b"
+    },
     "views": [
-      { "id": "request-path", "label": "一次 OpenAI 请求", "focus": ["client", "entry", "proxy", "scheduler", "runner", "llama"], "note": "从 /v1/* 进入，按 model 排队加载，就绪后转发到该模型的本地端口。" },
-      { "id": "public-entry", "label": "公网入口与隧道", "focus": ["cf", "public", "proxy"], "note": "cloudflared 只把流量送到 127.0.0.1:8080，校验 key 后才进入 /v1 代理。" },
-      { "id": "management", "label": "管理界面与运行库", "focus": ["ui", "api", "data", "updater", "llama"], "note": "界面读写配置与日志，更新器把官方 llama.cpp 版本放进 data/runtime。" }
+      { "id": "request-path", "label": "一次 OpenAI 请求", "focus": ["client", "entry", "proxy", "scheduler", "runner", "llama"], "note": "从 /v1/* 进入，按 model 排队加载，就绪后转发到该模型自己的本地端口。" },
+      { "id": "public-entry", "label": "公网入口与隧道", "focus": ["cf", "public", "proxy"], "note": "cloudflared 只把流量送到 127.0.0.1:8080，校验 key 之后才进入 /v1 代理。" },
+      { "id": "management", "label": "管理界面与运行库", "focus": ["ui", "api", "data", "updater", "llama"], "note": "界面读写配置与日志；更新器把官方 llama.cpp 版本放进 data/runtime。" }
     ]
   },
   "components": [
-    { "id": "ui", "type": "frontend", "label": "管理界面", "sublabel": "Nuxt SPA · 中文", "pos": [270, 40], "size": [150, 64] },
-    { "id": "public", "type": "security", "label": "公网入口", "sublabel": "127.0.0.1:8080", "pos": [500, 40], "size": [150, 64], "tag": "Bearer key" },
-    { "id": "cf", "type": "cloud", "label": "Cloudflare 隧道", "sublabel": "cloudflared 子进程", "pos": [730, 40], "size": [150, 64] },
+    {
+      "id": "ui", "type": "frontend", "label": "管理界面", "sublabel": "Nuxt SPA · 中文", "pos": [270, 40], "size": [150, 64],
+      "sources": [{ "path": "app/composables/useLive.ts", "line": 32, "label": "EventSource('/api/stream')" }]
+    },
+    {
+      "id": "public", "type": "security", "label": "公网入口", "sublabel": "127.0.0.1:8080", "pos": [510, 40], "size": [150, 64], "tag": "Bearer key",
+      "sources": [
+        { "path": "server/core/public-entry.ts", "line": 39, "label": "handlePublic" },
+        { "path": "server/core/keys.ts", "line": 170, "label": "authenticate" }
+      ]
+    },
+    {
+      "id": "cf", "type": "cloud", "label": "Cloudflare 隧道", "sublabel": "cloudflared 子进程", "pos": [740, 40], "size": [150, 64],
+      "sources": [
+        { "path": "server/core/tunnel.ts", "line": 416, "label": "TunnelManager" },
+        { "path": "server/core/tunnel.ts", "line": 86, "label": "cloudflaredName" }
+      ]
+    },
 
     { "id": "client", "type": "external", "label": "OpenAI 客户端", "sublabel": "curl / 聊天应用", "pos": [40, 190], "size": [130, 64] },
-    { "id": "entry", "type": "backend", "label": "Bun 入口", "sublabel": "server/entry.ts :5001", "pos": [270, 190], "size": [150, 64] },
-    { "id": "proxy", "type": "backend", "label": "/v1 代理", "sublabel": "proxy.ts · 图片压缩", "pos": [500, 190], "size": [150, 64] },
-    { "id": "llama", "type": "external", "label": "llama-server", "sublabel": "data/runtime/llama.cpp", "pos": [960, 190], "size": [160, 64] },
+    {
+      "id": "entry", "type": "backend", "label": "Bun 入口", "sublabel": "server/entry.ts :5001", "pos": [270, 190], "size": [150, 64],
+      "sources": [{ "path": "server/entry.ts", "line": 31, "end_line": 79, "label": "Bun.serve 分流" }]
+    },
+    {
+      "id": "proxy", "type": "backend", "label": "/v1 代理", "sublabel": "proxy.ts · 图片压缩", "pos": [510, 190], "size": [150, 64],
+      "sources": [{ "path": "server/core/proxy.ts", "line": 506, "end_line": 573, "label": "handleV1Inner" }]
+    },
+    {
+      "id": "llama", "type": "external", "label": "llama-server", "sublabel": "data/runtime/llama.cpp", "pos": [960, 190], "size": [160, 64],
+      "sources": [
+        { "path": "server/core/launch.ts", "line": 232, "label": "planLaunch" },
+        { "path": "server/core/runner.ts", "line": 320, "label": "spawn(exe, argv)" }
+      ]
+    },
 
-    { "id": "api", "type": "backend", "label": "管理 API", "sublabel": "Nitro · server/api/*", "pos": [270, 340], "size": [150, 64] },
-    { "id": "scheduler", "type": "backend", "label": "调度器", "sublabel": "排队切换 · 内存准入 · 看门狗", "pos": [500, 340], "size": [170, 72] },
-    { "id": "runner", "type": "backend", "label": "Runner", "sublabel": "spawn argv · /health", "pos": [730, 340], "size": [150, 64] },
-    { "id": "updater", "type": "backend", "label": "更新器", "sublabel": "llama.cpp · 应用更新", "pos": [960, 340], "size": [150, 64] },
+    {
+      "id": "api", "type": "backend", "label": "管理 API", "sublabel": "Nitro · server/api/*", "pos": [270, 340], "size": [150, 64],
+      "sources": [
+        { "path": "server/plugins/app.ts", "line": 6, "label": "getContext()" },
+        { "path": "server/api/state.get.ts", "line": 4, "label": "live.snapshot()" },
+        { "path": "server/api/models/[id]/start.post.ts", "line": 15, "label": "ops.start" }
+      ]
+    },
+    {
+      "id": "scheduler", "type": "backend", "label": "调度器", "sublabel": "排队切换 · 内存准入 · 看门狗", "pos": [500, 340], "size": [170, 72],
+      "sources": [
+        { "path": "server/core/scheduler.ts", "line": 22, "label": "ModelState" },
+        { "path": "server/core/scheduler.ts", "line": 273, "label": "acquire" },
+        { "path": "server/core/watchdog.ts", "line": 32, "label": "Watchdog" }
+      ]
+    },
+    {
+      "id": "runner", "type": "backend", "label": "Runner", "sublabel": "spawn argv · /health", "pos": [730, 340], "size": [150, 64],
+      "sources": [
+        { "path": "server/core/runner.ts", "line": 221, "label": "class Runner" },
+        { "path": "server/core/runner.ts", "line": 110, "label": "killTree" }
+      ]
+    },
+    {
+      "id": "updater", "type": "backend", "label": "更新器", "sublabel": "llama.cpp · 应用更新", "pos": [965, 340], "size": [150, 64],
+      "sources": [
+        { "path": "server/core/updater.ts", "line": 105, "label": "class Updater" },
+        { "path": "server/core/llamacpp.ts", "line": 260, "label": "SHA-256 校验" }
+      ]
+    },
 
-    { "id": "data", "type": "database", "label": "data/", "sublabel": "settings · models · secrets · logs", "pos": [500, 490], "size": [170, 64] }
+    {
+      "id": "data", "type": "database", "label": "data/", "sublabel": "settings · models · secrets · logs", "pos": [500, 490], "size": [170, 64],
+      "sources": [
+        { "path": "server/core/store.ts", "line": 91, "label": "class JsonStore" },
+        { "path": "server/core/store.ts", "line": 38, "label": "renameSync 原子写" },
+        { "path": "server/core/logs.ts", "line": 125, "label": "LogStore" }
+      ]
+    }
   ],
   "boundaries": [
     { "kind": "region", "label": "llama-web 进程（Bun + Nitro）", "wraps": ["public", "entry", "proxy", "api", "scheduler", "runner", "updater"] }
@@ -49,8 +115,9 @@
     { "id": "updater-to-llama", "from": "updater", "to": "llama", "label": "下载 · 校验 SHA-256", "variant": "dashed", "fromSide": "top", "toSide": "bottom" }
   ],
   "cards": [
-    { "dot": "cyan", "title": "请求路径", "items": ["/v1/* 由 Bun 入口原生处理，不经过 Nitro", "按请求里的 model 排队加载或切换，默认同一时间在线 1 个", "模型就绪后转发到它自己的本地端口，断连即中止"] },
+    { "dot": "cyan", "title": "请求路径", "items": ["/v1/* 由 Bun 入口原生处理，不经过 Nitro", "按请求里的 model 排队加载或切换，默认同一时间在线 1 个", "模型就绪后转发到它自己的本地端口，客户端断连即中止"] },
     { "dot": "emerald", "title": "进程与显存", "items": ["Runner 用参数数组启动 llama-server，--host / --port 由 llama-web 分配", "加载前做内存准入；多开时看门狗按剩余显存卸载模型", "子进程记在 data/run/pids.json，清理只结束 data/runtime 下的进程"] },
-    { "dot": "rose", "title": "公网与更新", "items": ["公网入口只绑 127.0.0.1、只开放 /v1/*、必须带 API key", "cloudflared 由 llama-web 托管，随进程启停并自动重试", "llama.cpp 与 llama-web 各自检查官方 Release，保留旧版本可回退"] }
+    { "dot": "rose", "title": "公网与更新", "items": ["公网入口只绑 127.0.0.1、只开放 /v1/*、必须带 API key", "cloudflared 由 llama-web 托管，随进程启停并自动重试", "llama.cpp 与 llama-web 各自检查官方 Release，保留旧版本可回退"] },
+    { "dot": "slate", "title": "证据范围", "items": ["源码证据固定在提交 d6606f198663f7b57035c91553c4f17cc491066b", "生成时工作区还有 src-tauri/Cargo.lock 未提交改动，它不是本图的证据"] }
   ]
 }
