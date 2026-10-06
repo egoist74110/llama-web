@@ -12,11 +12,11 @@ export function describeUpstreams(): { upstreams: ConnectionView[], exclusiveHol
   return { upstreams, exclusiveHolder: ctx.health.holder() }
 }
 
-/** Local model names (a prefix must not shadow them) and the ports llama-web itself listens on (no forwarding loops). */
+/** Local model names (a prefix must not shadow them) and the ports llama-web itself listens on (no forwarding loops; the public port only while the public entry is on, since 8080 is also where other engines like to live). */
 export function editContext(): EditContext {
   const ctx = getContext()
   const s = ctx.getSettings()
-  return { localNames: ctx.getModels().models.map(m => m.name), selfPorts: [s.server.port, ctx.bootPort, s.public.port] }
+  return { localNames: ctx.getModels().models.map(m => m.name), selfPorts: [s.server.port, ctx.bootPort, ...(s.public.enabled ? [s.public.port] : [])] }
 }
 
 /** An API key from a form: undefined = keep, '' = remove, otherwise the new one. */
