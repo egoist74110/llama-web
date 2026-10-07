@@ -1,7 +1,7 @@
 // Shared by the settings routes: the document the settings page works with.
 import { DEFAULT_LAUNCH_DEFAULTS } from '../core/args'
 import { DEFAULT_CPU_DEFAULTS, hasCpuChannel } from '../core/config'
-import { fmt, t } from '../core/i18n'
+import { fmt, setLocale, t } from '../core/i18n'
 import { StoreError } from '../core/store'
 import { existsSync } from 'node:fs'
 import { cloudflaredPath, findCloudflared, maskToken, TunnelError } from '../core/tunnel'
@@ -23,6 +23,9 @@ function cloudflaredState(dataDir: string): SettingsDoc['public']['cloudflared']
 export function describeSettings(): SettingsDoc {
   const ctx = getContext()
   const s = ctx.getSettings()
+  // Also where a saved language takes effect: every settings save answers with this document, so
+  // changing the language needs no restart (decision 18).
+  setLocale(s.ui.locale)
   return {
     modelDirs: s.modelDirs.map(d => ({ ...d, ...dirStatus(d) })),
     defaults: s.defaults,
@@ -30,6 +33,7 @@ export function describeSettings(): SettingsDoc {
     ...(hasCpuChannel(ctx.platform) ? { defaultsCpu: s.defaultsCpu, builtinDefaultsCpu: DEFAULT_CPU_DEFAULTS } : {}),
     image: s.preprocess.image,
     mirror: s.mirror,
+    ui: s.ui,
     server: {
       port: s.server.port,
       portRange: s.scheduler.portRange,

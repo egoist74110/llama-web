@@ -7,6 +7,7 @@ import {
   type ModelsDoc, type Settings,
 } from '../core/config'
 import { authenticate, defaultSecrets, normalizeSecrets, SECRETS_MIGRATIONS, SECRETS_VERSION, type SecretsDoc } from '../core/keys'
+import { setLocale } from '../core/i18n'
 import { describeDevices, DeviceProbe, type DeviceList, type DevicesView, type GpuDevice } from '../core/devices'
 import { sampleSystemMemory } from '../core/memory-sample'
 import type { SystemMemory } from '../core/memory-estimate'
@@ -253,12 +254,16 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
   // Settings edits (page or by hand) also start / stop / move the public listener.
   // `hold` is raised while a pair of writes is in flight (see onSaved of the Cloudflare setup): nothing reacts to half of it, one reconciliation runs afterwards.
   const hold = new Hold()
-  const settingsRef = openStore(settingsStore, newSettings, () => { changed(); if (!hold.held) applyPublic() })
+  const settingsRef = openStore(settingsStore, newSettings, () => { changed(); applyLocale(); if (!hold.held) applyPublic() })
   const modelsRef = openStore(modelsStore, defaultModels, changed)
   // An unreadable secrets.json falls back to "no keys": every public request is refused. A new tunnel token restarts the tunnel.
   const secretsRef = openStore(secretsStore, defaultSecrets, () => { if (!hold.held) applyTunnel() })
   const upstreamsRef = openStore(upstreamsStore, defaultUpstreams, changed)
   const getSettings = settingsRef.get
+  // The language everything this process says - events, API errors, the errors of `/v1/*` - is the
+  // saved one (decision 18): applied once at startup and again on every reload or own update.
+  const applyLocale = () => setLocale(getSettings().ui.locale)
+  applyLocale()
   let selectedTarget: RuntimeTarget, selectionError: string | undefined
   try { selectedTarget = runtimeTarget(platform, getSettings().llamacpp.acceleration) }
   catch (e) {

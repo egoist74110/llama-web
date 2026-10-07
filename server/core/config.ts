@@ -6,6 +6,7 @@ import type { FileRef, ModelDir } from './types'
 import type { Acceleration, PlatformInfo } from './platform'
 import { normalizeCustomMirror } from './mirrors'
 import { normalizeUsageKeepDays } from './usage'
+import { DEFAULT_LOCALE, LOCALES, type LocaleCode } from '../../i18n/messages'
 
 /** Name of the built-in profile created when a model is enabled or imported. */
 export const DEFAULT_PROFILE = '默认'
@@ -101,6 +102,8 @@ export interface Settings {
   preprocess: { image: ImagePreprocess }
   logs: { keepRunsPerModel: number, keepDays: number, usageKeepDays: number }
   gpu: { sampleSec: number }
+  /** Interface language (decision 18): what the pages show and what the server answers in. */
+  ui: { locale: LocaleCode }
   /** First-run wizard: `done` is set when it is finished or skipped. */
   setup: { done: boolean, /** False = the launch defaults have not been tuned to this machine yet (decision 54). */ tuned: boolean }
 }
@@ -153,7 +156,7 @@ export type NoRoomPolicy = 'unload' | 'error'
 export const NO_ROOM_POLICIES: readonly NoRoomPolicy[] = ['unload', 'error']
 export const MAX_LOADED_LIMIT = 99
 
-export const SETTINGS_VERSION = 10
+export const SETTINGS_VERSION = 11
 export const MODELS_VERSION = 1
 
 /**
@@ -244,6 +247,7 @@ export function defaultSettings(platform?: PlatformInfo): Settings {
     preprocess: { image: { enabled: true, maxEdge: 896, format: 'jpeg', quality: 90 } },
     logs: { keepRunsPerModel: 20, keepDays: 14, usageKeepDays: 30 },
     gpu: { sampleSec: 2 },
+    ui: { locale: DEFAULT_LOCALE },
     setup: { done: false, tuned: false },
   }
 }
@@ -315,6 +319,12 @@ export const SETTINGS_MIGRATIONS: Record<number, (old: any) => any> = {
     old.scheduler.onNoRoom ??= 'unload'
     return old
   },
+  // 11: interface language (decision 18). Chinese, which is what every existing installation shows.
+  10: (old) => {
+    if (!isObj(old.ui)) old.ui = {}
+    old.ui.locale ??= DEFAULT_LOCALE
+    return old
+  },
 }
 
 /** The online limit that is in force: 1 unless `multiLoad` is on, never more than there are ports for the processes. */
@@ -368,6 +378,8 @@ export function normalizeSettings(doc: Settings): Settings {
   out.scheduler.maxLoaded = Number.isInteger(ml) && ml >= 1 && ml <= MAX_LOADED_LIMIT ? ml : 1
   if (typeof out.scheduler.multiLoad !== 'boolean') out.scheduler.multiLoad = false
   if (!NO_ROOM_POLICIES.includes(out.scheduler.onNoRoom)) out.scheduler.onNoRoom = 'unload'
+  // A hand-edited language llama-web does not have falls back to Chinese (decision 18).
+  if (!LOCALES.includes(out.ui.locale)) out.ui.locale = DEFAULT_LOCALE
   return out as Settings
 }
 

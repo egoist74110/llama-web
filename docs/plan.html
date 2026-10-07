@@ -110,6 +110,7 @@ li.task .when{color:var(--ok);font-size:12px;white-space:nowrap}
   <a href="#s8">阶段 8 · 运行库、设备与用量</a>
   <a href="#s9">阶段 9 · 多模型并行与显存保护</a>
   <a href="#s10">阶段 10 · 外部接入</a>
+  <a href="#s11">阶段 11 · 多语言界面</a>
   <a href="#verify">验收方式</a>
   <a href="#slots">坑位（暂不实现）</a>
   <a href="#risks">风险与待验证</a>
@@ -177,7 +178,7 @@ li.task .when{color:var(--ok);font-size:12px;white-space:nowrap}
     <tr><td>图片处理</td><td>sharp</td><td>需在阶段 1 首先验证 Bun + Windows 下可用</td></tr>
     <tr><td>参数拆分</td><td><code>string-argv</code> 或同类库</td><td>「额外参数」文本框按 shell 规则拆成数组，处理引号</td></tr>
     <tr><td>测试</td><td><code>bun test</code></td><td>纯逻辑单元测试 + 每阶段真机冒烟</td></tr>
-    <tr><td>文案</td><td>集中在 <code>i18n/zh-CN.ts</code></td><td>只做中文，但文本不写死在组件里</td></tr>
+    <tr><td>文案</td><td>集中在 <code>i18n/zh-CN.ts</code>（键是基准），英文在 <code>i18n/en.ts</code>，语言表 <code>i18n/messages.ts</code></td><td>文本不写死在组件里；没译到的键回落中文</td></tr>
   </table>
   <h3>目录结构（计划）</h3>
 <pre>llama-web/
@@ -185,7 +186,11 @@ li.task .when{color:var(--ok);font-size:12px;white-space:nowrap}
 ├─ docs/plan.html         本文件
 ├─ start.bat              双击启动
 ├─ app/                   前端：pages/ components/ composables/
-├─ i18n/zh-CN.ts          所有界面文案
+├─ i18n/
+│  ├─ zh-CN.ts            所有界面文案（键的基准，as const）
+│  ├─ en.ts               英文文案（骨架 + 分组注释）
+│  ├─ messages.ts         语言表 LOCALES、Messages / PartialMessages 类型、字典表
+│  └─ fill.ts             缺键回落中文：deepMergeWithFallback
 ├─ server/
 │  ├─ api/                管理接口
 │  ├─ entry.ts            自定义 Bun 入口（构建产物用）：/v1、/upstream 原生处理，其余交给 Nitro
@@ -245,7 +250,7 @@ li.task .when{color:var(--ok);font-size:12px;white-space:nowrap}
     <tr><td>16</td><td>旧目录</td><td>首次启动导入旧 <code>swap-config.json</code> 和聊天模板；旧目录原样保留，由用户手动归档</td></tr>
     <tr><td>—</td><td>名字 / 仓库</td><td><code>llama-web</code>，GitHub <b>公开</b>仓库</td></tr>
     <tr><td>17–19</td><td>敏感信息</td><td>代码不含个人路径、域名、key；公网域名 / 隧道名 / key 全部做成配置项；只靠 <code>.gitignore</code> 排除 <code>data/</code>；旧 key 不导入，由用户重新生成</td></tr>
-    <tr><td>18</td><td>界面语言</td><td>只做中文，文案集中在一个文件</td></tr>
+    <tr><td>18</td><td>界面语言</td><td>用户 2026-10-07 修订：中文 + 英文。中文文案仍在 <code>i18n/zh-CN.ts</code>（键是基准），英文在 <code>i18n/en.ts</code>，字典按语言表 <code>LOCALES</code> 组织，加第三种语言只要一行语言表加一个文件。服务端生成的文字（事件、接口错误、<code>/v1/*</code> 错误）跟随设置里的语言（<code>ui.locale</code>，默认 <code>zh-CN</code>），保存设置即切换、不需要重启；界面切换语言也不重新加载页面。内置方案名 <code>默认</code> 是数据，不改，只在英文界面显示成「Default」</td></tr>
     <tr><td>20</td><td>局域网权限与地址</td><td>局域网完整权限、免 key；只有 <code>:8080</code> 公网入口要 key。本机打开总览时，API 地址优先显示服务端主网卡 IPv4 与实际访问端口，方便其他设备使用；通过局域网地址或公网域名打开时保留该地址。找不到可用 IPv4 时保留本机地址。开发模式默认也监听 <code>0.0.0.0</code>，与正式主入口一致；公网入口的监听与鉴权规则不变</td></tr>
     <tr><td>21</td><td>界面</td><td>Nuxt UI；总览 / 模型 / 日志 / 设置 四页；简洁、留白、分组卡片；显存每 2 秒采样</td></tr>
     <tr><td>22</td><td>加载失败 / 崩溃</td><td>不自动重试；中文原因 + 最后 30 行日志；崩溃后下一个请求最多自动重载一次，再失败需手动重试（额度按进程计：自动重载出来的进程再崩溃即 failed，不因成功服务过请求而重置；手动启动 / 重试后重新获得一次）；加载超时默认 600 秒</td></tr>
@@ -928,6 +933,47 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
   <div class="note"><b>阶段关口 10</b>：10-2 完成后停下，等用户试用；不自动发版。</div>
 </section>
 
+<section id="s11" class="stage">
+  <div class="stage-head"><h2>阶段 11 · 多语言界面</h2><div class="stage-meta"><span class="count"></span><div class="bar"><i></i></div></div></div>
+  <p>目标：界面语言可以选（关键决定 18 修订版）。中文文案集中在 <code>i18n/zh-CN.ts</code> 不动，英文文案放 <code>i18n/en.ts</code>，字典按语言表组织，以后加第三种语言只加一行 <code>LOCALES</code> 和一个文件。服务端生成的文字（事件、接口错误、<code>/v1/*</code> 给第三方客户端的错误）跟随设置里的语言。本阶段不改任何行为规则。</p>
+
+  <h3>11-1 · 字典类型与基础设施（Sonnet 5.5）</h3>
+  <ul class="tasks">
+    <li class="task" data-done="true"><span class="t">新增 <code>i18n/messages.ts</code>：<code>LOCALES</code> 语言表、<code>LocaleCode</code>、<code>Messages</code>（保留 <code>zh-CN.ts</code> 的 <code>as const</code>，用 mapped type 把字面量放宽成 <code>string</code>、键结构不变）、<code>PartialMessages</code> 与 <code>dictionaries</code> 字典表</span><span class="when">2026-10-07</span></li>
+    <li class="task" data-done="true"><span class="t">新增 <code>i18n/en.ts</code>（骨架 + 分组注释，不翻译文案）与纯模块 <code>i18n/fill.ts</code>：<code>deepMergeWithFallback(zh, enPartial)</code> 缺键回落中文、数组按下标逐位合并，解析后的字典是完整字典（不是运行时 Proxy 查询），数组仍是真数组</span><span class="when">2026-10-07</span></li>
+    <li class="task" data-done="true"><span class="t"><code>server/core/i18n.ts</code>：<code>export const t = zh</code> 换成「当前字典 + <code>setLocale</code>」，<code>t</code> 仍是对象（包一层 Proxy），<code>fmt()</code> 签名与行为不变，所有导入点一行不改</span><span class="when">2026-10-07</span></li>
+    <li class="task" data-done="true"><span class="t"><code>server/service/context.ts</code> 在配置加载后调用一次 <code>setLocale</code>（并在配置重载 / 自己写入后重新应用）；<code>server/service/settings-api.ts</code> 在保存成功后再生效一次：换语言不需要重启</span><span class="when">2026-10-07</span></li>
+    <li class="task" data-done="true"><span class="t">settings v10 → v11：<code>Settings.ui.locale</code>，默认 <code>'zh-CN'</code>（现有行为不变），按 <code>SETTINGS_MIGRATIONS</code> 风格写迁移（只补缺、已有值不覆盖），<code>normalizeSettings</code> 加白名单校验（手改的未知值落回 <code>'zh-CN'</code>），<code>SettingsDoc</code> / <code>describeSettings()</code> 暴露 <code>ui.locale</code></span><span class="when">2026-10-07</span></li>
+    <li class="task" data-done="true"><span class="t">新增 <code>tests/core/i18n-parity.test.ts</code>：递归比较中英文键集合、<code>{name}</code> 占位符集合、数组长度、英文里不得出现中日韩字符、不得有空串；本包先 warn-only（打印缺失键数量），三批译文完成后转成硬失败</span><span class="when">2026-10-07</span></li>
+    <li class="task" data-done="true"><span class="t">测试：<code>fill.ts</code> 的回落与数组逐位合并；config v10→v11 迁移（旧文件缺 <code>ui</code> 补默认、已有值不被覆盖、版本高于当前时拒绝）；<code>server/core/i18n.ts</code> 的 <code>setLocale</code> 生效与 <code>fmt()</code> 行为不变</span><span class="when">2026-10-07</span></li>
+  </ul>
+
+  <h3>11-2 · 界面接线（Sonnet 5.5）</h3>
+  <ul class="tasks">
+    <li class="task" data-done="false"><span class="t">前端读 <code>ui.locale</code> 并即时切换（不重新加载页面）；设置页的语言选择；桌面壳启动窗口按系统语言选初始语言；<code>DEFAULT_PROFILE = '默认'</code> 数据不变，只在英文界面显示成「Default」</span><span class="when"></span></li>
+  </ul>
+
+  <h3>11-2 至 11-3 · 三批译文（AI 翻译，用户只抽查总览 / 模型 / 设置）</h3>
+  <ul class="tasks">
+    <li class="task" data-done="false"><span class="t">按分组把 <code>i18n/en.ts</code> 的骨架填成英文文案（约 1800 条），占位符与数组长度照中文；用户只抽查总览 / 模型 / 设置三组</span><span class="when"></span></li>
+  </ul>
+
+  <h3>11-4 · 转硬失败与剩余泄漏（Sonnet 5.5）</h3>
+  <ul class="tasks">
+    <li class="task" data-done="false"><span class="t">三批译文完成后把 <code>tests/core/i18n-parity.test.ts</code> 的 warn-only 转成硬失败；补 <code>server/core/proxy.ts</code> 里三处不走 i18n 的泄漏（原始 <code>Error.message</code>、字面量 <code>'cancelled'</code>、流式转发的 statusText）</span><span class="when"></span></li>
+  </ul>
+
+  <div class="accept"><h3>验收标准</h3>
+    <ul>
+      <li>默认设置下所有行为与阶段 10 完全一致（语言 <code>zh-CN</code>，界面文案不变）。</li>
+      <li>字典按语言表组织：加第三种语言只要一行 <code>LOCALES</code>、一个文件。</li>
+      <li>服务端生成的文案（事件、接口错误、<code>/v1/*</code> 给第三方客户端的错误）跟随设置里的语言，保存设置后不需要重启就切换。</li>
+      <li><code>bun test</code> 与 typecheck 通过；parity 检查在译文完成前是警告，完成后转硬失败。</li>
+    </ul>
+  </div>
+  <div class="note"><b>阶段关口 11</b>：11-1 完成后停下等用户确认基础设施与骨架，再决定三批译文怎么切。</div>
+</section>
+
 <section id="verify">
   <h2>验收方式</h2>
   <ul>
@@ -949,7 +995,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
     <tr><td><span class="tag slot">调度</span></td><td>常驻模型、空闲自动卸载：<code>reserved.pinned</code> / <code>reserved.idleUnloadMin</code></td></tr>
     <tr><td><span class="tag slot">调度</span></td><td>按显存判断能否共存：<b>阶段 9 实现</b>（决定 42、43）；常驻 / 空闲自动卸载仍是坑位</td></tr>
     <tr><td><span class="tag slot">公网</span></td><td>按 key 禁止触发切换：<code>apiKeys[].allowSwitch</code></td></tr>
-    <tr><td><span class="tag slot">界面</span></td><td>英文界面：新增 <code>i18n/en.ts</code></td></tr>
+    <tr><td><span class="tag slot">界面</span></td><td>英文界面：<b>已实现</b>（阶段 11-1：<code>i18n/en.ts</code> 骨架 + <code>i18n/messages.ts</code> 语言表 + <code>i18n/fill.ts</code> 回落）；译文与界面接线是 11-2 至 11-3</td></tr>
     <tr><td><span class="tag slot">运行</span></td><td>开机自启服务：加一个注册脚本即可，架构不变</td></tr>
     <tr><td><span class="tag slot">安全</span></td><td>源码版数据目录可用 <code>LLAMA_WEB_DATA</code> 挪到项目外；阶段 5 桌面版默认使用用户数据目录</td></tr>
     <tr><td><span class="tag slot">桌面</span></td><td>Mac 套壳与 DMG、签名增量更新（Tauri updater）、系统托盘、Universal 包、Windows ARM：本阶段不实施；Mac 后续须用户另行启动。应用内检查 / 版本旁提示 / 下载校验后自动安装已有源码实现（关键决定 29），2026-10-03 的新自动安装流程尚未重新打包真机验收</td></tr>
@@ -984,6 +1030,8 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 <section id="changelog">
   <h2>变更记录</h2>
   <table>
+    <tr><td>2026-10-07</td><td>决定 18 修订（用户 2026-10-07）：界面语言从「只做中文」改成「中文 + 英文，字典按语言表组织，第三种语言只加一行 <code>LOCALES</code> 和一个文件」；服务端生成的文字（事件、接口错误、<code>/v1/*</code> 错误）跟随设置里的语言，保存即切换不重启；<code>默认</code> 方案名作为数据不变，英文界面显示「Default」。新增阶段 11「多语言界面」。</td></tr>
+    <tr><td>2026-10-07</td><td>11-1 完成：新增 <code>i18n/messages.ts</code>（<code>LOCALES</code> / <code>LocaleCode</code> / <code>Messages</code> / <code>PartialMessages</code> / <code>dictionaries</code>）、<code>i18n/en.ts</code>（骨架与分组注释，<b>尚无英文文案</b>）、<code>i18n/fill.ts</code>（缺键回落中文、数组逐位合并）；<code>server/core/i18n.ts</code> 变成「当前字典 + <code>setLocale</code>」，<code>t</code> 用 Proxy 保持同一身份，<code>fmt()</code> 不变，导入点未改；settings 升到 v11（<code>ui.locale</code>，默认 <code>zh-CN</code>，迁移 + 白名单校验），<code>SettingsDoc</code> 暴露 <code>ui.locale</code>；新增 <code>tests/core/i18n-parity.test.ts</code>（warn-only）。界面接线与译文未做，「英文界面」坑位改为已实现骨架。</td></tr>
     <tr><td>2026-10-06</td><td>决定 56 增加 ⑩「手动启动」（用户要求）：上游可保存启动命令，离线时在「接入」页手动启动并等待模型出现；llama-web 不管理该进程的生命周期、不停外部服务。阶段 10 新增 10-3。</td></tr>
     <tr><td>2026-10-06</td><td>10-2 完成：「接入」页（<code>/connections</code>）、模型页启动按钮在独占时置灰、总览 / 模型页 / 接入页的独占提示；本地侧防冲突补上（启用模型与导入旧配置遇到上游前缀时拒绝 / 跳过）。规则没有变化。</td></tr>
     <tr><td>2026-10-06</td><td>决定 56 增加 ⑨「独占本机」（用户确认）：上游可标「在本机运行」，默认「独占本机」开——探测到该上游运行时卸载全部本地 llama-server 并拒绝一切本地加载，关掉后回到阶段 9 的显存保护；不做显存预留与进程测量。阶段 10 新增 10-1b。</td></tr>

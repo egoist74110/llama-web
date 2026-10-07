@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
-import { cleanWizard, defaultModels, defaultSettings, normalizeSettings, SETTINGS_MIGRATIONS, type ModelConfig, type ModelsDoc, type Settings } from '../../server/core/config'
+import { cleanWizard, defaultModels, defaultSettings, normalizeSettings, SETTINGS_MIGRATIONS, SETTINGS_VERSION, type ModelConfig, type ModelsDoc, type Settings } from '../../server/core/config'
 import {
   applyDefaults, applyImagePreprocess, applyModelDirs, applyPublic, applyServer, applySettingsPatch, dirStatus, expandHome, isFirstRun, SettingsError,
 } from '../../server/core/settings-admin'
@@ -400,5 +400,38 @@ describe('applyPublic', () => {
     const s = settingsWith()
     applySettingsPatch(s, { public: { enabled: true } }, models())
     expect(s.public.enabled).toBe(true)
+  })
+})
+
+describe('settings version 11 (interface language, decision 18)', () => {
+  test('migration 10 -> 11 adds the language and keeps what is there', () => {
+    const out = SETTINGS_MIGRATIONS[10]!({ version: 10, scheduler: { multiLoad: true, maxLoaded: 3 } })
+    expect(out.ui).toEqual({ locale: 'zh-CN' })
+    expect(out.scheduler).toEqual({ multiLoad: true, maxLoaded: 3 })
+    // A value already there (a newer file written back by hand) is not overwritten.
+    expect(SETTINGS_MIGRATIONS[10]!({ version: 10, ui: { locale: 'en' } }).ui.locale).toBe('en')
+    // A ui section that is not an object is replaced, and normalize fills the rest.
+    expect(SETTINGS_MIGRATIONS[10]!({ version: 10, ui: 'en' }).ui).toEqual({ locale: 'zh-CN' })
+    // No ui section at all: normalize fills the default.
+    expect(normalizeSettings(SETTINGS_MIGRATIONS[10]!({ version: 10 })).ui.locale).toBe('zh-CN')
+  })
+
+  test('the whole chain from version 1 ends with Chinese, which is what every existing installation shows', () => {
+    let doc: any = { version: 1, public: { enabled: true, port: 8080, domain: 'a.example.com', tunnelName: 'x' } }
+    for (let v = 1; v < SETTINGS_VERSION; v++) doc = SETTINGS_MIGRATIONS[v]!(doc)
+    expect(normalizeSettings(doc).ui).toEqual({ locale: 'zh-CN' })
+  })
+
+  test('normalize: a hand-edited language llama-web does not have falls back to Chinese', () => {
+    for (const locale of ['EN', 'de', '', 'de-DE', 1, null, null]) {
+      expect(normalizeSettings({ ...defaultSettings(), ui: { ...defaultSettings().ui, locale } } as never).ui.locale).toBe('zh-CN')
+    }
+    expect(normalizeSettings({ ...defaultSettings(), ui: { locale: 'en' } }).ui.locale).toBe('en')
+    expect(defaultSettings().ui.locale).toBe('zh-CN')
+  })
+
+  test('normalize keeps a ui section that only misses part of it, and rejects a ui section of the wrong type', () => {
+    expect(normalizeSettings({ ...defaultSettings(), ui: {} } as never).ui).toEqual({ locale: 'zh-CN' })
+    expect(codeOf(() => normalizeSettings({ ...defaultSettings(), ui: 'zh-CN' } as never))).toBe('other:"ui" must be an object')
   })
 })

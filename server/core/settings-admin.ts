@@ -298,6 +298,8 @@ export interface SettingsDoc {
   builtinDefaultsCpu?: LaunchDefaults
   image: Settings['preprocess']['image']
   mirror: Settings['mirror']
+  /** Interface language (decision 18), so the page can show and change it without a restart. */
+  ui: Settings['ui']
   server: { port: number, portRange: [number, number], loadTimeoutSec: number, drainTimeoutSec: number, multiLoad: boolean, maxLoaded: number, onNoRoom: NoRoomPolicy }
   public: Settings['public'] & {
     /** State of the public listener right now. */
