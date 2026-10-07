@@ -11,6 +11,7 @@
 //   --publish             after both builds pass, publish the draft (asks you to type the version)
 //   -y, --yes             do not ask for confirmation (needed when stdin is not a terminal)
 //   --dry-run             print what would happen, change nothing
+// Only runs when the signed-in gh account is the owner of the repository.
 // Flow: checks -> commit pending work -> bump package.json -> release notes -> test -> commit -> push
 //       -> "Windows release (draft)" -> "macOS arm64 build" (attach_to_draft) -> draft link.
 // The release stays a DRAFT unless --publish is given: publishing is the step after you tried the installer.
@@ -240,6 +241,12 @@ async function main(): Promise<number> {
 
   if (run(['gh', '--version'], { allowFail: true }).code !== 0) fail('gh (GitHub CLI) was not found in PATH: https://cli.github.com')
   if (run(['gh', 'auth', 'status'], { allowFail: true }).code !== 0) fail('gh is not logged in: run `gh auth login`')
+  // Only the repository owner may release: the signed-in gh account must be the owner of origin.
+  const login = gh('api', 'user', '--jq', '.login')
+  const owner = gh('repo', 'view', '--json', 'owner', '--jq', '.owner.login')
+  if (login.toLowerCase() !== owner.toLowerCase()) {
+    fail('Only the repository owner can release: gh is signed in as a different account than the owner of this repo')
+  }
   const branch = git('rev-parse', '--abbrev-ref', 'HEAD')
   if (branch !== 'main') fail(`Releases are built from main (current branch: ${branch})`)
 
