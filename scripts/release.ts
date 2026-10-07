@@ -141,8 +141,9 @@ function restoreCargoLockNoise() {
   }
 }
 
-async function commitPending(o: Options) {
-  const status = git('status', '--short')
+// The notes file of the version being released is expected to be new: it is not "pending work".
+async function commitPending(o: Options, notesPath: string) {
+  const status = git('status', '--short').split('\n').filter(l => l && !l.endsWith(notesPath)).join('\n')
   if (!status) return
   log('uncommitted changes:')
   console.log(status)
@@ -152,7 +153,7 @@ async function commitPending(o: Options) {
     message = await ask('[release] commit message (empty = cancel): ') || fail('Cancelled')
   } else await confirm('Commit these changes?', o)
   if (o.dryRun) return log(`(dry run) would commit: ${message}`)
-  git('add', '-A')
+  git('add', '-A', '--', '.', `:!${notesPath}`)
   const code = await runLive(['git', 'commit', '-m', message])
   if (code !== 0) fail('git commit failed (the pre-commit hook prints the reason above)')
 }
@@ -255,11 +256,10 @@ async function main(): Promise<number> {
   if (behind) fail(`main is ${behind} commit(s) behind origin/main: pull first`)
 
   restoreCargoLockNoise()
-  await commitPending(o)
-
   const current = readVersion()
   const version = nextVersion(current, o.bump)
   const tag = `v${version}`
+  await commitPending(o, `docs/release-notes/${tag}.md`)
   if (git('tag', '--list', tag) || run(['gh', 'release', 'view', tag], { allowFail: true }).code === 0) {
     fail(`${tag} already exists (tag or release)`)
   }
