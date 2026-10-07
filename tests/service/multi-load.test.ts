@@ -3,10 +3,11 @@
 // `mlock` being dropped when it would lock more than is free. The device list and the system memory are stubbed; the
 // model file is a constructed header, no llama-server runs (a refused load never gets as far as starting one).
 import { afterAll, beforeAll, expect, test } from 'bun:test'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { defaultSettings } from '../../server/core/config'
+import { customDir } from '../../server/core/runtimes'
 import { DeviceProbe, type DeviceList } from '../../server/core/devices'
 import { SchedulerError, type NoRoomDetail } from '../../server/core/scheduler'
 import { writeGguf, type FakeGguf, type KvValue } from '../fixtures/gguf-builder'
@@ -42,8 +43,14 @@ beforeAll(async () => {
     modelDirs: [{ id: 'd', path: models, enabled: true, maxDepth: 0 }],
   }))
   const profiles = { 默认: { overrides: {}, extraArgs: '' }, 锁定: { overrides: {}, extraArgs: '--load-mode mlock' } }
-  const entry = { backend: 'llama-server', file: { dirId: 'd', rel: 'm.gguf' }, mmproj: null, draft: null, activeProfile: '默认', profiles }
+  // A fixed runtime: the accelerator must not depend on whether the machine running the test has a GPU.
+  const entry = { backend: 'llama-server', file: { dirId: 'd', rel: 'm.gguf' }, mmproj: null, draft: null, activeProfile: '默认', profiles, runtime: 'custom:r1' }
   writeFileSync(join(dir, 'models.json'), JSON.stringify({ version: 1, models: [{ id: 'm', name: 'M', ...entry }, { id: 'n', name: 'N', ...entry }] }))
+  writeFileSync(join(dir, 'runtimes.json'), JSON.stringify({
+    version: 1, entries: [{ id: 'r1', label: 'r1', source: { kind: 'dir', from: 'X:\src' }, os: process.platform, arch: process.arch, accel: win ? 'cuda' : 'metal', tag: 'b1', addedAt: '' }],
+  }))
+  mkdirSync(customDir(dir, 'r1'), { recursive: true })
+  writeFileSync(join(customDir(dir, 'r1'), win ? 'llama-server.exe' : 'llama-server'), 'x')
   process.env.LLAMA_WEB_DATA = dir
   delete (globalThis as Record<symbol, unknown>)[Symbol.for('llama-web.context')]
   DeviceProbe.prototype.list = async () => devices
