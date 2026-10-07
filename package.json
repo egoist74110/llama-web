@@ -19,6 +19,7 @@
     "start:build": "bun scripts/launch.ts build",
     "start:run": "bun scripts/launch.ts run",
     "start:web": "bun scripts/launch.ts web",
+    "release": "bun scripts/release.ts",
     "typecheck": "nuxt typecheck",
     "postinstall": "nuxt prepare"
   },
