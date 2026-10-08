@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // Log page: model output / events / requests. "Live" shows what the shared stream (useLive)
 // holds in memory; picking a file shows its end as saved under data/logs (survives restarts).
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
+import { profileLabel } from '~/utils/profile-label'
 import type { ActivityEvent } from '~~/server/core/live'
 import type { LogFileInfo, LogRead } from '~~/server/core/logs'
 import type { RequestRecord } from '~~/server/core/request-log'
@@ -16,12 +17,13 @@ const ui = usePlatformUi()
 // /logs?tab=events|requests (the overview's "all" links) opens that tab.
 const initialTab = useRoute().query.tab
 const tab = ref<Tab>(initialTab === 'events' || initialTab === 'requests' || initialTab === 'usage' ? initialTab : 'model')
-const tabs: Array<{ value: Tab, label: string }> = [
+// A computed: the tab labels are read again when the interface language changes.
+const tabs = computed<Array<{ value: Tab, label: string }>>(() => [
   { value: 'model', label: t.logs.tabs.model },
   { value: 'events', label: t.logs.tabs.events },
   { value: 'requests', label: t.logs.tabs.requests },
   { value: 'usage', label: t.logs.tabs.usage },
-]
+])
 // Sentinel = all models; /logs?model=<id> (the failure card's link) preselects one.
 const model = ref(toSelectValue(typeof useRoute().query.model === 'string' ? useRoute().query.model as string : ''))
 const range = ref(LIVE)
@@ -130,7 +132,7 @@ const modelRows = computed<TextRow[]>(() => {
   }
   return logLines.value
     .filter(l => !wantModel.value || l.modelId === wantModel.value)
-    .map(l => ({ key: String(l.id), at: l.at, tag: wantModel.value ? '' : `${modelName(l.modelId)}:${l.profile}`, text: l.text }))
+    .map(l => ({ key: String(l.id), at: l.at, tag: wantModel.value ? '' : `${modelName(l.modelId)}:${profileLabel(l.profile)}`, text: l.text }))
 })
 
 const eventRows = computed<TextRow[]>(() => {
@@ -301,7 +303,7 @@ function lineClass(text: string): string {
               </td>
               <td class="!whitespace-normal">
                 <span class="font-medium">{{ r.modelName ?? '—' }}</span>
-                <span v-if="r.profile" class="text-muted"> · {{ r.profile }}</span>
+                <span v-if="r.profile" class="text-muted"> · {{ profileLabel(r.profile) }}</span>
                 <span v-if="r.stream" class="ml-1 text-dimmed">{{ t.logs.requests.stream }}</span>
               </td>
               <td :class="r.outcome === 'ok' ? '' : r.outcome === 'error' ? 'text-error' : 'text-warning'">

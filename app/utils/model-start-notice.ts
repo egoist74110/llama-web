@@ -1,5 +1,5 @@
 // Recovery destinations for diagnosed launch failures. Never start, download or change settings here.
-import t from '../../i18n/zh-CN'
+import { t } from '../composables/useLocale'
 import { failureAdvice, loadErrorText } from './platform-text'
 import type { ModelStartNotice } from '../composables/useModelStartFeedback'
 

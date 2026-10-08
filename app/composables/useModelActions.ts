@@ -1,5 +1,5 @@
 // Calls to the model API; explicit starts also follow their background outcome through SSE.
-import t from '~~/i18n/zh-CN'
+import { t } from './useLocale'
 import { readStartGuard } from '~/utils/memory-check'
 
 type Failure = keyof typeof t.models.toast

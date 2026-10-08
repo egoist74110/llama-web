@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Input box: text, optional images (only when the model has a vision file), send / stop.
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 import { dataUrlBytes, imageLimit, MAX_IMAGE_BYTES, MAX_SESSION_IMAGE_BYTES } from '~/utils/chat'
 
 const props = defineProps<{ busy: boolean, canSend: boolean, vision: boolean, usedBytes: number }>()

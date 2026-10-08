@@ -2,7 +2,7 @@
 // "This computer": the read-only detection result (GET /api/system) with recommendations and warnings.
 // Windows shows CPU, memory and the NVIDIA card / driver; a Mac shows chip, cores and memory only
 // (decision 38: no GPU wording there, the server sends no GPU fields for it).
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 import type { SystemInfo } from '~~/server/core/system'
 
 const s = t.settings.system

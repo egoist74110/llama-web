@@ -1,6 +1,7 @@
 // State and actions of the chat page: conversations (browser-local), the models that can be
 // chatted with right now, and the streaming request. The page only wires these to the UI.
-import t from '~~/i18n/zh-CN'
+import { t } from './useLocale'
+import { profileLabel } from '~/utils/profile-label'
 import { newMessage, newId, streamChat, titleFrom, toRequestMessages, type ChatSession } from '~/utils/chat'
 import { idbBackend, memoryBackend, withTombstones, type ChatBackend } from '~/utils/chat-db'
 
@@ -13,7 +14,7 @@ export function useChat() {
   const options = computed<ChatModelOption[]>(() => (state.value?.models ?? []).flatMap(m =>
     m.instances.filter(i => i.state === 'ready').map(i => ({
       value: `${m.name}:${i.profile}`,
-      label: m.profiles.length > 1 ? `${m.name} · ${i.profile}` : m.name,
+      label: m.profiles.length > 1 ? `${m.name} · ${profileLabel(i.profile)}` : m.name,
       hasMmproj: m.hasMmproj,
     }))))
   const selected = ref('')

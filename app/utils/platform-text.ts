@@ -1,7 +1,7 @@
 // Text that differs on a Mac (decision 38): nothing visible there may mention a GPU, video memory,
 // Metal or drive letters. Components pass `isMac` from usePlatformUi(); the wording is in
 // i18n/zh-CN.ts under `platform.mac`.
-import t from '../../i18n/zh-CN'
+import { t } from '../composables/useLocale'
 
 const mac = t.platform.mac
 type Params = typeof t.models.edit.params

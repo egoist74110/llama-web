@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // Edit drawer for one model: files (main / mmproj / draft), profile management, and a
 // ProfileForm per profile (all kept mounted so unsaved edits survive switching profiles).
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
+import { profileLabel } from '~/utils/profile-label'
 import type { LaunchDefaults } from '~~/server/core/args'
 import type { ModelConfig } from '~~/server/core/config'
 import type { ScanEntry } from '~~/server/core/scanner'
@@ -25,11 +26,12 @@ const selected = ref('')
 const removing = ref(false)
 type EditTab = 'files' | 'profiles' | 'params'
 const editTab = ref<EditTab>('files')
-const editTabs: Array<{ value: EditTab, label: string }> = [
+// Computeds: the labels are read again when the interface language changes.
+const editTabs = computed<Array<{ value: EditTab, label: string }>>(() => [
   { value: 'files', label: edit.tabs.files },
   { value: 'profiles', label: edit.tabs.profiles },
   { value: 'params', label: edit.tabs.params },
-]
+])
 
 const url = computed(() => `/api/models/${encodeURIComponent(props.modelId)}`)
 
@@ -120,11 +122,11 @@ function fileItems(kind: 'file' | 'mmproj' | 'draft') {
   }
   return kind === 'file' ? items : withEmptyOption(edit.files.none, items)
 }
-const fileRows = [
+const fileRows = computed(() => [
   { kind: 'file' as const, label: edit.files.model },
   { kind: 'mmproj' as const, label: edit.files.mmproj },
   { kind: 'draft' as const, label: edit.files.draft },
-]
+])
 const itemsFor = computed(() => ({ file: fileItems('file'), mmproj: fileItems('mmproj'), draft: fileItems('draft') }))
 const filesDirty = computed(() => !!model.value && (
   picked.file !== refKey(model.value.file) || picked.mmproj !== refKey(model.value.mmproj) || picked.draft !== refKey(model.value.draft)
@@ -198,9 +200,9 @@ const opBusy = computed(() => !!busy.value[`profiles:${props.modelId}`])
 const pendingTitle = computed(() => {
   const p = pending.value
   if (!p) return ''
-  if (p.kind === 'remove') return fmt(edit.profiles.removeTitle, { name: selected.value })
+  if (p.kind === 'remove') return fmt(edit.profiles.removeTitle, { name: profileLabel(selected.value) })
   if (p.kind === 'create') return edit.profiles.createTitle
-  return fmt(p.kind === 'duplicate' ? edit.profiles.duplicateTitle : edit.profiles.renameTitle, { name: selected.value })
+  return fmt(p.kind === 'duplicate' ? edit.profiles.duplicateTitle : edit.profiles.renameTitle, { name: profileLabel(selected.value) })
 })
 </script>
 
@@ -297,7 +299,7 @@ const pendingTitle = computed(() => {
               @keydown.space.prevent="selected = n"
             >
               <span class="lw-radio" :class="{ on: selected === n }" />
-              <span class="flex-1 font-medium">{{ n }}{{ dirty[n] ? ' *' : '' }}</span>
+              <span class="flex-1 font-medium">{{ profileLabel(n) }}{{ dirty[n] ? ' *' : '' }}</span>
               <span v-if="n === model.activeProfile" class="lw-chip lw-chip-accent">{{ edit.profiles.isCurrent }}</span>
               <span v-if="isUp(n)" class="lw-st lw-st-ready">{{ edit.profiles.running }}</span>
             </li>
@@ -353,7 +355,7 @@ const pendingTitle = computed(() => {
             <span class="text-xs text-dimmed">{{ edit.paramsFor }}</span>
             <USelect
               v-model="selected"
-              :items="profileNames.map(n => ({ label: `${n}${n === model!.activeProfile ? `（${edit.profiles.isCurrent}）` : ''}${dirty[n] ? ' *' : ''}`, value: n }))"
+              :items="profileNames.map(n => ({ label: `${profileLabel(n)}${n === model!.activeProfile ? `（${edit.profiles.isCurrent}）` : ''}${dirty[n] ? ' *' : ''}`, value: n }))"
               size="sm"
               class="w-48"
               :aria-label="edit.paramsFor"

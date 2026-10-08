@@ -1,6 +1,6 @@
 // The settings document (GET /api/settings) shared by the settings page and the setup wizard,
 // and the one place that saves a patch and reports the outcome.
-import t from '~~/i18n/zh-CN'
+import { applyUiLocale, t } from './useLocale'
 import type { SettingsDoc } from '~~/server/core/settings-admin'
 
 function messageOf(e: unknown): string {
@@ -17,6 +17,8 @@ export function useSettings() {
   async function load() {
     try {
       doc.value = await $fetch<SettingsDoc>('/api/settings')
+      // The document carries the saved language, so the page shows it even before the next snapshot.
+      applyUiLocale(doc.value.ui)
       loadError.value = ''
     } catch (e) {
       loadError.value = messageOf(e)
@@ -29,6 +31,8 @@ export function useSettings() {
     saving.value = section
     try {
       doc.value = await $fetch<SettingsDoc>('/api/settings', { method: 'POST', body: patch })
+      // A language saved here takes effect on this page at once; the live snapshot carries it to the others.
+      applyUiLocale(doc.value.ui)
       if (!opts.quiet) toast.add({ title: t.settings.saved, color: 'success', icon: 'i-lucide-check' })
       return true
     } catch (e) {

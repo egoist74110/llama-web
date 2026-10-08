@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Left sidebar (decision 30): brand, navigation, the "now serving" card, connection status,
 // llama.cpp version and the light / dark switch. Replaces the old top bar.
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 
 const { state, metrics, connected } = useLive()
 const route = useRoute()
@@ -62,11 +62,12 @@ const runtimeUpdate = computed(() => {
 const { view: appVersion, release: appRelease } = useAppUpdate()
 
 const colorMode = useColorMode()
-const modes = [
+// A computed: the theme names follow the interface language.
+const modes = computed(() => [
   { value: 'system', label: L.themeSystemShort },
   { value: 'light', label: L.themeLight },
   { value: 'dark', label: L.themeDark },
-]
+])
 </script>
 
 <template>

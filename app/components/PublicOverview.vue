@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Public access after the guide: state, client addresses with the self-check, API keys, and the
 // actions (add an address, run the guide again, switch off). Everything else is under "Advanced".
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 
 const emit = defineEmits<{ start: [mode: 'setup' | 'add'] }>()
 const p = t.publicAccess

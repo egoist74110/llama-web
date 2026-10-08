@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 import { normalizeCustomMirror } from '~~/server/core/mirrors'
 
 const s = t.mirror

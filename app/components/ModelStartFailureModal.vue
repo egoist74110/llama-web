@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // Layout-owned so a failed first setup survives the originating dialog/card unmounting.
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
+import { profileLabel } from '~/utils/profile-label'
 import { modelStartNoticeView } from '~/utils/model-start-notice'
 
 const s = t.models.startFailure
@@ -50,7 +51,7 @@ async function logs() {
           <UIcon name="i-lucide-circle-alert" class="mt-0.5 size-4 shrink-0" />
           {{ view.reason }}
         </p>
-        <p v-if="display.profile" class="m-0 text-xs text-muted">{{ fmt(s.profile, { profile: display.profile }) }}</p>
+        <p v-if="display.profile" class="m-0 text-xs text-muted">{{ fmt(s.profile, { profile: profileLabel(display.profile) }) }}</p>
         <p class="m-0 text-sm text-default">{{ view.advice }}</p>
         <p v-if="display.message" class="m-0 whitespace-pre-wrap break-all rounded-lg bg-elevated px-3 py-2 text-xs text-muted">{{ display.message }}</p>
       </div>

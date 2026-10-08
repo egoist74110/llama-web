@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Confirm before saving a profile whose memory estimate is risky or does not fit (decision 43). Saving is never refused
 // for the estimate: the free memory changes, so the user decides; the breakdown shows what the launch would take.
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 import { mainPool, poolRows, poolTitle, saveRiskView, type CheckDoc } from '~/utils/memory-check'
 
 const props = defineProps<{ check: CheckDoc | null, restart: boolean }>()

@@ -1,6 +1,6 @@
 // Pure helpers for the memory estimate and the manual-start guard (decisions 41-44, 9-4): wording, tiers, breakdown rows
 // and the reading of a refused start (HTTP 409). Bun-testable; the Mac gets no GPU / video-memory wording (decision 38).
-import t from '../../i18n/zh-CN'
+import { t } from '../composables/useLocale'
 import { decidingPool, SYSTEM_POOL } from '../../server/core/admission'
 import type { StateDoc } from '../../server/core/live'
 import type { MemoryEstimate, Pool, Tier } from '../../server/core/memory-estimate'

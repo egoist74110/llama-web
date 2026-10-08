@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Chat page (decision 55): talks to the local /v1/chat/completions of a model that is already
 // running. It never starts a model; conversations live only in this browser.
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 import { sessionImageBytes } from '~/utils/chat'
 
 const c = useChat()

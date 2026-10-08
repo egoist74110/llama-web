@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto'
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
-import zh from '../i18n/zh-CN'
+import { DEFAULT_LOCALE, dictionaries, LOCALES } from '../i18n/messages'
 
 const root = resolve(import.meta.dir, '..')
 const resources = join(root, 'src-tauri', 'resources')
@@ -54,6 +54,14 @@ function licenses(path: string, result: string[], base = path) {
     }
   }
 }
+// strings.json (gitignored, generated here): start-window strings grouped by locale; launcher.js
+// picks one from the system language list (work package 11-2). An untranslated branch falls back to
+// Chinese through i18n/fill.ts, so every locale's group is complete. `default` is DEFAULT_LOCALE.
+function desktopStrings() {
+  const by: Record<string, unknown> = {}
+  for (const locale of LOCALES) by[locale] = dictionaries[locale].desktop
+  return JSON.stringify({ default: DEFAULT_LOCALE, by })
+}
 if (dev) {
   if (!existsSync(join(root, '.output', 'server', 'index.mjs'))) throw new Error('Build the app first (bun run build)')
   rmSync(resources, { recursive: true, force: true })
@@ -61,7 +69,7 @@ if (dev) {
   cpSync(join(root, '.output'), join(resources, 'app'), { recursive: true })
   cpSync(process.execPath, join(resources, bunName))
   await run([process.execPath, 'build', join(root, 'desktop', 'import-data.ts'), '--target=bun', '--outfile=' + join(resources, 'import-data.mjs')])
-  writeFileSync(join(root, 'desktop', 'ui', 'strings.json'), JSON.stringify(zh.desktop))
+  writeFileSync(join(root, 'desktop', 'ui', 'strings.json'), desktopStrings())
   writeFileSync(join(resources, 'versions.json'), JSON.stringify({ application: `${appVersion}-dev`, bun: Bun.version,
     bunSha256: digest(join(resources, bunName)), resourceId: resourceDigest(), target: `${process.platform}-${process.arch}-dev`, signature: 'none',
     license: 'MIT', commit: 'dev' }, null, 2))
@@ -90,7 +98,7 @@ try {
   mkdirSync(join(root, 'src-tauri', 'icons'), { recursive: true })
   // macOS uses the committed icon.icns (tauri.macos.conf.json); icon.ico is the Windows icon.
   if (target === 'windows-x64') cpSync(join(root, 'public', 'favicon.ico'), join(root, 'src-tauri', 'icons', 'icon.ico'))
-  writeFileSync(join(root, 'desktop', 'ui', 'strings.json'), JSON.stringify(zh.desktop))
+  writeFileSync(join(root, 'desktop', 'ui', 'strings.json'), desktopStrings())
   const notices: string[] = []
   licenses(join(work, 'node_modules'), notices)
   const cargo = Bun.spawn(['cargo', 'metadata', '--manifest-path', join(root, 'src-tauri', 'Cargo.toml'), '--locked',

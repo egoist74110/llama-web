@@ -2,7 +2,7 @@
 // A manual start the server did not simply allow (decisions 41, 42): "risky" / "unknown" can be started anyway after
 // reading the numbers; "does not fit" and "limit reached" only offer to stop the other models first (there is no forced
 // start). Layout-owned so it outlives the card that asked.
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 import { guardView } from '~/utils/memory-check'
 
 const s = t.models.guard

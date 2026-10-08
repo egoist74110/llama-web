@@ -950,7 +950,8 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 
   <h3>11-2 · 界面接线（Sonnet 5.5）</h3>
   <ul class="tasks">
-    <li class="task" data-done="false"><span class="t">前端读 <code>ui.locale</code> 并即时切换（不重新加载页面）；设置页的语言选择；桌面壳启动窗口按系统语言选初始语言；<code>DEFAULT_PROFILE = '默认'</code> 数据不变，只在英文界面显示成「Default」</span><span class="when"></span></li>
+    <li class="task" data-done="true"><span class="t">前端读 <code>ui.locale</code> 并即时切换（不重新加载页面）；设置页的语言选择；桌面壳启动窗口按系统语言选初始语言；<code>DEFAULT_PROFILE = '默认'</code> 数据不变，只在英文界面显示成「Default」</span><span class="when">2026-10-08</span></li>
+  </ul>
   </ul>
 
   <h3>11-2 至 11-3 · 三批译文（AI 翻译，用户只抽查总览 / 模型 / 设置）</h3>
@@ -961,6 +962,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
   <h3>11-4 · 转硬失败与剩余泄漏（Sonnet 5.5）</h3>
   <ul class="tasks">
     <li class="task" data-done="false"><span class="t">三批译文完成后把 <code>tests/core/i18n-parity.test.ts</code> 的 warn-only 转成硬失败；补 <code>server/core/proxy.ts</code> 里三处不走 i18n 的泄漏（原始 <code>Error.message</code>、字面量 <code>'cancelled'</code>、流式转发的 statusText）</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">数字与时间格式跟随界面语言：<code>app/composables/useFormat.ts</code> 的 <code>formatClock</code> / <code>formatCount</code> 目前硬编码 <code>'zh-CN'</code>（11-2 接线时发现，2026-10-08）</span><span class="when"></span></li>
   </ul>
 
   <div class="accept"><h3>验收标准</h3>
@@ -1030,6 +1032,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 <section id="changelog">
   <h2>变更记录</h2>
   <table>
+    <tr><td>2026-10-08</td><td>11-2 完成：前端读 <code>ui.locale</code> 即时切换（<code>app/composables/useLocale.ts</code>：<code>t</code> 是按 key 路径惰性解析的 Proxy 视图，组件别名跨切换仍有效；71 处 import 改走 <code>useLocale</code>，12 处「setup 求值一次」的标签数组改 <code>computed</code>）；语言送达：<code>live.ts</code> 快照带 <code>locale</code> → <code>useLive</code> / <code>useSettings</code> 应用；设置页新增语言选择卡片（<code>settings-admin</code> 校验 <code>ui: { locale }</code>，错误码 <code>bad-locale</code>）；桌面壳启动窗口按系统语言选初始语言（<code>strings.json</code> 按 locale 分组，<code>launcher.js</code> 用 <code>navigator.languages</code> 匹配，不写进 <code>settings.ui.locale</code>）；<code>默认</code> 方案名数据不变，英文界面经 <code>app/utils/profile-label.ts</code> 显示「Default」；测试：<code>tests/app/locale-view.test.ts</code>、<code>tests/app/profile-label.test.ts</code>、<code>settings-admin.test.ts</code> 的 ui patch 校验。遗留（不在本包修）：<code>en.desktop</code> 尚无英文文案（11-2 至 11-3）、<code>proxy.ts</code> 的 <code>profileNotFound</code>（11-4）、<code>formatClock</code> / <code>formatCount</code> 硬编码 <code>'zh-CN'</code>（已列为阶段 11 未勾选任务，随 11-3 处理）、SPA 首帧在第一个快照到达前是中文。</td></tr>
     <tr><td>2026-10-07</td><td>决定 18 修订（用户 2026-10-07）：界面语言从「只做中文」改成「中文 + 英文，字典按语言表组织，第三种语言只加一行 <code>LOCALES</code> 和一个文件」；服务端生成的文字（事件、接口错误、<code>/v1/*</code> 错误）跟随设置里的语言，保存即切换不重启；<code>默认</code> 方案名作为数据不变，英文界面显示「Default」。新增阶段 11「多语言界面」。</td></tr>
     <tr><td>2026-10-07</td><td>11-1 完成：新增 <code>i18n/messages.ts</code>（<code>LOCALES</code> / <code>LocaleCode</code> / <code>Messages</code> / <code>PartialMessages</code> / <code>dictionaries</code>）、<code>i18n/en.ts</code>（骨架与分组注释，<b>尚无英文文案</b>）、<code>i18n/fill.ts</code>（缺键回落中文、数组逐位合并）；<code>server/core/i18n.ts</code> 变成「当前字典 + <code>setLocale</code>」，<code>t</code> 用 Proxy 保持同一身份，<code>fmt()</code> 不变，导入点未改；settings 升到 v11（<code>ui.locale</code>，默认 <code>zh-CN</code>，迁移 + 白名单校验），<code>SettingsDoc</code> 暴露 <code>ui.locale</code>；新增 <code>tests/core/i18n-parity.test.ts</code>（warn-only）。界面接线与译文未做，「英文界面」坑位改为已实现骨架。</td></tr>
     <tr><td>2026-10-06</td><td>决定 56 增加 ⑩「手动启动」（用户要求）：上游可保存启动命令，离线时在「接入」页手动启动并等待模型出现；llama-web 不管理该进程的生命周期、不停外部服务。阶段 10 新增 10-3。</td></tr>

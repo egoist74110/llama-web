@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // Usage tab of the log page (decision 40): daily token bars and totals by model / source / key.
 // Data comes from GET /api/usage (aggregates only; no conversation content).
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
+import { profileLabel } from '~/utils/profile-label'
 import type { UsageGroup, UsageGroupBy, UsageReport } from '~~/server/core/usage'
 
 const toast = useToast()
@@ -59,15 +60,16 @@ const bars = computed(() => {
 })
 const hasData = computed(() => (total.value?.requests ?? 0) > 0)
 
-const groupTabs: Array<{ value: UsageGroupBy, label: string }> = [
+// A computed: the tab labels are read again when the interface language changes.
+const groupTabs = computed<Array<{ value: UsageGroupBy, label: string }>>(() => [
   { value: 'model', label: t.usage.groups.model },
   { value: 'source', label: t.usage.groups.source },
   { value: 'key', label: t.usage.groups.key },
   { value: 'profile', label: t.usage.groups.profile },
-]
+])
 function groupLabel(g: UsageGroup): string {
   if (groupBy.value === 'source') return t.logs.requests.source[g.key as keyof typeof t.logs.requests.source] ?? g.key
-  if (g.key) return g.label || g.key
+  if (g.key) return groupBy.value === 'profile' ? profileLabel(g.label || g.key) : g.label || g.key
   return groupBy.value === 'model' ? t.usage.names.unknownModel : groupBy.value === 'key' ? t.usage.names.noKey : t.usage.names.noProfile
 }
 const rows = computed(() => report.value?.by[groupBy.value] ?? [])

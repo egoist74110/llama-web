@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // "Recommend again for this machine": shows old -> recommended for the global launch defaults,
 // one checkbox per item. Opening only reads; confirming writes just the ticked items, closing writes nothing.
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 import type { RetuneItem, RetunePlan } from '~~/server/core/retune'
 
 const open = defineModel<boolean>('open', { default: false })

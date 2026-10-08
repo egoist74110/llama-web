@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Import of the old swap-config.json: used by the first-run wizard and kept on the settings page.
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 
 const emit = defineEmits<{ imported: [] }>()
 const path = ref('')

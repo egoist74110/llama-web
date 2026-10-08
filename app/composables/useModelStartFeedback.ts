@@ -1,5 +1,5 @@
 // Follow explicit starts through the shared live feed: HTTP only acknowledges the background job.
-import t from '~~/i18n/zh-CN'
+import { t } from './useLocale'
 import type { ActivityEvent } from '~~/server/core/live'
 
 interface Attempt {

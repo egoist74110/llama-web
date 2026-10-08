@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Scan discovery: .gguf files in the model directories that are not enabled yet.
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 import type { ScanEntry, ScanWarning } from '~~/server/core/scanner'
 
 type Entry = ScanEntry & { enabledAs: string | null }

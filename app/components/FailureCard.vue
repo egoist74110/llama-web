@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Failure / crash card: diagnosed reason + advice, the last output lines, a jump to the full
 // model log and (optionally) a manual retry. Shown by the overview and the model card.
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 import type { StateInstance } from '~~/server/core/live'
 
 const props = defineProps<{

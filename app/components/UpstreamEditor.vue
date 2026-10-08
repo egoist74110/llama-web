@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Add / edit one external upstream in a slide-over. The API key is write-only: the list only says whether one is
 // saved, a blank box keeps it, "clear" removes it. Server messages (Chinese) are shown as they come.
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 import type { ConnectionView } from '~~/server/core/upstreams'
 
 const props = defineProps<{ open: boolean, upstream: ConnectionView | null }>()

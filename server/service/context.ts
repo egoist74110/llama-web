@@ -386,6 +386,9 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
       // Job and its version from one view: the page orders snapshots and HTTP responses by it.
       ...(({ job, rev }) => ({ cloudflare: job, cloudflareRev: rev }))(cloudflare.view()),
       firstRun: isFirstRun(getSettings(), getModels()),
+      // The language every open page shows and answers in (decision 18): a settings save re-notifies
+      // the hub, so all open pages change at once.
+      locale: getSettings().ui.locale,
       connections: viewUpstreams(upstreamsRef.get(), secretsRef.get().upstreamKeys).map(u => ({ ...u, up: health.isUp(u.id), checkedAt: health.state(u.id)?.checkedAt ?? null, launch: launcher.state(u.id) })),
       exclusiveHolder: health.holder(),
     }),

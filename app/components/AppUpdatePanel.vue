@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // One offered llama-web release: title, date, release notes and the download / install actions
 // (desktop) or a link to the release page (source version). Used by the prompt and the settings card.
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 
 const props = defineProps<{ compact?: boolean }>()
 const s = t.appUpdate

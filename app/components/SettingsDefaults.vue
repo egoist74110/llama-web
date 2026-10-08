@@ -2,7 +2,7 @@
 // Global default launch parameters: one value per form field (no inherit here, this is the root).
 // Windows keeps two sets, one for GPU builds and one for CPU builds (decision 36); the build a model
 // finally uses picks which set applies. A Mac has a single set and no device choice (decision 38).
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 import type { GpuChoice } from '~~/server/core/gpu-group'
 import type { ParamField } from '~/composables/useParamFields'
 import { displayThinkingLimit, thinkingBudget, validThinkingLimit } from '~~/server/core/thinking-limit'

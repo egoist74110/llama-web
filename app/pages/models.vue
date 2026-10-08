@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 
 const { state } = useLive()
 const route = useRoute()
 const tab = ref<'enabled' | 'discover'>(route.query.tab === 'discover' ? 'discover' : 'enabled')
-const tabs = [
+// A computed: the labels are read again when the interface language changes.
+const tabs = computed(() => [
   { value: 'enabled' as const, label: t.models.tabs.enabled },
   { value: 'discover' as const, label: t.models.tabs.discover },
-]
+])
 const list = computed(() => state.value?.models ?? [])
 const filter = ref('')
 const needle = computed(() => filter.value.trim().toLowerCase())

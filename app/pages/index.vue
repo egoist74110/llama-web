@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Overview dashboard (decision 30): hero card, four stat tiles, recent events and requests.
 // Everything comes from useLive(); local API addresses use the server's LAN host.
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 import type { ActivityEvent } from '~~/server/core/live'
 import { modelsOnCard } from '~/utils/memory-check'
 import { apiAddress } from '~/utils/overview'

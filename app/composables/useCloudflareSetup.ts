@@ -1,6 +1,6 @@
 // State of the one-click tunnel setup (Cloudflare API), shared by the guide's steps: saved API
 // token (masked), what the token can see, the preview and the run. Calls the 4-5 endpoints only.
-import t from '~~/i18n/zh-CN'
+import { t } from './useLocale'
 import type { Inspection, JobRev, JobView, SetupJob, SetupPlan } from '~~/server/core/cloudflare'
 
 export function messageOf(e: unknown): string {

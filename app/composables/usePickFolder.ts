@@ -1,5 +1,5 @@
 // "Choose folder…" button: the server opens the native system dialog (Windows or macOS) on this machine.
-import t from '~~/i18n/zh-CN'
+import { t } from './useLocale'
 
 export function usePickFolder() {
   const toast = useToast()

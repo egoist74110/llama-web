@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // One line for "an external service is holding the machine" (decision 56 ⑨): local models are unloaded and cannot start.
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 
 withDefaults(defineProps<{ link?: boolean }>(), { link: true })
 const { state } = useLive()

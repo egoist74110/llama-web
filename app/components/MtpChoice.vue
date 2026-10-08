@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 import { MTP_MAX_N, type MtpInput } from '~~/server/core/mtp'
 import type { FileRef } from '~~/server/core/types'
 

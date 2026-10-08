@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Getting-started guide: four steps (model directory, llama.cpp, enable a model, start), each ticked
 // off by what is actually configured. The menu entry disappears once a model has been added.
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 
 const s = t.setup
 const { state } = useLive()

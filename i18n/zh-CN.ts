@@ -816,6 +816,11 @@ export default {
     loadFailed: '读取设置失败',
     reset: '撤销修改',
     dirty: '有未保存的修改',
+    language: {
+      title: '界面语言',
+      hint: '管理界面显示的语言，也是事件与接口提示使用的语言。选完立刻生效，不用重启；模型、参数和已保存的文件都不受影响。',
+      label: '语言',
+    },
     dirs: {
       title: '模型目录',
       hint: '扫描 .gguf 文件的位置。每个目录可以单独停用，并限制往下扫描几层。模型记录的是「目录 + 相对路径」，换了盘符只需要改这里的路径。',
@@ -975,6 +980,7 @@ export default {
       'bad-public-port': '公网入口端口必须是 1024 到 65535 之间的整数，且不能和监听端口相同、不能在 llama-server 端口范围内。',
       'bad-mirror': '自定义镜像前缀不合法：必须是 https:// 开头的公网域名，不能带账号密码、端口、参数，也不能是本机、内网或 IP 地址。',
       'bad-domain': '域名格式不对，只填主机名，例如 llm.example.com（不要带 https:// 或路径）：{detail}',
+      'bad-locale': '界面语言只能是 llama-web 有字典的语言（zh-CN 或 en）。',
     },
     public: {
       port: '入口端口',

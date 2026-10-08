@@ -2,7 +2,7 @@
 // Guide step "preview and run" (one-click branch): the 4-5 preview with explicit choices for
 // existing tunnels / DNS records, the confirmation, then every step's result (retry from the
 // failed step, or undo what the run created). Emits `done` when the run finished.
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 import type { SetupPlan } from '~~/server/core/cloudflare'
 
 const emit = defineEmits<{ done: [] }>()

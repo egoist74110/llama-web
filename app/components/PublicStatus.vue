@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Live state of the public path: the entry listener (127.0.0.1:port) and the hosted tunnel
 // (cloudflared), with retry and the last output on errors. Used by the guide and the overview.
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 
 const s = t.tunnel
 const p = t.publicAccess

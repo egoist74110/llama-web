@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 import { validThinkingLimit } from '~~/server/core/thinking-limit'
 
 const props = defineProps<{ modelValue: number | string, enabled: boolean, idPrefix: string, disabled?: boolean, legacyDisabled?: boolean }>()

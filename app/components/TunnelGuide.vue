@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Step-by-step guide for creating the tunnel in the Cloudflare dashboard. The pictures are
 // schematic SVGs (labels use the dashboard's own English wording); nothing here is account data.
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 
 // `open`: start expanded; `bare`: no separator above (inside the public access guide).
 const props = defineProps<{ ingress: string, open?: boolean, bare?: boolean }>()

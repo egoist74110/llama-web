@@ -5,7 +5,7 @@
 // API token (one click, the 4-5 flow), the dashboard guide + pasted tunnel token, or a quick
 // tunnel (no domain, decision 31: straight on to "connect"). All end in "connect": entry +
 // hosting on, wait for the tunnel, show the address and key.
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 import type { PublicWizard, WizardStep } from '~~/server/core/config'
 import type { KeyView } from '~~/server/core/keys'
 

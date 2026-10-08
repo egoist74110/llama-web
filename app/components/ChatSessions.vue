@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Conversation list: new / switch / rename (inline) / delete (with confirmation).
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 import type { ChatSession } from '~/utils/chat'
 
 const props = defineProps<{ sessions: ChatSession[], currentId: string | null, busy: boolean }>()

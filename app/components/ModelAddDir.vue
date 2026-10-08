@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // "Add folder" on the models page: choose a folder (native dialog) or paste a path, add it to the
 // model directories and scan right away. The page then jumps to the scan results.
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 import { checkNewDir } from '~/utils/model-dirs'
 
 const emit = defineEmits<{ added: [] }>()

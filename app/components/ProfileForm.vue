@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // One profile: chat template, launch parameters (inherit / custom / omit), extra args, and the
 // command preview built by the backend from the values currently on screen.
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 import type { LaunchDefaults, ParamKey, ParamOverrides } from '~~/server/core/args'
 import type { Profile } from '~~/server/core/config'
 import type { LaunchPreview } from '~~/server/core/launch'
@@ -115,11 +115,12 @@ function setMode(key: ParamKey, mode: Mode) {
   row.mode = mode
 }
 
-const modeItems = [
+// A computed: the labels are read again when the interface language changes.
+const modeItems = computed(() => [
   { label: t.models.edit.form.inherit, value: 'inherit' },
   { label: t.models.edit.form.custom, value: 'custom' },
   { label: t.models.edit.form.omit, value: 'omit' },
-]
+])
 
 function selectItems(field: ParamField, current: string) {
   const items = [...(field.options ?? [])]

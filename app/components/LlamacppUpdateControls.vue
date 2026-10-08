@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Daily checks always run; automatic runtime installation is opt-in.
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 import type { LlamacppDoc } from '~~/server/core/updater'
 
 const s = t.llamacpp.update

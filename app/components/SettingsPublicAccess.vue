@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // The public access module (4-6): one card in three states — off (a sentence and a button),
 // the guide (progress saved on the server), or the overview.
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 import type { PublicWizard } from '~~/server/core/config'
 
 const p = t.publicAccess

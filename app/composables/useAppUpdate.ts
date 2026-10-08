@@ -1,6 +1,6 @@
 // llama-web's own updates: the state comes from the live snapshot (`appUpdate`); actions call
 // /api/app-update. One prompt dialog for the whole app (AppUpdatePrompt in the layout).
-import t from '~~/i18n/zh-CN'
+import { t } from './useLocale'
 import type { AppUpdateView } from '~~/server/core/app-update'
 
 function messageOf(e: unknown): string {

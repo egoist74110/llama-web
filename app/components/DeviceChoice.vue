@@ -4,7 +4,7 @@
 // ratio and, for row, a main GPU. Row / tensor are experimental: choosing one asks for a confirmation the first
 // time for this build + devices + mode, and a combination that failed before is flagged.
 // Used by the global defaults, the model box and the profile form; nothing renders on a Mac (callers check hasGpu).
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 import type { DevicesView } from '~~/server/core/devices'
 
 const form = defineModel<GpuForm>({ required: true })

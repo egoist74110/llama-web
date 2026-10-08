@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // "Advanced" part of the public access overview: entry port, hosting switch, replacing / clearing
 // the tunnel token, clearing the Cloudflare API token, and where cloudflared comes from.
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 
 const p = t.publicAccess
 const o = p.overview
@@ -17,8 +17,9 @@ watch(() => pub.value?.port, (v) => { port.value = String(v ?? '') }, { immediat
 const badPort = computed(() => !/^\d+$/.test(port.value.trim()) || Number(port.value) < 1024 || Number(port.value) > 65535)
 const savePort = () => save('public-port', { public: { port: Number(port.value) } })
 const quick = computed(() => pub.value?.tunnelMode === 'quick')
-const modeItems = [{ label: o.modeOwn, value: 'token' }, { label: o.modeQuick, value: 'quick' }]
-const protocolItems = [{ label: o.protocolHttp2, value: 'http2' }, { label: o.protocolQuic, value: 'quic' }]
+// Computeds: the option labels follow the interface language.
+const modeItems = computed(() => [{ label: o.modeOwn, value: 'token' }, { label: o.modeQuick, value: 'quick' }])
+const protocolItems = computed(() => [{ label: o.protocolHttp2, value: 'http2' }, { label: o.protocolQuic, value: 'quic' }])
 const setMode = (v: string) => { if (v !== pub.value?.tunnelMode) void save('public-mode', { public: { tunnelMode: v } }, { quiet: true }).then(ok => ok && toast.add({ title: o.modeSaved, color: 'success', icon: 'i-lucide-check' })) }
 const setProtocol = (v: string) => { if (v !== pub.value?.tunnelProtocol) void save('public-protocol', { public: { tunnelProtocol: v } }, { quiet: true }) }
 const toggle = (v: boolean) => save('public-tunnel', { public: { tunnelEnabled: v } }, { quiet: true })

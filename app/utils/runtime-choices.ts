@@ -1,6 +1,6 @@
 // Pure helpers for the llama.cpp version and device choices (settings page, edit drawer).
 // Wording comes from i18n; nothing here knows about components.
-import t from '../../i18n/zh-CN'
+import { t } from '../composables/useLocale'
 import type { DevicesView } from '../../server/core/devices'
 import type { RuntimeRow } from '../../server/core/runtime-manager'
 import { fmt, formatMiB } from '../composables/useFormat'

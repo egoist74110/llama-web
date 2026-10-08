@@ -1,9 +1,10 @@
 <script setup lang="ts">
 // One enabled model: state, start / stop / retry, profile dropdown, missing-file warning.
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 import type { StateDoc } from '~~/server/core/live'
 import { quantFromFile } from '~/utils/overview'
 import { gib, tierClass } from '~/utils/memory-check'
+import { profileItems, profileLabel } from '~/utils/profile-label'
 
 const props = defineProps<{ model: StateDoc['models'][number] }>()
 const { busy, start, stop, retry, setProfile } = useModelActions()
@@ -54,7 +55,7 @@ const working = computed(() => !!(busy.value[`start:${props.model.id}`] || busy.
           <span v-else class="lw-chip">{{ t.models.card.mmprojNone }}</span>
           <span v-if="model.files.draft" class="lw-chip">{{ t.models.card.draft }}</span>
           <template v-if="memory?.estimate">
-            <span class="lw-chip lw-num" :title="fmt(t.memory.cardTitle, { profile: model.activeProfile })">
+            <span class="lw-chip lw-num" :title="fmt(t.memory.cardTitle, { profile: profileLabel(model.activeProfile) })">
               {{ fmt(memory.basis === 'measured' ? t.memory.chip.measured : t.memory.chip.estimated, { n: gib(memory.estimate.total.totalMiB) }) }}
             </span>
             <span v-if="!memoryOnline" class="lw-st" :class="tierClass(memory.tier)" :title="t.memory.tierHint[memory.tier]">{{ t.memory.tier[memory.tier] }}</span>
@@ -70,7 +71,7 @@ const working = computed(() => !!(busy.value[`start:${props.model.id}`] || busy.
           <span class="text-xs text-dimmed">{{ t.models.card.profile }}</span>
           <USelect
             :model-value="model.activeProfile"
-            :items="model.profiles"
+            :items="profileItems(model.profiles)"
             size="sm"
             class="w-32"
             :disabled="!!busy[`profile:${model.id}`]"
@@ -126,7 +127,7 @@ const working = computed(() => !!(busy.value[`start:${props.model.id}`] || busy.
       <UIcon name="i-lucide-lock" class="size-3.5 shrink-0 lw-dot-warn" />{{ fmt(t.upstreams.page.blocked, { holder }) }}
     </p>
     <p v-if="otherProfile" class="m-0 text-xs text-muted">
-      {{ fmt(t.models.card.runningProfile, { profile: otherProfile }) }}
+      {{ fmt(t.models.card.runningProfile, { profile: profileLabel(otherProfile) }) }}
     </p>
     <FailureCard
       v-if="shown?.failure && failed"

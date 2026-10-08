@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // First start of a model enabled from a scan: confirm context, thinking, vision and MTP, then start it.
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 import { MTP_DEFAULT_N, mtpValid, type MtpInput } from '~~/server/core/mtp'
 import { validThinkingLimit } from '~~/server/core/thinking-limit'
 import { readStartGuard } from '~/utils/memory-check'

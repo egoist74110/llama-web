@@ -1,6 +1,15 @@
 /* Bundled launch screen only. The HTTP console has no native capabilities. */
 (async () => {
-  const strings = await (await fetch('strings.json')).json()
+  const doc = await (await fetch('strings.json')).json()
+  // Start-window language from the system language list (work package 11-2): exact tag match,
+  // then primary-subtag match, then the packaged default. Settings.ui.locale is not touched here.
+  const keys = Object.keys(doc.by)
+  const wanted = (navigator.languages || []).map(x => String(x).toLowerCase())
+  const locale = keys.find(k => wanted.includes(k.toLowerCase()))
+    ?? keys.find(k => wanted.some(w => w.split('-')[0] === k.split('-')[0]))
+    ?? (keys.includes(doc.default) ? doc.default : keys[0])
+  document.documentElement.lang = locale
+  const strings = doc.by[locale]
   const invoke = window.__TAURI__.core.invoke
   const status = document.getElementById('status'), detail = document.getElementById('detail')
   const retry = document.getElementById('retry'), quit = document.getElementById('quit')

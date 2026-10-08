@@ -2,7 +2,8 @@
 // llama.cpp versions of this computer: update status, builds grouped by channel (official and hand-added),
 // switch the current one with confirmation, add a build, delete one (with its own confirmation).
 // A Mac has one channel and nothing about GPUs (decision 38); the flags come from usePlatformUi().
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
+import { profileLabel } from '~/utils/profile-label'
 import type { RuntimeRow } from '~~/server/core/runtime-manager'
 
 const s = t.llamacpp
@@ -82,7 +83,7 @@ const fallbacks = computed(() => events.value
   .filter((e): e is Fallback => e.kind === 'runtime-fallback' && !dismissed.value.has(e.id))
   .slice(0, 3))
 const modelName = (id: string) => state.value?.models.find(x => x.id === id)?.name ?? id
-const fallbackLine = (e: Fallback) => fmt(m.fallbackLine, { model: modelName(e.modelId), profile: e.profile, from: e.from, to: e.to })
+const fallbackLine = (e: Fallback) => fmt(m.fallbackLine, { model: modelName(e.modelId), profile: profileLabel(e.profile), from: e.from, to: e.to })
 function dismissFallbacks() {
   dismissed.value = new Set([...dismissed.value, ...fallbacks.value.map(e => e.id)])
 }

@@ -8,13 +8,14 @@ import { applyGpuChoice, hasGpuFields, sanitizeGpuChoice } from './gpu-group'
 import { ArgsSyntaxError, PARAM_DEFS, paramValueOk, splitArgs, type LaunchDefaults, type ParamValue } from './args'
 import { cleanWizard, hasCpuChannel, hasDeviceSelection, MAX_LOADED_LIMIT, NO_ROOM_POLICIES, TUNNEL_MODES, TUNNEL_PROTOCOLS, type ModelsDoc, type NoRoomPolicy, type Settings, type TunnelMode, type TunnelProtocol } from './config'
 import { normalizeCustomMirror } from './mirrors'
+import { LOCALES, type LocaleCode } from '../../i18n/messages'
 import type { PublicStatus } from './public-entry'
 import type { ModelDir } from './types'
 
 export type SettingsErrorCode =
   | 'bad-request' | 'dir-path' | 'dir-duplicate' | 'dir-depth' | 'dir-in-use' | 'dir-limit'
   | 'bad-param' | 'bad-extra-args' | 'bad-image' | 'bad-port' | 'bad-port-range' | 'bad-timeout'
-  | 'bad-public-port' | 'bad-domain' | 'bad-mirror' | 'bad-max-loaded' | 'bad-on-no-room'
+  | 'bad-public-port' | 'bad-domain' | 'bad-mirror' | 'bad-max-loaded' | 'bad-on-no-room' | 'bad-locale'
 
 export class SettingsError extends Error {
   constructor(public code: SettingsErrorCode, public detail = '') {
@@ -252,11 +253,13 @@ export interface SettingsPatch {
   llamacpp?: unknown
   /** Own mirror prefix: { custom: string }. */
   mirror?: unknown
+  /** Interface language (decision 18): { locale: 'zh-CN' | 'en' }. */
+  ui?: unknown
   /** Marks the first-run wizard as finished (or skipped). */
   setupDone?: unknown
 }
 
-const SECTIONS = ['modelDirs', 'defaults', 'defaultsCpu', 'image', 'server', 'public', 'setupDone', 'llamacpp', 'mirror']
+const SECTIONS = ['modelDirs', 'defaults', 'defaultsCpu', 'image', 'server', 'public', 'setupDone', 'llamacpp', 'mirror', 'ui']
 
 /** Apply every section present in the patch; validation of any section failing aborts the whole patch. */
 export function applySettingsPatch(draft: Settings, patch: unknown, models: ModelsDoc, host: { os: NodeJS.Platform } = { os: process.platform }): void {
@@ -281,6 +284,14 @@ export function applySettingsPatch(draft: Settings, patch: unknown, models: Mode
     const base = normalizeCustomMirror(p.mirror.custom)
     if (base === null) throw new SettingsError('bad-mirror')
     draft.mirror.custom = base
+  }
+  // Interface language (decision 18): `{ locale }` only, and only a language llama-web has a
+  // dictionary for. A value the page did not send is refused here rather than dropped: the page can
+  // only offer a language that exists.
+  if (p.ui !== undefined) {
+    if (!isObj(p.ui) || Object.keys(p.ui).some(k => k !== 'locale')) throw new SettingsError('bad-request')
+    if (!LOCALES.includes(p.ui.locale as LocaleCode)) throw new SettingsError('bad-locale', String(p.ui.locale).slice(0, 40))
+    draft.ui.locale = p.ui.locale as LocaleCode
   }
   if (p.setupDone !== undefined) {
     if (typeof p.setupDone !== 'boolean') throw new SettingsError('bad-request')

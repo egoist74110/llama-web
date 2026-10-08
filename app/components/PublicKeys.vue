@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // API keys for the public entry: create (random), masked list, show / copy, revoke (confirmed).
 // Part of the public access module (overview and the guide's last step); no card of its own.
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 import type { KeyView } from '~~/server/core/keys'
 
 const s = t.keys

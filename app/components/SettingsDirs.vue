@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Model directories: add / remove / disable / depth. Existing rows keep their id (models refer to it).
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 
 const s = t.settings.dirs
 const { doc, saving, save } = useSettings()

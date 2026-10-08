@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // About and updates of llama-web itself: version, manual check, the offered release (notes +
 // actions, see AppUpdatePanel) and the automatic install switch. State from the live snapshot.
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 
 const s = t.appUpdate
 const { view, release, busy, check, setAutoUpdate } = useAppUpdate()

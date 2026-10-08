@@ -2,7 +2,7 @@
 // Confirm removing a model. By default only the configuration goes; the checkbox (bottom left)
 // also moves the model / mmproj / draft files to the system trash. The server says which files
 // that would be and which are kept because another model still uses them.
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 
 type PlanFile = { kind: 'model' | 'mmproj' | 'draft', rel: string, action: 'trash' | 'keep-shared' | 'missing', usedBy: string[] }
 type Plan = { busy: boolean, unsafe: boolean, files: PlanFile[] }

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // Confirm deleting a build: shows what the server says would happen (models that chose it fall back
 // to "follow", the current version moves) before anything is removed.
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
+import { profileLabel } from '~/utils/profile-label'
 import type { DeletePlan, RuntimeRow } from '~~/server/core/runtime-manager'
 
 const props = defineProps<{ row: RuntimeRow | null }>()
@@ -41,7 +42,7 @@ watch(() => props.row?.ref, async (ref) => {
 const modelName = (id: string) => state.value?.models.find(m => m.id === id)?.name ?? id
 const affectedText = (a: DeletePlan['affected'][number]) => (a.profile === null
   ? fmt(s.removeModelOwn, { model: modelName(a.modelId) })
-  : fmt(s.removeProfileOwn, { model: modelName(a.modelId), profile: a.profile }))
+  : fmt(s.removeProfileOwn, { model: modelName(a.modelId), profile: profileLabel(a.profile) }))
 const blockedText = computed(() => (plan.value?.blocked === 'latest-official' ? s.removeLatestWhy : plan.value?.blocked === 'in-use' ? s.removeInUseWhy : ''))
 
 async function confirm() {

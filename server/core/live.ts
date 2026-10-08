@@ -16,6 +16,7 @@ import type { TunnelInfo } from './tunnel'
 import type { FileRef, ModelDir } from './types'
 import type { PlatformInfo } from './platform'
 import type { ConnectionView } from './upstreams'
+import type { LocaleCode } from '../../i18n/messages'
 
 export interface StateInstance {
   profile: string
@@ -72,6 +73,12 @@ export interface StateDoc {
   cloudflareRev: JobRev | null
   /** Nothing configured yet and the setup wizard has not been dismissed. */
   firstRun: boolean
+  /**
+   * The interface language this snapshot carries (decision 18): every page reads the language here, so
+   * saving a new one repaints all open pages without a reload. Absent in tests that do not wire a
+   * settings document.
+   */
+  locale?: LocaleCode
   /** External upstreams (decision 56) with their last probe; absent in tests that do not wire them. */
   connections?: ConnectionView[]
   /** Name of the upstream that holds the machine for itself right now (local models cannot load); null = none. */
@@ -301,7 +308,7 @@ export class LiveHub {
   }
 
   snapshot(): StateDoc {
-    const { scheduler, models, queue, llamacpp, tunnel, cloudflare, cloudflareRev, firstRun, platform, appUpdate, network, connections, exclusiveHolder } = this.opts.snapshot()
+    const { scheduler, models, queue, llamacpp, tunnel, cloudflare, cloudflareRev, firstRun, platform, appUpdate, network, connections, exclusiveHolder, locale } = this.opts.snapshot()
     return {
       now: this.now(),
       models: models.map(m => ({
@@ -318,6 +325,7 @@ export class LiveHub {
       ...(appUpdate ? { appUpdate } : {}),
       ...(network ? { network } : {}),
       ...(connections ? { connections, exclusiveHolder: exclusiveHolder ?? null } : {}),
+      ...(locale ? { locale } : {}),
     }
   }
 

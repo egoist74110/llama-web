@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 
 const route = useRoute()
 const { load, loadError, doc } = useSettings()
 onMounted(load)
 
 // Section directory: anchors inside the page, the active one follows the scroll position.
-const all = [
+// A computed: the labels are read again when the interface language changes.
+const all = computed(() => [
   { id: 's-dirs', label: t.settings.dirs.title, needsDoc: true },
+  { id: 's-language', label: t.settings.language.title, needsDoc: true },
   { id: 's-system', label: t.settings.system.title, needsDoc: true },
   { id: 's-llama', label: t.llamacpp.title, needsDoc: true },
   { id: 's-defaults', label: t.settings.defaults.title, needsDoc: true },
@@ -16,10 +18,10 @@ const all = [
   { id: 's-public', label: t.publicAccess.title, needsDoc: true },
   { id: 's-about', label: t.appUpdate.title, needsDoc: false },
   { id: 's-import', label: t.import.title, needsDoc: false },
-]
+])
 // About and import work without the settings document, so they are always listed.
-const sections = computed(() => all.filter(s => !s.needsDoc || doc.value))
-const active = ref(all[0]!.id)
+const sections = computed(() => all.value.filter(s => !s.needsDoc || doc.value))
+const active = ref(all.value[0]!.id)
 let observer: IntersectionObserver | null = null
 // After a click the smooth scroll passes other sections; keep the clicked one highlighted meanwhile.
 let lockUntil = 0
@@ -92,6 +94,7 @@ watch(() => route.hash, async () => { await nextTick(); goToHash() })
         </div>
         <template v-else>
           <SettingsDirs id="s-dirs" />
+          <SettingsLanguage id="s-language" />
           <SettingsSystem id="s-system" />
           <SettingsLlamacpp id="s-llama" />
           <SettingsDefaults id="s-defaults" />

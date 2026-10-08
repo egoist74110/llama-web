@@ -1,8 +1,9 @@
-// Text helpers for the UI. All wording comes from i18n/zh-CN.ts.
-import t from '~~/i18n/zh-CN'
+// Text helpers for the UI. All wording comes from the current dictionary (composables/useLocale.ts).
+import { t } from './useLocale'
 import type { ActivityEvent, StateDoc } from '~~/server/core/live'
 import type { RequestRecord } from '~~/server/core/request-log'
 import { noRoomReasonTemplate, poolText } from '../utils/memory-check'
+import { profileLabel } from '../utils/profile-label'
 
 export function fmt(template: string, vars: Record<string, string | number> = {}): string {
   return template.replace(/\{(\w+)\}/g, (m, k: string) => (k in vars ? String(vars[k]) : m))
@@ -72,35 +73,36 @@ export function cfErrorText(code: string, detail = ''): string {
 
 const gibText = (miB: number | null) => (miB === null ? '?' : `${(miB / 1024).toFixed(1)} GB`)
 
-/** `isMac`: a Mac never reads GPU / video-memory wording (decision 38). */
+/** `isMac`: a Mac never reads GPU / video-memory wording (decision 38). Profile names go through
+ * `profileLabel`, so an English interface reads the built-in one as `Default` (decision 18). */
 export function eventText(e: ActivityEvent, modelName: (id: string) => string, isMac = false): string {
   if (e.kind === 'state') {
-    const vars = { model: modelName(e.modelId), profile: e.profile, from: stateLabel(e.from), to: stateLabel(e.to) }
+    const vars = { model: modelName(e.modelId), profile: profileLabel(e.profile), from: stateLabel(e.from), to: stateLabel(e.to) }
     return e.error ? fmt(t.events.stateError, { ...vars, reason: reasonText(e.error) }) : fmt(t.events.state, vars)
   }
   if (e.kind === 'drain-timeout') {
-    return fmt(t.events.drainTimeout, { model: modelName(e.modelId), profile: e.profile, count: e.inflight })
+    return fmt(t.events.drainTimeout, { model: modelName(e.modelId), profile: profileLabel(e.profile), count: e.inflight })
   }
   if (e.kind === 'tunnel') {
     return e.state === 'connected' ? t.events.tunnel.connected : fmt(t.events.tunnel.error, { reason: tunnelErrorText(e.code ?? '') })
   }
   if (e.kind === 'runtime-fallback') {
-    return fmt(t.events.runtimeFallback[e.reason], { model: modelName(e.modelId), profile: e.profile, from: e.from, to: e.to })
+    return fmt(t.events.runtimeFallback[e.reason], { model: modelName(e.modelId), profile: profileLabel(e.profile), from: e.from, to: e.to })
   }
   if (e.kind === 'no-room') {
     const key = e.manual ? 'manual' : 'request'
     const template = noRoomReasonTemplate(e.reason, isMac)
-    return fmt(t.events.noRoom[key], { model: modelName(e.modelId), profile: e.profile, reason: fmt(template, { estimate: gibText(e.estimateMiB), available: gibText(e.availableMiB), holder: e.holder ?? '' }) })
+    return fmt(t.events.noRoom[key], { model: modelName(e.modelId), profile: profileLabel(e.profile), reason: fmt(template, { estimate: gibText(e.estimateMiB), available: gibText(e.availableMiB), holder: e.holder ?? '' }) })
   }
   if (e.kind === 'make-room') {
-    return fmt(t.events.makeRoom, { model: modelName(e.modelId), profile: e.profile, victim: modelName(e.victimModelId), victimProfile: e.victimProfile })
+    return fmt(t.events.makeRoom, { model: modelName(e.modelId), profile: profileLabel(e.profile), victim: modelName(e.victimModelId), victimProfile: profileLabel(e.victimProfile) })
   }
   if (e.kind === 'watchdog') {
-    const vars = { model: e.modelId ? modelName(e.modelId) : '', profile: e.profile ?? '', pool: poolText(e.pool, isMac), percent: Math.round(e.freePercent) }
+    const vars = { model: e.modelId ? modelName(e.modelId) : '', profile: profileLabel(e.profile), pool: poolText(e.pool, isMac), percent: Math.round(e.freePercent) }
     return fmt(e.state === 'stopped' ? t.events.watchdog.stopped : t.events.watchdog.blocked, vars)
   }
   if (e.kind === 'vram-deviation') {
-    return fmt(t.events.vramDeviation, { model: modelName(e.modelId), profile: e.profile, percent: Math.round(e.deviation * 100) })
+    return fmt(t.events.vramDeviation, { model: modelName(e.modelId), profile: profileLabel(e.profile), percent: Math.round(e.deviation * 100) })
   }
   const rt = t.events.runtime
   const vars = { tag: e.tag ?? '', code: (t.status.runtime.errors as Record<string, string>)[e.code ?? ''] ?? e.code ?? '', from: e.from ?? '' }

@@ -2,7 +2,7 @@
 // Client addresses (own tunnel: the saved domain plus every host name the tunnel routes to this
 // entry; quick tunnel: the address cloudflared printed) and
 // the self-check: the server requests each address without a key and expects 401.
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 import type { CheckResult } from '~~/server/core/public-check'
 import { publicAddresses } from '~~/server/core/public-addresses'
 

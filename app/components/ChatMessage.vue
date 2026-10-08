@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // One message bubble. Model text goes through renderMarkdown, which escapes everything first.
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 import { renderMarkdown, type ChatMessage } from '~/utils/chat'
 
 const props = defineProps<{ message: ChatMessage, streaming?: boolean, canRegenerate?: boolean }>()

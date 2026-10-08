@@ -211,6 +211,20 @@ describe('applySettingsPatch', () => {
     expect(codeOf(() => applySettingsPatch(settingsWith(), { image: { quality: 70 }, server: { port: 1 } }, models()))).toBe('bad-port')
   })
 
+  // Interface language (decision 18, work package 11-2).
+  test('ui: { locale } is accepted for a known locale and lands in the draft', () => {
+    const s = settingsWith()
+    applySettingsPatch(s, { ui: { locale: 'en' } }, models())
+    expect(s.ui.locale).toBe('en')
+  })
+
+  test('ui: an unknown locale is bad-locale; extra keys or a wrong shape are bad-request', () => {
+    expect(codeOf(() => applySettingsPatch(settingsWith(), { ui: { locale: 'de' } }, models()))).toBe('bad-locale')
+    expect(codeOf(() => applySettingsPatch(settingsWith(), { ui: { locale: 1 } }, models()))).toBe('bad-locale')
+    expect(codeOf(() => applySettingsPatch(settingsWith(), { ui: { locale: 'en', theme: 'dark' } }, models()))).toBe('bad-request')
+    expect(codeOf(() => applySettingsPatch(settingsWith(), { ui: 'en' }, models()))).toBe('bad-request')
+  })
+
   test('the result still passes normalizeSettings and keeps the single-model defaults', () => {
     const s = settingsWith()
     applySettingsPatch(s, { server: { port: 5010 }, defaults: { ctxSize: 4096 } }, models())

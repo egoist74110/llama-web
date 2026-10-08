@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Confirmation before switching / rolling back the llama.cpp version (mounted once in the layout).
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 
 const s = t.llamacpp
 const { pending, busy, confirm } = useLlamacpp()

@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import t from '~~/i18n/zh-CN'
+import { getUiLocale, t } from './composables/useLocale'
 
-useHead({ title: t.app.title })
+// The title follows the interface language, so switching it renames the window without a reload.
+useHead({ title: computed(() => t.app.title), htmlAttrs: { lang: computed(() => getUiLocale()) } })
 </script>
 
 <template>

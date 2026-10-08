@@ -2,7 +2,7 @@
 // "Add version" dialog: pick a source (folder / archive / GitHub address), stage it, show what was
 // found, and register it only after the user confirms. Staging runs the chosen llama-server
 // (`--version`), so a warning comes first. Closing the dialog throws the staged copy away.
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 import type { AddPreview } from '~~/server/core/runtime-add'
 
 const open = defineModel<boolean>('open', { default: false })
@@ -28,11 +28,12 @@ const acceptUnverified = ref(false)
 const error = ref('')
 let cancelledByUser = false
 
-const kinds: Array<{ value: Kind, label: string }> = [
+// A computed: the labels are read again when the interface language changes.
+const kinds = computed<Array<{ value: Kind, label: string }>>(() => [
   { value: 'dir', label: s.kinds.dir },
   { value: 'archive', label: s.kinds.archive },
   { value: 'github', label: s.kinds.github },
-]
+])
 const accelItems = computed(() => [
   { label: s.accelAuto, value: 'auto' },
   { label: accelLabel('cuda', false), value: 'cuda' },

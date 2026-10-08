@@ -2,7 +2,8 @@
 // Overview hero (decision 30): the instance that matters most right now. Ready: name, file,
 // tags, big generation speed and the last ~40 s curve. Loading: progress. Failed: the failure
 // card. Nothing running: an empty state. Other live instances are listed underneath.
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
+import { profileLabel } from '~/utils/profile-label'
 import type { LaunchPreview } from '~~/server/core/launch'
 
 const { state, metrics, serverNow } = useLive()
@@ -46,7 +47,7 @@ watch(topKey, async (key) => {
 const tags = computed(() => {
   const x = top.value
   if (!x) return []
-  const out: Array<{ text: string, mono?: boolean, accent?: boolean }> = [{ text: fmt(h.profile, { name: x.inst.profile }) }]
+  const out: Array<{ text: string, mono?: boolean, accent?: boolean }> = [{ text: fmt(h.profile, { name: profileLabel(x.inst.profile) }) }]
   const ctx = ctxCache.value[topKey.value]
   if (ctx) out.push({ text: fmt(h.ctx, { n: ctx }), mono: true })
   const quant = quantFromFile(x.model.files.model)

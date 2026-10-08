@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Only user-requested release details and manual install confirmation open this dialog.
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 
 const s = t.appUpdate
 const { view, release, open, confirming, busy, install } = useAppUpdate()

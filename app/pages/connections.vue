@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 接入: external OpenAI-compatible upstreams (decision 56). The list comes from useLive() (state.connections, probed
 // every few seconds on the server); writes go to /api/upstreams and the answer is picked up by the next snapshot.
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 import type { ConnectionView, ImageCompressMode } from '~~/server/core/upstreams'
 
 const p = t.upstreams.page
@@ -56,11 +56,12 @@ function change(u: ConnectionView, body: Partial<ConnectionView>) {
   })
 }
 
-const compressModes: Array<{ value: ImageCompressMode, label: string }> = [
+// A computed: the labels are read again when the interface language changes.
+const compressModes = computed<Array<{ value: ImageCompressMode, label: string }>>(() => [
   { value: 'inherit', label: p.compress.inherit },
   { value: 'on', label: p.compress.on },
   { value: 'off', label: p.compress.off },
-]
+])
 
 function test(u: ConnectionView) {
   return run(`test:${u.id}`, async () => {

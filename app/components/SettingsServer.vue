@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Listening port, llama-server port range, timeouts, and the multi-model switches (decisions 41, 42): allow several models
 // online (default off), the online limit and what a request does when the next model does not fit.
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 
 const s = t.settings.server
 const ui = usePlatformUi()
@@ -36,10 +36,10 @@ const anyBad = computed(() => Object.values(bad.value).some(Boolean))
 const set = (key: 'port' | 'from' | 'to' | 'load' | 'drain' | 'max', v: string | number | undefined) => { f[key] = v == null ? '' : String(v) }
 // The wording says video memory only where there is a card (decision 38).
 const memory = computed(() => (ui.value.isMac ? t.memory.noun.ram : `${t.memory.noun.vram}和${t.memory.noun.ram}`))
-const noRoomItems = [
+const noRoomItems = computed(() => [
   { value: 'unload', label: s.onNoRoomUnload, description: s.onNoRoomUnloadHint },
   { value: 'error', label: s.onNoRoomError, description: s.onNoRoomErrorHint },
-]
+])
 
 const submit = () => save('server', {
   server: {

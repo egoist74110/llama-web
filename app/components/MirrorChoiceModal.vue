@@ -2,7 +2,7 @@
 // Mounted once in the layout. After a check or download that the user started failed because
 // GitHub could not be reached (the server marks the failure with `offer`), asks which public
 // mirror to retry through. Automatic checks never reach this dialog.
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 import { customMirror, offeredMirrors } from '~~/server/core/mirrors'
 
 const s = t.mirror

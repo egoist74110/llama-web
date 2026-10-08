@@ -1,6 +1,6 @@
 // Switching the current llama.cpp version (rollback). One confirmation dialog for the whole app
 // (LlamacppSwitchModal in the layout); the settings card and the failure card only ask for it.
-import t from '~~/i18n/zh-CN'
+import { t } from './useLocale'
 
 function messageOf(e: unknown): string {
   const err = e as { data?: { message?: string }, statusMessage?: string, message?: string }

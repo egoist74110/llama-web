@@ -3,6 +3,7 @@
 // poll. EventSource reconnects by itself; a dropped connection is shown in the top bar.
 import type { ActivityEvent, LogLine, MetricsDoc, StateDoc } from '~~/server/core/live'
 import type { RequestRecord } from '~~/server/core/request-log'
+import { setUiLocale } from './useLocale'
 
 const MAX_EVENTS = 50
 const MAX_REQUESTS = 200
@@ -38,6 +39,8 @@ function connect() {
     state.value = s
     skew.value = s.now - Date.now()
     connected.value = true
+    // The snapshot carries the saved language: a settings save repaints every open page (decision 18).
+    if (s.locale) setUiLocale(s.locale)
   })
   source.addEventListener('metrics', (e) => {
     const m = parse<MetricsDoc>(e as MessageEvent)

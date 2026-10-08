@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // The estimate bar of the edit drawer (decisions 42, 43): tier, how much is needed against how much is free, the breakdown
 // per memory pool, what the estimate could not model, and the parameter findings of the same check.
-import t from '~~/i18n/zh-CN'
+import { t } from '../composables/useLocale'
 import {
   barPercent, estimateTitle, issueText, mainPool, noteTexts, poolRows, poolTitle, summaryText, tierBar, tierClass,
   type CheckDoc,
