@@ -10,7 +10,7 @@
 - 接入外部服务：把任意 OpenAI 兼容服务（别的推理后端、远端服务）作为转发目标，按前缀路由；离线时可保存启动命令，在页面里启动和关闭
 - 界面：总览 / 模型 / 接入 / 对话 / 日志 / 设置；实时速度、加载进度、显存、失败诊断；界面语言在左侧栏切换，立即生效，不用重启
 - 自动更新官方 llama.cpp，保留旧版本，界面一键回退
-- 平台：Windows 11（NVIDIA GPU 或 CPU）；macOS 源码版见下文，**尚未在 Mac 真机完整验证**。开发计划与决定见 [`docs/plan.html`](docs/plan.html)
+- 平台：Windows 11（NVIDIA GPU 或 CPU）；macOS 源码版见下文（维护者已在 Apple Silicon Mac 上运行验证）。开发计划与决定见 [`docs/plan.html`](docs/plan.html)
 
 ## 安装
 
@@ -26,7 +26,7 @@
 bun install
 ```
 
-### macOS 源码版（未在 Mac 真机验证）
+### macOS 源码版
 
 同样需要 [Bun](https://bun.sh)。首次启动会按芯片下载官方 macOS 版 llama.cpp 并校验 SHA-256；Mac 只有这一种版本，设置页里没有显卡、设备或 CPU / GPU 切换。没有安装包、应用内更新和桌面壳：升级时 `git pull` 后运行 `./start.command build`。
 

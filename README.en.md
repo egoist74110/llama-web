@@ -10,7 +10,7 @@ A private local LLM console: one Nuxt + Bun process that starts, stops and switc
 - External services: connect any OpenAI-compatible service (another inference backend, a remote service) as a forwarding target, routed by prefix; when it is offline you can save a start command and start and stop it from the page
 - UI: Overview / Models / Connections / Chat / Logs / Settings; live speed, load progress, VRAM and failure diagnosis; the interface language is switched in the left sidebar and applies immediately, no restart
 - Updates the official llama.cpp automatically, keeps old versions, one-click rollback in the UI
-- Platforms: Windows 11 (NVIDIA GPU or CPU); the macOS source version is described below and is **not yet fully verified on a real Mac**. The development plan and decisions are in [`docs/plan.html`](docs/plan.html) (written in Chinese)
+- Platforms: Windows 11 (NVIDIA GPU or CPU); the macOS source version is described below (the maintainer has run it on an Apple Silicon Mac). The development plan and decisions are in [`docs/plan.html`](docs/plan.html) (written in Chinese)
 
 ## Install
 
@@ -26,7 +26,7 @@ Requires [Bun](https://bun.sh) (`bun` on your PATH). You do not need to download
 bun install
 ```
 
-### macOS from source (not verified on a real Mac)
+### macOS from source
 
 Also requires [Bun](https://bun.sh). The first launch downloads the official macOS build of llama.cpp for your chip and checks its SHA-256; a Mac has only this one build, so the Settings page has no GPU, device or CPU / GPU switch. There is no installer, in-app update or desktop shell: to upgrade, run `git pull` and then `./start.command build`.
 
