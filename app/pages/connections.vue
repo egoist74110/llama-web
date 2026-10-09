@@ -125,6 +125,17 @@ function cancelStart(u: ConnectionView) {
   })
 }
 
+function stop(u: ConnectionView) {
+  return run(`stop:${u.id}`, async () => {
+    try {
+      await $fetch(url(u, '/stop'), { method: 'POST' })
+      toast.add({ title: fmt(p.start.stopped, { name: u.name }), color: 'success', icon: 'i-lucide-check' })
+    } catch (e) {
+      fail(p.start.stopFailed, e)
+    }
+  })
+}
+
 const canStart = (u: ConnectionView) => u.checkedAt !== null && !u.up
 const waited = (u: ConnectionView) => (u.launch.state === 'starting' ? formatDuration(Math.max(0, serverNow.value - u.launch.since)) : '')
 const launchFailure = (u: ConnectionView) => {
@@ -191,13 +202,19 @@ const example = (u: ConnectionView) => `${u.name}-${allModels(u)[0] ?? 'model-id
           </a>
         </div>
 
-        <div v-if="canStart(u) || u.launch.state !== 'idle'" class="flex flex-col gap-2 rounded-[10px] bg-[var(--lw-sunken)] px-3.5 py-3">
+        <div v-if="canStart(u) || u.launch.state !== 'idle' || (u.up && u.canStop)" class="flex flex-col gap-2 rounded-[10px] bg-[var(--lw-sunken)] px-3.5 py-3">
           <div v-if="u.launch.state === 'starting'" class="flex flex-wrap items-center justify-between gap-2">
             <span class="flex items-center gap-2 text-[13px]">
               <UIcon name="i-lucide-loader-circle" class="size-4 shrink-0 animate-spin lw-dot-warn" />{{ fmt(p.start.waiting, { time: waited(u) }) }}
             </span>
             <UButton size="sm" color="neutral" variant="outline" :title="p.start.cancelHint" :loading="!!busy[`startcancel:${u.id}`]" @click="cancelStart(u)">
               {{ p.start.cancel }}
+            </UButton>
+          </div>
+          <div v-else-if="u.up && u.canStop" class="flex flex-wrap items-center justify-between gap-2">
+            <span class="text-xs text-muted">{{ p.start.running }}</span>
+            <UButton size="sm" color="neutral" variant="outline" icon="i-lucide-square" :title="p.start.stopHint" :loading="!!busy[`stop:${u.id}`]" @click="stop(u)">
+              {{ p.start.stop }}
             </UButton>
           </div>
           <div v-else-if="u.startCommand" class="flex flex-wrap items-center justify-between gap-2">

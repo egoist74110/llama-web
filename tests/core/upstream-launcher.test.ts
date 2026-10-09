@@ -174,6 +174,27 @@ describe('waiting for the service', () => {
     expect(s.killed).toEqual([])
   })
 
+  test('a service that came up can be stopped by hand; one we did not start cannot', async () => {
+    const s = setup(doc())
+    await expect(s.launcher.stop(s.id)).rejects.toThrow(LaunchError)
+    expect(s.launcher.canStop(s.id)).toBe(false)
+    s.launcher.start(s.id, false)
+    s.setResult({ ok: true, models: ['m'] })
+    await s.until(() => s.ready.length === 1)
+    expect(s.launcher.state(s.id).state).toBe('idle')
+    expect(s.launcher.canStop(s.id)).toBe(true)
+    await s.launcher.stop(s.id)
+    expect(s.killed).toEqual([4242])
+    expect(s.launcher.canStop(s.id)).toBe(false)
+  })
+
+  test('a start that failed leaves nothing to stop; a script that exited is not stoppable on Windows', async () => {
+    const s = setup(doc())
+    s.launcher.start(s.id, false)
+    s.procs[0]!.exitCb(1)
+    expect(s.launcher.canStop(s.id)).toBe(false)
+  })
+
   test('removing the upstream while waiting ends the wait quietly', async () => {
     const d = doc()
     const s = setup(d)

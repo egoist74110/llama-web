@@ -334,6 +334,8 @@ export interface ConnectionView extends UpstreamView {
   checkedAt: number | null
   /** The manual start (decision 56 ⑩). */
   launch: LaunchState
+  /** The service was started from here and can be stopped from here. */
+  canStop: boolean
 }
 
 export function viewUpstreams(doc: UpstreamsDoc, keys: Record<string, string>): UpstreamView[] {

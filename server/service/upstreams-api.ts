@@ -8,7 +8,7 @@ import { getContext } from './context'
 export function describeUpstreams(): { upstreams: ConnectionView[], exclusiveHolder: string | null } {
   const ctx = getContext()
   const upstreams = viewUpstreams(ctx.getUpstreams(), ctx.getSecrets().upstreamKeys).map(u => ({
-    ...u, up: ctx.health.isUp(u.id), checkedAt: ctx.health.state(u.id)?.checkedAt ?? null, launch: ctx.launcher.state(u.id),
+    ...u, up: ctx.health.isUp(u.id), checkedAt: ctx.health.state(u.id)?.checkedAt ?? null, launch: ctx.launcher.state(u.id), canStop: ctx.launcher.canStop(u.id),
   }))
   return { upstreams, exclusiveHolder: ctx.health.holder() }
 }

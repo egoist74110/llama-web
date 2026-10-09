@@ -1576,6 +1576,11 @@ export default {
         },
         startFailed: '启动失败',
         cancelFailed: '取消失败',
+        stop: '关闭',
+        stopHint: '结束刚才从这里启动的进程（连同它启动的子进程）。只有这次运行的 llama-web 启动的服务才能从这里关闭，重启 llama-web 之后就不能了。',
+        running: '服务由这里启动，正在运行。',
+        stopped: '「{name}」已关闭。',
+        stopFailed: '关闭失败',
       },
     },
     form: {
@@ -1659,6 +1664,7 @@ export default {
         'already-starting': '正在启动，请等待结果。',
         'bad-cwd': '工作目录不存在，或不是文件夹：{detail}',
         'bad-command': '启动命令无法解析：{detail}',
+        'not-ours': '这个服务不是这次运行的 llama-web 启动的，没法从这里停止。',
       },
     },
     test: {

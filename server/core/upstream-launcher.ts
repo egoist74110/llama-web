@@ -10,7 +10,7 @@ import { splitArgs } from './args'
 import { killTree } from './runner'
 import type { Upstream } from './upstreams'
 
-export type LaunchErrorCode = 'not-found' | 'no-command' | 'already-up' | 'already-starting' | 'bad-cwd' | 'bad-command'
+export type LaunchErrorCode = 'not-found' | 'no-command' | 'already-up' | 'already-starting' | 'bad-cwd' | 'bad-command' | 'not-ours'
 
 export class LaunchError extends Error {
   constructor(public code: LaunchErrorCode, public detail = '') {
@@ -67,6 +67,8 @@ export interface LauncherDeps {
   onReady(u: Upstream, models: string[]): void
   /** The state of any upstream changed (for the live snapshot). */
   onChange(): void
+  /** The service we started was stopped by hand: the health probe is nudged. */
+  onStopped?(u: Upstream): void
   log?(message: string): void
   spawn?(spec: SpawnSpec): LaunchedProcess
   kill?(pid: number): Promise<void>
@@ -89,9 +91,13 @@ interface Run {
   done: boolean
 }
 
+/** A process this llama-web run started; it stays here after the service is up so it can be stopped by hand. */
+interface Owned { proc: LaunchedProcess, exited: boolean }
+
 export class UpstreamLauncher {
   private readonly states = new Map<string, LaunchState>()
   private readonly runs = new Map<string, Run>()
+  private readonly owned = new Map<string, Owned>()
 
   constructor(private readonly deps: LauncherDeps) {}
 
@@ -129,10 +135,13 @@ export class UpstreamLauncher {
     this.deps.log?.(`upstream ${u.name}: started by hand (${basename(file)}), waiting for its models`)
     const run: Run = { upstream: id, proc, timer: null, deadline: now() + (this.deps.timeoutMs ?? 600_000), exited: false, checking: false, done: false }
     this.runs.set(id, run)
+    const own: Owned = { proc, exited: false }
+    this.owned.set(id, own)
     this.set(id, { state: 'starting', since: now() })
     proc.onError((e) => { if (!run.done) this.finish(run, { state: 'failed', code: 'spawn-failed', detail: e.message }) })
     proc.onExit((code) => {
       run.exited = true
+      own.exited = true
       // A launcher that starts the service and exits (code 0) is normal: keep waiting. A crash is not.
       if (!run.done && code !== 0 && code !== null) this.finish(run, { state: 'failed', code: 'exited', detail: String(code) })
     })
@@ -146,12 +155,39 @@ export class UpstreamLauncher {
     if (!run) return
     this.finish(run, { state: 'idle' })
     if (!run.exited && run.proc.pid) await (this.deps.kill ?? killTree)(run.proc.pid).catch(() => {})
+    this.owned.delete(id)
+  }
+
+  /**
+   * Can the service be stopped from here? Only a process this run started: nothing is remembered across a restart of
+   * llama-web (not in pids.json, decision 56), and a service the user started elsewhere is never ours to kill. Off
+   * Windows the process group is signalled, so it works after a start script has exited; `taskkill /T` needs the pid alive.
+   */
+  canStop(id: string): boolean {
+    const o = this.owned.get(id)
+    return !!o && !!o.proc.pid && (!o.exited || (this.deps.platform ?? process.platform) !== 'win32')
+  }
+
+  /** End the process we started for this upstream (and what it started). */
+  async stop(id: string): Promise<void> {
+    const u = this.deps.upstreams().find(x => x.id === id)
+    if (!u) throw new LaunchError('not-found')
+    const o = this.owned.get(id)
+    if (!o || !this.canStop(id)) throw new LaunchError('not-ours')
+    const run = this.runs.get(id)
+    if (run) this.finish(run, { state: 'idle' })
+    this.owned.delete(id)
+    await (this.deps.kill ?? killTree)(o.proc.pid!).catch(() => {})
+    this.deps.log?.(`upstream ${u.name}: stopped by hand`)
+    this.deps.onChange()
+    this.deps.onStopped?.(u)
   }
 
   /** llama-web is closing: stop the timers. The services stay running. */
   close(): void {
     for (const run of this.runs.values()) { run.done = true; if (run.timer) clearTimeout(run.timer) }
     this.runs.clear()
+    this.owned.clear()
   }
 
   private set(id: string, s: LaunchState) {
@@ -164,6 +200,8 @@ export class UpstreamLauncher {
     run.done = true
     if (run.timer) clearTimeout(run.timer)
     this.runs.delete(run.upstream)
+    // A failed start leaves nothing to stop; a timeout may still be loading, so it stays stoppable.
+    if (s.state === 'failed' && s.code !== 'timeout') this.owned.delete(run.upstream)
     this.set(run.upstream, s)
   }
 
