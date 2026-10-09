@@ -123,6 +123,7 @@ export const enSkeleton: PartialMessages = {
     themeDark: 'Dark',
     themeSystem: 'Follow system',
     themeSystemShort: 'System',
+    language: 'Language',
     mainNav: 'Main navigation',
     serving: {
       title: 'Now serving',
@@ -843,7 +844,7 @@ export const enSkeleton: PartialMessages = {
   },
 
   // Settings page: directory list, launch defaults, system section, image preprocessing, server settings,
-  // save errors. The language control itself is work package 11-2.
+  // save errors. The language switch lives in the sidebar.
   settings: {
     title: 'Settings',
     toc: 'Settings sections',
@@ -854,11 +855,6 @@ export const enSkeleton: PartialMessages = {
     loadFailed: 'Failed to read the settings',
     reset: 'Discard changes',
     dirty: 'Unsaved changes',
-    language: {
-      title: 'Interface language',
-      hint: 'The language of the management interface, and of events and API messages. It applies immediately, no restart needed; models, parameters and saved files are unaffected.',
-      label: 'Language',
-    },
     dirs: {
       title: 'Model directories',
       hint: 'Where .gguf files are scanned. Each directory can be disabled on its own, with its own scan depth. Models are recorded as "directory + relative path", so after a drive letter changes you only fix it here.',

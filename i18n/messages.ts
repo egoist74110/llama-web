@@ -43,6 +43,9 @@ export const DEFAULT_LOCALE: LocaleCode = 'zh-CN'
  * What each language calls itself. A language picker shows `中文` / `English` in every language, so
  * these are names and not wording: they are not translated and they are not part of a dictionary.
  */
+/** Compact names for the sidebar switch (two buttons wide). */
+export const LOCALE_SHORT_NAMES: { [K in LocaleCode]: string } = { 'zh-CN': '中文', en: 'EN' }
+
 export const LOCALE_NAMES: { [K in LocaleCode]: string } = { 'zh-CN': '中文', en: 'English' }
 
 /**

@@ -9,7 +9,6 @@ onMounted(load)
 // A computed: the labels are read again when the interface language changes.
 const all = computed(() => [
   { id: 's-dirs', label: t.settings.dirs.title, needsDoc: true },
-  { id: 's-language', label: t.settings.language.title, needsDoc: true },
   { id: 's-system', label: t.settings.system.title, needsDoc: true },
   { id: 's-llama', label: t.llamacpp.title, needsDoc: true },
   { id: 's-defaults', label: t.settings.defaults.title, needsDoc: true },
@@ -94,7 +93,6 @@ watch(() => route.hash, async () => { await nextTick(); goToHash() })
         </div>
         <template v-else>
           <SettingsDirs id="s-dirs" />
-          <SettingsLanguage id="s-language" />
           <SettingsSystem id="s-system" />
           <SettingsLlamacpp id="s-llama" />
           <SettingsDefaults id="s-defaults" />

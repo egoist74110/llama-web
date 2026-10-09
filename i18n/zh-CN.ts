@@ -98,6 +98,7 @@ export default {
     themeDark: '深色',
     themeSystem: '跟随系统',
     themeSystemShort: '系统',
+    language: '界面语言',
     mainNav: '主导航',
     serving: {
       title: '正在服务',
@@ -816,11 +817,6 @@ export default {
     loadFailed: '读取设置失败',
     reset: '撤销修改',
     dirty: '有未保存的修改',
-    language: {
-      title: '界面语言',
-      hint: '管理界面显示的语言，也是事件与接口提示使用的语言。选完立刻生效，不用重启；模型、参数和已保存的文件都不受影响。',
-      label: '语言',
-    },
     dirs: {
       title: '模型目录',
       hint: '扫描 .gguf 文件的位置。每个目录可以单独停用，并限制往下扫描几层。模型记录的是「目录 + 相对路径」，换了盘符只需要改这里的路径。',

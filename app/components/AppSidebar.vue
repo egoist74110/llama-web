@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // Left sidebar (decision 30): brand, navigation, the "now serving" card, connection status,
 // llama.cpp version and the light / dark switch. Replaces the old top bar.
-import { t } from '../composables/useLocale'
+import { LOCALES, LOCALE_SHORT_NAMES, type LocaleCode } from '~~/i18n/messages'
+import { getUiLocale, t } from '../composables/useLocale'
 
 const { state, metrics, connected } = useLive()
 const route = useRoute()
@@ -60,6 +61,14 @@ const runtimeUpdate = computed(() => {
   return c?.state === 'checked' && c.available ? c.tag : null
 })
 const { view: appVersion, release: appRelease } = useAppUpdate()
+
+const { saving, save } = useSettings()
+const locales = LOCALES.map((code) => ({ value: code, label: LOCALE_SHORT_NAMES[code] }))
+const currentLocale = computed(() => getUiLocale())
+function pickLocale(next: LocaleCode): void {
+  if (next === getUiLocale() || saving.value) return
+  void save('language', { ui: { locale: next } }, { quiet: true })
+}
 
 const colorMode = useColorMode()
 // A computed: the theme names follow the interface language.
@@ -137,6 +146,20 @@ const modes = computed(() => [
       <div v-if="appVersion" class="flex flex-wrap items-center gap-2 text-xs text-dimmed">
         <span class="font-mono">{{ t.app.title }} v{{ appVersion.current }}</span>
         <NuxtLink v-if="appRelease && appVersion.skipped !== appRelease.version" to="/settings#s-about" class="text-primary">{{ fmt(t.appUpdate.inlineAvailable, { version: appRelease.version }) }}</NuxtLink>
+      </div>
+      <div class="lw-seg w-full" role="group" :aria-label="L.language">
+        <button
+          v-for="l in locales"
+          :key="l.value"
+          type="button"
+          class="flex-1"
+          :class="{ on: currentLocale === l.value }"
+          :aria-pressed="currentLocale === l.value"
+          :disabled="!!saving"
+          @click="pickLocale(l.value)"
+        >
+          {{ l.label }}
+        </button>
       </div>
       <div class="lw-seg w-full" role="group" :aria-label="L.theme">
         <button
