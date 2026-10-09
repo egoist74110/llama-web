@@ -1,16 +1,15 @@
 // Stage 11 (decision 18): compare the English dictionary with the Chinese source of truth.
 //
-// Warn-only while the translation is in progress (this is work package 11-1): the gaps are printed
-// and the test passes. When the three translation batches are done, set TRANSLATION_DONE to true
-// (work package 11-4) and the same findings become failures. What has already been written in
-// English is checked hard either way.
+// Hard failure since work package 11-4: the three translation batches are done, so every finding
+// below (a missing key, an invented key, a shape or placeholder mismatch, CJK left in English, an
+// empty string) fails the test. The findings are still printed, so a failure says what is wrong.
 import { describe, expect, test } from 'bun:test'
 import zh from '../../i18n/zh-CN'
 import { enSkeleton } from '../../i18n/en'
 import { dictionaries } from '../../i18n/messages'
 
-/** False while stage 11 is translating: report the gaps instead of failing on them. */
-const TRANSLATION_DONE = false
+/** The three translation batches are done (11-2 to 11-3): the gaps are failures, not warnings. */
+const TRANSLATION_DONE = true
 
 /** CJK ideographs, Japanese kana, Korean hangul and the full-width punctuation written with them. */
 const CJK = /[\u2e80-\u2eff\u3000-\u303f\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff\uff01-\uff60]/
@@ -22,11 +21,29 @@ interface Leaf {
   text: string
 }
 
-/** Every string leaf and every array leaf of a dictionary, keyed by its key path. */
+/** The text inside an array entry: its own text, plus the text of everything nested in it. */
+function collect(node: unknown, into: string[]): void {
+  if (typeof node === 'string') into.push(node)
+  else if (Array.isArray(node)) for (const entry of node) collect(entry, into)
+  else if (node && typeof node === 'object') for (const key of Object.keys(node)) collect(node[key], into)
+}
+
+/**
+ * Every string leaf and every array leaf of a dictionary, keyed by its key path. An array stays one
+ * leaf - its entry count is its shape - but its entries are walked as well, so a field written
+ * inside an array entry (`tunnel.guide.steps[0].title`) is checked like any other key: the field
+ * names, the placeholders, CJK left in English and empty strings all apply to it.
+ */
 function leaves(node: unknown, path: string, out: Map<string, Leaf>): Map<string, Leaf> {
   if (typeof node === 'string') out.set(path, { kind: 'string', length: 1, text: node })
-  else if (Array.isArray(node)) out.set(path, { kind: 'array', length: node.length, text: node.join('\n') })
-  else if (node && typeof node === 'object') {
+  else if (Array.isArray(node)) {
+    const nested: string[] = []
+    collect(node, nested)
+    out.set(path, { kind: 'array', length: node.length, text: nested.join('\n') })
+    // The array is still one leaf (its entry count is its shape), but every entry is walked too:
+    // a field written inside an array entry is a key of its own and is checked like any other key.
+    node.forEach((entry, i) => leaves(entry, `${path}[${i}]`, out))
+  } else if (node && typeof node === 'object') {
     for (const key of Object.keys(node)) leaves(node[key], path ? `${path}.${key}` : key, out)
   }
   return out
@@ -76,7 +93,7 @@ describe('i18n parity (zh-CN vs en)', () => {
     expect(emptyProblems).toEqual([])
   })
 
-  test('the gaps are reported, and only become failures once the three translation batches are done', () => {
+  test('the whole Chinese dictionary is translated: the gaps are reported and fail the test', () => {
     const done = zhLeaves.size - missing.length
     const notes = [
       `en covers ${done} / ${zhLeaves.size} Chinese keys`,

@@ -25,6 +25,8 @@ export const MAX_BODY_BYTES = 100 * 1024 * 1024
 export type ProxyEvent =
   | { type: 'preprocess', target: Target, result: PreprocessResult }
   | { type: 'upstream-error', target: Target, error: unknown }
+  /** A failure that is not a SchedulerError: server-side diagnostics only, never a client message. */
+  | { type: 'internal-error', target: Target, error: unknown }
 
 /**
  * `p`, rejected early when `signal` aborts (or after `ms`). The abort listener lives only
@@ -175,25 +177,10 @@ export function loadFailureReason(cause: unknown): keyof typeof t.loadError {
   return diagnose(cause)?.kind ?? 'unknown'
 }
 
-function schedulerErrorResponse(e: unknown, modelName: string): Response {
-  if (!(e instanceof SchedulerError)) {
-    return errorResponse(500, 'internal_error', String((e as Error)?.message ?? e))
-  }
-  switch (e.code) {
-    case 'failed': {
-      const reason = t.loadError[loadFailureReason(e.cause)]
-      return errorResponse(503, 'model_load_failed', fmt(t.api.loadFailed, { model: modelName, reason }))
-    }
-    case 'stopped': return errorResponse(503, 'model_stopped', fmt(t.api.modelStopped, { model: modelName }))
-    case 'shutdown': return errorResponse(503, 'shutting_down', t.api.shuttingDown)
-    case 'cancelled': return errorResponse(499, 'cancelled', 'cancelled')
-    case 'no-room': return errorResponse(503, 'insufficient_memory', noRoomText(e.cause as NoRoomDetail | undefined, modelName))
-  }
-}
-
 const gib = (miB: number | null) => (miB === null ? '?' : `${(miB / 1024).toFixed(1)} GB`)
 
-/** Chinese reason of a refused load (decision 42): numbers included, no paths or names beyond the model. */
+/** The reason of a refused load, in the language the server is answering in (decision 42): numbers
+ * included, no paths or names beyond the model. */
 export function noRoomText(d: NoRoomDetail | undefined, model: string): string {
   const vars = { model, estimate: gib(d?.estimateMiB ?? null), available: gib(d?.availableMiB ?? null), limit: String(d?.limit ?? ''), holder: d?.holder ?? '' }
   const reason = d?.reason ?? 'memory'
@@ -312,6 +299,29 @@ export function createProxy(deps: ProxyDeps) {
     return errorResponse(502, 'upstream_unreachable', fmt(t.api.upstreamUnreachable, { model: modelName, detail: String((e as Error)?.message ?? e) }))
   }
 
+  /**
+   * Answer a scheduler failure. A failure that is not a SchedulerError keeps its raw text on the
+   * server side only - it is emitted as an `internal-error` proxy event, which the service logs
+   * (`server/service/context.ts`) - while the client gets the dictionary text, because `/v1/*`
+   * errors are read by third-party clients in the language of the settings (decision 18).
+   */
+  function schedulerErrorResponse(e: unknown, target: Target, modelName: string): Response {
+    if (!(e instanceof SchedulerError)) {
+      deps.onEvent?.({ type: 'internal-error', target, error: e })
+      return errorResponse(500, 'internal_error', t.api.internalError)
+    }
+    switch (e.code) {
+      case 'failed': {
+        const reason = t.loadError[loadFailureReason(e.cause)]
+        return errorResponse(503, 'model_load_failed', fmt(t.api.loadFailed, { model: modelName, reason }))
+      }
+      case 'stopped': return errorResponse(503, 'model_stopped', fmt(t.api.modelStopped, { model: modelName }))
+      case 'shutdown': return errorResponse(503, 'shutting_down', t.api.shuttingDown)
+      case 'cancelled': return errorResponse(499, 'cancelled', t.api.cancelled)
+      case 'no-room': return errorResponse(503, 'insufficient_memory', noRoomText(e.cause as NoRoomDetail | undefined, modelName))
+    }
+  }
+
   /** Forward to the leased model and pass the response through; releases the lease. */
   async function forward(call: UpstreamCall, modelName: string, trace?: RequestTrace): Promise<Response> {
     if (trace) trace.deferred = true
@@ -411,7 +421,7 @@ export function createProxy(deps: ProxyDeps) {
           trace.finish(200, 'aborted')
           writer.abort().catch(() => {})
         } else {
-          const failure = schedulerErrorResponse(e, modelName)
+          const failure = schedulerErrorResponse(e, target, modelName)
           trace.finish(200, 'error', codeOf(failure))
           await sendFinal(failure)
         }
@@ -456,9 +466,14 @@ export function createProxy(deps: ProxyDeps) {
       ac.signal.addEventListener('abort', finish, { once: true })
       try {
         if (!res.ok || !res.body) {
-          // Headers are already sent as SSE; report the upstream error as an event.
+          // Headers are already sent as SSE; report the upstream error as an event. The upstream's
+          // own body is relayed unchanged; when it sent none, the event is built from the dictionary
+          // instead of the upstream's statusText, so the upstream's wording never reaches the client.
           const text = await res.text()
-          await bounded(send(`data: ${text || JSON.stringify({ error: { message: res.statusText, code: res.status } })}\n\n`), ac.signal)
+          const relayed = text || JSON.stringify({
+            error: { message: fmt(t.api.upstreamStreamError, { status: res.status }), code: res.status },
+          })
+          await bounded(send(`data: ${relayed}\n\n`), ac.signal)
           upstreamStatus = res.status
           trace.chunk(enc.encode(text))
           ok = res.status < 500
@@ -627,7 +642,7 @@ export function createProxy(deps: ProxyDeps) {
     try {
       lease = await deps.scheduler.acquire(target, { signal: req.signal })
     } catch (e) {
-      return schedulerErrorResponse(e, model.name)
+      return schedulerErrorResponse(e, target, model.name)
     }
     return forward({ lease, req, path: upstreamPath, body }, model.name, trace)
   }
@@ -655,10 +670,11 @@ export function createProxy(deps: ProxyDeps) {
     const running = deps.scheduler.snapshot().models.find(s => s.modelId === model.id && s.state === 'ready')
     if (!running) return errorResponse(503, 'model_not_running', fmt(t.api.notRunning, { model: model.name }))
     let lease: Lease
+    const target: Target = { modelId: running.modelId, profile: running.profile }
     try {
-      lease = await deps.scheduler.acquire({ modelId: running.modelId, profile: running.profile }, { signal: req.signal })
+      lease = await deps.scheduler.acquire(target, { signal: req.signal })
     } catch (e) {
-      return schedulerErrorResponse(e, model.name)
+      return schedulerErrorResponse(e, target, model.name)
     }
     return forward({ lease, req, path: m[2] + url.search, body: raw }, model.name)
   }

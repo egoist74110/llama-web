@@ -21,7 +21,9 @@ describe('dictionaries', () => {
     expect(LOCALES).toEqual(['zh-CN', 'en'])
     for (const code of LOCALES) {
       expect(dictionaries[code]).toBeDefined()
-      expect(dictionaries[code].api.modelNotFound).toBe(zh.api.modelNotFound)
+      // Shape only: the wording of this key is translated batch by batch.
+      expect(dictionaries[code]!.api.modelNotFound.trim()).not.toBe('')
+      expect(dictionaries[code].api.modelNotFound).toContain('{name}')
     }
   })
 
@@ -29,7 +31,7 @@ describe('dictionaries', () => {
     expect(dictionaries.en.desktop).not.toBe(dictionaries['zh-CN'].desktop)
     expect(dictionaries.en.cloudflare.howToken.steps).not.toBe(zh.cloudflare.howToken.steps)
     expect(Array.isArray(dictionaries.en.cloudflare.howToken.steps)).toBe(true)
-    expect(dictionaries.en.api.modelNotFound).toBe(zh.api.modelNotFound)
+    expect(dictionaries.en.api).not.toBe(dictionaries['zh-CN'].api)
   })
 })
 
@@ -75,8 +77,11 @@ describe('deepMergeWithFallback', () => {
 
   test('the real dictionaries: en covers every key of zh-CN and falls back where nothing is written', () => {
     const en = deepMergeWithFallback(dictionaries['zh-CN'], enSkeleton)
-    expect(en.desktop.choose).toBe(zh.desktop.choose)
-    expect(en.models.edit.rd.gpu.confirmNotes).toEqual(zh.models.edit.rd.gpu.confirmNotes)
+    // Shape only: every key of zh-CN is present, and the wording is whatever batch has written it.
+    expect(typeof en.desktop.choose).toBe('string')
+    expect(en.desktop.choose.trim()).not.toBe('')
+    // Translated arrays keep the Chinese length and order (merged entry by index), not the text.
+    expect(en.models.edit.rd.gpu.confirmNotes.length).toBe(zh.models.edit.rd.gpu.confirmNotes.length)
     expect(en.cloudflare.howDomain.steps.length).toBe(zh.cloudflare.howDomain.steps.length)
   })
 })

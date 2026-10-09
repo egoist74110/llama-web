@@ -1918,6 +1918,10 @@ export default {
     loadFailed: '模型「{model}」加载失败：{reason}。请查看日志，处理后手动重试。',
     modelStopped: '模型「{model}」已被手动停止，请求已取消。',
     shuttingDown: 'llama-web 正在关闭。',
+    // 499: the request that was waiting for a load was cancelled.
+    cancelled: '请求已被取消。',
+    // Used when the upstream answered a stream with an error and no body of its own.
+    upstreamStreamError: '上游服务返回了错误（状态码 {status}），没有返回可以显示的原因。',
     // 503 insufficient_memory (decision 42): the load was not started; models already online are untouched.
     noRoom: {
       memory: '模型「{model}」放不下：预估需要 {estimate}，当前可用 {available}。为避免拖垮服务器，没有加载。请联系服务所有者先停止别的模型，或改用更小的模型 / 参数。',

@@ -205,8 +205,12 @@ function logProxyEvent(e: ProxyEvent) {
         x ? `${x.width}x${x.height} ${x.format} ${Math.round(x.bytes / 1024)}KB` : '?'
       log(`image ${describeTarget(e.target)} #${r.message}.${r.part}: ${r.action} ${size(b)}${a ? ` -> ${size(a)}` : ''}${r.detail ? ` (${r.detail})` : ''}`)
     }
-  } else {
+  } else if (e.type === 'upstream-error') {
     logError(`upstream ${describeTarget(e.target)}:`, (e.error as Error)?.message ?? e.error)
+  } else {
+    // A failure that is not a SchedulerError: its raw text is kept on the server side (this is the
+    // diagnostic path the proxy error response deliberately does not carry to the client).
+    logError(`internal error ${describeTarget(e.target)}:`, (e.error as Error)?.message ?? e.error)
   }
 }
 

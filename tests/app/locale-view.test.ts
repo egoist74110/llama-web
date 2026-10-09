@@ -3,6 +3,7 @@
 // object, reading the dictionary of the language that is current when a value is read.
 import { afterEach, describe, expect, test } from 'bun:test'
 import zh from '../../i18n/zh-CN'
+import { dictionaries } from '../../i18n/messages'
 import { applyUiLocale, getUiLocale, t } from '../../app/composables/useLocale'
 
 afterEach(() => applyUiLocale({ locale: 'zh-CN' }))
@@ -17,9 +18,10 @@ describe('the locale view (work package 11-2)', () => {
     const s = t.settings.system
     applyUiLocale({ locale: 'en' })
     // Same object identity (the alias never has to be re-taken), and its values now resolve
-    // against the English dictionary - Chinese text until work package 11-3 fills the English
-    // dictionary in, exactly the fallback rule of i18n/fill.ts.
-    expect(s.title).toBe(zh.settings.system.title)
+    // against the English dictionary - translated wording where batch 1 (11-2 至 11-3) has written
+    // English, Chinese fallback elsewhere, exactly the merge rule of i18n/fill.ts.
+    expect(s.title).toBe(dictionaries.en.settings.system.title)
+    expect(s.title).not.toBe(zh.settings.system.title)
     expect(getUiLocale()).toBe('en')
   })
 

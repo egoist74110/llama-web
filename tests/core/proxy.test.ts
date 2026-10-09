@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import sharp from 'sharp'
+import { DEFAULT_LOCALE, dictionaries } from '../../i18n/messages'
 import { defaultSettings, type ModelsDoc, type Settings } from '../../server/core/config'
+import { fmt, setLocale, t } from '../../server/core/i18n'
 import { LoadError } from '../../server/core/runner'
 import { activeBoundedWaits, bounded, createProxy, type ProxyEvent } from '../../server/core/proxy'
 import type { RequestRecord } from '../../server/core/request-log'
-import { Scheduler, type ModelProcess, type Target } from '../../server/core/scheduler'
+import { Scheduler, SchedulerError, type Lease, type ModelProcess, type ModelState, type Target } from '../../server/core/scheduler'
 import { SpeedMeter } from '../../server/core/speed'
 
 // ---------------------------------------------------------------------------------------
@@ -23,7 +25,7 @@ interface Upstream {
   crash(): void
 }
 
-function makeUpstream(target: Target, opts: { chunks?: number, gapMs?: number, holdHeaders?: boolean }): Upstream {
+function makeUpstream(target: Target, opts: { chunks?: number, gapMs?: number, holdHeaders?: boolean, streamError?: boolean }): Upstream {
   let res!: () => void
   let rej!: (e: unknown) => void
   let exit!: () => void
@@ -48,6 +50,9 @@ function makeUpstream(target: Target, opts: { chunks?: number, gapMs?: number, h
         up.requests.push({ path: url.pathname + url.search, headers: req.headers, body })
         if (url.pathname === '/props') return Response.json({ model: target.modelId, profile: target.profile })
         if (url.pathname === '/boom') return Response.json({ error: { message: 'bad', code: 500 } }, { status: 500 })
+        // An error answer with no body of its own: whatever the client then reads comes from the
+        // proxy alone, never from the upstream's own wording.
+        if (opts.streamError) return new Response(null, { status: 502, statusText: 'Upstream Exploded' })
         // Accept the request but never send response headers (until the server is stopped).
         if (body?.stream && opts.holdHeaders) return new Promise<Response>(() => {})
         if (body?.stream) {
@@ -102,7 +107,7 @@ afterEach(async () => {
   for (const c of cleanups.splice(0)) await c()
 })
 
-function setup(opts: { models?: ModelsDoc, autoReady?: boolean, chunks?: number, gapMs?: number, heartbeatMs?: number, maxBodyBytes?: number, drainTimeoutMs?: number, finalEventTimeoutMs?: number, holdHeaders?: boolean, speed?: SpeedMeter } = {}) {
+function setup(opts: { models?: ModelsDoc, autoReady?: boolean, chunks?: number, gapMs?: number, heartbeatMs?: number, maxBodyBytes?: number, drainTimeoutMs?: number, finalEventTimeoutMs?: number, holdHeaders?: boolean, streamError?: boolean, speed?: SpeedMeter } = {}) {
   const ups: Upstream[] = []
   const events: ProxyEvent[] = []
   const records: RequestRecord[] = []
@@ -772,5 +777,94 @@ describe('bounded()', () => {
     expect((await p).message).toBe('gone')
     expect((await bounded(never, new AbortController().signal, 20).catch(e => e)).message).toContain('timed out')
     expect((await bounded(never, ac.signal).catch(e => e)).message).toBe('gone') // already aborted
+  })
+})
+
+// ---------------------------------------------------------------------------------------
+// The wording a /v1 client reads (work package 11-4): always the dictionary of the current
+// language - never a raw exception text, never the literal 'cancelled', never the upstream's
+// own statusText. The status code and the error `code` stay exactly as they were.
+
+/** A proxy whose scheduler fails with `thrown` (not a SchedulerError unless we say so). */
+function failingProxy(thrown: () => unknown) {
+  const events: ProxyEvent[] = []
+  const records: RequestRecord[] = []
+  const proxy = createProxy({
+    scheduler: {
+      acquire: async (): Promise<Lease> => { throw thrown() },
+      snapshot: () => ({ models: [], queue: [] }),
+      stateOf: (): ModelState => 'stopped',
+    },
+    getModels: () => MODELS,
+    getSettings: () => defaultSettings(),
+    onEvent: e => events.push(e),
+    onRequest: r => records.push(r),
+  })
+  const ask = () => proxy.handleV1(new Request('http://x/v1/chat/completions', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: 'Alpha', messages: [] }),
+  }))
+  return { ask, events, records }
+}
+
+describe('the text a /v1 error carries', () => {
+  // The server answers in the language of the settings; never leave it switched for the other files.
+  afterEach(() => setLocale(DEFAULT_LOCALE))
+
+  test('a failure that is not a SchedulerError: 500 with the dictionary text, never the exception text', async () => {
+    const { ask, events, records } = failingProxy(() => new Error('ZZZ-raw-exception-boom'))
+    const res = await ask()
+    expect(res.status).toBe(500)
+    const json = await res.json() as any
+    expect(json.error.code).toBe('internal_error')
+    expect(json.error.type).toBe('server_error')
+    expect(json.error.message).toBe(dictionaries[DEFAULT_LOCALE].api.internalError)
+    expect(json.error.message).not.toContain('ZZZ-raw-exception-boom')
+    // The request record is unchanged: a code, never free text.
+    expect(records[0]!.status).toBe(500)
+    expect(records[0]!.error).toBe('internal_error')
+    // The raw text is not gone: it is kept on the server side as an `internal-error` proxy event,
+    // which the service writes to its own error output (logProxyEvent -> logError in context.ts).
+    expect(events.some(e => e.type === 'internal-error' && (e.error as Error)?.message === 'ZZZ-raw-exception-boom')).toBe(true)
+  })
+
+  test('the cancelled branch keeps 499 and code "cancelled" and follows the current language', async () => {
+    const { ask } = failingProxy(() => new SchedulerError('cancelled', { modelId: 'a', profile: 'default' }))
+
+    setLocale(DEFAULT_LOCALE)
+    const zhRes = await ask()
+    expect(zhRes.status).toBe(499)
+    const zhJson = await zhRes.json() as any
+    expect(zhJson.error.code).toBe('cancelled')
+    expect(zhJson.error.message).toBe(dictionaries[DEFAULT_LOCALE].api.cancelled)
+
+    setLocale('en')
+    const enRes = await ask()
+    expect(enRes.status).toBe(499)
+    const enJson = await enRes.json() as any
+    expect(enJson.error.code).toBe('cancelled')
+    expect(enJson.error.message).toBe(dictionaries.en.api.cancelled)
+    expect(enJson.error.message).not.toBe(zhJson.error.message)
+    // English wording: no CJK, not empty.
+    expect(enJson.error.message).not.toMatch(/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]/)
+    expect(enJson.error.message.trim()).not.toBe('')
+  })
+
+  test('a stream the upstream answered with an error and no body: the event text is the dictionary', async () => {
+    const { post, ups, records } = setup({ autoReady: false, streamError: true })
+    const res = await post('/v1/chat/completions', { model: 'Alpha', stream: true })
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toContain('text/event-stream')
+    await until(() => ups.length === 1)
+    ups[0]!.succeed() // the load finishes; the upstream then answers 502 with no body of its own
+    const { text } = await readAll(res)
+    const line = text.split('\n').find(l => l.startsWith('data: '))!
+    const json = JSON.parse(line.slice(6))
+    expect(json.error.code).toBe(502)
+    expect(json.error.message).toBe(fmt(t.api.upstreamStreamError, { status: 502 }))
+    // Nothing of the upstream's own wording reached the client.
+    expect(json.error.message).not.toContain('Upstream Exploded')
+    expect(text).not.toContain('Upstream Exploded')
+    await until(() => records.length === 1)
+    expect(records[0]!.status).toBe(502)
   })
 })

@@ -1,5 +1,5 @@
 // Text helpers for the UI. All wording comes from the current dictionary (composables/useLocale.ts).
-import { t } from './useLocale'
+import { getUiLocale, t } from './useLocale'
 import type { ActivityEvent, StateDoc } from '~~/server/core/live'
 import type { RequestRecord } from '~~/server/core/request-log'
 import { noRoomReasonTemplate, poolText } from '../utils/memory-check'
@@ -18,8 +18,10 @@ export function formatDuration(ms: number): string {
   return fmt(t.duration.h, { n: Math.floor(total / 3600), m: Math.floor((total % 3600) / 60) })
 }
 
+/** A 24-hour clock in the language the interface is showing. The locale tag is read on every call,
+ * so a language switch changes the next render without re-importing anything. */
 export function formatClock(ms: number): string {
-  return new Date(ms).toLocaleTimeString('zh-CN', { hour12: false })
+  return new Date(ms).toLocaleTimeString(getUiLocale(), { hour12: false })
 }
 
 /** Memory in MiB as MiB / GiB text. */
@@ -156,7 +158,8 @@ export function formatMs(ms: number): string {
   return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)} s`
 }
 
-/** 1234 -> `1,234`; used for token and request counts. */
+/** 1234 -> `1,234`; used for token and request counts. Rounded to an integer first, grouped with the
+ * digit separators of the language the interface is showing (the locale tag is read on every call). */
 export function formatCount(n: number): string {
-  return Math.round(n).toLocaleString('zh-CN')
+  return Math.round(n).toLocaleString(getUiLocale())
 }

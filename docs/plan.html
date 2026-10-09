@@ -956,13 +956,13 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 
   <h3>11-2 至 11-3 · 三批译文（AI 翻译，用户只抽查总览 / 模型 / 设置）</h3>
   <ul class="tasks">
-    <li class="task" data-done="false"><span class="t">按分组把 <code>i18n/en.ts</code> 的骨架填成英文文案（约 1800 条），占位符与数组长度照中文；用户只抽查总览 / 模型 / 设置三组</span><span class="when"></span></li>
+    <li class="task" data-done="true"><span class="t">按分组把 <code>i18n/en.ts</code> 的骨架填成英文文案（约 1800 条），占位符与数组长度照中文；用户只抽查总览 / 模型 / 设置三组</span><span class="when">2026-10-09</span></li>
   </ul>
 
   <h3>11-4 · 转硬失败与剩余泄漏（Sonnet 5.5）</h3>
   <ul class="tasks">
-    <li class="task" data-done="false"><span class="t">三批译文完成后把 <code>tests/core/i18n-parity.test.ts</code> 的 warn-only 转成硬失败；补 <code>server/core/proxy.ts</code> 里三处不走 i18n 的泄漏（原始 <code>Error.message</code>、字面量 <code>'cancelled'</code>、流式转发的 statusText）</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">数字与时间格式跟随界面语言：<code>app/composables/useFormat.ts</code> 的 <code>formatClock</code> / <code>formatCount</code> 目前硬编码 <code>'zh-CN'</code>（11-2 接线时发现，2026-10-08）</span><span class="when"></span></li>
+    <li class="task" data-done="true"><span class="t">三批译文完成后把 <code>tests/core/i18n-parity.test.ts</code> 的 warn-only 转成硬失败；补 <code>server/core/proxy.ts</code> 里三处不走 i18n 的泄漏（原始 <code>Error.message</code>、字面量 <code>'cancelled'</code>、流式转发的 statusText）</span><span class="when">2026-10-09</span></li>
+    <li class="task" data-done="true"><span class="t">数字与时间格式跟随界面语言：<code>app/composables/useFormat.ts</code> 的 <code>formatClock</code> / <code>formatCount</code> 目前硬编码 <code>'zh-CN'</code>（11-2 接线时发现，2026-10-08）</span><span class="when">2026-10-09</span></li>
   </ul>
 
   <div class="accept"><h3>验收标准</h3>
