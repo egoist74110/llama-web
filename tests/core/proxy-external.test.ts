@@ -41,7 +41,7 @@ function fakeUpstream(opts: { hang?: boolean, status?: number } = {}) {
   return { seen, url: `http://127.0.0.1:${srv.port}/v1`, port: srv.port }
 }
 
-function setup(opts: { upstreamUrl: string, mode?: ImageCompressMode, settings?: Settings, key?: string, models?: ModelsDoc, exclusive?: boolean }) {
+function setup(opts: { upstreamUrl: string, mode?: ImageCompressMode, settings?: Settings, key?: string, models?: ModelsDoc, exclusive?: boolean, fetchImpl?: typeof fetch }) {
   const doc: UpstreamsDoc = defaultUpstreams()
   createUpstream(doc, { name: 'Strata', baseUrl: opts.upstreamUrl, imageCompress: opts.mode ?? 'inherit', manualModels: ['qwen-x'] }, { localNames: [], selfPorts: [] })
   const id = doc.upstreams[0]!.id
@@ -57,7 +57,7 @@ function setup(opts: { upstreamUrl: string, mode?: ImageCompressMode, settings?:
     },
     getModels: () => opts.models ?? MODELS, getSettings: () => opts.settings ?? defaultSettings(), heartbeatMs: 10,
     getUpstreams: () => doc, getUpstreamKey: i => keys[i] ?? '',
-    onRequest: r => records.push(r), onEvent: e => events.push(e),
+    onRequest: r => records.push(r), onEvent: e => events.push(e), fetchImpl: opts.fetchImpl,
   })
   const front = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: req => proxy.handleV1(req) })
   closers.push(() => front.stop(true))
@@ -239,3 +239,60 @@ test('after an edit the new prefix and key apply to the next request', async () 
   expect((await s.post({ model: 'Strata-q' })).status).toBe(404)
   expect((await s.post({ model: 'Renamed-q' })).status).toBe(200)
 })
+
+test('an upstream that echoes the key in its error body or a header does not hand it to the client', async () => {
+  const srv = Bun.serve({
+    port: 0, hostname: '127.0.0.1',
+    fetch: req => Response.json({ error: { message: `Invalid key ${req.headers.get('authorization')?.slice(7)}` } }, { status: 401, headers: { 'x-echo': req.headers.get('authorization') ?? '' } }),
+  })
+  closers.push(() => srv.stop(true))
+  const s = setup({ upstreamUrl: `http://127.0.0.1:${srv.port}/v1` })
+  const res = await s.post({ model: 'Strata-q' })
+  expect(res.status).toBe(401)
+  const text = await res.text()
+  expect(text).toContain('Invalid key')
+  expect(text).not.toContain(UPSTREAM_KEY)
+  expect(JSON.stringify([...res.headers])).not.toContain(UPSTREAM_KEY)
+})
+
+test('a streaming answer that splits the echoed key across chunks is masked too', async () => {
+  const enc = new TextEncoder()
+  const srv = Bun.serve({
+    port: 0, hostname: '127.0.0.1',
+    fetch: () => new Response(new ReadableStream({
+      async start(c) {
+        for (const part of ['data: ', UPSTREAM_KEY.slice(0, 4), UPSTREAM_KEY.slice(4), '\n\n']) { c.enqueue(enc.encode(part)); await Bun.sleep(5) }
+        c.close()
+      },
+    }), { headers: { 'content-type': 'text/event-stream' } }),
+  })
+  closers.push(() => srv.stop(true))
+  const s = setup({ upstreamUrl: `http://127.0.0.1:${srv.port}/v1` })
+  const text = await (await s.post({ model: 'Strata-q', stream: true })).text()
+  expect(text).toBe('data: ***\n\n')
+})
+
+test('an exception whose message carries the key is masked in the 502 and in the event', async () => {
+  const s = setup({ upstreamUrl: 'http://127.0.0.1:1/v1', fetchImpl: (() => Promise.reject(new Error(`connect failed, Authorization: Bearer ${UPSTREAM_KEY}`))) as unknown as typeof fetch })
+  const res = await s.post({ model: 'Strata-q' })
+  expect(res.status).toBe(502)
+  expect(await res.text()).not.toContain(UPSTREAM_KEY)
+  expect(JSON.stringify(s.events.map(e => String((e as any).error?.message ?? '')))).not.toContain(UPSTREAM_KEY)
+})
+
+test('the key is masked even when it is short, and in the HTTP status text', async () => {
+  const srv = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: () => new Response('abc', { status: 401, statusText: 'bad abc', headers: { 'x-echo': 'abc' } }) })
+  closers.push(() => srv.stop(true))
+  const s = setup({ upstreamUrl: `http://127.0.0.1:${srv.port}/v1`, key: 'abc' })
+  const res = await s.post({ model: 'Strata-q' })
+  expect(await res.text()).toBe('***')
+  expect(res.headers.get('x-echo')).toBe('***')
+  // the Response the proxy builds (what a Node / h3 front would write as the reason phrase)
+  const direct = await fakeStatusText(s)
+  expect(direct).not.toContain('abc')
+})
+
+async function fakeStatusText(s: ReturnType<typeof setup>): Promise<string> {
+  const res = await s.proxy.handleV1(new Request('http://x/v1/chat/completions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: 'Strata-q' }) }))
+  return res.statusText
+}

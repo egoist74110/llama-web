@@ -552,9 +552,14 @@ export class Scheduler {
     // The same target may still be on its way out (manual stop); let it finish first.
     if (inst?.evicting) await inst.evicting
 
-    // An external upstream that wants the machine to itself: nothing loads, whatever the memory looks like.
-    const holder = this.opts.blocked?.()
-    if (holder) return this.refuse(job, { reason: 'exclusive', estimateMiB: null, availableMiB: null, pool: null, holder })
+    // An external upstream that wants the machine to itself: nothing loads, whatever the memory looks like. Asked again
+    // after every wait below (admission, a model on its way out): the upstream may have come up meanwhile.
+    const exclusive = () => {
+      const holder = this.opts.blocked?.()
+      if (!holder) return false
+      this.refuse(job, { reason: 'exclusive', estimateMiB: null, availableMiB: null, pool: null, holder })
+      return true
+    }
 
     // Make room. Without multi-load: evict least-recently-used ready models until below the limit. With it: the limit and
     // the memory check decide; a manual start is refused, a request unloads (or is refused, `onNoRoom`).
@@ -567,6 +572,7 @@ export class Scheduler {
     let admission: Admission | undefined
     for (;;) {
       if (job.cancelled) return this.rejectAll(job, this.shuttingDown ? 'shutdown' : 'stopped')
+      if (exclusive()) return
       const others = [...this.instances.values()].filter(i => i.key !== key && OCCUPYING.has(i.state))
       let why: NoRoomDetail | null = null
       admission = undefined
@@ -575,6 +581,7 @@ export class Scheduler {
       } else if (multi) {
         admission = await this.admission(target, others)
         if (job.cancelled) return this.rejectAll(job, this.shuttingDown ? 'shutdown' : 'stopped')
+        if (exclusive()) return
         // `unknown` cannot be told apart from "fits" for a manual start (the interface asked the user first) or when
         // nothing else is online (the same as a single-model start); next to other models it counts as "does not fit".
         if (admission.tier === 'nofit') why = { reason: 'memory', ...admission.detail }

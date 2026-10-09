@@ -15,6 +15,7 @@ import { sourceOf, summarizeImages, summarizeParams, UsageTap, type RequestMeta,
 import { findModel, hasImages, listModelNames, resolveTarget, type RouteResult } from './routing'
 import { findExternal, listExternalNames, type ExternalRoute, type UpstreamsDoc } from './upstreams'
 import { diagnose } from './errors'
+import { redactHeaders, redactText, StreamRedactor } from './redact'
 import { effectiveReasoning, forceThinkingOff } from './thinking-guard'
 import type { SpeedMeter } from './speed'
 import { SchedulerError, type Lease, type NoRoomDetail, type Scheduler, type Target } from './scheduler'
@@ -254,6 +255,8 @@ interface UpstreamCall {
   url?: string
   /** Response for a call that could not be made (external upstreams); default: the llama-server one. */
   failure?: (e: unknown) => Response
+  /** An upstream key that must not reach the client: masked in the response headers and body (external upstreams). */
+  secret?: string
 }
 
 export function createProxy(deps: ProxyDeps) {
@@ -318,7 +321,7 @@ export function createProxy(deps: ProxyDeps) {
       case 'stopped': return errorResponse(503, 'model_stopped', fmt(t.api.modelStopped, { model: modelName }))
       case 'shutdown': return errorResponse(503, 'shutting_down', t.api.shuttingDown)
       case 'cancelled': return errorResponse(499, 'cancelled', t.api.cancelled)
-      case 'no-room': return errorResponse(503, 'insufficient_memory', noRoomText(e.cause as NoRoomDetail | undefined, modelName))
+      case 'no-room': return errorResponse(503, (e.cause as NoRoomDetail | undefined)?.reason === 'exclusive' ? 'machine_exclusive' : 'insufficient_memory', noRoomText(e.cause as NoRoomDetail | undefined, modelName))
     }
   }
 
@@ -347,22 +350,30 @@ export function createProxy(deps: ProxyDeps) {
     // Client gone or model unloaded: release now, not at the next pull (which may never come
     // when nobody reads the body any more, e.g. under nuxt dev).
     ac.signal.addEventListener('abort', () => finish(false), { once: true })
-    const headers = forwardResponseHeaders(res.headers)
+    const secret = call.secret ?? ''
+    const headers = redactHeaders(forwardResponseHeaders(res.headers), secret)
+    const redactor = new StreamRedactor(secret)
     if (!res.body) {
       finish(true)
-      return new Response(null, { status: res.status, statusText: res.statusText, headers })
+      return new Response(null, { status: res.status, statusText: redactText(res.statusText, secret), headers })
     }
     const reader = res.body.getReader()
     const body = new ReadableStream<Uint8Array>({
       async pull(ctrl) {
         try {
-          const { done, value } = await reader.read()
-          if (done) {
-            finish(true)
-            ctrl.close()
-          } else {
+          // A chunk that is only the start of the key yields nothing yet: read on until something can be sent.
+          for (;;) {
+            const { done, value } = await reader.read()
+            if (done) {
+              const tail = redactor.flush()
+              if (tail.length) ctrl.enqueue(tail)
+              finish(true)
+              ctrl.close()
+              return
+            }
             trace?.chunk(value)
-            ctrl.enqueue(value)
+            const out = redactor.push(value)
+            if (out.length) { ctrl.enqueue(out); return }
           }
         } catch (e) {
           finish(false)
@@ -377,7 +388,7 @@ export function createProxy(deps: ProxyDeps) {
         ac.abort(reason)
       },
     }, { highWaterMark: 0 })
-    return new Response(body, { status: res.status, statusText: res.statusText, headers })
+    return new Response(body, { status: res.status, statusText: redactText(res.statusText, secret), headers })
   }
 
   /** Streaming request whose model is not ready: answer at once, heartbeat, then stream. */
@@ -568,11 +579,12 @@ export function createProxy(deps: ProxyDeps) {
     const idle = new AbortController() // never aborts: nothing here can unload an upstream
     const lease: Lease = { target: { modelId: `upstream:${u.id}`, profile: '-' }, port: 0, signal: idle.signal, release() {} }
     const failure = (e: unknown) => {
-      deps.onEvent?.({ type: 'upstream-error', target: lease.target, error: e })
-      return errorResponse(502, 'upstream_unreachable', fmt(t.api.externalUnreachable, { upstream: u.name, detail: String((e as Error)?.message ?? e) }))
+      const detail = redactText(String((e as Error)?.message ?? e), key)
+      deps.onEvent?.({ type: 'upstream-error', target: lease.target, error: new Error(detail) })
+      return errorResponse(502, 'upstream_unreachable', fmt(t.api.externalUnreachable, { upstream: u.name, detail }))
     }
     const path = url.pathname.replace(/^\/v1(?=\/|$)/, '') + url.search
-    return forward({ lease, req, path, body, headers, url: `${u.baseUrl}${path}`, failure }, ext.name, trace)
+    return forward({ lease, req, path, body, headers, url: `${u.baseUrl}${path}`, failure, secret: key }, ext.name, trace)
   }
 
   async function handleV1Inner(req: Request, trace: RequestTrace): Promise<Response> {

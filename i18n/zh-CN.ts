@@ -1654,6 +1654,7 @@ export default {
       'bad-start-cwd': '工作目录不能含控制字符，最多 500 个字符。',
       'not-found': '找不到这个外部服务。',
       'too-many': '外部服务数量已达上限。',
+      'rollback-failed': '保存失败，而且没能恢复原来的设置，upstreams.json 和 secrets.json 可能不一致。请检查 data 目录（磁盘空间、权限）后再确认这个外部服务的地址和 key（{detail}）。',
       store: '无法保存：upstreams.json 或 secrets.json 有错误，请先修正后再试（{detail}）。',
     },
     launch: {

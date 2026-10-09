@@ -1,7 +1,7 @@
 // Add an external upstream: { name, baseUrl, apiKey?, monitorUrl?, imageCompress?, local?, exclusive?, manualModels? }.
 import { createUpstream, type Upstream } from '../../core/upstreams'
 import { getContext } from '../../service/context'
-import { cleanKey, describeUpstreams, editContext, upstreamsError } from '../../service/upstreams-api'
+import { cleanKey, describeUpstreams, editContext, saveUpstreamsAndKeys, upstreamsError } from '../../service/upstreams-api'
 
 export default defineEventHandler(async (event) => {
   const body = await readBody(event)
@@ -10,9 +10,15 @@ export default defineEventHandler(async (event) => {
     const key = cleanKey(body?.apiKey)
     ctx.refresh()
     let created: Upstream | null = null
-    ctx.updateUpstreams((draft) => { created = createUpstream(draft, body ?? {}, editContext()) })
+    if (key) {
+      saveUpstreamsAndKeys(
+        (draft) => { created = createUpstream(draft, body ?? {}, editContext()) },
+        (s) => { s.upstreamKeys[(created as Upstream).id] = key },
+      )
+    } else {
+      ctx.updateUpstreams((draft) => { created = createUpstream(draft, body ?? {}, editContext()) })
+    }
     const id = (created as Upstream | null)?.id ?? null
-    if (key && id) ctx.updateSecrets((s) => { s.upstreamKeys[id] = key })
     ctx.health.tick().catch(() => {})
     return { ...describeUpstreams(), createdId: id }
   } catch (e) {

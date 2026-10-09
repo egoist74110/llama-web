@@ -444,3 +444,37 @@ describe('who waits changes while the memory check is awaited (CR-018)', () => {
     expect(g.launches()).toBe(1)
   })
 })
+
+describe('exclusive upstream', () => {
+  function withHolder() {
+    let holder: string | null = null
+    let release!: () => void
+    const gate = new Promise<void>(r => { release = r })
+    const launched: Target[] = []
+    const sched = new Scheduler({
+      maxLoaded: 5, multiLoad: true, onNoRoom: 'unload', drainTimeoutMs: 2000,
+      blocked: () => holder,
+      admit: async () => { await gate; return { tier: 'ok', detail: { estimateMiB: 1, availableMiB: 100, pool: null }, pools: [] } },
+      launch: async (target) => {
+        launched.push(target)
+        const p = new FakeProc(target, 7200)
+        queueMicrotask(() => p.succeed())
+        return p
+      },
+    })
+    return { sched, launched, hold: (h: string) => { holder = h }, release }
+  }
+
+  test('an upstream that becomes exclusive while the memory check is pending stops the load', async () => {
+    const { sched, launched, hold, release } = withHolder()
+    const p = sched.acquire(A)
+    const outcome = p.then(() => 'loaded', (e: unknown) => e)
+    await tick(10) // the load is waiting for the memory check
+    hold('Strata')
+    release()
+    const e = await outcome
+    expect(e).toBeInstanceOf(SchedulerError)
+    expect(detailOf(e)).toMatchObject({ reason: 'exclusive', holder: 'Strata' })
+    expect(launched).toHaveLength(0)
+  })
+})

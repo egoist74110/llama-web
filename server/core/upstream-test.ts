@@ -1,4 +1,5 @@
 // Connection test of an external upstream (decision 56): `GET <baseUrl>/models` with the upstream's key. Pure module.
+import { redactText } from './redact'
 import { parseModelList, type Upstream } from './upstreams'
 
 export type TestResult =
@@ -14,7 +15,7 @@ export async function testConnection(u: Pick<Upstream, 'baseUrl'>, key: string, 
       redirect: 'manual',
     })
   } catch (e) {
-    return { ok: false, code: 'unreachable', detail: String((e as Error)?.message ?? e) }
+    return { ok: false, code: 'unreachable', detail: redactText(String((e as Error)?.message ?? e), key) }
   }
   if (res.status === 401 || res.status === 403) return { ok: false, code: 'unauthorized', status: res.status }
   if (!res.ok) return { ok: false, code: 'status', status: res.status }

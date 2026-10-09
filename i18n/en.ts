@@ -1697,6 +1697,7 @@ export const enSkeleton: PartialMessages = {
       'bad-start-cwd': 'A working directory cannot carry control characters and is at most 500 characters long.',
       'not-found': 'This external service cannot be found.',
       'too-many': 'The number of external services has reached its limit.',
+      'rollback-failed': 'Saving failed and the previous settings could not be restored, so upstreams.json and secrets.json may disagree. Check the data folder (disk space, permissions), then check this service\'s address and key ({detail}).',
       store: 'Cannot save: upstreams.json or secrets.json has an error, fix it and try again ({detail}).',
     },
     launch: {

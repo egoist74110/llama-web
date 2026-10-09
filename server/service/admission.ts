@@ -3,6 +3,7 @@
 // The estimate itself is `checkProfile` (the same one the save-time check uses); the rules are in core/admission.ts.
 import { fmt, t } from '../core/i18n'
 import { admissionFrom } from '../core/admission'
+import { noRoomText } from '../core/proxy'
 import { effectiveMaxLoaded } from '../core/config'
 import { parseNvidiaSmi, runNvidiaSmi } from '../core/gpu'
 import { sampleSystemMemory } from '../core/memory-sample'
@@ -45,9 +46,9 @@ export async function admitTarget(target: Target, _online: Target[]): Promise<Ad
   return admissionFrom(check.estimate, { statsKey: check.statsKey, dropMlock: check.mlockDropped, basis: check.basis })
 }
 
-/** A manual start the check does not allow (HTTP 409): `reason` is `limit`, `nofit`, `risky` or `unknown`. */
+/** A manual start the check does not allow (HTTP 409): `reason` is `limit`, `nofit`, `risky`, `unknown` or `exclusive` (an external upstream holds the machine). */
 export class StartRefused extends Error {
-  constructor(public reason: 'limit' | 'nofit' | 'risky' | 'unknown', message: string, public data: Record<string, unknown> = {}) {
+  constructor(public reason: 'limit' | 'nofit' | 'risky' | 'unknown' | 'exclusive', message: string, public data: Record<string, unknown> = {}) {
     super(message)
     this.name = 'StartRefused'
   }
@@ -73,6 +74,11 @@ const gib = (miB: number | null) => (miB === null ? '?' : `${(miB / 1024).toFixe
 export async function precheckStart(target: Target, confirm: boolean): Promise<void> {
   const ctx = getContext()
   const settings = ctx.getSettings()
+  const holder = ctx.health.holder()
+  if (holder) {
+    const name = ctx.getModels().models.find(m => m.id === target.modelId)?.name ?? target.modelId
+    throw new StartRefused('exclusive', noRoomText({ reason: 'exclusive', estimateMiB: null, availableMiB: null, pool: null, holder }, name), { holder })
+  }
   if (!settings.scheduler.multiLoad) return
   const key = (x: Target) => `${x.modelId}\u0000${x.profile}`
   const online = ctx.scheduler.snapshot().models.filter(m => ['loading', 'ready', 'draining', 'unloading'].includes(m.state))

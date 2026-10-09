@@ -64,3 +64,12 @@ test('texts for the online limit, unreadable memory and the watchdog', () => {
   expect(noRoomText({ reason: 'unknown', estimateMiB: null, availableMiB: null, pool: null }, 'Alpha')).toContain('读不到')
   expect(noRoomText({ reason: 'watchdog', estimateMiB: null, availableMiB: 100, pool: 'system' }, 'Alpha')).toContain('保护机制')
 })
+
+test('an exclusive upstream answers 503 machine_exclusive that names the holder', async () => {
+  const { post } = setup({ reason: 'exclusive', estimateMiB: null, availableMiB: null, pool: null, holder: 'Strata' })
+  const res = await post({ model: 'Alpha', messages: [{ role: 'user', content: 'x' }] })
+  expect(res.status).toBe(503)
+  const body = await res.json() as { error: { code: string, message: string } }
+  expect(body.error.code).toBe('machine_exclusive')
+  expect(body.error.message).toContain('Strata')
+})

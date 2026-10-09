@@ -28,6 +28,10 @@ describe('address', () => {
     expect(codeOf(() => cleanBaseUrl('http://127.0.0.1:5001/v1', [5001]))).toBe('url-self')
     expect(codeOf(() => cleanBaseUrl('http://localhost:8080/v1', [5001, 8080]))).toBe('url-self')
     expect(codeOf(() => cleanBaseUrl('http://0.0.0.0:5001/v1', [5001]))).toBe('url-self')
+    expect(codeOf(() => cleanBaseUrl('http://127.0.0.2:5001/v1', [5001]))).toBe('url-self')
+    expect(codeOf(() => cleanBaseUrl('http://[::ffff:127.0.0.1]:5001/v1', [5001]))).toBe('url-self')
+    // the same port on another machine stays allowed
+    expect(() => cleanBaseUrl('http://192.168.1.5:5001/v1', [5001])).not.toThrow()
     expect(cleanBaseUrl('http://127.0.0.1:9000/v1', [5001, 8080])).toBe('http://127.0.0.1:9000/v1')
     // The same port on another machine is another service.
     expect(cleanBaseUrl('http://192.168.1.5:5001/v1', [5001])).toBe('http://192.168.1.5:5001/v1')

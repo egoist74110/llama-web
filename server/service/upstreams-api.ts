@@ -2,7 +2,8 @@
 import { fmt, t } from '../core/i18n'
 import { StoreError } from '../core/store'
 import { LaunchError } from '../core/upstream-launcher'
-import { selfPortsOf, UpstreamError, viewUpstreams, type ConnectionView, type EditContext } from '../core/upstreams'
+import type { SecretsDoc } from '../core/keys'
+import { saveUpstreamsAndKeys as saveBoth, selfPortsOf, UpstreamError, viewUpstreams, type ConnectionView, type EditContext, type UpstreamsDoc } from '../core/upstreams'
 import { getContext } from './context'
 
 export function describeUpstreams(): { upstreams: ConnectionView[], exclusiveHolder: string | null } {
@@ -21,6 +22,11 @@ export function editContext(): EditContext {
   return { localNames: ctx.getModels().models.map(m => m.name), selfPorts: selfPortsOf(s.server.port, ctx.bootPort, pub) }
 }
 
+/** `saveUpstreamsAndKeys` on the running context's files. */
+export function saveUpstreamsAndKeys(changeUpstreams: (draft: UpstreamsDoc) => UpstreamsDoc | void, changeKeys: (draft: SecretsDoc) => SecretsDoc | void): void {
+  saveBoth(getContext(), changeUpstreams, changeKeys)
+}
+
 /** An API key from a form: undefined = keep, '' = remove, otherwise the new one. */
 export function cleanKey(raw: unknown): string | undefined {
   if (raw === undefined || raw === null) return undefined
@@ -32,7 +38,7 @@ export function cleanKey(raw: unknown): string | undefined {
 export function upstreamsError(e: unknown): never {
   if (e instanceof UpstreamError) {
     const errors = t.upstreams.errors as Record<string, string>
-    const status = e.code === 'not-found' ? 404 : e.code === 'name-taken' ? 409 : 400
+    const status = e.code === 'not-found' ? 404 : e.code === 'name-taken' ? 409 : e.code === 'rollback-failed' ? 500 : 400
     throw createError({ statusCode: status, message: fmt(errors[e.code] ?? e.code, { detail: e.detail }) })
   }
   // upstreams.json / secrets.json is broken (hand edit): never overwrite it with the cached copy.

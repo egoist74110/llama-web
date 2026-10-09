@@ -3,6 +3,7 @@
 // (`upstreamKeys`, by upstream id) and never appear in a view, a log or an event.
 import { randomBytes } from 'node:crypto'
 import { ArgsSyntaxError, splitArgs } from './args'
+import type { SecretsDoc } from './keys'
 import type { LaunchState } from './upstream-launcher'
 
 export type ImageCompressMode = 'inherit' | 'on' | 'off'
@@ -54,12 +55,41 @@ const isObj = (v: unknown): v is Record<string, any> => !!v && typeof v === 'obj
 export type UpstreamErrorCode =
   | 'bad-key'
   | 'bad-name' | 'name-taken' | 'name-local-conflict' | 'bad-url' | 'url-self' | 'bad-monitor-url'
+  | 'rollback-failed'
   | 'bad-model' | 'not-found' | 'too-many' | 'bad-mode' | 'bad-start-command' | 'bad-start-cwd'
 
 export class UpstreamError extends Error {
   constructor(public code: UpstreamErrorCode, public detail = '') {
     super(detail ? `${code}: ${detail}` : code)
     this.name = 'UpstreamError'
+  }
+}
+
+/** The two files an upstream edit touches: upstreams.json (address) and secrets.json (key). */
+export interface UpstreamFiles {
+  getUpstreams(): UpstreamsDoc
+  updateUpstreams(fn: (draft: UpstreamsDoc) => UpstreamsDoc | void): UpstreamsDoc
+  updateSecrets(fn: (draft: SecretsDoc) => SecretsDoc | void): SecretsDoc
+}
+
+/**
+ * Two files, one change (upstreams.json, then secrets.json): when the second write fails the first is put back, so an
+ * address never ends up paired with the key of another one. Throws what the failed write threw. When the put-back
+ * fails as well the two files may disagree: that is reported as `rollback-failed` (never swallowed), and nothing is
+ * sent on until the user has looked at the data folder.
+ */
+export function saveUpstreamsAndKeys(files: UpstreamFiles, changeUpstreams: (draft: UpstreamsDoc) => UpstreamsDoc | void, changeKeys: (draft: SecretsDoc) => SecretsDoc | void): void {
+  const before = structuredClone(files.getUpstreams())
+  files.updateUpstreams(changeUpstreams)
+  try {
+    files.updateSecrets(changeKeys)
+  } catch (e) {
+    try {
+      files.updateUpstreams(() => before)
+    } catch (rollback) {
+      throw new UpstreamError('rollback-failed', `${(e as Error)?.message ?? e}; ${(rollback as Error)?.message ?? rollback}`)
+    }
+    throw e
   }
 }
 
@@ -73,7 +103,9 @@ export function cleanName(raw: unknown): string {
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]', '::1'])
 
 export function isLoopbackHost(hostname: string): boolean {
-  return LOOPBACK.has(hostname.toLowerCase()) || hostname.toLowerCase().endsWith('.localhost')
+  const h = hostname.toLowerCase()
+  // 127.0.0.0/8, and the same address as an IPv4-mapped IPv6 one (the URL parser writes `[::ffff:7f00:1]`).
+  return LOOPBACK.has(h) || h.endsWith('.localhost') || /^127(\.\d{1,3}){3}$/.test(h) || /^\[::ffff:(7f[0-9a-f]{2}:[0-9a-f]{1,4}|127(\.\d{1,3}){3})\]$/.test(h)
 }
 
 /**
