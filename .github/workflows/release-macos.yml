@@ -129,7 +129,7 @@ jobs:
               signature: "ad-hoc (no Developer ID); not notarized; Gatekeeper warns on first open", license: "MIT",
               bundled: { bun: v.bun, bunSha256: v.bunSha256, resourceId: v.resourceId },
               toolchain: { rust: sh(["rustc", "--version"]), bunBuild: Bun.version, runner: `${process.env.ImageOS} ${process.env.ImageVersion}`, macos: sh(["sw_vers", "-productVersion"]) },
-              excludes: "llama.cpp, models and user data are not bundled; llama.cpp is downloaded on first start",
+              excludes: "llama.cpp, models and user data are not bundled; llama.cpp is downloaded from the app when local models are wanted",
               workflowRun: `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`,
             }, null, 2))'
           ls -l release

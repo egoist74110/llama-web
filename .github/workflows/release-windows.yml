@@ -91,7 +91,7 @@ jobs:
             license = 'MIT'
             bundled = [ordered]@{ bun = $versions.bun; bunSha256 = $versions.bunSha256; resourceId = $versions.resourceId }
             toolchain = [ordered]@{ rust = (rustc --version); bunBuild = (bun --version); runner = "$env:ImageOS $env:ImageVersion" }
-            excludes = 'llama.cpp, cudart, models and user data are not bundled; llama.cpp is downloaded on first start'
+            excludes = 'llama.cpp, cudart, models and user data are not bundled; llama.cpp is downloaded from the app when local models are wanted'
             workflowRun = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
           }
           [IO.File]::WriteAllText("$PWD/release/llama-web-$($env:VERSION)-manifest.json", ($manifest | ConvertTo-Json -Depth 5))
