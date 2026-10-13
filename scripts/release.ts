@@ -314,7 +314,9 @@ async function main(): Promise<number> {
     const typed = await ask(`[release] Type the version (${version}) to publish the draft: `)
     if (typed !== version) fail('Not published (version did not match); the draft is still there')
   }
-  gh('release', 'edit', tag, '--draft=false', '--prerelease=' + String(version.includes('-')))
+  const pre = version.includes('-')
+  // A stable release becomes "Latest" (the drafts are created as prereleases, which GitHub never marks latest).
+  gh('release', 'edit', tag, '--draft=false', '--prerelease=' + String(pre), ...(pre ? [] : ['--latest']))
   log(`published: ${draft.url}`)
   return 0
 }
