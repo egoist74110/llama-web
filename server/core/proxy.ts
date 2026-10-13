@@ -15,6 +15,7 @@ import { sourceOf, summarizeImages, summarizeParams, UsageTap, type RequestMeta,
 import { findModel, hasImages, listModelNames, resolveTarget, type RouteResult } from './routing'
 import { findExternal, listExternalNames, type ExternalRoute, type UpstreamsDoc } from './upstreams'
 import { diagnose } from './errors'
+import { multipartBoundary, multipartField, parseMultipart, rewriteMultipartField, type MultipartPart } from './multipart'
 import { redactHeaders, redactText, StreamRedactor } from './redact'
 import { effectiveReasoning, forceThinkingOff } from './thinking-guard'
 import type { SpeedMeter } from './speed'
@@ -562,8 +563,9 @@ export function createProxy(deps: ProxyDeps) {
   /**
    * Forward to an external upstream (decision 56): same image compression (per upstream: follow the global switch / on /
    * off), no scheduler, no lease, no load. The client's own `Authorization` is dropped and replaced by the upstream's key.
+   * A multipart body (`form`) gets its `model` field rewritten under a new boundary; no image compression there.
    */
-  async function forwardExternal(req: Request, trace: RequestTrace, ext: ExternalRoute, raw: Uint8Array<ArrayBuffer> | null, json: any, url: URL): Promise<Response> {
+  async function forwardExternal(req: Request, trace: RequestTrace, ext: ExternalRoute, raw: Uint8Array<ArrayBuffer> | null, json: any, url: URL, form: MultipartPart[] | null = null): Promise<Response> {
     const { upstream: u } = ext
     trace.modelId = `upstream:${u.id}`
     trace.modelName = ext.name
@@ -582,6 +584,11 @@ export function createProxy(deps: ProxyDeps) {
       body = new TextEncoder().encode(JSON.stringify(json))
     }
     const headers = forwardRequestHeaders(req.headers)
+    if (form) {
+      const rewritten = rewriteMultipartField(form, 'model', ext.modelId)
+      body = rewritten.body
+      headers.set('content-type', rewritten.contentType)
+    }
     const key = deps.getUpstreamKey?.(u.id) ?? ''
     if (key) headers.set('authorization', `Bearer ${key}`)
     const idle = new AbortController() // never aborts: nothing here can unload an upstream
@@ -625,12 +632,18 @@ export function createProxy(deps: ProxyDeps) {
       }
     }
 
+    // multipart/form-data (audio transcriptions, image edits): only the `model` text field is read; the
+    // other fields and files are neither parsed nor recorded. A malformed body routes like one without a model.
+    const boundary = !json && raw && raw.byteLength > 0 ? multipartBoundary(ctype) : null
+    const form = boundary ? parseMultipart(raw!, boundary) : null
+    const modelField: unknown = json && typeof json === 'object' ? json.model : form ? multipartField(form, 'model') : undefined
+
     trace.stream = !!json && typeof json === 'object' && json.stream === true
     trace.params = summarizeParams(json)
     const models = deps.getModels()
-    const ext = json && typeof json === 'object' ? externalOf(json.model) : null
-    if (ext) return forwardExternal(req, trace, ext, raw, json, url)
-    const route = resolveTarget(models, json && typeof json === 'object' ? json.model : undefined, deps.scheduler.snapshot().models)
+    const ext = externalOf(modelField)
+    if (ext) return forwardExternal(req, trace, ext, raw, json, url, form)
+    const route = resolveTarget(models, modelField, deps.scheduler.snapshot().models)
     if (!route.ok) return routeErrorResponse(route)
     const { target, model, profile } = route
     trace.modelId = model.id

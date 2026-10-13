@@ -1,5 +1,13 @@
 # 交接记录
 
+## 2026-10-13 · /v1 multipart/form-data 路由（关键决定 58）· 单会话
+- 依据：用户 2026-10-13 在对话中批准。起因是表单上传的接口（语音转写 `/v1/audio/transcriptions`、`/v1/images/edits`）的 `model` 在表单字段里，原来只解析 JSON，结果 400 `no_model` 或落到本地正在运行的模型。
+- 实现：新增纯模块 `server/core/multipart.ts`（逐字节解析 boundary / 各部分 / `Content-Disposition` 的 name，不解码文件；改写 `model` 字段并换新 boundary，其余部分的头和内容逐字节保留，preamble / epilogue 丢弃）。`proxy.ts` 的 `handleV1Inner` 先读 JSON，读不到再按 multipart 读 `model`，路由逻辑与 JSON 共用（`externalOf` → `forwardExternal`，否则 `resolveTarget`，支持 `名字:方案`）。外部上游：重拼表单并设置新 `content-type`；本地：请求体和 `content-type` 原样转发。请求体上限、公网鉴权、上游 key 替换与打码、请求记录（`params` 为空，不记表单字段 / 文件名 / 文件内容）都沿用原来的代码。
+- 没覆盖（已写进 plan 决定 58 ④⑤ 和阶段 10 一条未打勾任务）：表单请求不做图片压缩 / mmproj 检查 / 加载期间 SSE 心跳；异步任务后续请求不带 model（如 `GET /v1/videos/{id}`）到不了外部上游。
+- 测试：`tests/core/proxy-multipart.test.ts` 11 条（模块：boundary、往返、手写边界情况；路由：外部去前缀 + 字段 / 文件逐字节、请求记录无表单内容、本地 `Alpha:fast` 原样、未知模型 404、无 model 与 JSON 一致（含有正在运行的模型时落本地）、表单损坏、超限 413、公网入口 401 / 通过后换上游 key）。
+- 实际运行：`bun test` 1516 pass / 20 skip / 0 fail（1536 / 115 文件）；`bun run typecheck` exit 0。
+- 没有运行：`bun run build`、构建产物入口 / 开发服务器上的实测、对真实外部转写服务的请求（只用了进程内的假上游）。
+
 ## 2026-10-13 · macOS 措辞清理 · 单会话
 - 依据：用户说已在 Apple Silicon Mac 上自己跑过、都没问题，要求去掉文档和程序里含糊的 Mac 说法。派一个只读侦察查全仓，母会话核对后修改；另用 `gh` 核实：已发布的 v0.1.0-beta.8 带 `macos-arm64.dmg`，CI 的 macOS 作业持续通过。
 - 程序：命令预览的 `posixHint` 去掉「Mac 真机运行尚未验证」；关于与更新在 Mac 上显示新的 `appUpdate.macHint`（下载新 DMG 替换 / 源码版 `./start.command build`），不再提示 Windows 安装包与 start.bat；Mac 改端口提示同时写桌面版和源码版的做法；`platformInfo().verified` 对 darwin arm64 为真（测试同步，Intel Mac 仍为 false）；`ci.yml` 注释更新。
