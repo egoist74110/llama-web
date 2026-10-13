@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Getting-started guide with two paths: local models (model directory, llama.cpp, enable a model, start) or
 // external APIs only (add a service, read its models, point the client here; no llama.cpp needed). Each step is
-// ticked off by what is actually configured. The menu entry disappears once a model or an external service exists.
+// ticked off by what is actually configured. Finishing or skipping marks the guide done: its menu entry and this page are gone.
 import { t } from '../composables/useLocale'
 import type { ConnectionView } from '~~/server/core/upstreams'
 import { apiAddress } from '~/utils/overview'
@@ -112,6 +112,11 @@ async function download() {
     downloading.value = false
   }
 }
+
+// A finished guide is not offered again (also when this page is opened by its address).
+watch(() => state.value?.setupDone, (d) => { if (d) void navigateTo('/', { replace: true }) }, { immediate: true })
+// Something is set up on the chosen path: the button finishes the guide instead of skipping it.
+const progressed = computed(() => (mode.value === 'gateway' ? connections.value.length > 0 : modelCount.value > 0))
 
 async function skip() {
   if (await save('wizard-done', { setupDone: true }, { quiet: true })) await navigateTo('/')
@@ -341,14 +346,14 @@ async function skip() {
       </li>
     </ol>
 
-    <div v-if="!modelCount" class="mt-5 flex flex-wrap items-center gap-3">
+    <div class="mt-5 flex flex-wrap items-center gap-3">
       <UButton
-        :color="mode === 'gateway' && connections.length ? 'primary' : 'neutral'" :variant="mode === 'gateway' && connections.length ? 'solid' : 'outline'"
+        :color="progressed ? 'primary' : 'neutral'" :variant="progressed ? 'solid' : 'outline'"
         :loading="saving === 'wizard-done'" @click="skip"
       >
-        {{ mode === 'gateway' && connections.length ? s.finish : s.skip }}
+        {{ progressed ? s.finish : s.skip }}
       </UButton>
-      <span class="text-xs text-dimmed">{{ s.skipHint }}</span>
+      <span class="text-xs text-dimmed">{{ progressed ? s.finishHint : s.skipHint }}</span>
     </div>
 
     <UpstreamEditor v-model:open="editorOpen" :upstream="null" @saved="onSaved" />

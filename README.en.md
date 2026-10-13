@@ -136,7 +136,7 @@ start.bat web      # start only the service (open it in a browser); can be combi
 
 The same on both platforms from the command line: `bun run start`, `bun run start:build`, `bun run start:run`, `bun run start:web`.
 
-The default address is `http://localhost:5001` (it listens on `0.0.0.0`, so it is reachable on the LAN with every feature and no key). The first visit opens the setup guide, where you choose "Run local models" or "External APIs only"; once a model or an external service has been added, the guide disappears from the left.
+The default address is `http://localhost:5001` (it listens on `0.0.0.0`, so it is reachable on the LAN with every feature and no key). The first visit opens the setup guide, where you choose "Run local models" or "External APIs only". You can visit other pages meanwhile and come back through "Getting started" on the left; once you press "Done" or "Skip for now", the entry disappears and the guide is not offered again.
 
 ## Configuration
 

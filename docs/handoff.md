@@ -9,6 +9,7 @@
 - 实际运行：`bun test` 1504 pass / 20 skip / 0 fail（1524 / 114 文件）；`bun run typecheck` exit 0；`bun run build` exit 0；`src-tauri` 里 `cargo check` 通过（会改写 `Cargo.lock` 去掉 `pre-commit:allow` 标记，已还原）；开发服务器 + 临时 `LLAMA_WEB_DATA` 在浏览器里走了一遍外部 API 路径（中 / 英、浅 / 深、375 宽）：添加假服务、手填模型、测试连接失败提示、侧栏入口消失都正常；服务已停。
 - 没有运行：Windows NSIS / macOS DMG 打包与图标实际显示、GitHub 页面渲染、本地模型路径的引导（只改了外层，四步逻辑没动）、点「完成」之后的跳转（沿用原有 `skip()`）。
 - 已知且没改：窄屏下顶部导航文字挤在一起（原有问题）。
+- 追加（同日，用户反馈「引导中途点了别的页面就回不去」）：侧栏入口改为只看 `setup.done`（快照新增可选字段 `setupDone`）；引导页底部按钮始终显示，有进展时为「完成，去总览」；`setup.done` 为真时访问 `/setup` 跳回 `/`。升级兼容：`needsSetupDone()`（有模型目录 / 模型 / 外部服务但没完成引导）启动时算一次，快照立即视为完成，并在首次调优那一步（所有设置监听都已就绪后）写回 `setup.done = true`——直接在创建 context 时写会触发尚未初始化的 `live` / `tunnel`，测试里实际报过错。浏览器验证（临时数据目录）：加服务后去模型页入口仍在、可回到引导、点完成后入口消失、手动打开 `/setup` 跳回总览；把 `setup.done` 改回 false 重启后入口不出现且已写回 true。`bun test` 1505 pass / 0 fail；typecheck exit 0。
 
 ## 2026-10-13 · 阶段 11 审查处理 + 阶段 9 交叉审查闭环 · 母 AI 编排（Codex 审查 / Sonnet 实现 / 母 AI 复验）
 - 分工：Codex（gpt-6.1-sol，high）只做审查，阶段 11 接续原审查会话；Sonnet 5.5（medium）实现返工；母 AI 核实每轮 diff、亲自复跑验证、做取舍、提交。

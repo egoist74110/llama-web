@@ -34,7 +34,7 @@ import { loadDelta, VramStats } from '../core/vram-stats'
 import { Watchdog } from '../core/watchdog'
 import { admitTarget, admissionIsCurrent, admissionStillBound, samplePools, usedOf } from './admission'
 import { SpeedMeter } from '../core/speed'
-import { isFirstRun } from '../core/settings-admin'
+import { isFirstRun, needsSetupDone } from '../core/settings-admin'
 import { JsonStore, resolveDataDir, type VersionedDoc } from '../core/store'
 import { TunnelManager, type TunnelInfo } from '../core/tunnel'
 import { CloudflareSetup } from '../core/cloudflare'
@@ -292,6 +292,9 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     selectedTarget = { os: platform.os, arch: platform.arch, acceleration: 'cpu' }
   }
   const getModels = modelsRef.get
+  // The guide's menu entry follows `setup.done` alone: an installation set up before that flag counts as done
+  // (shown at once, saved with the first-run tuning below, when every listener of a settings write exists).
+  const legacySetupDone = needsSetupDone(getSettings(), getModels(), upstreamsRef.get().upstreams.length)
   const logs = new LogStore({ dir: join(dataDir, 'logs'), retention: () => getSettings().logs })
   startupClose.push(() => logs.closeAll())
   try { logs.prune() } catch (e) { logError('log retention failed', e) }
@@ -407,6 +410,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
       // Job and its version from one view: the page orders snapshots and HTTP responses by it.
       ...(({ job, rev }) => ({ cloudflare: job, cloudflareRev: rev }))(cloudflare.view()),
       firstRun: isFirstRun(getSettings(), getModels(), upstreamsRef.get().upstreams.length),
+      setupDone: getSettings().setup.done || legacySetupDone,
       // The language every open page shows and answers in (decision 18): a settings save re-notifies
       // the hub, so all open pages change at once.
       locale: getSettings().ui.locale,
@@ -671,6 +675,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
   // After residue cleanup, so leftovers of the last run do not hold a version directory.
   void cleanupDone.then(() => detect()).then((info) => {
     // First run only (decision 54): size the launch defaults to this machine, once.
+    if (legacySetupDone && !getSettings().setup.done) settingsRef.update((s) => { s.setup.done = true })
     if (!getSettings().setup.tuned) {
       const tuned = tunedDefaults(info)
       settingsRef.update((s) => {

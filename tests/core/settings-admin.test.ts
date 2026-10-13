@@ -4,7 +4,7 @@ import { homedir, tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 import { cleanWizard, defaultModels, defaultSettings, normalizeSettings, SETTINGS_MIGRATIONS, SETTINGS_VERSION, type ModelConfig, type ModelsDoc, type Settings } from '../../server/core/config'
 import {
-  applyDefaults, applyImagePreprocess, applyModelDirs, applyPublic, applyServer, applySettingsPatch, dirStatus, expandHome, isFirstRun, SettingsError,
+  applyDefaults, applyImagePreprocess, applyModelDirs, applyPublic, applyServer, applySettingsPatch, dirStatus, expandHome, isFirstRun, needsSetupDone, SettingsError,
 } from '../../server/core/settings-admin'
 
 // Absolute on the host (X:\… is not absolute on macOS / Linux); Windows-only semantics are tested separately.
@@ -239,6 +239,15 @@ describe('first run and directory status', () => {
     expect(isFirstRun({ ...s, modelDirs: [dir('main', abs('m'))] }, models())).toBe(false)
     expect(isFirstRun(s, models(model('main')))).toBe(false)
     expect(isFirstRun({ ...s, setup: { done: true } }, models())).toBe(false)
+  })
+
+  test('an installation set up before the guide flag is marked done once; a fresh or finished one is not', () => {
+    const s = defaultSettings()
+    expect(needsSetupDone(s, models(), 0)).toBe(false)
+    expect(needsSetupDone({ ...s, modelDirs: [dir('main', abs('m'))] }, models(), 0)).toBe(true)
+    expect(needsSetupDone(s, models(model('main')), 0)).toBe(true)
+    expect(needsSetupDone(s, models(), 1)).toBe(true)
+    expect(needsSetupDone({ ...s, setup: { done: true, tuned: true } }, models(), 1)).toBe(false)
   })
 
   test('an external service alone also counts as configured (gateway-only use)', () => {

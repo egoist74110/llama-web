@@ -1758,7 +1758,7 @@ export const enSkeleton: PartialMessages = {
   // First-run wizard: model directory, runtime, enabling a model, first start.
   setup: {
     title: 'Welcome to llama-web',
-    subtitle: 'Pick how you want to use it first. Each step is ticked on its own as you finish it, and this guide disappears from the left once you add models or an external service.',
+    subtitle: 'Pick how you want to use it first. Each step is ticked on its own as you finish it; you can look at other pages meanwhile, and "Getting started" stays on the left until you press "Done" or "Skip for now".',
     done: 'Done',
     mode: {
       label: 'How to use it',
@@ -1792,6 +1792,7 @@ export const enSkeleton: PartialMessages = {
       },
     },
     finish: 'Done, go to Overview',
+    finishHint: 'After this, "Getting started" disappears from the left; carry on setting things up on the Models, Connections and Settings pages.',
     dir: {
       title: 'Choose the model directory',
       hint: 'The folder that holds your .gguf model files; subfolders are scanned as well. You can add several, and add, remove or disable them later on the Settings page.',
@@ -1825,7 +1826,7 @@ export const enSkeleton: PartialMessages = {
       hint: 'Press "Start" on the Models page. The first start asks you about thinking, vision and MTP; after that you can connect with the API or a chat client.',
     },
     skip: 'Skip for now',
-    skipHint: 'You can configure everything on the Settings or Connections page at any time; this guide stays in the left menu until you add models or an external service.',
+    skipHint: 'After skipping, "Getting started" disappears from the left; you can set things up on the Models, Connections and Settings pages later.',
   },
 
   // Chat page: sessions, messages, composer.

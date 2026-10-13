@@ -346,6 +346,14 @@ export function dirStatus(dir: ModelDir): DirStatus {
   }
 }
 
+/**
+ * Installations that were already set up before the guide had its own "done" flag (models, a model directory or an
+ * external service, but the guide never finished or skipped): marked done once at startup so the guide stays hidden.
+ */
+export function needsSetupDone(settings: Settings, models: ModelsDoc, upstreamCount: number): boolean {
+  return !settings.setup.done && (settings.modelDirs.length > 0 || models.models.length > 0 || upstreamCount > 0)
+}
+
 /** The first-run wizard is offered while nothing is configured (no model directory, model or upstream) and it has not been dismissed. */
 export function isFirstRun(settings: Settings, models: ModelsDoc, upstreamCount = 0): boolean {
   return !settings.setup.done && settings.modelDirs.length === 0 && models.models.length === 0 && upstreamCount === 0

@@ -73,6 +73,8 @@ export interface StateDoc {
   cloudflareRev: JobRev | null
   /** Nothing configured yet and the setup wizard has not been dismissed. */
   firstRun: boolean
+  /** The guide was finished or skipped: its menu entry and page are gone. Absent in tests that do not wire it. */
+  setupDone?: boolean
   /**
    * The interface language this snapshot carries (decision 18): every page reads the language here, so
    * saving a new one repaints all open pages without a reload. Absent in tests that do not wire a
@@ -312,7 +314,7 @@ export class LiveHub {
   }
 
   snapshot(): StateDoc {
-    const { scheduler, models, queue, llamacpp, tunnel, cloudflare, cloudflareRev, firstRun, platform, appUpdate, network, connections, exclusiveHolder, locale, settingsRev, settingsBoot } = this.opts.snapshot()
+    const { scheduler, models, queue, llamacpp, tunnel, cloudflare, cloudflareRev, firstRun, setupDone, platform, appUpdate, network, connections, exclusiveHolder, locale, settingsRev, settingsBoot } = this.opts.snapshot()
     return {
       now: this.now(),
       models: models.map(m => ({
@@ -330,6 +332,7 @@ export class LiveHub {
       ...(network ? { network } : {}),
       ...(connections ? { connections, exclusiveHolder: exclusiveHolder ?? null } : {}),
       ...(locale ? { locale } : {}),
+      ...(setupDone !== undefined ? { setupDone } : {}),
       ...(settingsRev !== undefined ? { settingsRev } : {}),
       ...(settingsBoot !== undefined ? { settingsBoot } : {}),
     }
