@@ -215,6 +215,7 @@ export default {
       noHostQuick: '临时地址还没有生成，连通后会显示',
       quickMode: '临时地址（重启会变）',
       setup: '在「设置」开启',
+      goPublic: '前往',
     },
     online: {
       title: '在线的模型',

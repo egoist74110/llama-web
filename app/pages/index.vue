@@ -155,11 +155,16 @@ const tokens = (n: number | null) => (n === null ? '–' : n.toLocaleString('zh-
         </section>
 
         <section class="lw-card flex flex-col gap-2.5 px-[18px] py-4">
-          <div class="text-xs text-dimmed">{{ tl.publicAccess }}</div>
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-xs text-dimmed">{{ tl.publicAccess }}</span>
+            <NuxtLink v-if="publicUrl" to="/settings#s-public" class="inline-flex items-center gap-0.5 text-xs text-primary hover:underline">
+              {{ tl.goPublic }}<UIcon name="i-lucide-chevron-right" class="size-3.5" />
+            </NuxtLink>
+          </div>
           <div><span class="lw-st" :class="tunnelPill.cls">{{ tunnelPill.label }}</span></div>
           <div v-if="publicQuick" class="text-xs text-dimmed">{{ tl.quickMode }}</div>
           <div v-if="publicUrl" class="truncate font-mono text-xs text-muted" :title="publicUrl">{{ publicUrl }}</div>
-          <NuxtLink v-else-if="tunnel?.state === 'off'" to="/settings" class="text-xs text-muted hover:text-default">{{ tl.setup }}</NuxtLink>
+          <NuxtLink v-else-if="tunnel?.state === 'off'" to="/settings#s-public" class="text-xs text-muted hover:text-default">{{ tl.setup }}</NuxtLink>
           <div v-else class="text-xs text-dimmed">{{ publicQuick ? tl.noHostQuick : tl.noHost }}</div>
         </section>
       </div>

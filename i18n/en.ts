@@ -243,6 +243,7 @@ export const enSkeleton: PartialMessages = {
       noHostQuick: 'The temporary address has not been generated yet; it will appear once connected',
       quickMode: 'Temporary address (changes on restart)',
       setup: 'Enable it in Settings',
+      goPublic: 'Open',
     },
     online: {
       title: 'Online models',
