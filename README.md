@@ -46,7 +46,7 @@ flowchart LR
 
 ## 快速开始
 
-1. **安装**：Windows 用安装包；也可以用源码运行（Windows / macOS），见[安装](#安装)。
+1. **安装**：Windows 用 `.exe` 安装包，Apple Silicon Mac 用 `.dmg`；也可以用源码运行，见[安装](#安装)。
 2. **添加你要用的模型或服务**（两条路可以只选一条，也可以都用）：
    - **只当 API 网关**：首次打开会进入新手引导，选「只接入外部 API」：添加服务（地址含 `/v1`，填上游 API key）→ 读取模型列表（「测试连接」，或手填模型 id）→ 引导直接给出客户端要填的地址和模型名。不需要 llama.cpp。
    - **本地 llama.cpp**：在新手引导里选「运行本地模型」，四步：选择模型目录 → 下载并安装 llama.cpp（官方 Release，校验 SHA-256）→ 启用模型 → 启动。
@@ -85,13 +85,19 @@ flowchart LR
 - **请求记录**：来源（本机 / 局域网 / 公网）、key 名称、白名单参数、token 数（外部服务需在响应里返回 `usage`）；不保存对话内容
 - **公网访问（可选）**：独立的 `:8080` 入口，只绑 `127.0.0.1`、只开放 `/v1/*`、必须带 API key；由 llama-web 托管 Cloudflare 隧道，有域名可一键配置，没有域名可用临时地址。详见 [公网访问](docs/public-access.md)
 - **界面**：总览 / 模型 / 接入 / 对话 / 日志 / 设置；中文 / English 在左侧栏切换，立即生效；跟随系统深浅色
-- **应用更新**：桌面版可自动下载、双重校验后安装；源码版只提示
+- **应用更新**：Windows 桌面版可自动下载、双重校验后安装；Mac 桌面版和源码版提示新版本，手动更新
 
 ## 安装
 
 ### Windows 桌面版（推荐）
 
 从 [Releases](https://github.com/egoist74110/llama-web/releases) 下载 `llama-web_<版本>_x64-setup.exe` 安装（当前用户安装，不需要管理员权限），可用同页的 `SHA256SUMS` 核对。安装包未做代码签名，SmartScreen 提示时选「更多信息 → 仍要运行」。不需要安装 Bun / Node，也不需要预装 llama.cpp：要跑本地模型时，在新手引导或「设置 → llama.cpp 版本」里下载即可。系统要求、已验证 / 未验证的环境和已知问题见每个版本的发布说明，构建方式与数据目录见 [Windows 桌面记录](docs/windows-desktop.md)。
+
+### macOS 桌面版（Apple Silicon）
+
+从 [Releases](https://github.com/egoist74110/llama-web/releases) 下载 `llama-web_<版本>_macos-arm64.dmg`，打开后把 `llama-web` 拖进「应用程序」。要求 macOS 13 及以上、Apple Silicon（M 系列）；不需要安装 Bun，也不需要预装 llama.cpp。
+
+安装包只做了 ad-hoc 签名，没有公证，第一次打开会被系统拦下：到「系统设置 → 隐私与安全性」底部找到「已阻止使用 llama-web」，点「仍要打开」，之后就能正常打开。更新时下载新版 DMG 替换「应用程序」里的旧应用，数据保留。细节见 [macOS 桌面记录](docs/macos-desktop.md)。
 
 ### 源码版
 
@@ -103,20 +109,21 @@ bun install
 
 ### macOS 源码版
 
-同样需要 [Bun](https://bun.sh)。下载 llama.cpp 时会按芯片选择官方 macOS 版并校验 SHA-256；Mac 只有这一种版本，设置页里没有显卡、设备或 CPU / GPU 切换。没有安装包、应用内更新和桌面壳：升级时 `git pull` 后运行 `./start.command build`。
+同样需要 [Bun](https://bun.sh)。下载 llama.cpp 时使用官方 macOS arm64 版（Metal 加速）并校验 SHA-256；Mac 上推理统一走 Metal，所以设置页里没有显卡、设备或 CPU / GPU 切换。升级时 `git pull` 后运行 `./start.command build`。
 
 - 数据都在仓库下的 `data/`；卸载 = 删除仓库目录（想保留配置先备份 `data/`）。
 - 模型放在外置 exFAT / 网络盘时，macOS 会产生 `._xxx.gguf` 伴随文件，扫描会自动跳过它们。
 - 「选择文件夹」使用系统的 `osascript` 对话框；第一次使用时系统可能询问是否允许终端控制其他应用。也可以直接粘贴路径，`~/models` 会展开成你的主目录。
 - 从网上下载的压缩包会带隔离标记；手动添加的 llama.cpp 若被系统拒绝运行，需要在终端执行 `xattr -dr com.apple.quarantine <目录>`。
-- CI 里有 macOS 作业（`bun test`、类型检查、下载真实 macOS 版 llama.cpp 运行 `--version`），它不加载模型，Metal 推理、选择文件夹对话框和 Finder 双击启动仍需真机确认。
+- 每次推送 CI 都会在 macOS 上跑 `bun test`、类型检查，并下载真实的 macOS 版 llama.cpp 运行 `--version`。
 
 ### 平台
 
 | 平台 | 状态 |
 | --- | --- |
 | Windows 11 x64（NVIDIA GPU 或 CPU） | 桌面安装包 + 源码版 |
-| macOS（Apple Silicon） | 源码版；维护者已在 Apple Silicon Mac 上运行验证 |
+| macOS 13+（Apple Silicon） | 桌面安装包（DMG）+ 源码版，Metal 推理；维护者日常在 Apple Silicon Mac 上使用 |
+| macOS（Intel） | 不提供安装包，未测试 |
 | Linux | 未适配 |
 
 ## 启动
@@ -160,7 +167,8 @@ start.bat web      # 只启动服务（浏览器打开），可和 build / run �
 
 **llama-web 本身**：「设置 → 关于与更新」显示当前版本，自动更新默认开启：到期时在打开后约 15 秒检查，运行期间每天检查一次 GitHub Releases。关闭自动更新后仍每天检查，仅在版本号旁提示新版，可手动检查、更新或跳过此版本。检查时间跨重启保存，失败也计入每日间隔；手动检查可随时进行。不会自动弹出更新说明或显示顶部横幅。
 
-- 桌面版：开启自动更新时会自动下载安装包；关闭时由用户点击「立即更新」下载、确认「关闭并安装」。GitHub 资产摘要与 `SHA256SUMS` 都一致才算下载完成；安装会停止所有模型和服务，桌面壳再次校验后启动安装程序，装完自动重新打开。配置和数据保留。
+- Windows 桌面版：开启自动更新时会自动下载安装包；关闭时由用户点击「立即更新」下载、确认「关闭并安装」。GitHub 资产摘要与 `SHA256SUMS` 都一致才算下载完成；安装会停止所有模型和服务，桌面壳再次校验后启动安装程序，装完自动重新打开。配置和数据保留。
+- Mac 桌面版：提示新版本并打开发布页面；下载新版 DMG 替换「应用程序」里的旧应用，数据保留。
 - 源码版：只提示和打开发布页面，不自动安装。
 - 预发布版用户会收到更新的预发布和正式版；正式版用户只收到正式版。
 
@@ -193,7 +201,7 @@ git config core.hooksPath scripts
 
 ### 发布（维护者）
 
-GitHub Actions →「Windows release (draft)」→ 输入与 `package.json` 相同的版本号运行。流程在 Windows runner 上冻结依赖安装、测试、类型检查、构建 NSIS 包，用 `desktop/check-package.ts` 按 allowlist 检查包内文件（拒绝 data / secrets / .env / 日志 / 本机路径），生成 SHA256SUMS 与构建清单，创建**草稿** prerelease；发布说明取自 `docs/release-notes/v<版本>.md`。从草稿下载安装包验收后再手动发布（发布时才创建 tag）。
+一般用 `release.bat` / `./release.command`（`scripts/release.ts`）：检查、改版本号、提交推送后依次触发「Windows release (draft)」和「macOS arm64 build」两个工作流，Mac 的 DMG 挂到同一个草稿上。Windows 工作流在 Windows runner 上冻结依赖安装、测试、类型检查、构建 NSIS 包，用 `desktop/check-package.ts` 按 allowlist 检查包内文件（拒绝 data / secrets / .env / 日志 / 本机路径），生成 SHA256SUMS 与构建清单，创建**草稿** prerelease；发布说明取自 `docs/release-notes/v<版本>.md`。macOS 工作流在 arm64 runner 上构建 DMG，检查包内容，并用包内 Bun 起服务、运行真实 llama.cpp。从草稿下载安装包验收后再发布（发布时才创建 tag）。
 
 ## 图标
 

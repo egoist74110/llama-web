@@ -46,7 +46,7 @@ flowchart LR
 
 ## Quick start
 
-1. **Install**: the installer on Windows, or run from source (Windows / macOS); see [Install](#install).
+1. **Install**: the `.exe` installer on Windows, the `.dmg` on Apple Silicon Macs, or run from source; see [Install](#install).
 2. **Add the models or services you use** (pick either path, or both):
    - **API gateway only**: the first visit opens the setup guide; choose "External APIs only": add a service (address including `/v1`, plus its API key) → read its model list ("Test the connection", or type model ids in by hand) → the guide shows the address and model name to enter in your client. No llama.cpp needed.
    - **Local llama.cpp**: choose "Run local models" in the setup guide, four steps: choose a model directory → download and install llama.cpp (official release, SHA-256 checked) → enable models → start.
@@ -85,13 +85,19 @@ flowchart LR
 - **Request records**: source (local / LAN / public), key name, allow-listed parameters and token counts (external services must return `usage` in the response); conversation content is never stored
 - **Public access (optional)**: a separate `:8080` entry that binds only `127.0.0.1`, serves only `/v1/*` and requires an API key; llama-web runs the Cloudflare tunnel itself, with one-click setup for your own domain or a temporary address without one. See [Public access](docs/public-access.en.md)
 - **UI**: Overview / Models / Connections / Chat / Logs / Settings; Chinese / English switched from the left sidebar, applied immediately; follows the system light / dark theme
-- **App updates**: the desktop app can download, double-check and install updates; the source version only shows a note
+- **App updates**: the Windows desktop app can download, double-check and install updates; the Mac desktop app and the source version show new versions for a manual update
 
 ## Install
 
 ### Windows desktop app (recommended)
 
 Download `llama-web_<version>_x64-setup.exe` from [Releases](https://github.com/egoist74110/llama-web/releases) and install it (per-user install, no administrator rights needed); the `SHA256SUMS` file on the same page lets you verify it. The installer is not code-signed: when SmartScreen warns, choose "More info → Run anyway". Neither Bun / Node nor llama.cpp needs to be installed beforehand: when you want local models, download llama.cpp from the setup guide or from "Settings → llama.cpp versions". System requirements, verified / unverified environments and known issues are in each version's release notes; build steps and the data directory are in the [Windows desktop notes](docs/windows-desktop.md) (Chinese).
+
+### macOS desktop app (Apple Silicon)
+
+Download `llama-web_<version>_macos-arm64.dmg` from [Releases](https://github.com/egoist74110/llama-web/releases), open it and drag `llama-web` into Applications. Requires macOS 13 or later on Apple Silicon (M series); neither Bun nor llama.cpp needs to be installed beforehand.
+
+The package is only ad-hoc signed and not notarized, so macOS blocks the first launch: at the bottom of "System Settings → Privacy & Security", find "llama-web was blocked" and press "Open Anyway"; after that it opens normally. To update, download the new DMG and replace the app in Applications; your data is kept. Details are in the [macOS desktop notes](docs/macos-desktop.md) (Chinese).
 
 ### From source
 
@@ -103,20 +109,21 @@ bun install
 
 ### macOS from source
 
-Also requires [Bun](https://bun.sh). Downloading llama.cpp picks the official macOS build for your chip and checks its SHA-256; a Mac has only this one build, so the Settings page has no GPU, device or CPU / GPU switch. There is no installer, in-app update or desktop shell: to upgrade, run `git pull` and then `./start.command build`.
+Also requires [Bun](https://bun.sh). Downloading llama.cpp uses the official macOS arm64 build (Metal acceleration) and checks its SHA-256; inference on a Mac always runs on Metal, so the Settings page has no GPU, device or CPU / GPU switch. To upgrade, run `git pull` and then `./start.command build`.
 
 - All data lives in `data/` inside the repository; to uninstall, delete the repository directory (back up `data/` first to keep your configuration).
 - When models sit on an external exFAT / network drive, macOS creates `._xxx.gguf` companion files; the scan skips them automatically.
 - "Choose folder" uses the system `osascript` dialog; the first time, the system may ask whether Terminal may control other apps. You can also paste a path directly; `~/models` expands to your home directory.
 - Archives downloaded from the web carry a quarantine flag; if the system refuses to run a manually added llama.cpp, run `xattr -dr com.apple.quarantine <directory>` in a terminal.
-- CI has a macOS job (`bun test`, type check, and running `--version` on the real macOS llama.cpp download). It does not load a model, so Metal inference, the folder dialog and double-click launch from Finder still need confirming on a real Mac.
+- On every push, CI runs `bun test` and the type check on macOS, and downloads the real macOS llama.cpp to run `--version`.
 
 ### Platforms
 
 | Platform | Status |
 | --- | --- |
 | Windows 11 x64 (NVIDIA GPU or CPU) | Desktop installer + source |
-| macOS (Apple Silicon) | Source; the maintainer has run it on an Apple Silicon Mac |
+| macOS 13+ (Apple Silicon) | Desktop installer (DMG) + source, Metal inference; the maintainer uses it daily on an Apple Silicon Mac |
+| macOS (Intel) | No installer, not tested |
 | Linux | Not supported yet |
 
 ## Start
@@ -160,7 +167,8 @@ Almost every setting can be changed on the Settings page. `keepVersions` and `cu
 
 **llama-web itself**: "Settings → About & updates" shows the current version, and auto-update is on by default: when due it checks about 15 seconds after opening, and while running checks GitHub Releases once a day. With auto-update off it still checks daily and only shows a note next to the version number; you can check, update or skip this version by hand. The check time is saved across restarts and a failed check counts toward the daily interval; a manual check can be made at any time. Release notes are never popped up and no banner is shown at the top.
 
-- Desktop app: with auto-update on, the installer is downloaded automatically; with it off, you click "Update now" to download and confirm "Close and install". The download counts as complete only when the GitHub asset digest and `SHA256SUMS` both match; installing stops all models and services, the desktop shell verifies it again before launching the installer, and the app reopens by itself afterwards. Settings and data are kept.
+- Windows desktop app: with auto-update on, the installer is downloaded automatically; with it off, you click "Update now" to download and confirm "Close and install". The download counts as complete only when the GitHub asset digest and `SHA256SUMS` both match; installing stops all models and services, the desktop shell verifies it again before launching the installer, and the app reopens by itself afterwards. Settings and data are kept.
+- Mac desktop app: shows the new version and opens the release page; download the new DMG and replace the app in Applications, your data is kept.
 - Source version: only shows a note and opens the release page; nothing is installed automatically.
 - Users on a pre-release receive later pre-releases and stable releases; users on a stable release receive stable releases only.
 
@@ -193,7 +201,7 @@ Development conventions and the directory layout are in [`AGENTS.md`](AGENTS.md)
 
 ### Releasing (maintainers)
 
-GitHub Actions → "Windows release (draft)" → run it with the same version number as `package.json`. On a Windows runner the workflow installs frozen dependencies, tests, type-checks and builds the NSIS package, checks the files inside the package against an allowlist with `desktop/check-package.ts` (rejecting data / secrets / .env / logs / local paths), generates SHA256SUMS and a build manifest, and creates a **draft** prerelease; the release notes come from `docs/release-notes/v<version>.md`. Download the installer from the draft to accept it, then publish by hand (the tag is only created on publishing).
+Usually through `release.bat` / `./release.command` (`scripts/release.ts`): it checks, bumps the version, commits and pushes, then dispatches the "Windows release (draft)" and "macOS arm64 build" workflows, and the Mac DMG is attached to the same draft. On a Windows runner the Windows workflow installs frozen dependencies, tests, type-checks and builds the NSIS package, checks the files inside the package against an allowlist with `desktop/check-package.ts` (rejecting data / secrets / .env / logs / local paths), generates SHA256SUMS and a build manifest, and creates a **draft** prerelease; the release notes come from `docs/release-notes/v<version>.md`. The macOS workflow builds the DMG on an arm64 runner, checks its contents, and starts the service and a real llama.cpp with the bundled Bun. Download the installers from the draft to accept them, then publish (the tag is only created on publishing).
 
 ## Icon
 

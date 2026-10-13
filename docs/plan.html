@@ -136,7 +136,7 @@ li.task .when{color:var(--ok);font-size:12px;white-space:nowrap}
     <li><b>一个进程</b>：自己启动和管理 <code>llama-server.exe</code>，同时提供 OpenAI 兼容 API 和中文管理界面。</li>
     <li><b>一个主端口</b> <code>:5001</code>（本机与局域网，完整功能），外加一个只给 Cloudflare 隧道用的 <code>:8080</code>（只开放 <code>/v1/*</code>，强制校验 key）。</li>
     <li><b>手动启动</b>：源码版双击 <code>start.bat</code>；阶段 5 增加 Windows 桌面套壳，双击应用打开现有管理界面，关闭主窗口即停止服务并结束所有托管子进程。</li>
-    <li><b>交付顺序</b>：先做 Windows / macOS 的兼容基础，再做出 Windows 套壳并停下来试用；确认后才准备首个 Windows Release。Mac 套壳与发包另行启动，尚未验证的平台不宣称支持。</li>
+    <li><b>交付顺序</b>：先做 Windows / macOS 的兼容基础，再做出 Windows 套壳并停下来试用；确认后才准备首个 Windows Release。Mac 桌面壳与 DMG 后来单独完成，beta.7 起与 Windows 同版本发布；只宣称实测过的平台（Windows 11 x64、macOS 13+ Apple Silicon）。</li>
   </ul>
   <h3>不做什么</h3>
   <ul>
@@ -589,10 +589,10 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
   <table>
     <tr><th>目标</th><th>推理运行库</th><th>桌面交付与验收状态</th></tr>
     <tr><td>Windows 11 x64</td><td>保留 NVIDIA CUDA + 匹配 cudart；准备 CPU 构建供无 NVIDIA 环境使用，未知设备提示选择，不能误下 CUDA</td><td>当前优先：5-2 本地 NSIS 安装包 → 用户试用确认 → 5-3 GitHub Windows Release</td></tr>
-    <tr><td>macOS arm64（Apple Silicon）</td><td>官方 macos-arm64 构建，准备 Metal 能力；无需 cudart</td><td>5-1 只准备服务兼容基础；DMG、签名和真实 Metal 模型验收在后续 Mac 工作包，不自动开始</td></tr>
+    <tr><td>macOS arm64（Apple Silicon）</td><td>官方 macos-arm64 构建，准备 Metal 能力；无需 cudart</td><td>已支持：DMG（ad-hoc 签名、未公证）+ 源码版，beta.7 起随 Release 发布；维护者真机日常使用，Metal 推理正常（2026-10-13 确认）。签名公证、应用内更新仍未做</td></tr>
     <tr><td>macOS x64（Intel）</td><td>官方 macos-x64 构建，按实际硬件验证 CPU / Metal，不能承诺每台 Intel Mac 都能 GPU 加速</td><td>后续独立 x64 DMG；缺少真机验证时不标为已支持，不强行合并 Universal 包</td></tr>
   </table>
-  <p>最低系统与 CPU 指令集要求取 Tauri、固定 Bun、sharp 和选用的 llama.cpp 构建的共同要求，并在真实测试后写入 README。首轮只承诺验收后的 Windows 11 x64；Windows ARM、Linux、其他 Windows GPU 后端、开机自启与托盘不进入本阶段。</p>
+  <p>最低系统与 CPU 指令集要求取 Tauri、固定 Bun、sharp 和选用的 llama.cpp 构建的共同要求，并在真实测试后写入 README。首轮只承诺验收后的 Windows 11 x64（macOS Apple Silicon 之后也已验收，见上表）；Windows ARM、Linux、其他 Windows GPU 后端、开机自启与托盘不进入本阶段。</p>
 
   <h3>5-1 · 跨平台兼容基础</h3>
   <ul class="tasks">
@@ -765,7 +765,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
     <li class="task" data-done="true"><span class="t">模型页顶部「添加目录」按钮：调 <code>usePickFolder</code> 选目录 → 加入 <code>modelDirs</code> 并立即扫描 → 滚动到「扫描发现」；空状态也有同一按钮；重复目录 / 已包含的子目录给提示；不改向导流程（<code>ModelAddDir.vue</code>；旁边的「输入路径」按钮用于粘贴路径；源码版浏览器里验证了粘贴路径 → 添加 → 扫描、重复目录提示，系统选择窗口没有点）</span><span class="when">2026-10-03</span></li>
     <li class="task" data-done="true"><span class="t">Mac 专项收尾 · 扫描跳过 <code>._*</code> 与 <code>.DS_Store</code>；路径开头的 <code>~</code> 展开成主目录（<code>expandHome</code>）</span><span class="when">2026-10-03</span></li>
     <li class="task" data-done="true"><span class="t">Mac 专项收尾 · 界面文案审计：Mac 上不出现 GPU / 显存 / Metal / 盘符字样（<code>platform.mac</code> 里的替换文案 + <code>app/utils/platform-text.ts</code>；去掉未使用的 <code>macHint</code>；<code>runtimeHint</code> 本来只在 GPU 版显示；总览显存卡加平台判断）；测试扫描所有 Mac 文案。只检查了文案与代码，没有用模拟的 Mac 平台在浏览器里逐页看</span><span class="when">2026-10-03</span></li>
-    <li class="task" data-done="false"><span class="t">Mac 专项收尾 · 已写好但未在 Mac 上验证：源码版启动脚本 <code>start.command</code>（<code>bash -n</code> 与静态测试通过，Finder 双击与 PATH 未验证；README 已写用法）、<code>osascript</code> 选目录（只测了命令构造与结果解析，没有真机弹窗 / 权限提示验证）、macOS CI 作业 <code>.github/workflows/ci.yml</code>（含下载真实 macOS 版 llama.cpp 运行 <code>--version</code>；还没有在 GitHub 上跑过，推送后以 Actions 结果为准）</span><span class="when"></span></li>
+    <li class="task" data-done="true"><span class="t">Mac 专项收尾 · 已写好但未在 Mac 上验证：源码版启动脚本 <code>start.command</code>（<code>bash -n</code> 与静态测试通过，Finder 双击与 PATH 未验证；README 已写用法）、<code>osascript</code> 选目录（只测了命令构造与结果解析，没有真机弹窗 / 权限提示验证）、macOS CI 作业 <code>.github/workflows/ci.yml</code>（含下载真实 macOS 版 llama.cpp 运行 <code>--version</code>；还没有在 GitHub 上跑过，推送后以 Actions 结果为准）。<b>2026-10-13</b>：维护者在 Apple Silicon Mac 上实际使用，Finder 双击 <code>start.command</code>、<code>osascript</code> 选目录都正常；macOS CI 在 GitHub 上持续通过</span><span class="when">2026-10-13</span></li>
   </ul>
 
   <h3>8-7 · 多 GPU：设备组与切分（Opus 5.5，决定 45）</h3>
@@ -792,8 +792,8 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
     <li class="task" data-done="true"><span class="t">修复 llama.cpp 状态一直显示「正在检查」：24 小时检查冷却内且没有安装任何版本时状态被置为待检查；现在显示「未安装，请在设置中下载运行库」，自动更新开启时不再被冷却挡住（<code>server/core/updater.ts</code>）</span><span class="when">2026-10-05</span></li>
     <li class="task" data-done="true"><span class="t">GitHub 限流 / 大陆不可达的兜底与公共镜像（关键决定 53）：API 限流或报错时改用 github.com 页面（latest 下载重定向、资产页、releases.atom）；用户发起的检查 / 下载失败后弹窗二选一（ghfast.top 推荐、gh-proxy.com 备用），自动检查不弹。真实网络验证三个镜像的元数据与下载（SHA-256 通过）、被墙模拟的完整弹窗流程；<b>没验证</b>：大陆网络下镜像是否可用、llama-web 安装包经镜像下载的真实运行</span><span class="when">2026-10-05</span></li>
     <li class="task" data-done="false"><span class="t">首次运行按本机配置默认参数（关键决定 54）：Mac 按统一内存、Windows 按最大 NVIDIA 显存（没有 NVIDIA 卡按系统内存）给上下文与批大小，settings 升到版本 8，内置额外参数精简为 <code>--no-prefill-assistant</code>。已在 Mac 实测首次生成、单元测试覆盖各档；<b>还差</b>：Windows 实机检测与生成、分档数值用真实模型验证（目前是保守经验值）</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">启动器统一（<code>scripts/launch.ts</code>，<code>start.bat</code> / <code>start.command</code> / <code>bun run start</code> 共用）：询问是否重新构建（按源码是否改动给默认）、构建前自动 <code>bun install</code>、默认运行桌面版、<code>web</code> 只起服务。Mac 终端已验证；<b>还差</b>：Windows 实机、Finder 双击</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">桌面壳在 Mac 上开发运行（用户 2026-10-05 要求，范围：开发运行，不含 DMG / 签名 / 公证）：Rust 壳按平台分支（进程组代替作业对象、sha2 代替 BCrypt、内置 <code>bun</code>），<code>desktop/prepare.ts --dev</code>，启动器编译并运行壳。Mac 上编译、<code>cargo test</code> 7 项、启动内置服务、强杀壳后服务自行退出均已验证；<b>还差</b>：窗口界面的肉眼检查、正常关窗退出、Windows 上重新编译 <code>cfg(windows)</code> 分支（本机无法交叉检查）</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">启动器统一（<code>scripts/launch.ts</code>，<code>start.bat</code> / <code>start.command</code> / <code>bun run start</code> 共用）：询问是否重新构建（按源码是否改动给默认）、构建前自动 <code>bun install</code>、默认运行桌面版、<code>web</code> 只起服务。Mac 终端与 Finder 双击已验证（2026-10-13 维护者确认）；<b>还差</b>：Windows 实机</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">桌面壳在 Mac 上开发运行（用户 2026-10-05 要求，范围：开发运行，不含 DMG / 签名 / 公证）：Rust 壳按平台分支（进程组代替作业对象、sha2 代替 BCrypt、内置 <code>bun</code>），<code>desktop/prepare.ts --dev</code>，启动器编译并运行壳。Mac 上编译、<code>cargo test</code> 7 项、启动内置服务、强杀壳后服务自行退出均已验证；Mac 上窗口界面与正常关窗退出已由维护者日常使用确认（2026-10-13）；<b>还差</b>：Windows 上重新编译 <code>cfg(windows)</code> 分支（本机无法交叉检查）</span><span class="when"></span></li>
     <li class="task" data-done="true"><span class="t">用户自填镜像（关键决定 53 后续，用户 2026-10-05 要求越简单越好）：设置页「自定义镜像」文本框（<code>settings.mirror.custom</code>，settings 升到版本 9 并带迁移），留空 = 只用内置镜像；填写后弹窗多出第三个选项。只接受 https 公网域名（无 IP / 本机 / 内网 / 端口 / 账号密码 / 参数），域名与重定向限制不变；浏览器只传 id <code>custom</code>，服务端取已保存的前缀。<b>没做</b>：系统代理读取（Bun 需按平台读系统设置，非零成本）、并发测速自动选镜像</span><span class="when">2026-10-05</span></li>
     <li class="task" data-done="true"><span class="t">内置聊天页「对话」（关键决定 55，工作包 8-chat）：左侧菜单新页面，模型下拉（只列运行中实例）、流式输出 / 停止 / 思考折叠 / Markdown / 新对话 / 速度显示；<b>图片上传（需 mmproj）与多会话列表（新建 / 切换 / 重命名 / 删除）</b>；对话只存浏览器本地（IndexedDB）；没有在线模型时只提示不加载。已有未提交草稿 <code>app/utils/chat.ts</code>（SSE 解析与安全 Markdown）与 <code>tests/app/chat.test.ts</code>（5 项通过），可复用。需用 Mac 上已有的模型做真实流式验证</span><span class="when">2026-10-05</span></li>
     <li class="task" data-done="false"><span class="t">镜像后续（仍未做）：读取系统代理、并发测速自动选镜像；镜像清单按实测会失效，需定期复查；经镜像下载的 llama-web 安装包做一次真机验证（含自填镜像的真实可用性）</span><span class="when"></span></li>
@@ -805,8 +805,8 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
     <li class="task" data-done="false"><span class="t">运行库：Mac 官方资产是 tar.gz（<code>macos-arm64</code> / <code>macos-x64</code>，无 cudart）；手动添加时设置可执行位、清除 <code>com.apple.quarantine</code>、检查同目录 dylib 与签名（arm64 无签名二进制会被系统拒绝，必要时 ad-hoc 签名）；开始前确认官方是否仍发布 x64 Mac 资产</span><span class="when"></span></li>
     <li class="task" data-done="false"><span class="t">界面隐藏清单：GPU / 加速类型 / CPU-GPU 默认切换 / 设备选择 / 显存卡片 / 本机检测里的 GPU 部分；总览的「显存」小卡在 Mac 上改成「内存」或隐藏（8-6 定，不出现 GPU 字样）</span><span class="when"></span></li>
     <li class="task" data-done="false"><span class="t">平台判断集中到一个 composable / 一个服务端函数（<code>showGpu</code>、<code>showDevices</code>），测试覆盖 darwin 下接口不返回 GPU 字段</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">macOS CI：GitHub Actions macOS runner 跑 <code>bun test</code>、typecheck、假 llama-server 加载 / 兜底 / 平台隔离，并下载真实 macOS 版 llama.cpp 做 <code>--version</code> 冒烟（能小模型加载则加上）；结果如实区分「runner 验证」和「未验证」</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">遗漏项审计（已发现，8-6 前确认归属）：Mac 源码版没有启动脚本（<code>start.bat</code> 只有 Windows）：<b>8-6 新增 <code>start.command</code></b>；应用内更新与安装包只有 Windows（NSIS），<b>Mac 套壳 / DMG / 发包另开工作包（用户 2026-10-03 确认），按 AGENTS.md 仍须用户另行启动，本阶段不做</b>；<code>sharp</code> 需在 Mac 上原生安装；exFAT 外置盘会产生 <code>._*</code> 文件，扫描要跳过；Mac 路径 / <code>~</code> 展开与粘贴路径校验；README / 卸载说明的 Mac 路径；<code>docs/platform-foundation.md</code> 里「不宣称 Mac 已支持」的措辞在验证后更新</span><span class="when"></span></li>
+    <li class="task" data-done="true"><span class="t">macOS CI：GitHub Actions macOS runner 跑 <code>bun test</code>、typecheck、假 llama-server 加载 / 兜底 / 平台隔离，并下载真实 macOS 版 llama.cpp 做 <code>--version</code> 冒烟（能小模型加载则加上）；结果如实区分「runner 验证」和「未验证」。GitHub Actions 的 macOS 作业每次推送通过（2026-10-13 用 <code>gh run</code> 核对）；真实模型推理由维护者真机覆盖</span><span class="when">2026-10-13</span></li>
+    <li class="task" data-done="true"><span class="t">遗漏项审计（已发现，8-6 前确认归属）：Mac 源码版没有启动脚本（<code>start.bat</code> 只有 Windows）：<b>8-6 新增 <code>start.command</code></b>；应用内更新与安装包只有 Windows（NSIS），<b>Mac 套壳 / DMG / 发包另开工作包（用户 2026-10-03 确认），按 AGENTS.md 仍须用户另行启动，本阶段不做</b>；<code>sharp</code> 需在 Mac 上原生安装；exFAT 外置盘会产生 <code>._*</code> 文件，扫描要跳过；Mac 路径 / <code>~</code> 展开与粘贴路径校验；README / 卸载说明的 Mac 路径；<code>docs/platform-foundation.md</code> 里「不宣称 Mac 已支持」的措辞在验证后更新。<b>2026-10-13</b>：Mac 套壳 / DMG / 发包已完成（beta.7 起），<code>docs/platform-foundation.md</code> 等文档的「未验证 / 不宣称支持」措辞按维护者真机确认更新</span><span class="when">2026-10-13</span></li>
   </ul>
 
   <div class="accept"><h3>验收标准</h3>
@@ -1002,7 +1002,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
     <tr><td><span class="tag slot">界面</span></td><td>英文界面：<b>已实现</b>（阶段 11-1：<code>i18n/en.ts</code> 骨架 + <code>i18n/messages.ts</code> 语言表 + <code>i18n/fill.ts</code> 回落）；译文与界面接线是 11-2 至 11-3</td></tr>
     <tr><td><span class="tag slot">运行</span></td><td>开机自启服务：加一个注册脚本即可，架构不变</td></tr>
     <tr><td><span class="tag slot">安全</span></td><td>源码版数据目录可用 <code>LLAMA_WEB_DATA</code> 挪到项目外；阶段 5 桌面版默认使用用户数据目录</td></tr>
-    <tr><td><span class="tag slot">桌面</span></td><td>Mac 套壳与 DMG、签名增量更新（Tauri updater）、系统托盘、Universal 包、Windows ARM：本阶段不实施；Mac 后续须用户另行启动。应用内检查 / 版本旁提示 / 下载校验后自动安装已有源码实现（关键决定 29），2026-10-03 的新自动安装流程尚未重新打包真机验收</td></tr>
+    <tr><td><span class="tag slot">桌面</span></td><td>签名增量更新（Tauri updater）、Mac 签名公证与应用内更新、系统托盘、Universal 包、Intel Mac、Windows ARM：不实施（Mac 套壳与 DMG 已在后续完成）。应用内检查 / 版本旁提示 / 下载校验后自动安装已有源码实现（关键决定 29），2026-10-03 的新自动安装流程尚未重新打包真机验收</td></tr>
     <tr><td><span class="tag slot">运行库</span></td><td>从源码编译 llama.cpp（git 仓库 + 编译器 / CMake / CUDA 工具链）、Vulkan / HIP / SYCL 等其他 GPU 后端：阶段 8 不做（决定 34、37）</td></tr>
     <tr><td><span class="tag slot">设备</span></td><td>多卡并行切分（<code>--tensor-split</code>）：决定 39 要求一个模型只跑在一个设备上，只给警告不提供表单</td></tr>
   </table>
@@ -1034,6 +1034,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 <section id="changelog">
   <h2>变更记录</h2>
   <table>
+    <tr><td>2026-10-13</td><td>macOS 措辞更新（用户 2026-10-13：已在 Apple Silicon Mac 上自己跑过，都没问题）：README / AGENTS / platform-foundation / macos-desktop / v1.0.0 发布说明 / claude-guide 去掉「Mac 真机未验证」「不宣称 Mac 已支持」等过时说法，README 补上 macOS DMG 安装与更新方式；界面里命令预览去掉「Mac 真机运行尚未验证」，Mac 上的更新提示与改端口提示不再按 Windows / 源码版写；<code>platformInfo().verified</code> 对 darwin arm64 为真。打勾：Mac 专项收尾、macOS CI、遗漏项审计。仍然如实保留的限制：Intel Mac 不构建未测试、未公证、Mac 无应用内更新、macOS 13 / 14 未实测</td></tr>
     <tr><td>2026-10-13</td><td>新增关键决定 57（产品定位，用户 2026-10-13）：README 中英文按「llama.cpp 原生管理 + 独立 API 网关」重写，公网访问长教程移到 <code>docs/public-access.md</code> / <code>.en.md</code>（内容未删）；更正文档里与代码不符的两处：llama.cpp 不会在首次启动时自动下载（<code>llamacpp.autoUpdate</code> 默认关闭，在新手引导或设置里下载），<code>autoUpdate</code> 已可在界面修改；AGENTS.md「项目是什么」同步。应用图标换成新形象（Windows <code>favicon.ico</code> / <code>icon.ico</code> 16–256，macOS <code>icon.icns</code> 16–1024），素材后来按用户决定换成 AI 生成的千问风格形象。同日按用户决定：侧栏副标题改为「LLM 网关 · llama.cpp 管理」/「LLM gateway · llama.cpp」；新手引导加「运行本地模型 / 只接入外部 API」二选一，外部 API 路径三步（添加服务 → 读取模型列表 → 客户端配置），在引导页内直接打开添加抽屉和测试连接；<code>isFirstRun</code> 增加「没有外部服务」条件。随后按用户要求：侧栏「新手引导」入口只跟 <code>setup.done</code> 走（引导中途去别的页面也能回来；点「完成」或「先跳过」后入口消失，直接访问 <code>/setup</code> 会跳回总览）；引导页底部始终有按钮（已有进展时为「完成」）；升级前已有模型目录 / 模型 / 外部服务但没走完引导的安装，启动时视为已完成并保存</td></tr>
     <tr><td>2026-10-13</td><td>决定 18 措辞更正（用户 2026-10-13）：原写「加第三种语言只要一行 <code>LOCALES</code> 加一个文件」，按现状不成立。第三种语言无限期搁置，所以不补实现，只把实际要注册的位置写进决定 18。另定（用户交给编排决定）：事件里未知的加载失败原因（<code>live.ts</code> errorText / <code>useFormat.ts</code> reasonText）继续原样显示诊断原文，不改成通用文案。理由：阶段 11 复审没有找到会产生中文未知异常的真实路径；能识别的失败都已映射成当前语言文案；剩下的原文是排查问题的唯一线索。</td></tr>
     <tr><td>2026-10-13</td><td>阶段 9 交叉审查闭环（<code>docs/reviews/stage-9-codex.md</code>，3 轮，第 3 轮 pass）：核对 GPT r2 的 CR-010 至 CR-021，在 HEAD 上均已解决。新发现 3 条，均已修复：CR-022 内存检查与实际启动配置绑定，检查期间保存配置会重新检查；启动清理等待移到检查之前，launch 前同步复核，不一致不启动，新增 <code>config-changed</code> 失败种类与拒绝原因（中英文案）；CR-023 保存前检查取最新读数；CR-024 启动反馈按方案匹配。<code>/v1</code> 错误码约定没有改。硬件验收（Windows / CUDA / WDDM / 多卡）仍按各自任务待做。</td></tr>

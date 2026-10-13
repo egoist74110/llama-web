@@ -25,13 +25,14 @@ const cuda: RuntimeTarget = { os: 'win32', arch: 'x64', acceleration: 'cuda' }
 const cpu: RuntimeTarget = { ...cuda, acceleration: 'cpu' }
 const mac: RuntimeTarget = { os: 'darwin', arch: 'arm64', acceleration: 'metal' }
 
-test('host facts distinguish unknown NVIDIA, CPU and unverified Mac; unsupported combinations refuse', () => {
+test('host facts distinguish unknown NVIDIA, CPU, Apple Silicon and unverified Intel Mac; unsupported combinations refuse', () => {
   expect(platformInfo('win32', 'x64').acceleration).toBe('unknown')
   expect(() => runtimeTarget(platformInfo('win32', 'x64'), 'auto')).toThrow()
   expect(runtimeTarget(platformInfo('win32', 'x64', false), 'auto')).toEqual(cpu)
   expect(runtimeTarget(platformInfo('win32', 'x64', true), 'auto')).toEqual(cuda)
   expect(runtimeTarget(platformInfo('darwin', 'arm64'), 'auto')).toEqual(mac)
-  expect(platformInfo('darwin', 'arm64').verified).toBe(false)
+  expect(platformInfo('darwin', 'arm64').verified).toBe(true)
+  expect(platformInfo('darwin', 'x64').verified).toBe(false)
   expect(platformInfo('darwin', 'x64').acceleration).toBe('cpu')
   for (const info of [platformInfo('linux', 'x64'), platformInfo('win32', 'arm64')]) expect(() => runtimeTarget(info, 'cpu')).toThrow()
   expect(() => runtimeTarget(platformInfo('darwin', 'arm64'), 'cuda')).toThrow()

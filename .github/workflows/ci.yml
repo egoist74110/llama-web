@@ -1,7 +1,7 @@
 # Checks that run on every push and pull request. The macOS job is the only place the macOS branches
 # of the code run on real macOS (decision 38): unit tests, type check, and a smoke test that installs
-# the real macOS llama.cpp release and runs `llama-server --version`. It loads no model, so it says
-# nothing about Metal inference, the folder dialog, or the Finder launcher; those still need a Mac.
+# the real macOS llama.cpp release and runs `llama-server --version`. It loads no model; Metal inference,
+# the folder dialog and the Finder launcher are covered by the maintainer's runs on an Apple Silicon Mac.
 name: CI
 
 on:

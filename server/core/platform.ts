@@ -12,7 +12,7 @@ export interface PlatformInfo {
 export function platformInfo(os = process.platform, arch = process.arch, nvidia?: boolean): PlatformInfo {
   const acceleration = os === 'win32' ? (nvidia === undefined ? 'unknown' : nvidia ? 'cuda' : 'cpu')
     : os === 'darwin' && arch === 'arm64' ? 'metal' : os === 'darwin' ? 'cpu' : 'unknown'
-  return { os, arch, acceleration, shell: os === 'win32' ? 'cmd' : 'posix', verified: os === 'win32' && arch === 'x64' }
+  return { os, arch, acceleration, shell: os === 'win32' ? 'cmd' : 'posix', verified: (os === 'win32' && arch === 'x64') || (os === 'darwin' && arch === 'arm64') }
 }
 export function runtimeTarget(info: PlatformInfo, wanted: Acceleration): RuntimeTarget {
   const acceleration = wanted === 'auto' ? info.acceleration : wanted

@@ -25,7 +25,7 @@ llama-web：Unified LLM Gateway & llama.cpp Manager。轻量的跨平台 LLM 管
 - Bun：运行时、包管理、测试（`bun test`）
 - Nuxt UI（Tailwind）
 - sharp（图片处理）
-- 平台：Windows 11 + NVIDIA GPU（CUDA 版 llama.cpp）
+- 平台：Windows 11 x64（NVIDIA GPU 用 CUDA 版 llama.cpp，或 CPU 版）；macOS 13+ Apple Silicon（Metal 版 llama.cpp）。Intel Mac、Linux 不提供
 
 ## 常用命令
 
@@ -53,8 +53,8 @@ start.bat            # 用户实际使用的启动方式（1-5 实现）
 - `server/core/`：scheduler、model-ops（管理操作，路由里不要直接调 scheduler 的 start/stop）、runner、args、scanner、gguf、preprocess、proxy、routing、config、launch、logs（`data/logs` 落盘与保留）、request-log（请求记录：只存白名单参数、token 数，不存对话内容）、live、errors、updater（llama.cpp）、app-update / app-info（llama-web 自身更新与版本，版本号只在 `package.json`）、desktop-channel（桌面壳私有管道）、gpu、store、backends、admission（加载前内存检查的纯函数）、watchdog（多开时的运行期看门狗）、disk-space（下载前剩余空间）、upstreams / upstream-health / upstream-launcher（外部上游、健康探测与独占本机、手动启动，关键决定 56）
 - `server/plugins/`：启动时执行的逻辑
 - `tests/`：单元测试
-- `src-tauri/`、`desktop/`：Windows 桌面壳（Rust）、打包脚本与包内容检查（`desktop/check-package.ts`）
-- `.github/workflows/release-windows.yml`、`docs/release-notes/`：手动触发的 Windows 草稿 Release 与各版本发布说明
+- `src-tauri/`、`desktop/`：Windows / macOS 桌面壳（Rust，Mac 配置在 `tauri.macos.conf.json`）、打包脚本与包内容检查（`desktop/check-package.ts`）
+- `.github/workflows/release-windows.yml`、`release-macos.yml`、`scripts/release.ts`（`release.bat` / `release.command`）、`docs/release-notes/`：手动触发的草稿 Release（Windows 安装包 + macOS arm64 DMG）与各版本发布说明
 - `docs/plan.html`：开发计划与进度
 - `data/`：运行数据（已加入 .gitignore，见下文）
 
@@ -91,7 +91,7 @@ start.bat            # 用户实际使用的启动方式（1-5 实现）
 ### 阶段关口
 
 - 原有功能开发分为 4 个阶段；后续阶段 5（兼容基础与 Windows 桌面首发）以 `docs/plan.html` 为准。每个阶段由几个工作包组成。**每个工作包结束时提交并推送**，然后按指南告诉用户下一个工作包。
-- Windows 套壳工作包 5-2 完成后必须停下来等用户安装试用确认，才能进入 5-3 Release；Mac 套壳与发包必须等用户另行要求启动，不自动往下做。
+- Windows 套壳工作包 5-2 完成后必须停下来等用户安装试用确认，才能进入 5-3 Release。Mac 桌面壳与 DMG 已随 beta.7 起和 Windows 同版本发布；Mac 的签名公证、应用内更新、Intel 构建仍须用户另行要求，不自动往下做。
 - **每个阶段的最后一个工作包完成后停下来**，等用户试用和审查确认，得到确认后才开始下一阶段。
 - 一个会话只做一个工作包；做不完就停在测试能通过的干净点，写好交接，让用户开新会话接续。
 - 阶段结束时的真机冒烟会实际占用 GPU：开始之前先告诉用户。

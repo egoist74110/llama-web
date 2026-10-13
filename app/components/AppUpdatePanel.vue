@@ -5,6 +5,7 @@ import { t } from '../composables/useLocale'
 
 const props = defineProps<{ compact?: boolean }>()
 const s = t.appUpdate
+const ui = usePlatformUi()
 const { view, release, busy, confirming, download, cancel, skip } = useAppUpdate()
 const blocks = computed(() => notesBlocks(release.value?.notes ?? ''))
 const dl = computed(() => {
@@ -78,7 +79,7 @@ const skipped = computed(() => !!release.value && view.value?.skipped === releas
       </p>
     </template>
     <p v-else class="text-xs text-muted">
-      {{ s.sourceHint }}
+      {{ ui.isMac ? s.macHint : s.sourceHint }}
     </p>
 
     <div class="flex flex-wrap justify-end gap-2">

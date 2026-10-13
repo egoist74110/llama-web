@@ -1,11 +1,13 @@
 # 5-1 平台兼容基础
 
-本工作包完成服务端兼容基础。Windows 上运行测试与构建；macOS 分支只用构造数据验证。**尚未在 Mac 真机验证进程、sharp、Metal / CPU 推理，不宣称 Mac 已支持。** 不包含桌面壳、安装包或 Release。
+> **现状（2026-10-13）**：macOS 13+ Apple Silicon 已正式支持：维护者在 Apple Silicon Mac 上日常运行 DMG 桌面版与源码版（进程管理、sharp、Metal 推理、选择文件夹、Finder 启动都正常），CI 每次推送在 macOS 上跑测试和真实 llama.cpp 冒烟，DMG 从 beta.7 起随 Release 发布。仍未覆盖：Intel Mac（不构建、未测试）、签名公证、Mac 应用内更新。下文是 5-1 / 8-6 当时的记录，其中「未验证」的说法已被上述实测取代。
+
+本工作包完成服务端兼容基础。Windows 上运行测试与构建；macOS 分支当时只用构造数据验证。不包含桌面壳、安装包或 Release。
 
 ## 平台接口
 
 - `platformInfo(os, arch, nvidia?)` / `detectPlatform()`：报告 OS、架构、加速候选、命令 shell 和验证标记。Windows 的 NVIDIA 探测失败返回 unknown，不能自动猜 CUDA；检测不加载模型。
-- `runtimeTarget(info, acceleration)`：校验 Windows x64 CUDA / CPU、macOS arm64 / x64 CPU / Metal 组合。Windows ARM、Linux 不在本工作包支持范围。Intel Mac 自动选择 CPU；显式 Metal 仍需硬件实测。
+- `runtimeTarget(info, acceleration)`：校验 Windows x64 CUDA / CPU、macOS arm64 / x64 CPU / Metal 组合。Windows ARM、Linux 不在本工作包支持范围。Intel Mac 自动选择 CPU（Intel Mac 没有安装包、未测试）。
 - `targetKey(target)`：运行库目录标识。CUDA 保持既有“精确版本优先，否则同一主版本最新 minor，并要求匹配 cudart”规则。
 - `extractArchive()`：系统 bsdtar 支持 zip、tar.gz、tgz；先检查归档名、路径、类型和链接，再解压，解压后再次检查实际链接边界。下载要求 GitHub SHA-256。每个解压工具调用最多 120 秒，取消 / 超时杀掉工具后等待关闭，再删除临时目录。只有完整安装后才原子改名。
 - `stopProcessGroup()`：非 Windows 托管子进程采用独立进程组，TERM、最多 1.5 秒宽限、KILL。组首进程退出时仍处理组内后代。Windows 保留 `taskkill /T /F`。
@@ -18,7 +20,7 @@
 
 新增 `llamacpp.acceleration`：`auto | cuda | cpu | metal`。既有 v3 配置迁移为 `cuda`，保持此前 Windows 行为；保存前用 JsonStore 备份原始字节。`current`、`cudaRuntime`、模型目录、全局参数、模型覆盖与方案参数不改写。
 
-新配置使用 auto；确认 NVIDIA 的 Windows 使用既有参数默认值，CPU / Mac 新配置不套用 CUDA 特定参数。Mac 默认值只经过构造测试，真机效果待验证。修改加速类型后须重启，手改配置沿用已有管理方式；模型参数仍按原有层级合并，显式参数可以覆盖新配置默认值。
+新配置使用 auto；确认 NVIDIA 的 Windows 使用既有参数默认值，CPU / Mac 新配置不套用 CUDA 特定参数。Mac 默认值已在 Apple Silicon 真机上使用。修改加速类型后须重启，手改配置沿用已有管理方式；模型参数仍按原有层级合并，显式参数可以覆盖新配置默认值。
 
 ### runtime
 
@@ -51,7 +53,7 @@ llama.cpp 旧平铺目录只供 Windows x64 CUDA 使用；CPU 和 Mac 不扫描�
 
 下载、校验、解压失败只留下可重试状态，完整版本未发布；工作目录在 finally 清理。版本落盘后若配置保存失败，旧 current 仍可用，新版本可在下次启动对账。迁移备份失败时不覆盖旧文件。身份补写失败会终止对应子进程；停止等待身份探测结束。
 
-自动更新仍只在启动时运行，模型上线数仍固定 1；调度、端口分配、请求转发、公网来源识别和鉴权不变。无采样时隐藏 GPU 卡片，Mac 设置页说明采样及真机验证缺失；POSIX 命令预览使用单引号保护替换与 shell 元字符，Windows 继续 CMD 格式。
+自动更新仍只在启动时运行，模型上线数仍固定 1；调度、端口分配、请求转发、公网来源识别和鉴权不变。无采样时隐藏 GPU 卡片；POSIX 命令预览使用单引号保护替换与 shell 元字符，Windows 继续 CMD 格式。
 
 验证包括三平台资产构造测试、缺资产 / 错架构 / 校验失败、临时目录清理、真实小 zip / tar.gz / tgz、解压取消 / 超时、进程组信号模拟、身份与路径不匹配、PID 复用、旧配置备份、旧 runtime 回退与平台隔离、真实第二实例拒绝及死 owner 恢复。Windows 构建产物另用假 llama-server 验证旧目录加载、转发、命令预览、SSE、父进程退出与锁恢复。
 
@@ -60,7 +62,7 @@ llama.cpp 旧平铺目录只供 Windows x64 CUDA 使用；CPU 和 Mac 不扫描�
 ## 8-6 补充：Mac 源码版收尾与验证范围
 
 - 新增 `start.command`（对应 `start.bat`）、`osascript` 选择文件夹、扫描跳过 `._*` / `.DS_Store`、`~` 展开、界面文案审计（Mac 上不出现 GPU / 显存 / Metal / 盘符）、`.github/workflows/ci.yml` 的 macOS 作业。
-- **runner 验证（作业写好，结果以 GitHub Actions 为准，本地 Windows 上没有运行过）**：`bun test`、`bun run typecheck`、`bash -n start.command`、下载真实 macOS 版 llama.cpp 并运行 `llama-server --version`。
-- **未验证（仍需 Mac 真机）**：Metal 加载与推理、模型占用的统一内存、`osascript` 对话框与系统权限提示、Finder 双击 `start.command`、手动添加压缩包时的隔离标记 / 签名、`sharp` 的原生安装、进程树清理。
-- 因此「不宣称 Mac 已支持」的措辞保持不变；README 把 Mac 源码版标为「尚未在 Mac 真机验证」。
-- 桌面壳 / DMG / 发包不在阶段 8，须用户另行启动。
+- **runner 验证（GitHub Actions 上持续通过）**：`bun test`、`bun run typecheck`、`bash -n start.command`、下载真实 macOS 版 llama.cpp 并运行 `llama-server --version`。
+- **真机验证（维护者，Apple Silicon）**：Metal 加载与推理、`osascript` 选择文件夹、Finder 双击 `start.command`、`sharp`、进程树清理在日常使用中都正常（2026-10-13 确认）。手动添加压缩包被隔离标记拦下时，按 README 执行 `xattr`。
+- README 已把 Apple Silicon 标为支持（桌面 DMG + 源码版）。
+- 桌面壳 / DMG / 发包后来单独完成，beta.7 起随 Release 发布，见 `docs/macos-desktop.md`。

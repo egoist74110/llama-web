@@ -40,7 +40,7 @@ export default {
       setupPathHint: '也可以直接粘贴路径：在访达里选中文件夹，按 ⌥⌘C 复制路径。',
       dirPlaceholder: '例如 ~/llama.cpp/b1234',
       archivePlaceholder: '例如 ~/Downloads/llama-b1234.tar.gz',
-      restartRequired: '端口已保存为 {port}，但当前进程仍在使用 {current}。关闭运行 start.command 的终端窗口后重新启动才会生效。',
+      restartRequired: '端口已保存为 {port}，但当前进程仍在使用 {current}。退出 llama-web 后重新打开才会生效（桌面版从程序坞退出；源码版关闭运行 start.command 的终端窗口）。',
       // Findings of the save-time check and events that would otherwise say GPU / video memory.
       issues: {
         'cpu-gpu-layers': '设备选的是 CPU，但加速层数写了 {layers}：这个数字不会生效，模型全部在 CPU 上运行。',
@@ -726,7 +726,7 @@ export default {
       preview: {
         title: '命令预览',
         hint: '由后端按启动时完全相同的规则生成。端口在启动时才分配，这里只是示例。命令按 Windows 命令提示符（CMD）的写法转义，请粘贴到 CMD 里运行（PowerShell 的转义规则不同）。',
-        posixHint: '由后端按启动时相同的参数数组生成。端口只是示例；命令按 POSIX shell 转义，可粘贴到 macOS 终端。Mac 真机运行尚未验证。',
+        posixHint: '由后端按启动时相同的参数数组生成。端口只是示例；命令按 POSIX shell 转义，可粘贴到 macOS 终端。',
         copy: '复制',
         copied: '已复制命令',
         copyFailed: '复制失败，请手动选中复制',
@@ -2082,6 +2082,7 @@ export default {
     updateNow: '立即更新',
     sourceDownload: '前往下载',
     sourceHint: '源码版不会自动安装：请到发布页面下载 Windows 安装包，或拉取最新代码后重新运行 start.bat。',
+    macHint: 'Mac 版不会自动安装：桌面版请到发布页面下载新的 DMG，替换「应用程序」里的 llama-web；源码版拉取最新代码后运行 ./start.command build。',
     skip: '跳过此版本',
     unskip: '恢复提示',
     later: '稍后',

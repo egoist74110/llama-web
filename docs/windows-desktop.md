@@ -1,6 +1,6 @@
 # Windows desktop
 
-5-2 本地测试包已由用户试用确认（未在干净机 / 无 NVIDIA 上试用）。5-3 起由 GitHub Actions 生成草稿 Release，结果见文末「5-3」。Mac 未开始。
+5-2 本地测试包已由用户试用确认（未在干净机 / 无 NVIDIA 上试用）。5-3 起由 GitHub Actions 生成草稿 Release，结果见文末「5-3」。macOS 桌面版见 [macos-desktop.md](macos-desktop.md)。
 
 ## 构建
 

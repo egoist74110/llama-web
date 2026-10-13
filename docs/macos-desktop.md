@@ -1,6 +1,8 @@
-# macOS desktop（Apple Silicon，未签名测试包）
+# macOS desktop（Apple Silicon，ad-hoc 签名、未公证）
 
-状态（2026-10-05）：只出 **arm64** 的 DMG。用户 2026-10-05 要求与 Windows 同版本（0.1.0-beta.7）一起发：先跑 Windows 工作流创建草稿 Release，再跑本工作流并勾选 `attach_to_draft`，把 DMG 挂到同一个**草稿**并把 DMG 追加进 `SHA256SUMS`；公开草稿由维护者核对下载包后手动执行。没有 Apple 开发者证书：应用只做了 ad-hoc 签名，**没有公证**，所以首次打开 macOS 会警告，不能说“无提示安装”。Intel Mac 不构建、不用 Rosetta 代替验证。Mac 包日后与 Windows 同版本一起发，那是单独的工作包。
+状态（2026-10-05）：只出 **arm64** 的 DMG。用户 2026-10-05 要求与 Windows 同版本（0.1.0-beta.7）一起发：先跑 Windows 工作流创建草稿 Release，再跑本工作流并勾选 `attach_to_draft`，把 DMG 挂到同一个**草稿**并把 DMG 追加进 `SHA256SUMS`；公开草稿由维护者核对下载包后手动执行。没有 Apple 开发者证书：应用只做了 ad-hoc 签名，**没有公证**，所以首次打开 macOS 会警告，不能说“无提示安装”。Intel Mac 不构建、不用 Rosetta 代替验证。
+
+现状（2026-10-13）：DMG 从 0.1.0-beta.7 起与 Windows 安装包同版本发布（`scripts/release.ts` 一次触发两个工作流）；维护者在 Apple Silicon Mac 上日常使用 DMG 版，下载、拖入应用程序、首次打开、模型加载与 Metal 推理、退出清理都正常。仍然成立的限制：没有公证（首次打开要「仍要打开」）、没有应用内更新、只有 arm64。
 
 ## 构建
 
@@ -16,7 +18,7 @@ bun run desktop:build:mac     # = desktop:prepare + tauri build --bundles dmg
 - `icons/icon.icns` 由 1254² 原图生成（2026-10-13）：圆角方形，按 Apple 网格缩到 824/1024、四周透明，16–1024 共 10 个 PNG 帧（调色板压缩）；64 px 及以下用脸部特写。Windows 的 `icon.ico` 来自 `public/favicon.ico`（16–256 共 7 帧 RGBA PNG，48 px 及以下用脸部特写，见 `desktop/prepare.ts`）。
 - 产物：`src-tauri/target/release/bundle/dmg/llama-web_<版本>_aarch64.dmg`。
 
-## GitHub Actions：`macOS arm64 build (artifact only)`
+## GitHub Actions：`macOS arm64 build`
 
 `.github/workflows/release-macos.yml`，手动触发（输入版本，必须等于 `package.json`；可选 `attach_to_draft`），`macos-15`（arm64）。**本身不创建 Release、不打 tag**；只有勾选 `attach_to_draft` 时，最后一步才往**已存在的草稿** `v<版本>` 上传（草稿必须已有 Windows 安装包和 `SHA256SUMS`；已公开的 Release 或已有同名 DMG 会直接拒绝；Mac 的许可汇总以 `THIRD-PARTY-NOTICES-macos.txt` 上传，不覆盖 Windows 的）。工作流 `contents: write` 只给这一步用。步骤：冻结安装 → `bun test` → typecheck → 构建 DMG → `cargo test` → `desktop/check-package.ts`（DMG）→ 在从 DMG 取出的 `.app` 里用**包内的 Bun** 跑 JIT、sharp、起服务（隔离数据目录）并下载 / 解压 / 执行真实 llama.cpp 做 `--version` → 汇集产物并作为 workflow artifact 上传（保留 14 天）：
 
@@ -48,9 +50,9 @@ Windows 模式（`.exe` 安装包、`resources` 目录）的逻辑与允许清�
 | sharp / libvips | 随 npm 包带的 `.node` 与 `.dylib` 是 linker 生成的 ad-hoc 签名；Bun 带 `disable-library-validation`，可加载 |
 | 从 DMG 取出的 `.app` 内 | 内置 Bun 的 JIT 循环、sharp 缩放 JPEG（libvips 8.18.7）、起服务并返回页面 200、`/v1/models` 空列表，均成功 |
 | 运行时下载的 llama.cpp | 由应用自己下载（无隔离属性）；CI 已用源码版 Bun 验证 `llama-server --version`，工作流里再用**包内 Bun** 验证一次（见上；runner 上已通过，run 37270349450） |
-| 模拟隔离属性（`com.apple.quarantine`） | 给 `.app` 根目录写“未批准”的隔离标记后，包内 Bun 被系统直接杀掉（退出码 137）；写“用户已批准”标记（Open Anyway 之后的状态）或去掉标记则正常。这是**手工模拟**，用户在 Mac 上实际走一遍流程后才能下结论 |
+| 模拟隔离属性（`com.apple.quarantine`） | 给 `.app` 根目录写“未批准”的隔离标记后，包内 Bun 被系统直接杀掉（退出码 137）；写“用户已批准”标记（Open Anyway 之后的状态）或去掉标记则正常。这是手工模拟；之后用户按「仍要打开」实际走过完整流程，结论一致 |
 
-未验证：整个应用窗口在真实“下载 → 挂载 DMG → 拖入 Applications → 首次打开”流程里的表现；Metal 推理；模型加载；退出后进程组清理（5-1 的 POSIX 逻辑只有构造测试 + CI）；不同 macOS 版本（本机是 macOS 27，工作流跑在 macos-15）。
+后续真机结果（维护者，2026-10-13 确认）：“下载 → 挂载 DMG → 拖入 Applications → 首次打开”、Metal 推理、模型加载、退出后进程清理都正常。仍未覆盖：macOS 13 / 14 等较旧版本（维护者本机是较新的 macOS，工作流跑在 macos-15）。
 
 ## 首次打开（没有证书时用户要做的事）
 

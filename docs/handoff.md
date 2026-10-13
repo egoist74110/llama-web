@@ -1,5 +1,13 @@
 # 交接记录
 
+## 2026-10-13 · macOS 措辞清理 · 单会话
+- 依据：用户说已在 Apple Silicon Mac 上自己跑过、都没问题，要求去掉文档和程序里含糊的 Mac 说法。派一个只读侦察查全仓，母会话核对后修改；另用 `gh` 核实：已发布的 v0.1.0-beta.8 带 `macos-arm64.dmg`，CI 的 macOS 作业持续通过。
+- 程序：命令预览的 `posixHint` 去掉「Mac 真机运行尚未验证」；关于与更新在 Mac 上显示新的 `appUpdate.macHint`（下载新 DMG 替换 / 源码版 `./start.command build`），不再提示 Windows 安装包与 start.bat；Mac 改端口提示同时写桌面版和源码版的做法；`platformInfo().verified` 对 darwin arm64 为真（测试同步，Intel Mac 仍为 false）；`ci.yml` 注释更新。
+- 文档：README 中英文补「macOS 桌面版（Apple Silicon）」安装节、平台表（Apple Silicon 支持 / Intel 不提供）、Mac 更新方式、发布流程含 macOS 工作流，去掉「Mac 只有这一种版本」「没有安装包和桌面壳」「仍需真机确认」；AGENTS 平台与目录说明；platform-foundation 顶部加现状、8-6 未验证段改为真机结果；macos-desktop 现状与未验证段；windows-desktop 的「Mac 未开始」；v1.0.0 发布说明（会被下次发布沿用）的真机情况和 llama.cpp 下载时机；claude-guide 阶段关口 5；plan 交付顺序、兼容表、坑位表，打勾 Mac 专项收尾 / macOS CI / 遗漏项审计，加变更记录。
+- 依据用户这句确认写成「真机正常」的项：DMG 安装与首次打开、Metal 推理、模型加载、选择文件夹、Finder 双击 start.command、sharp、退出清理、窗口与关窗。用户如有某项其实没试过，需要改回。
+- 保留的限制（仍然属实）：Intel Mac 不构建未测试、ad-hoc 签名未公证、Mac 没有应用内更新、macOS 13 / 14 未实测；历史交接记录、旧版本发布说明、已完成工作包的提示词没有改写。
+- 没打勾：plan 中 805（手动添加运行库的签名处理）、806 / 807（界面隐藏与平台判断，代码看似已实现但没有逐项核对测试），794 / 795 / 796 还差 Windows 部分。
+
 ## 2026-10-13 · 产品定位文档 + 新图标 + 纯网关新手引导 · 单会话（不是计划里的工作包）
 - 依据：用户给出的定位说明与随后四项决定（关键决定 57）。
 - 文档：README 中英文按「llama.cpp 原生管理 + 独立 API 网关」重写（标题区、两种能力对照表与边界、mermaid 流程图、两条快速开始、功能三组、平台表、设计原则、图标说明）；公网访问长教程原样移到 `docs/public-access.md` / `.en.md`；AGENTS.md「项目是什么」同步。核对代码后更正旧说法：llama.cpp 不会在首次启动时自动下载（`llamacpp.autoUpdate` 默认 false），`autoUpdate` 已有界面开关。
