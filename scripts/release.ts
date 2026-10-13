@@ -119,8 +119,10 @@ function readVersion(): string {
 // Replaces only the top-level "version" line so the rest of package.json keeps its formatting.
 function writeVersion(version: string) {
   const text = readFileSync(pkgPath, 'utf8')
-  const next = text.replace(/^(\s*"version"\s*:\s*")[^"]*(")/m, `$1${version}$2`)
-  if (next === text) fail('Could not find the "version" line in package.json')
+  const line = /^(\s*"version"\s*:\s*")[^"]*(")/m
+  // Releasing the version package.json already has (e.g. publishing 1.0.0 after its pre-releases) changes nothing.
+  if (!line.test(text)) fail('Could not find the "version" line in package.json')
+  const next = text.replace(line, `$1${version}$2`)
   writeFileSync(pkgPath, next)
 }
 
