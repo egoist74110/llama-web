@@ -4,15 +4,13 @@
 
 ## 项目是什么
 
-llama-web：本地私有 LLM 控制台。一个 Nuxt + Bun 进程，负责：
+llama-web：Unified LLM Gateway & llama.cpp Manager。轻量的跨平台 LLM 管理与 API 网关，一个 Nuxt + Bun 进程。两种能力分开看：
 
-- 启动、停止、切换 `llama-server.exe`（自己管理子进程，不依赖 llama-swap）
-- 提供 OpenAI 兼容 API（`/v1/*`），按请求里的 `model` 自动切换模型
-- 请求预处理（目前只有图片压缩）
-- 扫描模型目录、读取 GGUF 元数据
-- 中文管理界面：总览 / 模型 / 日志 / 设置
-- 可选的公网入口（Cloudflare 隧道 → `:8080`，只开放 `/v1/*`，校验 API key）
-- 自动更新官方 llama.cpp Release，保留旧版本用于回退
+- **llama.cpp 原生管理**（唯一原生管理的引擎）：启动、停止、切换 `llama-server`（自己管理子进程，不依赖 llama-swap）；扫描模型目录、读取 GGUF 元数据；官方 llama.cpp Release 的下载、版本保留与回退（自动更新默认关闭）
+- **独立 API 网关**（不需要 llama.cpp）：把 OpenAI 兼容的外部服务接成上游转发（关键决定 56），只转发 API，不部署、不管理它们的进程
+- 共用：OpenAI 兼容 API（`/v1/*`，按请求里的 `model` 路由到本地模型或上游）、请求预处理（目前只有图片压缩）、请求记录、管理界面（中 / 英）、可选的公网入口（Cloudflare 隧道 → `:8080`，只开放 `/v1/*`，校验 API key）
+
+定位边界（关键决定 57）：支持其他引擎的 API，不等于管理其他引擎。不要把 vLLM / SGLang / Ollama 等的部署或进程管理加进来；文档里不要把计划中的能力写成已实现。
 
 **完整需求、决定和进度都在 [`docs/plan.html`](docs/plan.html)。开始任何工作前先读它。** 它是唯一的计划来源；本文件只写工作规则。
 

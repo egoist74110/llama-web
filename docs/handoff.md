@@ -1,5 +1,15 @@
 # 交接记录
 
+## 2026-10-13 · 产品定位文档 + 新图标 + 纯网关新手引导 · 单会话（不是计划里的工作包）
+- 依据：用户给出的定位说明与随后四项决定（关键决定 57）。
+- 文档：README 中英文按「llama.cpp 原生管理 + 独立 API 网关」重写（标题区、两种能力对照表与边界、mermaid 流程图、两条快速开始、功能三组、平台表、设计原则、图标说明）；公网访问长教程原样移到 `docs/public-access.md` / `.en.md`；AGENTS.md「项目是什么」同步。核对代码后更正旧说法：llama.cpp 不会在首次启动时自动下载（`llamacpp.autoUpdate` 默认 false），`autoUpdate` 已有界面开关。
+- 侧栏副标题：「LLM 网关 · llama.cpp 管理」/「LLM gateway · llama.cpp」（英文原想写 manager，窄侧栏会折行，缩短了）。
+- 新手引导：顶部「运行本地模型 / 只接入外部 API」二选一（只有外部服务、没有模型时默认后者）。外部 API 路径三步：添加服务（引导页内直接打开 `UpstreamEditor`，新服务保存后自动测试一次，同接入页）→ 读取模型列表（每个服务一个「测试连接」按钮）→ 客户端配置（Base URL 用 `apiAddress`、示例模型名取第一个可用的 `名称-模型id`）。底部按钮在已有外部服务时变成「完成，去总览」。`isFirstRun` 多一个参数 `upstreamCount`（默认 0），有外部服务就不再重定向；侧栏引导入口在有模型或外部服务时隐藏。新增测试 1 条。
+- 图标：换成用户提供的 AI 生成千问风格图（1254² 圆形徽章在米白底上），做成圆角方形；小尺寸（ICO ≤48、ICNS ≤64）用脸部特写。`public/favicon.ico` = Windows `icon.ico`（7 帧 RGBA PNG，约 190 KB），`icon.icns`（10 帧，约 700 KB），`icon.png`（256 RGBA，约 130 KB）。
+- 实际运行：`bun test` 1504 pass / 20 skip / 0 fail（1524 / 114 文件）；`bun run typecheck` exit 0；`bun run build` exit 0；`src-tauri` 里 `cargo check` 通过（会改写 `Cargo.lock` 去掉 `pre-commit:allow` 标记，已还原）；开发服务器 + 临时 `LLAMA_WEB_DATA` 在浏览器里走了一遍外部 API 路径（中 / 英、浅 / 深、375 宽）：添加假服务、手填模型、测试连接失败提示、侧栏入口消失都正常；服务已停。
+- 没有运行：Windows NSIS / macOS DMG 打包与图标实际显示、GitHub 页面渲染、本地模型路径的引导（只改了外层，四步逻辑没动）、点「完成」之后的跳转（沿用原有 `skip()`）。
+- 已知且没改：窄屏下顶部导航文字挤在一起（原有问题）。
+
 ## 2026-10-13 · 阶段 11 审查处理 + 阶段 9 交叉审查闭环 · 母 AI 编排（Codex 审查 / Sonnet 实现 / 母 AI 复验）
 - 分工：Codex（gpt-6.1-sol，high）只做审查，阶段 11 接续原审查会话；Sonnet 5.5（medium）实现返工；母 AI 核实每轮 diff、亲自复跑验证、做取舍、提交。
 - 阶段 11：`stage-11-codex.md` CR-001 至 CR-006 全部修复，每条后面标了处理结果；修复复审 `stage-11-fixes-codex.md` 共 7 轮，第 7 轮 pass。主要返工在 CR-002：最后定为服务端设置版本 `(boot, rev)`，三条通道统一判新旧（新增 `server/core/boot-seq.ts`、`data/run/boot.json`）。设计取舍：`boot.json` 缺失或损坏时从 1 重新计数，已打开的旧页面需刷新，Codex 认可为边界。CR-004 由母 AI 在构建产物入口实测（Codex 沙箱里 build 会 SIGSEGV）。

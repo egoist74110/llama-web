@@ -13,7 +13,7 @@ bun run desktop:build:mac     # = desktop:prepare + tauri build --bundles dmg
 
 - `desktop/prepare.ts` 在 macOS arm64 上与 Windows 走同一条隔离工作树流程：冻结安装、`nuxt build`、把完整 `.output`、**官方 Bun（复制运行脚本的那份 Bun，要求版本等于 1.3.14）**、数据导入助手和许可汇总复制到 `src-tauri/resources/`，`versions.json` 的 `target` 为 `macos-arm64`。sharp 来自 `@img/sharp-darwin-arm64` 与 `@img/sharp-libvips-darwin-arm64`（`.output` 里已带）。
 - `src-tauri/tauri.macos.conf.json` 只在 macOS 上被 Tauri 合并：目标 `app` / `dmg`、`icons/icon.icns`、最低系统 13.0（Bun 的要求）、`signingIdentity: "-"`（ad-hoc）。Windows 的 `tauri.conf.json` 没有改。
-- `icons/icon.icns` 由仓库里 32×32 的 `icon.png` 放大而来，**只是占位图标，会偏糊**；正式图标需要一张大图。
+- `icons/icon.icns` 由 1254² 原图生成（2026-10-13）：圆角方形，按 Apple 网格缩到 824/1024、四周透明，16–1024 共 10 个 PNG 帧（调色板压缩）；64 px 及以下用脸部特写。Windows 的 `icon.ico` 来自 `public/favicon.ico`（16–256 共 7 帧 RGBA PNG，48 px 及以下用脸部特写，见 `desktop/prepare.ts`）。
 - 产物：`src-tauri/target/release/bundle/dmg/llama-web_<版本>_aarch64.dmg`。
 
 ## GitHub Actions：`macOS arm64 build (artifact only)`

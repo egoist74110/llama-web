@@ -95,7 +95,7 @@ export const enSkeleton: PartialMessages = {
   // Window title and subtitle.
   app: {
     title: 'llama-web',
-    subtitle: 'Local LLM console',
+    subtitle: 'LLM gateway · llama.cpp',
   },
 
   // Left menu entries.
@@ -1758,8 +1758,40 @@ export const enSkeleton: PartialMessages = {
   // First-run wizard: model directory, runtime, enabling a model, first start.
   setup: {
     title: 'Welcome to llama-web',
-    subtitle: 'Four steps to get running. Each step is ticked on its own as you finish it, and this guide disappears from the left once you add models.',
+    subtitle: 'Pick how you want to use it first. Each step is ticked on its own as you finish it, and this guide disappears from the left once you add models or an external service.',
     done: 'Done',
+    mode: {
+      label: 'How to use it',
+      local: 'Run local models',
+      localHint: 'Run GGUF models on this computer with llama.cpp, in four steps.',
+      gateway: 'External APIs only',
+      gatewayHint: 'No llama.cpp needed: connect OpenAI-compatible services such as vLLM, Ollama or cloud APIs, and let clients talk only to llama-web.',
+    },
+    gateway: {
+      add: {
+        title: 'Add an external service',
+        hint: 'Enter the service address (including /v1) and its API key. The name becomes the model prefix: clients call "name-modelid".',
+        go: 'Add an external service',
+        added: 'Added: {names}',
+      },
+      models: {
+        title: 'Read the model list',
+        hint: 'Press "Test the connection" on the Connections page and llama-web reads its model list; if the service has no /models, type the model ids in by hand.',
+        go: 'Go to Connections',
+        ready: 'Models available: {count}.',
+        needAdd: 'Finish the first step first.',
+      },
+      client: {
+        title: 'Point your client at llama-web',
+        hint: 'The client is configured only this once; later changes of service or key are made in llama-web.',
+        baseUrl: 'Base URL',
+        model: 'model',
+        modelExample: 'name-modelid',
+        key: 'API key',
+        keyValue: 'Not checked on the LAN, any value works',
+      },
+    },
+    finish: 'Done, go to Overview',
     dir: {
       title: 'Choose the model directory',
       hint: 'The folder that holds your .gguf model files; subfolders are scanned as well. You can add several, and add, remove or disable them later on the Settings page.',
@@ -1793,7 +1825,7 @@ export const enSkeleton: PartialMessages = {
       hint: 'Press "Start" on the Models page. The first start asks you about thinking, vision and MTP; after that you can connect with the API or a chat client.',
     },
     skip: 'Skip for now',
-    skipHint: 'You can configure everything on the Settings page at any time; this guide stays in the left menu until you add models.',
+    skipHint: 'You can configure everything on the Settings or Connections page at any time; this guide stays in the left menu until you add models or an external service.',
   },
 
   // Chat page: sessions, messages, composer.

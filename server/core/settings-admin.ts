@@ -346,7 +346,7 @@ export function dirStatus(dir: ModelDir): DirStatus {
   }
 }
 
-/** The first-run wizard is offered while nothing is configured and it has not been dismissed. */
-export function isFirstRun(settings: Settings, models: ModelsDoc): boolean {
-  return !settings.setup.done && settings.modelDirs.length === 0 && models.models.length === 0
+/** The first-run wizard is offered while nothing is configured (no model directory, model or upstream) and it has not been dismissed. */
+export function isFirstRun(settings: Settings, models: ModelsDoc, upstreamCount = 0): boolean {
+  return !settings.setup.done && settings.modelDirs.length === 0 && models.models.length === 0 && upstreamCount === 0
 }

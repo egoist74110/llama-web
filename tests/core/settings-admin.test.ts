@@ -241,6 +241,12 @@ describe('first run and directory status', () => {
     expect(isFirstRun({ ...s, setup: { done: true } }, models())).toBe(false)
   })
 
+  test('an external service alone also counts as configured (gateway-only use)', () => {
+    const s = defaultSettings()
+    expect(isFirstRun(s, models(), 0)).toBe(true)
+    expect(isFirstRun(s, models(), 1)).toBe(false)
+  })
+
   test('old settings files without a "setup" section are filled from defaults', () => {
     const { setup: _omit, ...old } = defaultSettings()
     expect(normalizeSettings(old as unknown as Settings).setup).toEqual({ done: false, tuned: false })

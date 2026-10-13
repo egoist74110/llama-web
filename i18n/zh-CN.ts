@@ -74,7 +74,7 @@ export default {
   },
   app: {
     title: 'llama-web',
-    subtitle: '本地 LLM 控制台',
+    subtitle: 'LLM 网关 · llama.cpp 管理',
   },
   nav: {
     guide: '新手引导',
@@ -1712,8 +1712,40 @@ export default {
   // First-run wizard.
   setup: {
     title: '欢迎使用 llama-web',
-    subtitle: '四步就能跑起来。每完成一步会自动打勾，添加模型后这个引导会从左侧消失。',
+    subtitle: '先选一种用法。每完成一步会自动打勾，添加了模型或外部服务后，这个引导会从左侧消失。',
     done: '已完成',
+    mode: {
+      label: '用法',
+      local: '运行本地模型',
+      localHint: '用 llama.cpp 在这台电脑上跑 GGUF 模型，四步完成。',
+      gateway: '只接入外部 API',
+      gatewayHint: '不需要 llama.cpp：把 vLLM、Ollama、云端 API 等 OpenAI 兼容服务接进来，客户端只连 llama-web。',
+    },
+    gateway: {
+      add: {
+        title: '添加外部服务',
+        hint: '填写服务的地址（含 /v1）和它的 API key。名称会成为模型前缀，客户端用「名称-模型id」调用。',
+        go: '添加外部服务',
+        added: '已添加：{names}',
+      },
+      models: {
+        title: '读取模型列表',
+        hint: '在「接入」页点「测试连接」，llama-web 会读取它的模型列表；服务没有 /models 时可以手填模型 id。',
+        go: '去「接入」页',
+        ready: '可用模型 {count} 个。',
+        needAdd: '先完成第一步。',
+      },
+      client: {
+        title: '在客户端里接入 llama-web',
+        hint: '客户端只需要配置这一次，以后换服务、换 key 都在 llama-web 里改。',
+        baseUrl: 'Base URL',
+        model: 'model',
+        modelExample: '名称-模型id',
+        key: 'API key',
+        keyValue: '局域网不校验，随便填一个即可',
+      },
+    },
+    finish: '完成，去总览',
     dir: {
       title: '选择模型目录',
       hint: '模型 .gguf 文件所在的文件夹，会递归扫描子目录。可以添加多个，之后在设置页增删、停用。',
@@ -1747,7 +1779,7 @@ export default {
       hint: '在「模型」页点「启动」。第一次启动会问你思考、视觉、MTP 三个选项，之后就能用 API 或聊天客户端连接了。',
     },
     skip: '先跳过',
-    skipHint: '以后随时可以从设置页配置，引导也会一直留在左侧，直到你添加了模型。',
+    skipHint: '以后随时可以从设置页或「接入」页配置，引导也会一直留在左侧，直到你添加了模型或外部服务。',
   },
   chat: {
     title: '对话',
