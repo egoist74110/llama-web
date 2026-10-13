@@ -112,9 +112,9 @@
 ## 处理结果汇总（2026-10-13）
 
 - CR-001 至 CR-006：全部**已修复**，修复复审结论见 [stage-11-fixes-codex.md](stage-11-fixes-codex.md)（7 轮，第 7 轮 pass）。
-- 「其他重点」里的待确认项，复审第 1 轮 B 节给出事实判定，**需要用户决定**：
-  - 事件里未知原因原样显示（`live.ts` errorText / `useFormat.ts` reasonText）：没有找到真实可达的中文未知异常调用链，代码维持原状。诊断原文是否允许保留，由用户决定。
-  - 决定 18「第三种语言只加一行 `LOCALES` 和一个文件」：按现状不成立。实际还要改 import、`LOCALE_SHORT_NAMES`、`LOCALE_NAMES`、`DISPLAY_LABELS`、`dictionaries`，以及 i18n / parity 测试。是改措辞还是补任务，由用户决定。
+- 「其他重点」里的待确认项，复审第 1 轮 B 节给出事实判定，2026-10-13 已定：
+  - 事件里未知原因原样显示（`live.ts` errorText / `useFormat.ts` reasonText）：没有找到真实可达的中文未知异常调用链，**决定保留诊断原文**（用户交给编排决定，理由见 plan 变更记录 2026-10-13），代码不改。
+  - 决定 18「第三种语言只加一行 `LOCALES` 和一个文件」：按现状不成立。实际还要改 import、`LOCALE_SHORT_NAMES`、`LOCALE_NAMES`、`DISPLAY_LABELS`、`dictionaries`，以及 i18n / parity 测试。**用户决定：第三种语言无限期搁置**，只把决定 18 的措辞改为实际注册清单，不补实现。
   - `forwardExternal` 的 secret 遮挡：CR-001 改动后仍成立，无需处理。
 - 英文窄屏布局、浏览器实际走查、桌面壳 `strings.json` 实生成：本轮没有运行，留到阶段 11 关口由用户试用。
 

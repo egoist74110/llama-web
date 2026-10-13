@@ -6,7 +6,7 @@
 - 阶段 9：`stage-9-codex.md` 核对 GPT r2 的 CR-010 至 CR-021，均已解决；新发现 CR-022（major）、CR-023、CR-024 均已修复，3 轮后 pass。新增 `config-changed` 失败种类 / 拒绝原因（中英 i18n）。`/v1` 仍是 503 `insufficient_memory`，约定没有改。service 夹具固定 `setup.tuned: true`，排除后台首次调优造成的偶发失败。plan 已打勾「9-1 至 9-3 交叉审查」。
 - 实际运行（母 AI，合并后 main）：`bun test` **1503 pass / 20 skip / 0 fail**（1523 / 114 文件）；`bun run typecheck` exit 0；`bun run build` exit 0；parity 1845/1845。用临时 `LLAMA_WEB_DATA` 起构建产物两次：boot 1→2，rev 重启后归零，快照带 `settingsBoot`；进程已停，端口已释放。
 - 没有运行：浏览器 / 桌面壳、英文窄屏布局、`strings.json` 实生成、Windows / CUDA / 多卡真机、真实多窗口与时钟回退。
-- 待用户决定：① 决定 18「第三种语言只加一行 `LOCALES` 和一个文件」按现状不成立（还要改 5 处注册和测试），改措辞还是补任务；② 事件里未知原因原样显示（`live.ts` errorText / `useFormat.ts` reasonText），复审没找到真实可达的中文场景，是否保留诊断原文。
+- 两项决定（2026-10-13 已定）：① 第三种语言无限期搁置（用户），决定 18 措辞改成实际注册清单，不补实现；② 事件里未知原因继续原样显示诊断原文（用户交给编排决定），理由见 plan 变更记录。
 - 下一步：阶段 11 关口，等用户试用（设置页切 English，看总览 / 模型 / 设置、窄屏；桌面壳跟随语言）。
 
 ## 2026-10-09 · 11-4 · 转硬失败与剩余泄漏 · 母 AI（派一个子 AI 实现，母 AI 亲自复验）
