@@ -39,7 +39,7 @@ beforeAll(async () => {
   writeGguf(join(models, 'm.gguf'), spec())
   const s = defaultSettings()
   writeFileSync(join(dir, 'settings.json'), JSON.stringify({
-    ...s, llamacpp: { ...s.llamacpp, autoUpdate: false },
+    ...s, setup: { ...s.setup, tuned: true }, llamacpp: { ...s.llamacpp, autoUpdate: false },
     modelDirs: [{ id: 'd', path: models, enabled: true, maxDepth: 0 }],
   }))
   const profiles = { 默认: { overrides: {}, extraArgs: '' }, 锁定: { overrides: {}, extraArgs: '--load-mode mlock' } }
@@ -245,5 +245,49 @@ test('a save during the memory check cannot start the new arguments on the old a
     ctx!.runner.start = realStart
     ctx!.getMemoryProbe = realProbe
     setCtx(null)
+  }
+})
+
+test('start-up cleanup still running: a save during the wait is checked, not launched on the old answer (CR-022 r2)', async () => {
+  multi(true, { onNoRoom: 'error', maxLoaded: 4 })
+  freeOf(22000)
+  const setCtx = (n: number | null) => ctx!.updateModels((d) => { d.models.find(m => m.id === 'm')!.profiles['默认']!.overrides = n === null ? {} : { ctxSize: n } })
+  setCtx(1024)
+  const realCleanup = ctx!.cleanupDone
+  let release: () => void = () => {}
+  ;(ctx as { cleanupDone: Promise<void> }).cleanupDone = new Promise<void>((r) => { release = r })
+  const spawned: string[][] = []
+  const realStart = ctx!.runner.start.bind(ctx!.runner)
+  ctx!.runner.start = (async (spec: { args: (port: number) => string[] }) => {
+    spawned.push(spec.args(1))
+    throw new Error('stop here')
+  }) as unknown as typeof ctx.runner.start
+  try {
+    const started = ctx!.ops.start(M, { confirmed: false }).then(() => null, e => e)
+    await new Promise(r => setTimeout(r, 50))
+    setCtx(67108864) // saved while the clean-up is still running
+    release()
+    const e = await started as { code?: string, cause?: NoRoomDetail } | null
+    expect(spawned).toEqual([])
+    expect(e?.code).toBe('no-room')
+    expect(e?.cause?.reason).toBe('memory')
+  } finally {
+    ctx!.runner.start = realStart
+    ;(ctx as { cleanupDone: Promise<void> }).cleanupDone = realCleanup
+    setCtx(null)
+  }
+})
+
+test('a save after the answer was proven current unbinds it, so the launcher refuses to plan from it', async () => {
+  multi(true)
+  freeOf(22000)
+  const a = await adm!.admitTarget(M, [])
+  expect(await adm!.admissionIsCurrent(M, a)).toBe(true)
+  expect(adm!.admissionStillBound(a)).toBe(true)
+  ctx!.updateModels((d) => { d.models.find(m => m.id === 'm')!.profiles['默认']!.overrides = { ctxSize: 2048 } })
+  try {
+    expect(adm!.admissionStillBound(a)).toBe(false)
+  } finally {
+    ctx!.updateModels((d) => { d.models.find(m => m.id === 'm')!.profiles['默认']!.overrides = {} })
   }
 })

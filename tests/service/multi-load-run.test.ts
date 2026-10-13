@@ -37,7 +37,7 @@ beforeAll(async () => {
   writeGguf(join(models, 'm.gguf'), spec())
   const s = defaultSettings()
   writeFileSync(join(dir, 'settings.json'), JSON.stringify({
-    ...s, llamacpp: { ...s.llamacpp, autoUpdate: false }, modelDirs: [{ id: 'd', path: models, enabled: true, maxDepth: 0 }],
+    ...s, setup: { ...s.setup, tuned: true }, llamacpp: { ...s.llamacpp, autoUpdate: false }, modelDirs: [{ id: 'd', path: models, enabled: true, maxDepth: 0 }],
   }))
   const entry = (id: string) => ({
     id, name: id, backend: 'llama-server', file: { dirId: 'd', rel: 'm.gguf' }, mmproj: null, draft: null, activeProfile: '默认',

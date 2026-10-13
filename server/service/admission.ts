@@ -39,6 +39,8 @@ export async function usedOf(ids: readonly string[], os?: NodeJS.Platform): Prom
 /** The scheduler's question before a load: does the launch of this target fit next to the online models? */
 export async function admitTarget(target: Target, _online: Target[]): Promise<Admission> {
   const ctx = getContext()
+  // The start-up cleanup is awaited here, before the check, so that nothing between the check and the launch waits for it.
+  await ctx.cleanupDone
   const model = ctx.getModels().models.find(m => m.id === target.modelId)
   if (!model?.profiles[target.profile]) return admissionFrom(null)
   // Free memory is read again for every answer: what the models online take is in the reading already.
@@ -52,6 +54,7 @@ export async function admitTarget(target: Target, _online: Target[]): Promise<Ad
  */
 export async function admissionIsCurrent(target: Target, admission: Admission): Promise<boolean> {
   const ctx = getContext()
+  await ctx.cleanupDone // already done once an admission was made (admitTarget waits for it); keeps the key read after the wait
   const was = (admission.data as AdmissionData | undefined)?.statsKey
   if (!was) return true
   // The configuration the key is read from must not change while it is computed (the launch reads it right after).
@@ -61,7 +64,23 @@ export async function admissionIsCurrent(target: Target, admission: Admission): 
   if (!model?.profiles[target.profile]) return true // the launch fails by itself
   let now: string
   try { now = await currentLaunchKey(model, target.profile) } catch { return true }
-  return now === was && ctx.getSettings() === settings && ctx.getModels() === models
+  const same = now === was && ctx.getSettings() === settings && ctx.getModels() === models
+  if (same) verified.set(admission, { settings, models })
+  return same
+}
+
+/** The configuration documents an admission was last proven current against. */
+const verified = new WeakMap<Admission, { settings: unknown, models: unknown }>()
+
+/**
+ * Synchronous last look for the launcher: false when the configuration was saved after the answer was proven current, so the
+ * plan it is about to make would not be the one that was checked. An answer that was never verified binds nothing.
+ */
+export function admissionStillBound(admission: Admission): boolean {
+  const v = verified.get(admission)
+  if (!v) return true
+  const ctx = getContext()
+  return ctx.getSettings() === v.settings && ctx.getModels() === v.models
 }
 
 /** A manual start the check does not allow (HTTP 409): `reason` is `limit`, `nofit`, `risky`, `unknown` or `exclusive` (an external upstream holds the machine). */

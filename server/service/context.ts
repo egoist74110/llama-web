@@ -32,7 +32,7 @@ import { Scheduler, type SchedulerEvent } from '../core/scheduler'
 import { dropMlockArgs, type AdmissionData } from '../core/admission'
 import { loadDelta, VramStats } from '../core/vram-stats'
 import { Watchdog } from '../core/watchdog'
-import { admitTarget, admissionIsCurrent, samplePools, usedOf } from './admission'
+import { admitTarget, admissionIsCurrent, admissionStillBound, samplePools, usedOf } from './admission'
 import { SpeedMeter } from '../core/speed'
 import { isFirstRun } from '../core/settings-admin'
 import { JsonStore, resolveDataDir, type VersionedDoc } from '../core/store'
@@ -443,7 +443,9 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     // Initial llama.cpp download still running (or not installed yet): not a model failure.
     isPrecondition: e => e instanceof LaunchConfigError && e.code === 'no-runtime',
     launch: async (target, admission) => {
-      await cleanupDone
+      await cleanupDone // with an admission this is already settled (admitTarget waits for it): no wait between the check and the plan
+      // The configuration was saved after the answer was proven current: the plan would not be the checked one. Nothing starts.
+      if (admission && !admissionStillBound(admission)) throw new Error('The configuration changed after the memory check; start again')
       const admitted = admission?.data as AdmissionData | undefined
       let plan = planLaunch(target, { dataDir, settings: getSettings(), models: getModels(), host: runner.host, target: selectedTarget, runtimeEnv: runtimes.env() })
       // Protect the build from deletion from here on (before the first await) until it runs or the start fails.
