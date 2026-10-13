@@ -58,6 +58,9 @@ export interface NoRoomDetail {
   holder?: string
 }
 
+/** How often a load asks again because the configuration changed under the check before it is refused. */
+const MAX_STALE_ADMISSIONS = 3
+
 export interface Admission {
   tier: AdmitTier
   detail: Omit<NoRoomDetail, 'reason'>
@@ -130,6 +133,11 @@ export interface SchedulerOptions {
    * `multiLoad` off) there is no check and only the online limit applies.
    */
   admit?: (target: Target, online: Target[]) => Promise<Admission>
+  /**
+   * Is an answer of `admit` still about the launch that would start now (the configuration may be saved while the memory is
+   * read)? When not, the check is made again. Without it every answer counts as current.
+   */
+  admissionCurrent?: (target: Target, admission: Admission) => Promise<boolean>
   /** Name of what holds the machine for itself right now (decision 56): every load is refused meanwhile. Null = nothing does. */
   blocked?: () => string | null
   drainTimeoutMs: number
@@ -570,6 +578,7 @@ export class Scheduler {
     const byRequest = () => job.waiters.some(w => !w.manual)
     const unconfirmed = () => job.waiters.length > 0 && !job.waiters.some(w => !w.manual || w.confirmed === true)
     let admission: Admission | undefined
+    let stale = 0
     for (;;) {
       if (job.cancelled) return this.rejectAll(job, this.shuttingDown ? 'shutdown' : 'stopped')
       if (exclusive()) return
@@ -581,7 +590,16 @@ export class Scheduler {
       } else if (multi) {
         admission = await this.admission(target, others)
         if (job.cancelled) return this.rejectAll(job, this.shuttingDown ? 'shutdown' : 'stopped')
+        // A save during the check changed what would start: the answer is about another launch, ask again for the current one
+        // (and judge who is waiting afresh below). A configuration that keeps changing is refused as unreadable.
+        const current = !this.opts.admissionCurrent || await this.opts.admissionCurrent(target, admission).catch(() => true)
+        if (job.cancelled) return this.rejectAll(job, this.shuttingDown ? 'shutdown' : 'stopped')
+        // After both awaits, and before a stale answer retries: the exclusive holder is never skipped by the retry (the loop top asks again too).
         if (exclusive()) return
+        if (!current) {
+          if (++stale > MAX_STALE_ADMISSIONS) return this.refuse(job, { reason: 'unknown', estimateMiB: null, availableMiB: null, pool: null })
+          continue
+        }
         // `unknown` cannot be told apart from "fits" for a manual start (the interface asked the user first) or when
         // nothing else is online (the same as a single-model start); next to other models it counts as "does not fit".
         if (admission.tier === 'nofit') why = { reason: 'memory', ...admission.detail }

@@ -258,4 +258,28 @@ describe('a start refused after it was accepted (CR-021)', () => {
     expect(h.guards).toEqual([])
     h.close()
   })
+
+  test('a late refusal of another profile neither clears the new attempt nor opens the old profile dialog (CR-024)', () => {
+    const h = harness()
+    const attempt = h.feedback.begin('m1', 'other')
+    h.feedback.accepted(attempt)
+    h.live.events.value = [{ kind: 'no-room', id: 70, at: Date.now(), modelId: 'm1', profile: 'default', reason: 'unconfirmed', tier: 'unknown', estimateMiB: 1, availableMiB: 1, pool: null, manual: true }, ...h.live.events.value] as never
+    expect(h.guards).toEqual([])
+    // the attempt is still followed: its own failure still shows
+    h.event('failed', 'device-missing', 'm1', 'other')
+    expect(h.feedback.notice.value).toMatchObject({ modelId: 'm1', profile: 'other', kind: 'device-missing' })
+    // and its own refusal opens its own dialog
+    const second = h.feedback.begin('m1', 'other')
+    h.feedback.accepted(second)
+    h.live.events.value = [{ kind: 'no-room', id: 71, at: Date.now(), modelId: 'm1', profile: 'other', reason: 'memory', estimateMiB: 1, availableMiB: 1, pool: null, manual: true }, ...h.live.events.value] as never
+    expect(h.guards).toMatchObject([{ modelId: 'm1', profile: 'other', guard: { reason: 'nofit' } }])
+    h.close()
+  })
+
+  test('without an attempt on its way a manual refusal still opens its dialog (profile switch, restart)', () => {
+    const h = harness()
+    h.live.events.value = [{ kind: 'no-room', id: 80, at: Date.now(), modelId: 'm1', profile: 'default', reason: 'memory', estimateMiB: 1, availableMiB: 1, pool: null, manual: true }] as never
+    expect(h.guards).toMatchObject([{ modelId: 'm1', profile: 'default' }])
+    h.close()
+  })
 })

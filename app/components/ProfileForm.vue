@@ -251,7 +251,7 @@ const risk = ref<{ restart: boolean } | null>(null)
 const riskOpen = computed({ get: () => !!risk.value, set: (v) => { if (!v) risk.value = null } })
 async function trySave(restart: boolean) {
   clearTimeout(timer)
-  await refreshCheck()
+  await refreshCheck(true)
   if (saveNeedsConfirm(check.value)) risk.value = { restart }
   else emit('save', toForm(), restart)
 }

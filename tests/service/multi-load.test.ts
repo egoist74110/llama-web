@@ -206,3 +206,44 @@ test('mlock that would lock more than the free memory is dropped (only with the 
     ctx!.getMemoryProbe = async () => ({ list: devices, fallbackGpus: [], system: { totalMiB: 64000, availableMiB: 60000 } })
   }
 })
+
+test('a save during the memory check cannot start the new arguments on the old answer (CR-022)', async () => {
+  multi(true, { onNoRoom: 'error', maxLoaded: 4 })
+  freeOf(22000)
+  const setCtx = (n: number | null) => ctx!.updateModels((d) => { d.models.find(m => m.id === 'm')!.profiles['默认']!.overrides = n === null ? {} : { ctxSize: n } })
+  setCtx(1024)
+  const realProbe = ctx!.getMemoryProbe
+  const answer = { list: devices, fallbackGpus: [], system: { totalMiB: 64000, availableMiB: 60000 } }
+  let held = true
+  let release: () => void = () => {}
+  const gate = new Promise<void>((r) => { release = r })
+  let probes = 0
+  ctx!.getMemoryProbe = async () => {
+    probes++
+    if (held) await gate // the reads for the old arguments are held; later ones are not
+    return answer
+  }
+  const spawned: string[][] = []
+  const realStart = ctx!.runner.start.bind(ctx!.runner)
+  ctx!.runner.start = (async (spec: { args: (port: number) => string[] }) => {
+    spawned.push(spec.args(1))
+    throw new Error('stop here')
+  }) as unknown as typeof ctx.runner.start
+  try {
+    const started = ctx!.ops.start(M, { confirmed: false }).then(() => null, e => e)
+    await new Promise(r => setTimeout(r, 50))
+    expect(probes).toBeGreaterThan(0)
+    setCtx(67108864)
+    held = false
+    release()
+    const e = await started as { code?: string, cause?: NoRoomDetail } | null
+    expect(spawned).toEqual([]) // nothing started on the unchecked arguments
+    expect(e?.code).toBe('no-room')
+    expect(e?.cause?.reason).toBe('memory') // the check was made again for the new arguments
+    expect(probes).toBeGreaterThan(1)
+  } finally {
+    ctx!.runner.start = realStart
+    ctx!.getMemoryProbe = realProbe
+    setCtx(null)
+  }
+})

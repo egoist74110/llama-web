@@ -63,6 +63,20 @@ export interface ProfileCheck extends Omit<ModelCheck, 'params'> {
   mlockDropped: boolean
 }
 
+/** Identity of a launch shape: profile, final arguments, runtime build and the stamps of the files. Names the measured-memory record. */
+async function launchKey(modelId: string, profile: string, preview: LaunchPreview, paths: Array<string | null>): Promise<string> {
+  const stamps = await Promise.all(paths.map(fileStamp))
+  return statsKey([modelId, profile, preview.device, preview.args.join('\u0000'), runtimeKeyOf(preview.runtime), preview.runtime.ref, ...stamps])
+}
+
+/** The key `checkProfile` would give the saved profile right now (the admission compares it with the key it was made for). */
+export async function currentLaunchKey(model: ModelConfig, profile: string): Promise<string> {
+  const { preview, shown } = await buildPreview(model, undefined, profile)
+  const settings = getContext().getSettings()
+  const abs = (ref: ModelConfig['file'] | null) => (ref ? resolveFileRef(settings.modelDirs, ref) : null)
+  return launchKey(model.id, profile, preview, [abs(shown.file), abs(shown.mmproj), abs(shown.draft)])
+}
+
 export async function checkProfile(model: ModelConfig, profile: string, body?: PreviewBody, opts: { fresh?: boolean } = {}): Promise<ProfileCheck> {
   const ctx = getContext()
   const { preview, shown } = await buildPreview(model, body, profile)
@@ -87,8 +101,7 @@ export async function checkProfile(model: ModelConfig, profile: string, body?: P
   })
   // The measurement of an identical earlier launch replaces the formula (never below what is known exactly).
   // A record only belongs to the same build and the same files: a replaced model file or another llama.cpp build is a new launch.
-  const stamps = await Promise.all([abs(shown.file), mm, dr].map(fileStamp))
-  const key = statsKey([model.id, profile, preview.device, preview.args.join('\u0000'), runtimeKeyOf(preview.runtime), preview.runtime.ref, ...stamps])
+  const key = await launchKey(model.id, profile, preview, [abs(shown.file), mm, dr])
   let basis: 'measured' | 'formula' = 'formula'
   let { estimate, tier } = check
   if (estimate) {

@@ -32,7 +32,7 @@ import { Scheduler, type SchedulerEvent } from '../core/scheduler'
 import { dropMlockArgs, type AdmissionData } from '../core/admission'
 import { loadDelta, VramStats } from '../core/vram-stats'
 import { Watchdog } from '../core/watchdog'
-import { admitTarget, samplePools, usedOf } from './admission'
+import { admitTarget, admissionIsCurrent, samplePools, usedOf } from './admission'
 import { SpeedMeter } from '../core/speed'
 import { isFirstRun } from '../core/settings-admin'
 import { JsonStore, resolveDataDir, type VersionedDoc } from '../core/store'
@@ -432,6 +432,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     get multiLoad() { return getSettings().scheduler.multiLoad },
     get onNoRoom() { return getSettings().scheduler.onNoRoom },
     admit: admitTarget,
+    admissionCurrent: admissionIsCurrent,
     // An external upstream that runs here and wants the machine to itself (decision 56): no local load meanwhile.
     blocked: () => health.holder(),
     get drainTimeoutMs() { return getSettings().scheduler.drainTimeoutSec * 1000 },

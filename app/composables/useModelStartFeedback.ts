@@ -57,6 +57,9 @@ export function useModelStartFeedback() {
   let seenNoRoom: number | null = null
   function refused(e: Extract<ActivityEvent, { kind: 'no-room' }>) {
     const p = pending.value[e.modelId]
+    // With an attempt on its way, only a refusal of that attempt counts: the same profile and newer than the action. A late event
+    // of another profile's older start must neither end this attempt's feedback nor open that profile's dialog.
+    if (p && (e.id <= p.after || (p.profile !== undefined && e.profile !== p.profile))) return
     if (p) cancel(e.modelId)
     const reason = e.reason === 'memory' ? 'nofit' : e.reason === 'unconfirmed' ? (e.tier ?? 'risky') : e.reason === 'limit' || e.reason === 'unknown' ? e.reason : null
     if (!reason) return

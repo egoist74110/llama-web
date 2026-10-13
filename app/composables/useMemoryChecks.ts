@@ -29,7 +29,7 @@ export function useMemoryChecks() {
     chain = chain.then(async () => {
       let stale = false
       try {
-        const r = await $fetch<CheckDoc>(`/api/models/${encodeURIComponent(modelId)}/check`, { method: 'POST', body: { profile } })
+        const r = await $fetch<CheckDoc>(`/api/models/${encodeURIComponent(modelId)}/check`, { method: 'POST', body: { profile, ...(force ? { fresh: true } : {}) } })
         stale = dirty.has(key)
         if (!stale) docs.value = { ...docs.value, [key]: r }
       } catch {

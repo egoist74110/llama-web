@@ -12,8 +12,8 @@ function harness() {
     return states.get(key)
   }
   const state = ref<unknown>({ models: [{ id: 'a', instances: [{ profile: 'p', state: 'ready' }] }] })
-  const calls: Array<{ resolve: (v: unknown) => void }> = []
-  const $fetch = () => new Promise(resolve => calls.push({ resolve }))
+  const calls: Array<{ resolve: (v: unknown) => void, body: unknown }> = []
+  const $fetch = (_url: string, opts?: { body?: unknown }) => new Promise(resolve => calls.push({ resolve, body: opts?.body }))
   const source = readFileSync(new URL('../../app/composables/useMemoryChecks.ts', import.meta.url), 'utf8')
     .replace(/^import .*\r?\n/gm, '').replace(/^export /gm, '')
   const code = new Bun.Transpiler({ loader: 'ts' }).transformSync(source)
@@ -51,4 +51,23 @@ test('without a change in between, the answer is published as before', async () 
   expect(h.checks.get('a', 'p')).toMatchObject({ tier: 'ok' })
   expect(h.calls).toHaveLength(1)
   scope.stop()
+})
+
+test('a forced check asks the server for fresh device readings, a plain one does not (CR-023)', async () => {
+  const h = harness()
+  h.checks.request('a', 'p')
+  h.checks.request('b', 'p', true)
+  await new Promise(r => setTimeout(r, 10))
+  expect(h.calls[0]!.body).toEqual({ profile: 'p' })
+  h.calls[0]!.resolve({ tier: 'ok' })
+  await new Promise(r => setTimeout(r, 10))
+  expect(h.calls[1]!.body).toEqual({ profile: 'p', fresh: true })
+})
+
+test('the save button reads the memory fresh before it decides whether to ask (CR-023)', () => {
+  const source = readFileSync(new URL('../../app/components/ProfileForm.vue', import.meta.url), 'utf8')
+  const save = source.slice(source.indexOf('async function trySave'), source.indexOf('function confirmSave'))
+  expect(save).toContain('await refreshCheck(true)')
+  // and the form's own request carries the flag to the server
+  expect(source).toMatch(/\.\.\.\(fresh \? \{ fresh: true \} : \{\}\)/)
 })

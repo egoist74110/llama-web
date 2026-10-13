@@ -2,7 +2,7 @@
 // answer of a manual start, and the live reading of free memory shared by the load measurement and the watchdog.
 // The estimate itself is `checkProfile` (the same one the save-time check uses); the rules are in core/admission.ts.
 import { fmt, t } from '../core/i18n'
-import { admissionFrom } from '../core/admission'
+import { admissionFrom, type AdmissionData } from '../core/admission'
 import { noRoomText } from '../core/proxy'
 import { effectiveMaxLoaded } from '../core/config'
 import { parseNvidiaSmi, runNvidiaSmi } from '../core/gpu'
@@ -10,7 +10,7 @@ import { sampleSystemMemory } from '../core/memory-sample'
 import type { Admission, Target } from '../core/scheduler'
 import type { PoolReading } from '../core/watchdog'
 import { getContext } from './context'
-import { checkProfile } from './model-check'
+import { checkProfile, currentLaunchKey } from './model-check'
 
 /** Free memory right now: every NVIDIA card (`CUDA<n>`, not on a Mac) and the system (`system`); null when nothing could be read. */
 export async function samplePools(os: NodeJS.Platform = process.platform): Promise<PoolReading[] | null> {
@@ -44,6 +44,24 @@ export async function admitTarget(target: Target, _online: Target[]): Promise<Ad
   // Free memory is read again for every answer: what the models online take is in the reading already.
   const check = await checkProfile(model, target.profile, undefined, { fresh: true })
   return admissionFrom(check.estimate, { statsKey: check.statsKey, dropMlock: check.mlockDropped, basis: check.basis })
+}
+
+/**
+ * Is the answer still about the launch that would start now? Compares the key it was made for (arguments, files, runtime
+ * build) with the one of the saved profile. A save during the memory reads makes it stale; the scheduler asks again.
+ */
+export async function admissionIsCurrent(target: Target, admission: Admission): Promise<boolean> {
+  const ctx = getContext()
+  const was = (admission.data as AdmissionData | undefined)?.statsKey
+  if (!was) return true
+  // The configuration the key is read from must not change while it is computed (the launch reads it right after).
+  const settings = ctx.getSettings()
+  const models = ctx.getModels()
+  const model = models.models.find(m => m.id === target.modelId)
+  if (!model?.profiles[target.profile]) return true // the launch fails by itself
+  let now: string
+  try { now = await currentLaunchKey(model, target.profile) } catch { return true }
+  return now === was && ctx.getSettings() === settings && ctx.getModels() === models
 }
 
 /** A manual start the check does not allow (HTTP 409): `reason` is `limit`, `nofit`, `risky`, `unknown` or `exclusive` (an external upstream holds the machine). */
