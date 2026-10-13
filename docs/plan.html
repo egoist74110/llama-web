@@ -854,7 +854,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 
   <h3>审查（gpt-6.1sol 或用户指定的模型）</h3>
   <ul class="tasks">
-    <li class="task" data-done="false"><span class="t">9-1 至 9-3 完成后做一轮交叉审查：多进程生命周期与残留清理、并发加载 / 卸载竞态、公网请求能否绕过显存拦截、预估偏低时的失败路径、状态机与 <code>/v1</code> 路由是否仍满足「没有 model 字段时用哪个模型」的规则</span><span class="when"></span></li>
+    <li class="task" data-done="true"><span class="t">9-1 至 9-3 完成后做一轮交叉审查：多进程生命周期与残留清理、并发加载 / 卸载竞态、公网请求能否绕过显存拦截、预估偏低时的失败路径、状态机与 <code>/v1</code> 路由是否仍满足「没有 model 字段时用哪个模型」的规则</span><span class="when">2026-10-13</span></li>
   </ul>
 
   <h3>9-5 · 审查意见修复（2026-10-05 审核报告 <code>docs/reviews/code-audit-2026-10-05.md</code>）</h3>
@@ -1032,6 +1032,8 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 <section id="changelog">
   <h2>变更记录</h2>
   <table>
+    <tr><td>2026-10-13</td><td>阶段 9 交叉审查闭环（<code>docs/reviews/stage-9-codex.md</code>，3 轮，第 3 轮 pass）：核对 GPT r2 的 CR-010 至 CR-021，在 HEAD 上均已解决。新发现 3 条，均已修复：CR-022 内存检查与实际启动配置绑定，检查期间保存配置会重新检查；启动清理等待移到检查之前，launch 前同步复核，不一致不启动，新增 <code>config-changed</code> 失败种类与拒绝原因（中英文案）；CR-023 保存前检查取最新读数；CR-024 启动反馈按方案匹配。<code>/v1</code> 错误码约定没有改。硬件验收（Windows / CUDA / WDDM / 多卡）仍按各自任务待做。</td></tr>
+    <tr><td>2026-10-13</td><td>阶段 11 交叉审查与处理（<code>docs/reviews/stage-11-codex.md</code> 6 条，修复复审 <code>stage-11-fixes-codex.md</code> 7 轮，第 7 轮 pass）：<code>/v1</code> 合成错误不再带原始异常文本；设置文档与实时快照共用版本 <code>(boot, rev)</code>，<code>boot</code> 是 <code>data/run/boot.json</code> 持久化的启动序号，缺失或损坏时从 1 重新计数，已打开的旧页面需刷新（接受为边界）；Node 开发入口不再传出上游 statusText；<code>/v1</code> 外层异常转为 i18n 500 JSON（构建产物入口已实测）；方案名映射只读 own property；桌面启动窗口按系统语言偏好顺序匹配。没有改行为规则。两项待用户决定：决定 18「第三种语言只加一行和一个文件」按现状不成立；事件里未知原因原样显示是否保留。</td></tr>
     <tr><td>2026-10-09</td><td>阶段 10 交叉审查完成并闭环：审查 6 条（key 反射、独占加载竞态、自指地址、双文件保存、独占错误码、异常文案）与修复复审 3 条（短 key、回滚失败、statusText）均已处理，<code>bun test</code> 全过。决定 56 ④ 补充「只遮挡 key 原文」的能力边界；本机 LAN 地址的自指检查不做（保留同端口接入其他机器）。没有改行为规则。</td></tr>
     <tr><td>2026-10-09</td><td>状态更正（核对 docs/reviews/ 与 git log 后打勾）：「7-1 交叉审查」与「8-1 至 8-3 交叉审查」两条实际已完成但一直未打勾——报告 <code>stage-7-codex.md</code> / <code>stage-8-codex.md</code> 与处理提交 229d454、2324903 都在 main 上。阶段 9 的交叉审查以 GPT 审核报告形式做过（<code>code-audit-2026-10-06-gpt.md</code> 与 r2 复审，CR-010 至 CR-021 经四轮返工），但 r2 结论仍是 rework required、没有闭环复审报告，该条保持未打勾。阶段 10 的交叉审查确实从未做过，保持未打勾。没有改任何行为规则。</td></tr>
     <tr><td>2026-10-08</td><td>11-2 完成：前端读 <code>ui.locale</code> 即时切换（<code>app/composables/useLocale.ts</code>：<code>t</code> 是按 key 路径惰性解析的 Proxy 视图，组件别名跨切换仍有效；71 处 import 改走 <code>useLocale</code>，12 处「setup 求值一次」的标签数组改 <code>computed</code>）；语言送达：<code>live.ts</code> 快照带 <code>locale</code> → <code>useLive</code> / <code>useSettings</code> 应用；设置页新增语言选择卡片（<code>settings-admin</code> 校验 <code>ui: { locale }</code>，错误码 <code>bad-locale</code>）；桌面壳启动窗口按系统语言选初始语言（<code>strings.json</code> 按 locale 分组，<code>launcher.js</code> 用 <code>navigator.languages</code> 匹配，不写进 <code>settings.ui.locale</code>）；<code>默认</code> 方案名数据不变，英文界面经 <code>app/utils/profile-label.ts</code> 显示「Default」；测试：<code>tests/app/locale-view.test.ts</code>、<code>tests/app/profile-label.test.ts</code>、<code>settings-admin.test.ts</code> 的 ui patch 校验。遗留（不在本包修）：<code>en.desktop</code> 尚无英文文案（11-2 至 11-3）、<code>proxy.ts</code> 的 <code>profileNotFound</code>（11-4）、<code>formatClock</code> / <code>formatCount</code> 硬编码 <code>'zh-CN'</code>（已列为阶段 11 未勾选任务，随 11-3 处理）、SPA 首帧在第一个快照到达前是中文。</td></tr>

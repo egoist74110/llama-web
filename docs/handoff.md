@@ -1,5 +1,14 @@
 # 交接记录
 
+## 2026-10-13 · 阶段 11 审查处理 + 阶段 9 交叉审查闭环 · 母 AI 编排（Codex 审查 / Sonnet 实现 / 母 AI 复验）
+- 分工：Codex（gpt-6.1-sol，high）只做审查，阶段 11 接续原审查会话；Sonnet 5.5（medium）实现返工；母 AI 核实每轮 diff、亲自复跑验证、做取舍、提交。
+- 阶段 11：`stage-11-codex.md` CR-001 至 CR-006 全部修复，每条后面标了处理结果；修复复审 `stage-11-fixes-codex.md` 共 7 轮，第 7 轮 pass。主要返工在 CR-002：最后定为服务端设置版本 `(boot, rev)`，三条通道统一判新旧（新增 `server/core/boot-seq.ts`、`data/run/boot.json`）。设计取舍：`boot.json` 缺失或损坏时从 1 重新计数，已打开的旧页面需刷新，Codex 认可为边界。CR-004 由母 AI 在构建产物入口实测（Codex 沙箱里 build 会 SIGSEGV）。
+- 阶段 9：`stage-9-codex.md` 核对 GPT r2 的 CR-010 至 CR-021，均已解决；新发现 CR-022（major）、CR-023、CR-024 均已修复，3 轮后 pass。新增 `config-changed` 失败种类 / 拒绝原因（中英 i18n）。`/v1` 仍是 503 `insufficient_memory`，约定没有改。service 夹具固定 `setup.tuned: true`，排除后台首次调优造成的偶发失败。plan 已打勾「9-1 至 9-3 交叉审查」。
+- 实际运行（母 AI，合并后 main）：`bun test` **1503 pass / 20 skip / 0 fail**（1523 / 114 文件）；`bun run typecheck` exit 0；`bun run build` exit 0；parity 1845/1845。用临时 `LLAMA_WEB_DATA` 起构建产物两次：boot 1→2，rev 重启后归零，快照带 `settingsBoot`；进程已停，端口已释放。
+- 没有运行：浏览器 / 桌面壳、英文窄屏布局、`strings.json` 实生成、Windows / CUDA / 多卡真机、真实多窗口与时钟回退。
+- 待用户决定：① 决定 18「第三种语言只加一行 `LOCALES` 和一个文件」按现状不成立（还要改 5 处注册和测试），改措辞还是补任务；② 事件里未知原因原样显示（`live.ts` errorText / `useFormat.ts` reasonText），复审没找到真实可达的中文场景，是否保留诊断原文。
+- 下一步：阶段 11 关口，等用户试用（设置页切 English，看总览 / 模型 / 设置、窄屏；桌面壳跟随语言）。
+
 ## 2026-10-09 · 11-4 · 转硬失败与剩余泄漏 · 母 AI（派一个子 AI 实现，母 AI 亲自复验）
 - 依据：计划阶段 11 的 11-4 两条任务与验收标准。前面几批的未提交改动没有重做。
 - 做了：`tests/core/i18n-parity.test.ts` 的 `TRANSLATION_DONE` 改成 `true`（warn-only → 硬失败：缺失键 / invented 键 / 形状 / 占位符 / 中日韩字符 / 空串都变成失败）；`server/core/proxy.ts` 三处泄漏补完；`tests/core/proxy.test.ts` 新增 3 条测试。
