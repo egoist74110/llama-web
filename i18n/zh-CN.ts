@@ -1973,6 +1973,8 @@ export default {
     },
     upstreamUnreachable: '无法连接到模型「{model}」的 llama-server 进程',
     externalUnreachable: '无法连接到外部服务「{upstream}」',
+    // 404 job_not_found (decision 59): a follow-up of an async job (e.g. GET /v1/videos/{id}) whose id llama-web does not know.
+    jobNotFound: '找不到任务「{id}」：它不是通过 llama-web 创建的、已超过保留期（7 天），或者不是由当前调用方（同一个 API key / 本机与局域网）创建的。',
     interrupted: '模型「{model}」已卸载或意外退出，请求被中断。',
     notRunning: '模型「{model}」当前没有运行。/upstream 只转发到已经在运行的模型，不会自动加载。',
     notFound: '没有这个接口：{path}',

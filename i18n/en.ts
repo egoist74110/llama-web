@@ -2025,6 +2025,8 @@ export const enSkeleton: PartialMessages = {
     },
     upstreamUnreachable: 'The llama-server process of model "{model}" could not be reached',
     externalUnreachable: 'The external service "{upstream}" could not be reached',
+    // 404 job_not_found (decision 59): a follow-up of an async job (e.g. GET /v1/videos/{id}) whose id llama-web does not know.
+    jobNotFound: 'Job "{id}" was not found: it was not created through llama-web, it is past the retention period (7 days), or it was created by another caller (a different API key, or local / LAN versus public).',
     interrupted: 'Model "{model}" was unloaded or exited unexpectedly, and the request was interrupted.',
     notRunning: 'Model "{model}" is not running right now. /upstream only forwards to models that are already running and never loads one automatically.',
     notFound: 'There is no such endpoint: {path}',

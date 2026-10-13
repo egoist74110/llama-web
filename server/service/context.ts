@@ -25,6 +25,7 @@ import { detectLanAddress, getLanAddress } from '../core/network'
 import { LoadProgress, trackWeightLoad } from '../core/load-progress'
 import { ModelOps } from '../core/model-ops'
 import { createProxy, type Proxy, type ProxyEvent } from '../core/proxy'
+import { JobStore } from '../core/async-jobs'
 import { handlePublic, PublicListener } from '../core/public-entry'
 import { runStartupCleanup } from '../core/residue'
 import { LoadError, PidRegistry, Runner } from '../core/runner'
@@ -616,6 +617,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     progressOf: t => live.progressOf(t.modelId, t.profile),
     getUpstreams: upstreamsRef.get,
     getUpstreamKey: id => secretsRef.get().upstreamKeys[id] ?? '',
+    jobs: new JobStore({ dataDir, onError: e => logError('async jobs (data/jobs.json):', (e as Error)?.message ?? e) }),
   })
   const publicEntry: PublicListener = new PublicListener((req, ip) => handlePublic(req, {
     authenticate: header => authenticate(secretsRef.get(), header),

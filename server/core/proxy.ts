@@ -13,7 +13,8 @@ import { fmt, t } from './i18n'
 import { resolvePreprocessOptions, runPreprocess, type PreprocessResult } from './preprocess'
 import { sourceOf, summarizeImages, summarizeParams, UsageTap, type RequestMeta, type RequestRecord } from './request-log'
 import { findModel, hasImages, listModelNames, resolveTarget, type RouteResult } from './routing'
-import { findExternal, listExternalNames, type ExternalRoute, type UpstreamsDoc } from './upstreams'
+import { findExternal, listExternalNames, type ExternalRoute, type Upstream, type UpstreamsDoc } from './upstreams'
+import { isJobId, jobOwnerOf, matchJobCreate, matchJobFollowUp, sameOwner, type AsyncJobApi, type JobRegistry } from './async-jobs'
 import { diagnose } from './errors'
 import { multipartBoundary, multipartField, parseMultipart, rewriteMultipartField, type MultipartPart } from './multipart'
 import { redactHeaders, redactText, StreamRedactor } from './redact'
@@ -23,6 +24,9 @@ import { SchedulerError, type Lease, type NoRoomDetail, type Scheduler, type Tar
 
 /** Request body limit for /v1 and /upstream (bytes). */
 export const MAX_BODY_BYTES = 100 * 1024 * 1024
+
+/** Largest create response of an async API that is read to find the job id (bytes); bigger ones pass through. */
+const JOB_RESPONSE_PEEK = 1024 * 1024
 
 export type ProxyEvent =
   | { type: 'preprocess', target: Target, result: PreprocessResult }
@@ -87,6 +91,8 @@ export interface ProxyDeps {
   getUpstreamKey?(id: string): string
   /** `fetch` used for external upstreams (tests). */
   fetchImpl?: typeof fetch
+  /** Async job ids of external upstreams (decision 59); absent = follow-ups route like any request without a model. */
+  jobs?: JobRegistry
 }
 
 // ---------------------------------------------------------------------------------------
@@ -539,7 +545,7 @@ export function createProxy(deps: ProxyDeps) {
     const trace = new RequestTrace(req, meta, quiet ? null : deps.onRequest ?? null, ++requestSeq, quiet ? null : deps.speed ?? null)
     let res: Response
     try {
-      res = await handleV1Inner(req, trace)
+      res = await handleV1Inner(req, trace, meta)
     } catch (e) {
       // Anything unforeseen (a body read, a bad path) is logged here and answered in the dictionary
       // language; the exception text never reaches the client.
@@ -565,7 +571,7 @@ export function createProxy(deps: ProxyDeps) {
    * off), no scheduler, no lease, no load. The client's own `Authorization` is dropped and replaced by the upstream's key.
    * A multipart body (`form`) gets its `model` field rewritten under a new boundary; no image compression there.
    */
-  async function forwardExternal(req: Request, trace: RequestTrace, ext: ExternalRoute, raw: Uint8Array<ArrayBuffer> | null, json: any, url: URL, form: MultipartPart[] | null = null): Promise<Response> {
+  async function forwardExternal(req: Request, trace: RequestTrace, ext: ExternalRoute, raw: Uint8Array<ArrayBuffer> | null, json: any, url: URL, form: MultipartPart[] | null, meta: RequestMeta | undefined): Promise<Response> {
     const { upstream: u } = ext
     trace.modelId = `upstream:${u.id}`
     trace.modelName = ext.name
@@ -589,6 +595,89 @@ export function createProxy(deps: ProxyDeps) {
       body = rewritten.body
       headers.set('content-type', rewritten.contentType)
     }
+    const res = await sendExternal(req, trace, u, ext.name, body, headers, url)
+    const api = deps.jobs ? matchJobCreate(req.method, url.pathname) : null
+    return api ? rememberJob(res, api, u, ext.name, meta) : res
+  }
+
+  /**
+   * A successful create response of an async API (decision 59): read its JSON (small; capped), remember the top-level
+   * `id` with this upstream and the caller, and answer with the same bytes. Anything else passes through untouched.
+   */
+  async function rememberJob(res: Response, api: AsyncJobApi, u: Upstream, model: string, meta: RequestMeta | undefined): Promise<Response> {
+    if (!res.ok || !res.body || !(res.headers.get('content-type') ?? '').includes('json')) return res
+    const reader = res.body.getReader()
+    const chunks: Uint8Array[] = []
+    let total = 0
+    for (;;) {
+      let r: Awaited<ReturnType<typeof reader.read>>
+      try {
+        r = await reader.read()
+      } catch {
+        // Upstream dropped or the client left mid-response (forward() has already logged and recorded it).
+        return errorResponse(502, 'upstream_unreachable', fmt(t.api.externalUnreachable, { upstream: u.name }))
+      }
+      const { done, value } = r
+      if (done) break
+      chunks.push(value)
+      total += value.byteLength
+      if (total > JOB_RESPONSE_PEEK) {
+        // Not a job object: hand back what was read, then the rest as it comes.
+        const head = chunks.splice(0)
+        const rest = new ReadableStream<Uint8Array>({
+          start(ctrl) { for (const c of head) ctrl.enqueue(c) },
+          async pull(ctrl) {
+            try {
+              const r = await reader.read()
+              if (r.done) ctrl.close()
+              else ctrl.enqueue(r.value)
+            } catch (e) { ctrl.error(e) }
+          },
+          cancel(reason) { return reader.cancel(reason) },
+        })
+        return new Response(rest, { status: res.status, headers: res.headers })
+      }
+    }
+    const bytes = new Uint8Array(total)
+    let off = 0
+    for (const c of chunks) { bytes.set(c, off); off += c.byteLength }
+    try {
+      const id = JSON.parse(new TextDecoder().decode(bytes))?.id
+      if (isJobId(id)) deps.jobs!.record({ kind: api.kind, id, upstreamId: u.id, model, owner: jobOwnerOf(meta) })
+    } catch { /* not JSON after all: nothing to remember */ }
+    return new Response(bytes, { status: res.status, headers: res.headers })
+  }
+
+  /**
+   * A follow-up of an async job (decision 59): no `model` needed, the id says where the job lives. Unknown, expired, or
+   * created by another caller (see sameOwner) all answer the same 404, so ids of others cannot be probed.
+   */
+  async function forwardJobFollowUp(req: Request, trace: RequestTrace, kind: string, id: string, url: URL, meta: RequestMeta | undefined): Promise<Response> {
+    const entry = deps.jobs!.lookup(kind, id)
+    const u = entry && sameOwner(entry.owner, jobOwnerOf(meta)) ? deps.getUpstreams?.().upstreams.find(x => x.id === entry.upstreamId) : undefined
+    if (!entry || !u) {
+      req.body?.cancel().catch(() => {})
+      return errorResponse(404, 'job_not_found', fmt(t.api.jobNotFound, { id }))
+    }
+    let raw: Uint8Array<ArrayBuffer> | null = null
+    if (req.method === 'DELETE') {
+      try {
+        raw = await readBodyLimited(req, limit)
+      } catch (e) {
+        if (e instanceof BodyTooLarge) return errorResponse(413, 'body_too_large', fmt(t.api.bodyTooLarge, { limit: Math.round(limit / 1024 / 1024) }))
+        throw e
+      }
+    }
+    return sendExternal(req, trace, u, entry.model, raw, forwardRequestHeaders(req.headers), url)
+  }
+
+  /**
+   * Send to an external upstream as it is: the path without `/v1`, the upstream's key instead of the client's, the key
+   * masked in what comes back. The response body is streamed through (forward()), never buffered.
+   */
+  function sendExternal(req: Request, trace: RequestTrace, u: Upstream, modelName: string, body: Uint8Array<ArrayBuffer> | null, headers: Headers, url: URL): Promise<Response> {
+    trace.modelId = `upstream:${u.id}`
+    trace.modelName = modelName
     const key = deps.getUpstreamKey?.(u.id) ?? ''
     if (key) headers.set('authorization', `Bearer ${key}`)
     const idle = new AbortController() // never aborts: nothing here can unload an upstream
@@ -600,13 +689,15 @@ export function createProxy(deps: ProxyDeps) {
       return errorResponse(502, 'upstream_unreachable', fmt(t.api.externalUnreachable, { upstream: u.name }))
     }
     const path = url.pathname.replace(/^\/v1(?=\/|$)/, '') + url.search
-    return forward({ lease, req, path, body, headers, url: `${u.baseUrl}${path}`, failure, secret: key }, ext.name, trace)
+    return forward({ lease, req, path, body, headers, url: `${u.baseUrl}${path}`, failure, secret: key }, modelName, trace)
   }
 
-  async function handleV1Inner(req: Request, trace: RequestTrace): Promise<Response> {
+  async function handleV1Inner(req: Request, trace: RequestTrace, meta: RequestMeta | undefined): Promise<Response> {
     const url = new URL(req.url)
     const path = url.pathname
     if (req.method === 'GET' && (path === '/v1/models' || path === '/v1/models/')) return modelsList()
+    const job = deps.jobs ? matchJobFollowUp(req.method, path) : null
+    if (job) return forwardJobFollowUp(req, trace, job.api.kind, job.id, url, meta)
     if (req.method === 'GET' && path.startsWith('/v1/models/')) {
       const name = safeDecode(path.slice('/v1/models/'.length))
       if (!resolveTarget(deps.getModels(), name).ok && !externalOf(name)) {
@@ -642,7 +733,7 @@ export function createProxy(deps: ProxyDeps) {
     trace.params = summarizeParams(json)
     const models = deps.getModels()
     const ext = externalOf(modelField)
-    if (ext) return forwardExternal(req, trace, ext, raw, json, url, form)
+    if (ext) return forwardExternal(req, trace, ext, raw, json, url, form, meta)
     const route = resolveTarget(models, modelField, deps.scheduler.snapshot().models)
     if (!route.ok) return routeErrorResponse(route)
     const { target, model, profile } = route

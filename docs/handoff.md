@@ -1,5 +1,15 @@
 # 交接记录
 
+## 2026-10-13 · 异步任务后续请求路由（关键决定 59）· 单会话
+- 依据：用户 2026-10-13 在对话中批准，补决定 58 ⑤ 记下的缺口：`POST /v1/videos` 能转发到外部上游，但 `GET /v1/videos/{id}`、`GET /v1/videos/{id}/content`、`DELETE /v1/videos/{id}` 不带 model，到不了上游。
+- 实现：新增纯模块 `server/core/async-jobs.ts`（`ASYNC_JOB_APIS` 登记表，目前只有 `/v1/videos`；路径匹配、id 校验、创建方规则、`JobStore` = `data/jobs.json`，基于 `JsonStore`：version 1、原子写入、保留 3 份备份，每次写入清理过期（7 天）和超出 2000 条的最旧条目，查询时过期视为不存在；文件损坏时从空开始并记日志，下次写入覆盖，旧文件留在 backups）。`proxy.ts`：`forwardExternal` 拆出 `sendExternal`（去 `/v1`、换上游 key、打码、`forward()` 流式透传）；创建成功（2xx + JSON + ≤1 MB）后 `rememberJob` 读出顶层 `id` 记录，再把同样的字节交给客户端，超过 1 MB 原样续传不记；`handleV1Inner` 在读请求体之前先匹配后续请求，查到且创建方相同就 `sendExternal`，否则 404 `job_not_found`（新 i18n 键 `api.jobNotFound`，中英）。`context.ts` 接上 `JobStore`。
+- 创建方规则（已写进决定 59 ④）：公网调用按 key 名字，只有同一个 key 能查；本机与局域网算一组；两组互不可见；不属于自己的 id 与未知 id 一样 404。key 改名 / 吊销后旧任务查不到。
+- 测试：`tests/core/proxy-jobs.test.ts` 15 条（模块：路径匹配、id、创建方、清理、重载 / 备份 / 损坏文件 / 坏条目；路由：创建→记录→状态 / 删除转发到同一上游且不走本地调度器、请求记录只有方法路径模型名、3 MB 下载逐字节一致且在上游未发完时客户端已收到前半段、未知 id 404、新 proxy + 新 store 重启后仍能查、过期 404、上游 key 替换与打码、失败的创建不记录、公网仍需 key / 别的 key 404 / 本机看不到公网 key 的任务、本机与局域网共享、上游被删后 404）。
+- 中途修过的两处测试问题：① 时间戳原由 proxy 用 `Date.now()` 打，全量跑时与 store 的时钟不一致导致过期测试偶发失败，改为 store 自己打 `at`；② 「下载分多块到达」的断言依赖传输时机，全量跑时偶发失败，改成上游发一半后等闸门、客户端先收到前半段才放行。
+- 实际运行：`bun test` 1531 pass / 20 skip / 0 fail（1551 / 116 文件），连续两次；`bun run typecheck` exit 0。
+- 没有运行：`bun run build`、构建产物入口 / 开发服务器上的实测、对真实外部视频服务（如基于 ComfyUI 的服务）的请求（只用了进程内的假上游）、Windows 上的流式下载。
+- 已知限制：下载透传仍经过 `StreamRedactor`（理论上二进制里恰好出现上游 key 的字节序列会被打码）；响应头的 `content-length` 照旧被去掉（与其他转发一致）；`POST /v1/videos/{id}/remix` 之类的其他异步接口没有登记。
+
 ## 2026-10-13 · /v1 multipart/form-data 路由（关键决定 58）· 单会话
 - 依据：用户 2026-10-13 在对话中批准。起因是表单上传的接口（语音转写 `/v1/audio/transcriptions`、`/v1/images/edits`）的 `model` 在表单字段里，原来只解析 JSON，结果 400 `no_model` 或落到本地正在运行的模型。
 - 实现：新增纯模块 `server/core/multipart.ts`（逐字节解析 boundary / 各部分 / `Content-Disposition` 的 name，不解码文件；改写 `model` 字段并换新 boundary，其余部分的头和内容逐字节保留，preamble / epilogue 丢弃）。`proxy.ts` 的 `handleV1Inner` 先读 JSON，读不到再按 multipart 读 `model`，路由逻辑与 JSON 共用（`externalOf` → `forwardExternal`，否则 `resolveTarget`，支持 `名字:方案`）。外部上游：重拼表单并设置新 `content-type`；本地：请求体和 `content-type` 原样转发。请求体上限、公网鉴权、上游 key 替换与打码、请求记录（`params` 为空，不记表单字段 / 文件名 / 文件内容）都沿用原来的代码。
