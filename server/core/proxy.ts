@@ -102,6 +102,11 @@ export function errorResponse(status: number, code: string, message: string): Re
   return res
 }
 
+/** decodeURIComponent that keeps a malformed escape as it is: the name then simply matches nothing (404). */
+function safeDecode(raw: string): string {
+  try { return decodeURIComponent(raw) } catch { return raw }
+}
+
 /** Error code of a response made by errorResponse(), for the request record. */
 const codeOf = (res: Response): string | null => errorCodes.get(res) ?? null
 
@@ -299,7 +304,7 @@ export function createProxy(deps: ProxyDeps) {
   function upstreamFailure(e: unknown, lease: Lease, modelName: string): Response {
     deps.onEvent?.({ type: 'upstream-error', target: lease.target, error: e })
     if (lease.signal.aborted) return errorResponse(503, 'model_interrupted', fmt(t.api.interrupted, { model: modelName }))
-    return errorResponse(502, 'upstream_unreachable', fmt(t.api.upstreamUnreachable, { model: modelName, detail: String((e as Error)?.message ?? e) }))
+    return errorResponse(502, 'upstream_unreachable', fmt(t.api.upstreamUnreachable, { model: modelName }))
   }
 
   /**
@@ -355,7 +360,7 @@ export function createProxy(deps: ProxyDeps) {
     const redactor = new StreamRedactor(secret)
     if (!res.body) {
       finish(true)
-      return new Response(null, { status: res.status, statusText: redactText(res.statusText, secret), headers })
+      return new Response(null, { status: res.status, headers })
     }
     const reader = res.body.getReader()
     const body = new ReadableStream<Uint8Array>({
@@ -388,7 +393,7 @@ export function createProxy(deps: ProxyDeps) {
         ac.abort(reason)
       },
     }, { highWaterMark: 0 })
-    return new Response(body, { status: res.status, statusText: redactText(res.statusText, secret), headers })
+    return new Response(body, { status: res.status, headers })
   }
 
   /** Streaming request whose model is not ready: answer at once, heartbeat, then stream. */
@@ -535,8 +540,10 @@ export function createProxy(deps: ProxyDeps) {
     try {
       res = await handleV1Inner(req, trace)
     } catch (e) {
-      trace.finish(500, 'error', 'internal_error')
-      throw e
+      // Anything unforeseen (a body read, a bad path) is logged here and answered in the dictionary
+      // language; the exception text never reaches the client.
+      deps.onEvent?.({ type: 'internal-error', target: { modelId: '-', profile: '-' }, error: e })
+      res = errorResponse(500, 'internal_error', t.api.internalError)
     }
     if (!trace.deferred) trace.finish(res.status, res.status >= 400 ? 'error' : 'ok', codeOf(res))
     return res
@@ -568,7 +575,8 @@ export function createProxy(deps: ProxyDeps) {
         const result = await runPreprocess(json, { options: { image } })
         trace.images = summarizeImages(result.reports.image)
       } catch (e) {
-        return errorResponse(500, 'preprocess_failed', fmt(t.api.preprocessFailed, { detail: String((e as Error)?.message ?? e) }))
+        deps.onEvent?.({ type: 'internal-error', target: { modelId: trace.modelId ?? '-', profile: '-' }, error: e })
+        return errorResponse(500, 'preprocess_failed', t.api.preprocessFailed)
       }
       json.model = ext.modelId
       body = new TextEncoder().encode(JSON.stringify(json))
@@ -579,9 +587,10 @@ export function createProxy(deps: ProxyDeps) {
     const idle = new AbortController() // never aborts: nothing here can unload an upstream
     const lease: Lease = { target: { modelId: `upstream:${u.id}`, profile: '-' }, port: 0, signal: idle.signal, release() {} }
     const failure = (e: unknown) => {
+      // The raw text stays on the server (event -> log); the client reads the dictionary text only.
       const detail = redactText(String((e as Error)?.message ?? e), key)
       deps.onEvent?.({ type: 'upstream-error', target: lease.target, error: new Error(detail) })
-      return errorResponse(502, 'upstream_unreachable', fmt(t.api.externalUnreachable, { upstream: u.name, detail }))
+      return errorResponse(502, 'upstream_unreachable', fmt(t.api.externalUnreachable, { upstream: u.name }))
     }
     const path = url.pathname.replace(/^\/v1(?=\/|$)/, '') + url.search
     return forward({ lease, req, path, body, headers, url: `${u.baseUrl}${path}`, failure, secret: key }, ext.name, trace)
@@ -592,7 +601,7 @@ export function createProxy(deps: ProxyDeps) {
     const path = url.pathname
     if (req.method === 'GET' && (path === '/v1/models' || path === '/v1/models/')) return modelsList()
     if (req.method === 'GET' && path.startsWith('/v1/models/')) {
-      const name = decodeURIComponent(path.slice('/v1/models/'.length))
+      const name = safeDecode(path.slice('/v1/models/'.length))
       if (!resolveTarget(deps.getModels(), name).ok && !externalOf(name)) {
         return errorResponse(404, 'model_not_found', fmt(t.api.modelNotFound, { name }))
       }
@@ -641,7 +650,8 @@ export function createProxy(deps: ProxyDeps) {
         const thinkingForced = effectiveReasoning(deps.getSettings(), profile) === 'off' && forceThinkingOff(json)
         if (result.changed || thinkingForced) body = new TextEncoder().encode(JSON.stringify(json))
       } catch (e) {
-        return errorResponse(500, 'preprocess_failed', fmt(t.api.preprocessFailed, { detail: String((e as Error)?.message ?? e) }))
+        deps.onEvent?.({ type: 'internal-error', target, error: e })
+        return errorResponse(500, 'preprocess_failed', t.api.preprocessFailed)
       }
     }
 
@@ -667,7 +677,7 @@ export function createProxy(deps: ProxyDeps) {
       // `/upstream/x` -> `/upstream/x/` so relative links in llama-server's pages resolve.
       return new Response(null, { status: 308, headers: { location: `${url.pathname}/${url.search}` } })
     }
-    const name = decodeURIComponent(m[1]!)
+    const name = safeDecode(m[1]!)
     const model = findModel(deps.getModels().models, name)
     if (!model) return errorResponse(404, 'model_not_found', fmt(t.api.modelNotFound, { name }))
 

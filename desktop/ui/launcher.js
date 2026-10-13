@@ -5,8 +5,8 @@
   // then primary-subtag match, then the packaged default. Settings.ui.locale is not touched here.
   const keys = Object.keys(doc.by)
   const wanted = (navigator.languages || []).map(x => String(x).toLowerCase())
-  const locale = keys.find(k => wanted.includes(k.toLowerCase()))
-    ?? keys.find(k => wanted.some(w => w.split('-')[0] === k.split('-')[0]))
+  // Walk the system list in the user's order; a language only gets a later one's turn when nothing matches.
+  const locale = wanted.map(w => keys.find(k => k.toLowerCase() === w) ?? keys.find(k => k.split('-')[0].toLowerCase() === w.split('-')[0])).find(Boolean)
     ?? (keys.includes(doc.default) ? doc.default : keys[0])
   document.documentElement.lang = locale
   const strings = doc.by[locale]

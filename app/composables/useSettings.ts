@@ -1,12 +1,15 @@
 // The settings document (GET /api/settings) shared by the settings page and the setup wizard,
 // and the one place that saves a patch and reports the outcome.
-import { applyUiLocale, t } from './useLocale'
+import { acceptSettingsRev, applyUiLocale, t } from './useLocale'
 import type { SettingsDoc } from '~~/server/core/settings-admin'
 
 function messageOf(e: unknown): string {
   const err = e as { data?: { message?: string }, statusMessage?: string, message?: string }
   return err?.data?.message ?? err?.statusMessage ?? err?.message ?? String(e)
 }
+
+// How many times a load re-reads when every answer turns out to be older than what the page holds.
+const MAX_LOAD_ATTEMPTS = 3
 
 export function useSettings() {
   const toast = useToast()
@@ -16,10 +19,19 @@ export function useSettings() {
 
   async function load() {
     try {
-      doc.value = await $fetch<SettingsDoc>('/api/settings')
-      // The document carries the saved language, so the page shows it even before the next snapshot.
-      applyUiLocale(doc.value.ui)
-      loadError.value = ''
+      // A response older than what the page already applied (a save or a snapshot overtook it) is dropped
+      // and read again, so an old document never switches the language back.
+      for (let attempt = 0; attempt < MAX_LOAD_ATTEMPTS; attempt++) {
+        const fresh = await $fetch<SettingsDoc>('/api/settings')
+        if (!acceptSettingsRev(fresh.rev, fresh.boot)) continue
+        doc.value = fresh
+        // The document carries the saved language, so the page shows it even before the next snapshot.
+        applyUiLocale(fresh.ui)
+        loadError.value = ''
+        return
+      }
+      // Settings kept changing under the load: say so instead of leaving the page empty.
+      loadError.value = t.settings.loadStale
     } catch (e) {
       loadError.value = messageOf(e)
     }
@@ -30,9 +42,15 @@ export function useSettings() {
     if (saving.value) return false
     saving.value = section
     try {
-      doc.value = await $fetch<SettingsDoc>('/api/settings', { method: 'POST', body: patch })
-      // A language saved here takes effect on this page at once; the live snapshot carries it to the others.
-      applyUiLocale(doc.value.ui)
+      const saved = await $fetch<SettingsDoc>('/api/settings', { method: 'POST', body: patch })
+      if (acceptSettingsRev(saved.rev, saved.boot)) {
+        doc.value = saved
+        // A language saved here takes effect on this page at once; the live snapshot carries it to the others.
+        applyUiLocale(saved.ui)
+      } else {
+        // The save went through, but another page saved after it: this answer is already old. Fetch the current document.
+        void load()
+      }
       if (!opts.quiet) toast.add({ title: t.settings.saved, color: 'success', icon: 'i-lucide-check' })
       return true
     } catch (e) {

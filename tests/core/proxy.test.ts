@@ -849,6 +849,34 @@ describe('the text a /v1 error carries', () => {
     expect(enJson.error.message.trim()).not.toBe('')
   })
 
+  test('an unreachable llama-server: the dictionary text only, the exception text stays on the server', async () => {
+    const events: ProxyEvent[] = []
+    const lease = (): Lease => ({ target: { modelId: 'a', profile: 'default' }, port: 1, signal: new AbortController().signal, release() {} })
+    const proxy = createProxy({
+      scheduler: { acquire: async () => lease(), snapshot: () => ({ models: [], queue: [] }), stateOf: (): ModelState => 'ready' },
+      getModels: () => MODELS,
+      getSettings: () => defaultSettings(),
+      onEvent: e => events.push(e),
+    })
+    setLocale('en')
+    const res = await proxy.handleV1(new Request('http://x/v1/chat/completions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: 'Alpha', messages: [] }) }))
+    const json = await res.json() as any
+    expect(res.status).toBe(502)
+    expect(json.error.code).toBe('upstream_unreachable')
+    expect(json.error.message).toBe(fmt(dictionaries.en.api.upstreamUnreachable, { model: 'Alpha' }))
+    // port 1 refuses the connection: the runtime's own wording is on the event, not in the answer
+    const raised = events.find(e => e.type === 'upstream-error')
+    expect(String((raised as { error: Error }).error.message).length).toBeGreaterThan(0)
+    expect(json.error.message).not.toContain(String((raised as { error: Error }).error.message))
+  })
+
+  test('a malformed path escape on the local /v1 is a 404 in the dictionary language, not a thrown error', async () => {
+    const { proxy } = setup({})
+    const res = await proxy.handleV1(new Request('http://x/v1/models/%ZZ'))
+    expect(res.status).toBe(404)
+    expect(((await res.json()) as any).error.code).toBe('model_not_found')
+  })
+
   test('a stream the upstream answered with an error and no body: the event text is the dictionary', async () => {
     const { post, ups, records } = setup({ autoReady: false, streamError: true })
     const res = await post('/v1/chat/completions', { model: 'Alpha', stream: true })

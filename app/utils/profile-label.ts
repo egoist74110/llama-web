@@ -9,7 +9,8 @@ import { getUiLocale } from '../composables/useLocale'
 export function profileLabel(name: string | null | undefined): string {
   if (name === null || name === undefined) return ''
   const map = DISPLAY_LABELS[getUiLocale()] ?? {}
-  return map[name] ?? name
+  // Own keys only: a profile may be named `toString`, which the object prototype also answers to.
+  return Object.hasOwn(map, name) ? map[name]! : name
 }
 
 /** Select items for a profile list: the value stays the stored name, only the label is mapped. */

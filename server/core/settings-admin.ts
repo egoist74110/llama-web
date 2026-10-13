@@ -301,6 +301,10 @@ export function applySettingsPatch(draft: Settings, patch: unknown, models: Mode
 
 /** What GET /api/settings returns (and the settings page edits). */
 export interface SettingsDoc {
+  /** Monotonic version of the saved settings; a copy with a lower one is older. */
+  rev: number
+  /** Start number (absent when the server could not persist one) of the server process `rev` counts in; a higher boot is newer whatever the rev. */
+  boot?: number
   modelDirs: Array<ModelDir & DirStatus>
   defaults: LaunchDefaults
   builtinDefaults: LaunchDefaults

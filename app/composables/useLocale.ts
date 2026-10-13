@@ -10,6 +10,30 @@ import { DEFAULT_LOCALE, dictionaries, type LocaleCode, type Messages } from '..
 
 const locale = ref<LocaleCode>(DEFAULT_LOCALE)
 
+// The newest settings version (`SettingsDoc.boot`, `.rev`) this page has applied. The server counts every
+// settings change (rev) within one process, and numbers its starts (boot, persisted, so it does not depend
+// on the clock). The settings GET, the save response and the live snapshot all carry both, and copies are
+// ordered as (boot, rev): a copy that arrives late is older and is dropped, and a restarted server is newer
+// even though its rev starts over.
+let appliedBoot = -1
+let appliedRev = -1
+
+/**
+ * Whether a copy of the settings with this version may be applied: true (and remembered) when it is not
+ * older than what the page already shows. A copy without a full version (older server, tests) is
+ * accepted but cannot be placed, so it never changes the remembered version.
+ */
+export function acceptSettingsRev(rev: number | undefined, boot?: number): boolean {
+  if (rev === undefined || boot === undefined) return true
+  if (boot < appliedBoot || (boot === appliedBoot && rev < appliedRev)) return false
+  appliedBoot = boot
+  appliedRev = rev
+  return true
+}
+
+/** Forget the applied version (tests only). */
+export const resetSettingsRev = (): void => { appliedBoot = -1; appliedRev = -1 }
+
 /** The language the interface is showing right now. */
 export const getUiLocale = (): LocaleCode => locale.value
 

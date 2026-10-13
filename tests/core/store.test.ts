@@ -206,3 +206,27 @@ test('context openStore: after a failed save the getter still shows the valid ha
     store.close()
   }
 })
+
+test('context openStore: rev rises on every change and a snapshot built from the same ref carries the GET rev', async () => {
+  const { openStore } = await import('../../server/service/context')
+  const { LiveHub } = await import('../../server/core/live')
+  const store = make()
+  const ref = openStore(store, () => ({ version: 1, items: [] }))
+  const hub = new LiveHub({
+    snapshot: () => ({ scheduler: { models: [], queue: [] }, models: [], queue: [], llamacpp: { current: '', runtime: { state: 'idle' }, versions: [], rollback: null }, locale: 'en', settingsRev: ref.rev() }),
+  })
+  try {
+    const seen = [ref.rev()]
+    for (let i = 0; i < 5; i++) {
+      ref.update((d) => { d.items.push(String(i)) })
+      seen.push(ref.rev())
+      // The document the settings GET answers with reads the same ref, so the numbers agree.
+      expect(hub.snapshot().settingsRev).toBe(ref.rev())
+    }
+    ref.refresh()
+    seen.push(ref.rev())
+    for (let i = 1; i < seen.length; i++) expect(seen[i]!).toBeGreaterThan(seen[i - 1]!)
+  } finally {
+    store.close()
+  }
+})

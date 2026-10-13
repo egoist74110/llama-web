@@ -16,6 +16,7 @@ import { comboKey } from '../core/gpu-group'
 import { blamesSplitMode, SplitModeLoadError, SplitStats } from '../core/split-stats'
 import { diagnose } from '../core/errors'
 import { LogStore } from '../core/logs'
+import { nextBootSeq } from '../core/boot-seq'
 import { UsageStore } from '../core/usage'
 import type { RuntimeStatus } from '../core/llamacpp'
 import { GpuSampler, parseNvidiaSmi, runNvidiaSmi } from '../core/gpu'
@@ -66,6 +67,10 @@ export interface AppContext {
   /** Port configured when the process started (the listening port only changes on restart). */
   bootPort: number
   getSettings(): Settings
+  /** Monotonic version of the settings document: it rises on every change, whoever made it. */
+  getSettingsRev(): number
+  /** Identity of this process: settings versions are comparable only within one. */
+  getSettingsBoot(): number | null
   getModels(): ModelsDoc
   /** Save through the store (backup + atomic write) and make the change visible to getters. */
   updateSettings(fn: (draft: Settings) => Settings | void): Settings
@@ -151,6 +156,11 @@ const logError = (...a: unknown[]) => console.error('[llama-web]', ...a)
 /** A store whose last good value is kept when the file becomes unreadable. Exported for tests. */
 export function openStore<T extends VersionedDoc>(store: JsonStore<T>, fallback: () => T, onChange?: () => void) {
   let value: T
+  // Version of `value` within this process: counts every change (own update, refresh, hand edit seen by
+  // the watcher), so clients can order two copies of the document. It restarts at 0 with each process;
+  // copies are compared as (boot, rev), where `boot` is the persisted start counter (core/boot-seq.ts).
+  let rev = 0
+  const bump = () => { rev++ }
   try {
     value = store.load()
   } catch (e) {
@@ -159,19 +169,24 @@ export function openStore<T extends VersionedDoc>(store: JsonStore<T>, fallback:
   }
   store.watch((next) => {
     value = next
+    bump()
     log(`reloaded ${store.file}`)
     onChange?.()
   }, e => logError(`ignored invalid edit of ${store.file}:`, (e as Error).message))
   return {
     get: () => value,
+    /** Version of the value `get` returns right now (read in the same tick, so the pair is consistent). */
+    rev: () => rev,
     refresh(): T {
       value = store.refresh()
+      bump()
       onChange?.()
       return value
     },
     update(fn: (draft: T) => T | void): T {
       // Own writes are not reported by the file watcher, so refresh the cached value here.
       value = store.update(fn)
+      bump()
       onChange?.()
       return value
     },
@@ -258,6 +273,8 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
   // Settings edits (page or by hand) also start / stop / move the public listener.
   // `hold` is raised while a pair of writes is in flight (see onSaved of the Cloudflare setup): nothing reacts to half of it, one reconciliation runs afterwards.
   const hold = new Hold()
+  // Start number of this process, the major part of the settings version; null when it could not be made durable.
+  const settingsBoot = nextBootSeq(dataDir)
   const settingsRef = openStore(settingsStore, newSettings, () => { changed(); applyLocale(); if (!hold.held) applyPublic() })
   const modelsRef = openStore(modelsStore, defaultModels, changed)
   // An unreadable secrets.json falls back to "no keys": every public request is refused. A new tunnel token restarts the tunnel.
@@ -393,6 +410,8 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
       // The language every open page shows and answers in (decision 18): a settings save re-notifies
       // the hub, so all open pages change at once.
       locale: getSettings().ui.locale,
+      settingsRev: settingsRef.rev(),
+      ...(settingsBoot !== null ? { settingsBoot } : {}),
       connections: viewUpstreams(upstreamsRef.get(), secretsRef.get().upstreamKeys).map(u => ({ ...u, up: health.isUp(u.id), checkedAt: health.state(u.id)?.checkedAt ?? null, launch: launcher.state(u.id), canStop: launcher.canStop(u.id) })),
       exclusiveHolder: health.holder(),
     }),
@@ -677,7 +696,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
 
   let closing: Promise<void> | null = null
   return {
-    dataDir, bootPort: getSettings().server.port, getSettings, getModels, updateSettings: settingsRef.update, updateModels: modelsRef.update,
+    dataDir, bootPort: getSettings().server.port, getSettings, getSettingsRev: settingsRef.rev, getSettingsBoot: () => settingsBoot, getModels, updateSettings: settingsRef.update, updateModels: modelsRef.update,
     platform, runtimeTarget: selectedTarget,
     getSecrets: secretsRef.get, updateSecrets: secretsRef.update, getUpstreams: upstreamsRef.get, updateUpstreams: upstreamsRef.update, health, launcher, tunnel, applyTunnel, cloudflare,
     refresh: () => { settingsRef.refresh(); modelsRef.refresh(); upstreamsRef.refresh() },

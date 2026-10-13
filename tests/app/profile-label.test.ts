@@ -25,6 +25,14 @@ describe('profile display mapping (work package 11-2)', () => {
     expect(profileLabel('快')).toBe('快')
   })
 
+  test('a profile named like an Object.prototype member keeps its own name', () => {
+    for (const locale of ['zh-CN', 'en'] as const) {
+      applyUiLocale({ locale })
+      expect(profileLabel('toString')).toBe('toString')
+      expect(profileLabel('valueOf')).toBe('valueOf')
+    }
+  })
+
   test('null / undefined read as nothing (a request record without a profile)', () => {
     expect(profileLabel(null)).toBe('')
     expect(profileLabel(undefined)).toBe('')

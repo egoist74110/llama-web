@@ -79,6 +79,10 @@ export interface StateDoc {
    * settings document.
    */
   locale?: LocaleCode
+  /** Version of the settings document `locale` was read from; clients drop a snapshot older than what they hold. */
+  settingsRev?: number
+  /** Start number of the process `settingsRev` counts in: compared first, then the rev. */
+  settingsBoot?: number
   /** External upstreams (decision 56) with their last probe; absent in tests that do not wire them. */
   connections?: ConnectionView[]
   /** Name of the upstream that holds the machine for itself right now (local models cannot load); null = none. */
@@ -308,7 +312,7 @@ export class LiveHub {
   }
 
   snapshot(): StateDoc {
-    const { scheduler, models, queue, llamacpp, tunnel, cloudflare, cloudflareRev, firstRun, platform, appUpdate, network, connections, exclusiveHolder, locale } = this.opts.snapshot()
+    const { scheduler, models, queue, llamacpp, tunnel, cloudflare, cloudflareRev, firstRun, platform, appUpdate, network, connections, exclusiveHolder, locale, settingsRev, settingsBoot } = this.opts.snapshot()
     return {
       now: this.now(),
       models: models.map(m => ({
@@ -326,6 +330,8 @@ export class LiveHub {
       ...(network ? { network } : {}),
       ...(connections ? { connections, exclusiveHolder: exclusiveHolder ?? null } : {}),
       ...(locale ? { locale } : {}),
+      ...(settingsRev !== undefined ? { settingsRev } : {}),
+      ...(settingsBoot !== undefined ? { settingsBoot } : {}),
     }
   }
 

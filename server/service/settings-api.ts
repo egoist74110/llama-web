@@ -27,6 +27,8 @@ export function describeSettings(): SettingsDoc {
   // changing the language needs no restart (decision 18).
   setLocale(s.ui.locale)
   return {
+    rev: ctx.getSettingsRev(),
+    ...(ctx.getSettingsBoot() !== null ? { boot: ctx.getSettingsBoot()! } : {}),
     modelDirs: s.modelDirs.map(d => ({ ...d, ...dirStatus(d) })),
     defaults: s.defaults,
     builtinDefaults: DEFAULT_LAUNCH_DEFAULTS,
