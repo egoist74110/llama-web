@@ -23,7 +23,7 @@ export type FailureKind =
   | 'split-mode-failed' // a row / tensor group died while loading for no reason that points elsewhere (decision 45)
   // From the cause
   | 'no-port' | 'spawn-failed' | 'register-failed' | 'exited' | 'timeout' | 'aborted' | 'crashed'
-  | 'model-missing' | 'profile-missing' | 'no-runtime' | 'bad-args' | 'unknown'
+  | 'model-missing' | 'profile-missing' | 'no-runtime' | 'bad-args' | 'config-changed' | 'unknown'
 
 export interface FailureDoc {
   kind: FailureKind
@@ -77,7 +77,7 @@ export function classify(code: string, exitCode: number | null, tail: readonly s
 const CODE_KINDS: Record<string, true> = {
   'no-port': true, 'spawn-failed': true, 'register-failed': true, 'exited': true, 'timeout': true,
   'aborted': true, 'crashed': true, 'model-missing': true, 'profile-missing': true,
-  'file-missing': true, 'no-runtime': true, 'bad-args': true, 'device-missing': true, 'split-mode-unsupported': true, 'unknown': true,
+  'file-missing': true, 'no-runtime': true, 'bad-args': true, 'device-missing': true, 'split-mode-unsupported': true, 'config-changed': true, 'unknown': true,
 }
 
 /** Absolute paths in an output line -> `<dir>/file`: the card is readable from the LAN, local folders should not be. */

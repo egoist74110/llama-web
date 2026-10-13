@@ -61,6 +61,12 @@ export function useModelStartFeedback() {
     // of another profile's older start must neither end this attempt's feedback nor open that profile's dialog.
     if (p && (e.id <= p.after || (p.profile !== undefined && e.profile !== p.profile))) return
     if (p) cancel(e.modelId)
+    // The configuration kept changing during the check: nothing to confirm, only to start again (the notice names it).
+    if (e.reason === 'config-changed') {
+      const m = state.value?.models.find(x => x.id === e.modelId)
+      notices.value = [...notices.value, { modelId: e.modelId, profile: e.profile, name: m?.name ?? e.modelId, kind: 'config-changed' }]
+      return
+    }
     const reason = e.reason === 'memory' ? 'nofit' : e.reason === 'unconfirmed' ? (e.tier ?? 'risky') : e.reason === 'limit' || e.reason === 'unknown' ? e.reason : null
     if (!reason) return
     const model = state.value?.models.find(m => m.id === e.modelId)

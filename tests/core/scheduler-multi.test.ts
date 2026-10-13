@@ -478,3 +478,34 @@ describe('exclusive upstream', () => {
     expect(launched).toHaveLength(0)
   })
 })
+
+describe('an answer that cannot be proven current', () => {
+  const ok = async (): Promise<Admission> => ({ tier: 'ok', detail: { estimateMiB: 1, availableMiB: 100, pool: 'CUDA0' }, pools: ['CUDA0'] })
+  function make(current: () => Promise<boolean>) {
+    let admitted = 0
+    const launched: Target[] = []
+    const sched = new Scheduler({
+      maxLoaded: 4, multiLoad: true, onNoRoom: 'error', drainTimeoutMs: 100,
+      admit: async () => { admitted++; return ok() },
+      admissionCurrent: current,
+      launch: async (target) => { launched.push(target); return new FakeProc(target, 7100) },
+    })
+    return { sched, launched, admitted: () => admitted }
+  }
+
+  test('a check that throws counts as not current: asked again, then refused as config-changed, nothing launched', async () => {
+    const { sched, launched, admitted } = make(async () => { throw new Error('boom') })
+    const e = await sched.acquire(A).catch(x => x)
+    expect(e).toBeInstanceOf(SchedulerError)
+    expect(detailOf(e)).toMatchObject({ reason: 'config-changed' })
+    expect(admitted()).toBe(4) // the first answer and 3 retries
+    expect(launched).toHaveLength(0)
+  })
+
+  test('a changing configuration is refused as config-changed after the retries, also for a manual start', async () => {
+    const { sched, launched } = make(async () => false)
+    const e = await sched.start(A, { confirmed: true }).catch(x => x)
+    expect(detailOf(e)).toMatchObject({ reason: 'config-changed' })
+    expect(launched).toHaveLength(0)
+  })
+})

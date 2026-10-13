@@ -289,6 +289,7 @@ export const enSkeleton: PartialMessages = {
       watchdog: 'Out of memory while loading; stopped by the protection mechanism',
       unconfirmed: 'Available memory dropped while it was queued and this start was not confirmed (estimated need {estimate}, available {available}); press Start again',
       exclusive: 'The external service "{holder}" has this machine to itself, so nothing was loaded',
+      'config-changed': 'The configuration kept changing during the memory check, so nothing was started; press Start again in a moment',
     },
     makeRoom: 'Unloaded "{victim}" ({victimProfile}) in order to load "{model}" ({profile})',
     watchdog: {
@@ -1986,6 +1987,7 @@ export const enSkeleton: PartialMessages = {
       watchdog: 'The server ran out of memory, and "{model}" was stopped by the protection mechanism while loading. Please contact the service owner.',
       unconfirmed: 'Starting model "{model}" was not confirmed, so it was not loaded. Please contact the service owner.',
       exclusive: 'The external service "{holder}" has this machine to itself, so "{model}" was not loaded in order to avoid overloading the server. Please contact the service owner, or use a model of "{holder}" instead.',
+      'config-changed': 'The configuration of model "{model}" was changed during the memory check, so it was not loaded. Please try again shortly.',
     },
     upstreamUnreachable: 'The llama-server process of model "{model}" could not be reached',
     externalUnreachable: 'The external service "{upstream}" could not be reached',
@@ -2014,6 +2016,7 @@ export const enSkeleton: PartialMessages = {
     'device-missing': 'The chosen device does not exist',
     'split-mode-unsupported': 'This llama.cpp does not support the chosen split mode',
     'split-mode-failed': 'The experimental multi-GPU split failed to load',
+    'config-changed': 'The configuration was changed during the memory check; start again.',
     // Recognised from the llama-server output (server/core/errors.ts).
     oom: 'Not enough VRAM',
     'cuda-error': 'CUDA error',
@@ -2047,6 +2050,7 @@ export const enSkeleton: PartialMessages = {
       'device-missing': 'The chosen device is not in this llama.cpp version\'s device list (a GPU was removed, the llama.cpp version changed, or the driver does not see it). Nothing is switched to another device automatically, because another device changes the VRAM usage. Choose again under "Device" in this model\'s settings, or set it back to "Auto".',
       'split-mode-unsupported': 'The chosen split mode (--split-mode) is not in this llama.cpp version\'s help, so starting would fail. Switch to layer under "Device" in this model / profile, or use a version that supports it. The mode is not changed automatically.',
       'split-mode-failed': 'The process crashed or exited early while loading with the experimental row / tensor split, and the log does not show whether it was VRAM, a file or an argument. This combination (version + device + mode) has been remembered and a warning appears before the next start. You can switch to layer or go back to a single card; llama-web does not change it automatically.',
+      'config-changed': 'The configuration of this model or the global one was saved between the memory check and the actual start, so nothing was started rather than launching on arguments that were not checked. Just start it again.',
       unknown: 'The reason was not recognized. Look at the last lines of the log below, or open the full log.',
     },
     noRetry: 'It is not retried automatically; retry manually after you fix the problem.',

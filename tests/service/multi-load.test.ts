@@ -291,3 +291,20 @@ test('a save after the answer was proven current unbinds it, so the launcher ref
     ctx!.updateModels((d) => { d.models.find(m => m.id === 'm')!.profiles['默认']!.overrides = {} })
   }
 })
+
+test('a start the configuration overtook fails as config-changed, with text in both languages (CR-022)', async () => {
+  const { diagnose } = await import('../../server/core/errors')
+  const { errorText } = await import('../../server/core/live')
+  const { LaunchConfigError } = await import('../../server/core/launch')
+  const err = new LaunchConfigError('config-changed', 'The configuration changed after the memory check')
+  expect(diagnose(err)?.kind).toBe('config-changed')
+  expect(errorText(err)).toBe('config-changed')
+  const zh = (await import('../../i18n/zh-CN')).default
+  const en = (await import('../../i18n/en')).default
+  for (const d of [zh, en]) {
+    expect((d.loadError as Record<string, string>)['config-changed']).toBeTruthy()
+    expect((d.failure.advice as Record<string, string>)['config-changed']).toBeTruthy()
+    expect((d.api.noRoom as Record<string, string>)['config-changed']).toBeTruthy()
+    expect((d.events.noRoomReason as Record<string, string>)['config-changed']).toBeTruthy()
+  }
+})

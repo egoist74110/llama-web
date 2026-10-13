@@ -441,11 +441,11 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
       logSchedulerEvent(e); live.onSchedulerEvent(e)
     },
     // Initial llama.cpp download still running (or not installed yet): not a model failure.
-    isPrecondition: e => e instanceof LaunchConfigError && e.code === 'no-runtime',
+    isPrecondition: e => e instanceof LaunchConfigError && (e.code === 'no-runtime' || e.code === 'config-changed'),
     launch: async (target, admission) => {
       await cleanupDone // with an admission this is already settled (admitTarget waits for it): no wait between the check and the plan
       // The configuration was saved after the answer was proven current: the plan would not be the checked one. Nothing starts.
-      if (admission && !admissionStillBound(admission)) throw new Error('The configuration changed after the memory check; start again')
+      if (admission && !admissionStillBound(admission)) throw new LaunchConfigError('config-changed', 'The configuration changed after the memory check')
       const admitted = admission?.data as AdmissionData | undefined
       let plan = planLaunch(target, { dataDir, settings: getSettings(), models: getModels(), host: runner.host, target: selectedTarget, runtimeEnv: runtimes.env() })
       // Protect the build from deletion from here on (before the first await) until it runs or the start fails.

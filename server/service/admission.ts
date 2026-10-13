@@ -56,14 +56,15 @@ export async function admissionIsCurrent(target: Target, admission: Admission): 
   const ctx = getContext()
   await ctx.cleanupDone // already done once an admission was made (admitTarget waits for it); keeps the key read after the wait
   const was = (admission.data as AdmissionData | undefined)?.statsKey
-  if (!was) return true
+  if (!was) return true // no identity to compare (nothing could be estimated): nothing to protect
   // The configuration the key is read from must not change while it is computed (the launch reads it right after).
   const settings = ctx.getSettings()
   const models = ctx.getModels()
   const model = models.models.find(m => m.id === target.modelId)
-  if (!model?.profiles[target.profile]) return true // the launch fails by itself
+  if (!model?.profiles[target.profile]) return true // the profile is gone: the launch fails with its own error (profile-missing)
   let now: string
-  try { now = await currentLaunchKey(model, target.profile) } catch { return true }
+  // A key that cannot be computed proves nothing: the answer is not current (the scheduler asks again, then refuses).
+  try { now = await currentLaunchKey(model, target.profile) } catch { return false }
   const same = now === was && ctx.getSettings() === settings && ctx.getModels() === models
   if (same) verified.set(admission, { settings, models })
   return same

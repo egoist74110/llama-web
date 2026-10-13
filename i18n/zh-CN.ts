@@ -259,6 +259,7 @@ export default {
       watchdog: '加载时内存不足，被保护机制停止',
       unconfirmed: '排队期间可用内存变少了，这次启动没有得到你的确认（预估需要 {estimate}，可用 {available}），请再点一次启动',
       exclusive: '外部服务「{holder}」正在独占本机，没有加载',
+      'config-changed': '检查内存期间配置一直在被修改，没有启动，请稍后再点一次启动',
     },
     makeRoom: '为加载「{model}」（{profile}）卸载了「{victim}」（{victimProfile}）',
     watchdog: {
@@ -1934,6 +1935,7 @@ export default {
       watchdog: '服务器的显存 / 内存不足，「{model}」在加载时被保护机制停止。请联系服务所有者。',
       unconfirmed: '模型「{model}」的启动没有得到确认，没有加载。请联系服务所有者。',
       exclusive: '外部服务「{holder}」正在独占这台机器，为避免拖垮服务器，没有加载「{model}」。请联系服务所有者，或改用「{holder}」的模型。',
+      'config-changed': '模型「{model}」的配置在检查内存期间被修改，没有加载。请稍后重试。',
     },
     upstreamUnreachable: '无法连接到模型「{model}」的 llama-server 进程',
     externalUnreachable: '无法连接到外部服务「{upstream}」',
@@ -1961,6 +1963,7 @@ export default {
     'device-missing': '所选设备不存在',
     'split-mode-unsupported': '这个 llama.cpp 不支持所选的切分模式',
     'split-mode-failed': '实验性的多卡切分加载失败',
+    'config-changed': '检查内存期间配置被修改了，请重新启动。',
     // Recognised from the llama-server output (server/core/errors.ts).
     'oom': '显存不足',
     'cuda-error': 'CUDA 报错',
@@ -1993,6 +1996,7 @@ export default {
       'device-missing': '所选的设备不在这个 llama.cpp 的设备列表里（显卡被拆了、换了 llama.cpp 版本，或驱动没有识别它）。不会自动换成别的设备，因为换设备会改变显存占用。到该模型的「设备」设置里重新选择，或改回「自动」。',
       'split-mode-unsupported': '这个 llama.cpp 版本的帮助里没有所选的切分模式（--split-mode）。到该模型 / 方案的「设备」设置里换成 layer，或换一个支持它的版本。不会自动改模式。',
       'split-mode-failed': '用实验性的 row / tensor 切分加载时进程崩溃或提前退出了，日志里没有显示是显存、文件或参数问题。已经记住这个组合（版本 + 设备 + 模式），下次启动前会警告。可以换成 layer，或改回单卡；llama-web 不会自动改。',
+      'config-changed': '启动前的内存检查和实际启动之间，这个模型或全局的配置被保存了，为了不按没检查过的参数启动，这次没有启动。直接重新启动即可。',
       'unknown': '原因未识别。看下面的日志最后几行，或打开完整日志。',
     },
     noRetry: '不会自动重试，处理后请手动重试。',

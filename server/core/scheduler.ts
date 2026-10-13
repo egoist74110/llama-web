@@ -43,9 +43,10 @@ export interface NoRoomDetail {
    * `limit` = the online limit is reached, `memory` = it does not fit next to what is online, `unknown` = the free memory
    * could not be read, `watchdog` = the memory ran short while it was loading or running (decision 44), `unconfirmed` =
    * a manual start was only confirmed for the answer it got at the interface, and the answer at load time is worse,
+   * `config-changed` = the configuration kept changing (or could not be compared) while the check ran, so nothing was started,
    * `exclusive` = an external upstream that runs on this machine wants it to itself (decision 56, `holder` names it).
    */
-  reason: 'limit' | 'memory' | 'unknown' | 'watchdog' | 'unconfirmed' | 'exclusive'
+  reason: 'limit' | 'memory' | 'unknown' | 'watchdog' | 'unconfirmed' | 'exclusive' | 'config-changed'
   /** `unconfirmed` only: what the check at load time said (`risky` or `unknown`). */
   tier?: 'risky' | 'unknown'
   estimateMiB: number | null
@@ -592,12 +593,12 @@ export class Scheduler {
         if (job.cancelled) return this.rejectAll(job, this.shuttingDown ? 'shutdown' : 'stopped')
         // A save during the check changed what would start: the answer is about another launch, ask again for the current one
         // (and judge who is waiting afresh below). A configuration that keeps changing is refused as unreadable.
-        const current = !this.opts.admissionCurrent || await this.opts.admissionCurrent(target, admission).catch(() => true)
+        const current = !this.opts.admissionCurrent || await this.opts.admissionCurrent(target, admission).catch(() => false)
         if (job.cancelled) return this.rejectAll(job, this.shuttingDown ? 'shutdown' : 'stopped')
         // After both awaits, and before a stale answer retries: the exclusive holder is never skipped by the retry (the loop top asks again too).
         if (exclusive()) return
         if (!current) {
-          if (++stale > MAX_STALE_ADMISSIONS) return this.refuse(job, { reason: 'unknown', estimateMiB: null, availableMiB: null, pool: null })
+          if (++stale > MAX_STALE_ADMISSIONS) return this.refuse(job, { reason: 'config-changed', estimateMiB: null, availableMiB: null, pool: null })
           continue
         }
         // `unknown` cannot be told apart from "fits" for a manual start (the interface asked the user first) or when

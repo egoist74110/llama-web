@@ -14,7 +14,7 @@ import type { Target } from './scheduler'
 import { resolveFileRef } from './scanner'
 import { parseRuntimeRef, resolveRuntimeRef, RuntimeResolveError, type FallbackReason, type RuntimeAccel, type RuntimeEnv } from './runtimes'
 
-export type LaunchConfigErrorCode = 'model-missing' | 'profile-missing' | 'file-missing' | 'no-runtime' | 'bad-args' | 'device-missing' | 'split-mode-unsupported'
+export type LaunchConfigErrorCode = 'model-missing' | 'profile-missing' | 'file-missing' | 'no-runtime' | 'bad-args' | 'device-missing' | 'split-mode-unsupported' | 'config-changed'
 
 export class LaunchConfigError extends Error {
   constructor(public code: LaunchConfigErrorCode, message: string, public warnings: ArgWarning[] = []) {

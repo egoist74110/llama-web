@@ -282,4 +282,14 @@ describe('a start refused after it was accepted (CR-021)', () => {
     expect(h.guards).toMatchObject([{ modelId: 'm1', profile: 'default' }])
     h.close()
   })
+
+  test('a refusal because the configuration kept changing shows a notice instead of a confirmation dialog', () => {
+    const h = harness()
+    const attempt = h.feedback.begin('m1', 'default')
+    h.feedback.accepted(attempt)
+    h.live.events.value = [{ kind: 'no-room', id: 90, at: Date.now(), modelId: 'm1', profile: 'default', reason: 'config-changed', estimateMiB: null, availableMiB: null, pool: null, manual: true }] as never
+    expect(h.guards).toEqual([])
+    expect(h.feedback.notice.value).toMatchObject({ modelId: 'm1', profile: 'default', kind: 'config-changed' })
+    h.close()
+  })
 })
