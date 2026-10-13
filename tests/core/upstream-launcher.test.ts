@@ -3,7 +3,8 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createUpstream, defaultUpstreams, type UpstreamsDoc } from '../../server/core/upstreams'
-import { LaunchError, launchArgv, UpstreamLauncher, realSpawn, type CheckResult, type LaunchedProcess, type SpawnSpec } from '../../server/core/upstream-launcher'
+import { LaunchError, launchArgv, needsOutsideJob, UpstreamLauncher, realSpawn, type CheckResult, type LaunchedProcess, type SpawnSpec } from '../../server/core/upstream-launcher'
+import { quoteWindowsArg, windowsCommandLine } from '../../server/core/win-spawn'
 
 const closers: Array<() => void> = []
 afterEach(() => { while (closers.length) closers.pop()!() })
@@ -52,7 +53,7 @@ describe('start command line', () => {
   test('is split into an argument array (quotes understood), never given to a shell', () => {
     const s = setup(doc())
     s.launcher.start(s.id, false)
-    expect(s.spawned).toEqual([{ file: 'strata-start', args: ['--fast', 'a b'], cwd: undefined }])
+    expect(s.spawned).toEqual([{ file: 'strata-start', args: ['--fast', 'a b'], cwd: undefined, keepRunning: true }])
   })
 
   test('.bat / .cmd go through cmd.exe on Windows only', () => {
@@ -215,6 +216,65 @@ describe('waiting for the service', () => {
   })
 })
 
+describe('stop when llama-web exits (decision 60)', () => {
+  test('off by default: the spawn asks to keep running, and shutdown leaves the service alone', async () => {
+    const s = setup(doc())
+    expect(doc().upstreams[0]!.stopOnExit).toBe(false)
+    s.launcher.start(s.id, false)
+    expect(s.spawned[0]!.keepRunning).toBe(true)
+    await s.launcher.shutdown()
+    expect(s.killed).toEqual([])
+  })
+
+  test('on: shutdown ends the process this run started (and only that)', async () => {
+    const d = doc({ stopOnExit: true })
+    createUpstream(d, { name: 'Other', baseUrl: 'http://127.0.0.1:8/v1', startCommand: 'other-start' }, { localNames: [], selfPorts: [] })
+    const s = setup(d)
+    s.launcher.start(s.id, false)
+    expect(s.spawned[0]!.keepRunning).toBe(false)
+    s.procs[0]!.pid = 5001
+    s.launcher.start(d.upstreams[1]!.id, false) // stopOnExit off: stays running
+    s.procs[1]!.pid = 5002
+    await s.launcher.shutdown()
+    expect(s.killed).toEqual([5001])
+    expect(s.logs.some(l => l.includes('Strata') && l.includes('exiting'))).toBe(true)
+  })
+
+  test('on, but nothing was started from here, or it already exited on Windows: nothing to stop', async () => {
+    const s = setup(doc({ stopOnExit: true }))
+    await s.launcher.shutdown()
+    expect(s.killed).toEqual([])
+  })
+
+  test('the switch is read at exit: turned on after the start still stops it', async () => {
+    const d = doc()
+    const s = setup(d)
+    s.launcher.start(s.id, false)
+    d.upstreams[0]!.stopOnExit = true
+    await s.launcher.shutdown()
+    expect(s.killed).toEqual([4242])
+  })
+
+  test('only the Windows desktop app needs a start outside its job, and only to keep running', () => {
+    const desk = { LLAMA_WEB_DESKTOP_SESSION: 'x' }
+    expect(needsOutsideJob({ keepRunning: true }, 'win32', desk)).toBe(true)
+    expect(needsOutsideJob({ keepRunning: false }, 'win32', desk)).toBe(false)
+    expect(needsOutsideJob({ keepRunning: true }, 'win32', {})).toBe(false) // start.bat: no job
+    expect(needsOutsideJob({ keepRunning: true }, 'darwin', desk)).toBe(false) // its own process group already
+  })
+
+  test('Windows command line: quoted the way the C runtime splits it again', () => {
+    expect(quoteWindowsArg('plain')).toBe('plain')
+    expect(quoteWindowsArg('')).toBe('""')
+    expect(quoteWindowsArg('two words')).toBe('"two words"')
+    expect(quoteWindowsArg('X:\\models\\a.gguf')).toBe('X:\\models\\a.gguf')
+    expect(quoteWindowsArg('X:\\Program Files\\app\\')).toBe('"X:\\Program Files\\app\\\\"')
+    expect(quoteWindowsArg('say "hi"')).toBe('"say \\"hi\\""')
+    expect(quoteWindowsArg('a\\"b')).toBe('"a\\\\\\"b"')
+    expect(windowsCommandLine('X:\\apps\\py.exe', ['-m', 'server', '--name', 'a b'])).toBe('X:\\apps\\py.exe -m server --name "a b"')
+  })
+})
+
 describe('a real process', () => {
   test('is started detached with its argument array and the wait ends when its server answers', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'lw-launch-'))
@@ -253,6 +313,50 @@ describe('a real process', () => {
     for (let i = 0; i < 200 && ready.length === 0; i++) await Bun.sleep(50)
     expect(ready).toEqual([['real-model']])
     expect(JSON.parse(await Bun.file(marker).text())).toEqual([String(port), 'two words'])
+    writeFileSync(stop, '')
+    await Bun.sleep(300)
+  })
+})
+
+describe('a real process at exit (decision 60)', () => {
+  test.skipIf(process.platform === 'win32')('shutdown ends the service with the switch on and leaves the other one answering', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'lw-exit-'))
+    closers.push(() => rmSync(dir, { recursive: true, force: true }))
+    const script = join(dir, 'svc.ts')
+    const stop = join(dir, 'stop')
+    // Serves a model list at once; ends on its own when the stop file appears (or after 20 s).
+    writeFileSync(script, [
+      "import { existsSync } from 'node:fs'",
+      'const t0 = Date.now()',
+      "const srv = Bun.serve({ port: Number(process.argv[2]), hostname: '127.0.0.1', fetch: () => Response.json({ data: [{ id: 'm' }] }) })",
+      `setInterval(() => { if (existsSync(${JSON.stringify(stop)}) || Date.now() - t0 > 20000) { srv.stop(true); process.exit(0) } }, 100)`,
+    ].join('\n'))
+    const freePort = () => { const p = Bun.serve({ port: 0, fetch: () => new Response('') }); const n = p.port; p.stop(true); return n }
+    const [pa, pb] = [freePort(), freePort()]
+    const d = defaultUpstreams()
+    const cmd = (port: number) => `"${process.execPath}" "${script}" ${port}`
+    createUpstream(d, { name: 'Gone', baseUrl: `http://127.0.0.1:${pa}/v1`, startCommand: cmd(pa), stopOnExit: true }, { localNames: [], selfPorts: [] })
+    createUpstream(d, { name: 'Stays', baseUrl: `http://127.0.0.1:${pb}/v1`, startCommand: cmd(pb) }, { localNames: [], selfPorts: [] })
+    const answers = async (port: number) => {
+      try { return (await fetch(`http://127.0.0.1:${port}/v1/models`, { signal: AbortSignal.timeout(500) })).ok } catch { return false }
+    }
+    const ready: string[] = []
+    const launcher = new UpstreamLauncher({
+      upstreams: () => d.upstreams,
+      check: async u => ({ ok: await answers(Number(new URL(u.baseUrl).port)), models: ['m'] }),
+      onReady: u => ready.push(u.name),
+      onChange: () => {},
+      spawn: realSpawn, pollMs: 50, timeoutMs: 15000,
+    })
+    closers.push(() => launcher.close())
+    for (const u of d.upstreams) launcher.start(u.id, false)
+    for (let i = 0; i < 200 && ready.length < 2; i++) await Bun.sleep(50)
+    expect(ready.sort()).toEqual(['Gone', 'Stays'])
+    await launcher.shutdown()
+    let gone = false
+    for (let i = 0; i < 40 && !gone; i++) { gone = !(await answers(pa)); if (!gone) await Bun.sleep(50) }
+    expect(gone).toBe(true)
+    expect(await answers(pb)).toBe(true)
     writeFileSync(stop, '')
     await Bun.sleep(300)
   })

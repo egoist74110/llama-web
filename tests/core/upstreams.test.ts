@@ -164,3 +164,25 @@ describe('upstreams.json and secrets.json', () => {
     expect(() => normalizeSecrets({ ...defaultSecrets(), upstreamKeys: { u1: 5 as any } })).toThrow()
   })
 })
+
+describe('stop when llama-web exits (decision 60)', () => {
+  const ctx = { localNames: [], selfPorts: [] }
+  test('off by default, also for an upstreams.json written before the field existed', () => {
+    const d = defaultUpstreams()
+    expect(createUpstream(d, { name: 'A', baseUrl: 'http://127.0.0.1:9/v1' }, ctx).stopOnExit).toBe(false)
+    const old: any = { version: 1, upstreams: [{ id: 'u-1', name: 'B', baseUrl: 'http://127.0.0.1:9/v1' }] }
+    expect(normalizeUpstreams(old).upstreams[0]!.stopOnExit).toBe(false)
+    const odd: any = { version: 1, upstreams: [{ id: 'u-1', name: 'B', baseUrl: 'http://127.0.0.1:9/v1', stopOnExit: 'yes' }] }
+    expect(normalizeUpstreams(odd).upstreams[0]!.stopOnExit).toBe(false)
+  })
+
+  test('set on create and on edit; an edit without the field keeps it', () => {
+    const d = defaultUpstreams()
+    const u = createUpstream(d, { name: 'A', baseUrl: 'http://127.0.0.1:9/v1', stopOnExit: true }, ctx)
+    expect(u.stopOnExit).toBe(true)
+    updateUpstream(d, u.id, { name: 'A2' }, ctx)
+    expect(u.stopOnExit).toBe(true)
+    updateUpstream(d, u.id, { stopOnExit: false }, ctx)
+    expect(u.stopOnExit).toBe(false)
+  })
+})

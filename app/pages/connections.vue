@@ -272,6 +272,18 @@ const example = (u: ConnectionView) => `${u.name}-${allModels(u)[0] ?? 'model-id
             <USwitch :model-value="u.exclusive" :disabled="!!busy[`edit:${u.id}`]" :aria-label="p.exclusive" @update:model-value="(v: boolean) => change(u, { exclusive: v })" />
           </div>
 
+          <div v-if="u.startCommand" class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <p class="m-0 text-[13px] font-medium">
+                {{ p.stopOnExit }}
+              </p>
+              <p class="m-0 mt-0.5 text-xs text-dimmed">
+                {{ p.stopOnExitHint }}
+              </p>
+            </div>
+            <USwitch :model-value="u.stopOnExit" :disabled="!!busy[`edit:${u.id}`]" :aria-label="p.stopOnExit" @update:model-value="(v: boolean) => change(u, { stopOnExit: v })" />
+          </div>
+
           <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
             <div class="min-w-0">
               <p class="m-0 text-[13px] font-medium">

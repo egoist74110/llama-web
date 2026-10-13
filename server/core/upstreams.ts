@@ -28,6 +28,11 @@ export interface Upstream {
   startCommand: string
   /** Working directory of the start command; '' = llama-web's own. */
   startCwd: string
+  /**
+   * When llama-web exits, also stop the service it started from here (decision 60). Default false: the service is the
+   * user's and keeps running (decision 56 ⑩). Only a process this llama-web run started is ever stopped.
+   */
+  stopOnExit: boolean
   /** Model ids from the last successful connection test. */
   models: string[]
   /** Model ids typed in by hand (for upstreams without `/v1/models`). */
@@ -207,6 +212,7 @@ export function normalizeUpstreams(doc: UpstreamsDoc): UpstreamsDoc {
     names.add(u.name.toLowerCase())
     u.local = u.local !== false
     u.exclusive = u.exclusive !== false
+    u.stopOnExit = u.stopOnExit === true
     if (typeof u.testedAt !== 'string') u.testedAt = ''
   }
   return doc
@@ -272,6 +278,7 @@ export interface UpstreamForm {
   manualModels?: unknown
   startCommand?: unknown
   startCwd?: unknown
+  stopOnExit?: unknown
 }
 
 /**
@@ -306,7 +313,7 @@ export function createUpstream(draft: UpstreamsDoc, form: UpstreamForm, ctx: Edi
   const u: Upstream = {
     id, name, baseUrl: cleanBaseUrl(form.baseUrl, ctx.selfPorts), monitorUrl: cleanMonitorUrl(form.monitorUrl),
     imageCompress: cleanMode(form.imageCompress), local: form.local !== false, exclusive: form.exclusive !== false,
-    startCommand: cleanStartCommand(form.startCommand), startCwd: cleanStartCwd(form.startCwd),
+    startCommand: cleanStartCommand(form.startCommand), startCwd: cleanStartCwd(form.startCwd), stopOnExit: form.stopOnExit === true,
     models: [], manualModels: cleanModelIds(form.manualModels), testedAt: '',
   }
   draft.upstreams.push(u)
@@ -333,6 +340,7 @@ export function updateUpstream(draft: UpstreamsDoc, id: unknown, form: UpstreamF
   if (form.manualModels !== undefined) u.manualModels = cleanModelIds(form.manualModels)
   if (form.startCommand !== undefined) u.startCommand = cleanStartCommand(form.startCommand)
   if (form.startCwd !== undefined) u.startCwd = cleanStartCwd(form.startCwd)
+  if (form.stopOnExit !== undefined) u.stopOnExit = form.stopOnExit === true
   return u
 }
 

@@ -1581,6 +1581,8 @@ export const enSkeleton: PartialMessages = {
       exclusive: 'Exclusive use of this machine',
       exclusiveHint: 'While it runs, llama-web unloads its own local models and does not allow loading a local model at the same time, so the two never hold the machine together.',
       exclusiveActive: 'This machine is held exclusively: the local models are unloaded and cannot be started.',
+      stopOnExit: 'Stop it when llama-web exits',
+      stopOnExitHint: 'Off (default): a service started from here keeps running after llama-web exits. On: llama-web stops it when it exits. Only the process started from here this time is stopped; one started elsewhere is never touched.',
       compress: { label: 'Image compression', inherit: 'Follow the global setting', on: 'On', off: 'Off' },
       compressHint: '"Follow the global setting" uses the image compression switch on the Settings page; On / Off only applies to this service.',
       key: { label: 'API key', saved: 'Saved', none: 'Not saved' },

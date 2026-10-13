@@ -26,6 +26,7 @@ import { LoadProgress, trackWeightLoad } from '../core/load-progress'
 import { ModelOps } from '../core/model-ops'
 import { createProxy, type Proxy, type ProxyEvent } from '../core/proxy'
 import { JobStore } from '../core/async-jobs'
+import { loadWinSpawn } from '../core/win-spawn'
 import { handlePublic, PublicListener } from '../core/public-entry'
 import { runStartupCleanup } from '../core/residue'
 import { LoadError, PidRegistry, Runner } from '../core/runner'
@@ -595,6 +596,8 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     log,
   })
   startupClose.push(() => launcher.close())
+  // Native spawn for a service that must outlive the Windows desktop app (decision 60); a no-op anywhere else.
+  void loadWinSpawn()
   // Reads free memory every two seconds, but only has work while several models may be online and one is loading or ready.
   const watchdog = new Watchdog({
     sample: () => samplePools(platform.os),
@@ -775,7 +778,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
         secretsStore.close()
         upstreamsStore.close()
         health.stop()
-        launcher.close()
+        await launcher.shutdown()
         gpu.stop()
         watchdog.stop()
         await scheduler.shutdown()

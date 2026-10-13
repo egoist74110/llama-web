@@ -1538,6 +1538,8 @@ export default {
       exclusive: '独占本机',
       exclusiveHint: '它运行时，llama-web 会卸载自己的本地模型，也不允许同时再加载本地模型，两边不会一起占着机器。',
       exclusiveActive: '正在独占本机：本地模型已卸载，不能启动。',
+      stopOnExit: '关闭 llama-web 时一起停止',
+      stopOnExitHint: '关掉时（默认），从这里启动的服务在 llama-web 退出后继续运行；打开后，llama-web 退出时会把它一起停止。只停止这次从这里启动的进程，在别处启动的不会动。',
       compress: { label: '图片压缩', inherit: '沿用全局', on: '开', off: '关' },
       compressHint: '「沿用全局」按设置页的图片压缩开关；开 / 关只对这个服务生效。',
       key: { label: 'API key', saved: '已保存', none: '未保存' },

@@ -1,5 +1,14 @@
 # 交接记录
 
+## 2026-10-13 · 决定 59 真机测试 + 「关闭 llama-web 时一起停止」开关（关键决定 60）· 单会话
+- 决定 59 真机测试（用户的 llama-web 已更新到 75fdda2 并重启，经公网入口 + key，curl）：文生视频（`Comfy-minimax-h3-t2v`）创建 200 → 状态轮询 200（90 秒完成）→ `/content` 200，674,548 字节 mp4，h264 864×480 2.33 秒，完整解码无错；图生视频（`Comfy-minimax-h3-i2v`，multipart `input_reference` 首帧图）创建 200 → 96 秒完成 → `/content` 200，1,426,274 字节，h264 960×960 2.33 秒，首帧与输入图一致；未知 id → 404 `job_not_found` 中文；不带 key → 401。异常：图生视频第一次下载用了 217 秒，之后两次重下 15 秒 / 8.6 秒且逐字节相同，原因未查。上游状态里的 `seconds` / `size` 与实际文件不一致，`url` 字段透传了上游自己的 127.0.0.1 地址（未处理，待用户决定）。
+- 重启后：用户请求日志显示 23:00:32 三条 502 `upstream_unreachable`（带模型名 = 映射重启后仍在，视频服务当时还没起来）、23:00:52 三条 404（上游自己的 `Video not found`）。原因：视频服务随 llama-web 一起被结束、任务在它内存里丢失。plan 里决定 59 的「已真机验证」**没有写**（用户的条件是全部通过）。
+- 追查：Windows 桌面版的壳把 llama-web 放进 Job Object（关闭时结束所有进程），`detached` 不能脱离，与决定 56 ⑩「退出时不结束」不符（只读代码得出，用户的平台没有确认）。
+- 决定 60（用户：「加个设置吧，默认原则，可以修改」）：每个外部服务一个开关 `stopOnExit`（默认 false，旧文件按 false，不改版本号），「接入」页在有启动命令时显示。关 = 继续运行；Windows 桌面版改为 Job 外启动（`job.rs` 加 `JOB_OBJECT_LIMIT_BREAKAWAY_OK`；新 `server/core/win-spawn.ts` 用 bun:ffi 调 `CreateProcessW`，`CREATE_BREAKAWAY_FROM_JOB | CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP | CREATE_UNICODE_ENVIRONMENT`，`Bun.which` 解析完整路径，参数按 C 运行库规则引号（同 libuv），每秒查退出码；失败退回普通启动并写日志）。只在 `LLAMA_WEB_DESKTOP_SESSION` 存在的 Windows 上走这条路。开 = `UpstreamLauncher.shutdown()` 在退出时结束这次启动的进程树（`context.shutdown()` 里替换原来的 `launcher.close()`）。
+- 测试：`upstream-launcher.test.ts` 新增 7 条（默认保留 / 开关打开只停自己 / 没启动不停 / 退出时读开关 / 何时需要 Job 外启动 / Windows 引号 / macOS 真实进程：打开的被停、没打开的仍应答），`upstreams.test.ts` 新增 2 条（默认值与旧文件、创建与编辑）。
+- 实际运行：`bun test` 1540 pass / 20 skip / 0 fail（两次）；`bun run typecheck` exit 0；`job.rs` 单独放进临时 crate 用 rust 1.99 `cargo check --target x86_64-pc-windows-msvc` 通过（完整的 `src-tauri` Windows check 因本机没有 `llvm-rc` 在 tauri-winres 构建脚本失败，与改动无关）；开发服务器 + 临时数据目录在浏览器里看了「接入」页：开关只在有启动命令的卡片出现、点开后 `upstreams.json` 写入 true、英文与 375 宽正常；服务已停、临时文件已删。
+- 没有运行：Windows 上的任何验证（`CreateProcessW` 的 FFI 调用、breakaway、关掉桌面版后服务是否保留、打开开关后是否被停止、llama-server 是否仍随壳崩溃被清理）；Windows 安装包构建；`bun run build`。plan 里这条任务没有打勾。
+
 ## 2026-10-13 · 异步任务后续请求路由（关键决定 59）· 单会话
 - 依据：用户 2026-10-13 在对话中批准，补决定 58 ⑤ 记下的缺口：`POST /v1/videos` 能转发到外部上游，但 `GET /v1/videos/{id}`、`GET /v1/videos/{id}/content`、`DELETE /v1/videos/{id}` 不带 model，到不了上游。
 - 实现：新增纯模块 `server/core/async-jobs.ts`（`ASYNC_JOB_APIS` 登记表，目前只有 `/v1/videos`；路径匹配、id 校验、创建方规则、`JobStore` = `data/jobs.json`，基于 `JsonStore`：version 1、原子写入、保留 3 份备份，每次写入清理过期（7 天）和超出 2000 条的最旧条目，查询时过期视为不存在；文件损坏时从空开始并记日志，下次写入覆盖，旧文件留在 backups）。`proxy.ts`：`forwardExternal` 拆出 `sendExternal`（去 `/v1`、换上游 key、打码、`forward()` 流式透传）；创建成功（2xx + JSON + ≤1 MB）后 `rememberJob` 读出顶层 `id` 记录，再把同样的字节交给客户端，超过 1 MB 原样续传不记；`handleV1Inner` 在读请求体之前先匹配后续请求，查到且创建方相同就 `sendExternal`，否则 404 `job_not_found`（新 i18n 键 `api.jobNotFound`，中英）。`context.ts` 接上 `JobStore`。

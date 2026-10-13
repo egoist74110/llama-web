@@ -1,14 +1,16 @@
 // Starting an external upstream by hand (decision 56 ⑩): the user saved a command line for it; when the service is not up
 // the page can run it. llama-web then keeps asking the service for its model list until models show up (= started), the
 // process we ran exits with an error, or the wait runs out. The service stays the user's: it is started detached, its
-// output is not read, it is not recorded in pids.json and not stopped when llama-web exits. Pure module: spawn, the
-// check, the clock and the timers are injected.
+// output is not read, it is not recorded in pids.json and, by default, not stopped when llama-web exits (decision 56 ⑩).
+// With the upstream's `stopOnExit` on, llama-web stops the process it started when it exits (decision 60). Pure module:
+// spawn, the check, the clock and the timers are injected.
 import { spawn as nodeSpawn } from 'node:child_process'
 import { existsSync, statSync } from 'node:fs'
 import { basename, extname } from 'node:path'
 import { splitArgs } from './args'
 import { killTree } from './runner'
 import type { Upstream } from './upstreams'
+import { spawnOutsideJob, winSpawnAvailable } from './win-spawn'
 
 export type LaunchErrorCode = 'not-found' | 'no-command' | 'already-up' | 'already-starting' | 'bad-cwd' | 'bad-command' | 'not-ours'
 
@@ -33,7 +35,13 @@ export interface LaunchedProcess {
   unref(): void
 }
 
-export interface SpawnSpec { file: string, args: string[], cwd: string | undefined }
+export interface SpawnSpec {
+  file: string
+  args: string[]
+  cwd: string | undefined
+  /** The service should outlive llama-web (`stopOnExit` off): under the Windows desktop shell it is started outside the shell's job. */
+  keepRunning: boolean
+}
 
 /** `.bat` / `.cmd` cannot be started directly on Windows: they go through `cmd.exe /c`. Everything else is run as written. */
 export function launchArgv(argv: string[], platform: NodeJS.Platform = process.platform): { file: string, args: string[] } {
@@ -42,7 +50,39 @@ export function launchArgv(argv: string[], platform: NodeJS.Platform = process.p
   return { file: file!, args }
 }
 
-export function realSpawn(spec: SpawnSpec): LaunchedProcess {
+/**
+ * Under the Windows desktop shell every child of llama-web is in a job that ends with the shell (src-tauri/src/job.rs);
+ * a service that should keep running is started outside it. Anywhere else a detached child already outlives llama-web.
+ */
+export function needsOutsideJob(spec: Pick<SpawnSpec, 'keepRunning'>, platform: NodeJS.Platform = process.platform, env: Record<string, string | undefined> = process.env): boolean {
+  return spec.keepRunning && platform === 'win32' && !!env.LLAMA_WEB_DESKTOP_SESSION
+}
+
+function spawnWindowsOutsideJob(spec: SpawnSpec): LaunchedProcess | null {
+  const which = (globalThis as { Bun?: { which(cmd: string, o: { cwd?: string, PATH?: string }): string | null } }).Bun?.which
+  const full = which?.(spec.file, { cwd: spec.cwd, PATH: process.env.PATH })
+  if (!full) return null
+  const p = spawnOutsideJob(full, spec.args, spec.cwd)
+  const exitCbs: Array<(code: number | null) => void> = []
+  const timer = setInterval(() => {
+    const code = p.exitCode()
+    if (code === null) return
+    clearInterval(timer)
+    for (const cb of exitCbs) cb(code)
+  }, 1000)
+  return { pid: p.pid, onExit: (cb) => { exitCbs.push(cb) }, onError: () => {}, unref: () => { timer.unref?.() } }
+}
+
+export function realSpawn(spec: SpawnSpec, log?: (message: string) => void): LaunchedProcess {
+  if (needsOutsideJob(spec)) {
+    try {
+      const p = winSpawnAvailable() ? spawnWindowsOutsideJob(spec) : null
+      if (p) return p
+      log?.('upstream start: cannot start outside the desktop app\'s job, the service will stop when the app exits')
+    } catch (e) {
+      log?.(`upstream start: starting outside the desktop app's job failed (${(e as Error).message}), the service will stop when the app exits`)
+    }
+  }
   const child = nodeSpawn(spec.file, spec.args, { cwd: spec.cwd, detached: true, stdio: 'ignore', windowsHide: true })
   return {
     pid: child.pid,
@@ -126,7 +166,8 @@ export class UpstreamLauncher {
     const now = this.deps.now ?? Date.now
     let proc: LaunchedProcess
     try {
-      proc = (this.deps.spawn ?? realSpawn)({ file, args, cwd })
+      const spec: SpawnSpec = { file, args, cwd, keepRunning: !u.stopOnExit }
+      proc = this.deps.spawn ? this.deps.spawn(spec) : realSpawn(spec, this.deps.log)
     } catch (e) {
       this.set(id, { state: 'failed', code: 'spawn-failed', detail: (e as Error).message })
       return
@@ -183,7 +224,23 @@ export class UpstreamLauncher {
     this.deps.onStopped?.(u)
   }
 
-  /** llama-web is closing: stop the timers. The services stay running. */
+  /**
+   * llama-web is exiting: end the processes this run started for upstreams with `stopOnExit` on (decision 60), then
+   * close. The others stay running. Never throws.
+   */
+  async shutdown(): Promise<void> {
+    const ids = [...this.owned.keys()]
+    await Promise.all(ids.map(async (id) => {
+      const u = this.deps.upstreams().find(x => x.id === id)
+      const o = this.owned.get(id)
+      if (!u?.stopOnExit || !o || !this.canStop(id)) return
+      await (this.deps.kill ?? killTree)(o.proc.pid!).catch(() => {})
+      this.deps.log?.(`upstream ${u.name}: stopped because llama-web is exiting`)
+    }))
+    this.close()
+  }
+
+  /** Stop the timers and forget the processes. The services stay running. */
   close(): void {
     for (const run of this.runs.values()) { run.done = true; if (run.timer) clearTimeout(run.timer) }
     this.runs.clear()

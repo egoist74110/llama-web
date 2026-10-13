@@ -1,4 +1,7 @@
 // A shell crash closes the only job handle and terminates the owned service tree.
+// Windows: the job allows breakaway, so a process started with CREATE_BREAKAWAY_FROM_JOB leaves it. llama-web asks for
+// that only for an external service the user wants kept running after llama-web exits (decision 60,
+// server/core/win-spawn.ts); everything else it starts (llama-server, cloudflared) stays in the job.
 #[cfg(windows)]
 mod imp {
     use std::{io, mem, os::windows::io::AsRawHandle, process::Child};
@@ -17,7 +20,8 @@ mod imp {
                 }
                 let job = Self(handle as isize);
                 let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = mem::zeroed();
-                limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+                limits.BasicLimitInformation.LimitFlags =
+                    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_BREAKAWAY_OK;
                 if SetInformationJobObject(
                     handle,
                     JobObjectExtendedLimitInformation,
