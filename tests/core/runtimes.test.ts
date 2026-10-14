@@ -147,7 +147,7 @@ describe('resolveRuntimeRef', () => {
       addCustom(e)
       const ref = `custom:${e.id}`
       expect(resolveRuntimeRef(ref, env(target, [e]))).toEqual({ ref, exe: customExe(data, e), label: e.label, fallback: null })
-      expect(refOfExe(data, customExe(data, e), target.os)).toBe(ref)
+      expect(refOfExe(data, customExe(data, e))).toBe(ref)
       install(target, 'b300')
       rmSync(customExe(data, e))
       expect(resolveRuntimeRef(ref, env(target, [e])).fallback?.reason).toBe('missing')
