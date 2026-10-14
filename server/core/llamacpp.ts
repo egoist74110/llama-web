@@ -211,8 +211,9 @@ export async function resolveLatest(fetchFn: FetchFn, cudaRuntime: string, platf
   }
   const { tag, assets } = found
   const os = platform === 'win32' ? 'win' : 'linux'
+  if (target?.acceleration === 'vulkan' && (target.os !== 'win32' || target.arch !== 'x64')) throw new RuntimeError('asset-missing', 'Unsupported Vulkan target')
   if (target && target.acceleration !== 'cuda') {
-    const name = target.os === 'win32' ? `llama-${tag}-bin-win-cpu-${target.arch}.zip`
+    const name = target.os === 'win32' ? `llama-${tag}-bin-win-${target.acceleration === 'vulkan' ? 'vulkan' : 'cpu'}-${target.arch}.zip`
       : target.os === 'darwin' ? `llama-${tag}-bin-macos-${target.arch}.tar.gz` : ''
     const bin = assets.find(a => a.name === name)
     if (!bin) throw new RuntimeError('asset-missing', 'Release asset not found', name || `${target.os}/${target.arch}`)

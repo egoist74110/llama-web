@@ -980,6 +980,7 @@ export default {
       'bad-mirror': '自定义镜像前缀不合法：必须是 https:// 开头的公网域名，不能带账号密码、端口、参数，也不能是本机、内网或 IP 地址。',
       'bad-domain': '域名格式不对，只填主机名，例如 llm.example.com（不要带 https:// 或路径）：{detail}',
       'bad-locale': '界面语言只能是 llama-web 有字典的语言（zh-CN 或 en）。',
+      'bad-acceleration': '此电脑不支持这个加速方式。',
     },
     public: {
       port: '入口端口',
@@ -1349,6 +1350,7 @@ export default {
     },
   },
   llamacpp: {
+    chooseAcceleration: '请到「设置」页选择运行库加速方式，然后重启 llama-web。',
     title: 'llama.cpp 版本',
     hint: '每天检查一次，自动更新默认关闭；开启后会自动下载并使用新版。保留最近 {n} 个版本，可以随时回退。',
     status: '状态',
@@ -1498,7 +1500,7 @@ export default {
   system: {
     warnings: {
       'no-nvidia': '没有检测到 NVIDIA 显卡：建议使用 CPU 版本。',
-      'other-gpu-vendor': '检测到 {vendors} 显卡：本项目目前只支持 NVIDIA（CUDA）和 CPU，这些显卡不会被用来推理。',
+      'other-gpu-vendor': '检测到 {vendors} 显卡：可在运行库设置中试用实验性的 Vulkan 版。',
       'nvidia-unknown': '没能读出显卡信息（nvidia-smi 没有响应），无法自动选择 CUDA 运行库。',
       'driver-too-old': '显卡驱动 {driver} 太旧，装不了任何 CUDA 运行库：请升级驱动，或改用 CPU 版本。',
       'driver-below-latest-cuda': '显卡驱动 {driver} 最高支持 CUDA {maxMajor}.x，新版 CUDA {latestMajor}.x 需要驱动 {minDriver} 或更高：已自动选用 {maxMajor}.x，也可以升级驱动。',
@@ -2005,6 +2007,7 @@ export default {
     // Recognised from the llama-server output (server/core/errors.ts).
     'oom': '显存不足',
     'cuda-error': 'CUDA 报错',
+    'gpu-error': 'GPU 报错',
     'dll-missing': '缺少运行库（DLL）',
     'unknown-arg': 'llama-server 不认识某个启动参数',
     'mmproj-mismatch': 'mmproj 与模型不匹配',
@@ -2018,6 +2021,7 @@ export default {
     advice: {
       'oom': '显存放不下。可以：调小上下文长度（ctx）；减少放进显卡的层数（-ngl）；把 K / V 缓存类型改成 q8_0；换更小的量化文件；换一张空闲的卡（设备）；先停止其他在线的模型；或先到「总览」确认没有别的程序占着显存。',
       'cuda-error': 'CUDA 运行出错。确认显卡驱动是最新的、没有别的程序独占显卡；再试一次，仍然出现就把下面的日志发给开发者。',
+      'gpu-error': '显卡后端出错。请更新显卡驱动，确认此运行库支持你的显卡后再试。',
       'dll-missing': 'llama-server 启动不了，缺少 CUDA 运行库。到「设置」确认 llama.cpp 已完整下载（包含 cudart），或重启 llama-web 让它重新下载。',
       'file-missing': '找不到模型文件（或 mmproj / 草稿模型）。到「模型」页检查文件还在不在、模型目录有没有改名。',
       'unknown-arg': 'llama-server 拒绝了某个参数，多半是「额外参数」写错，或该参数不属于当前 llama.cpp 版本。打开该方案的命令预览，对照下面的日志检查。',

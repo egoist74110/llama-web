@@ -144,7 +144,7 @@ describe('detectSystem on Windows', () => {
     const info = await detectSystem({ os: 'win32', arch: 'x64', run: fake({ smi: 'hang' }).run, ...NO_CPU })
     expect(info.nvidia).toMatchObject({ state: 'unknown', gpus: [] })
     expect(info.cudaLimits).toBeUndefined()
-    expect(systemWarnings(info, { cudaRuntime: '' }).map(w => w.code)).toEqual(['nvidia-unknown'])
+    expect(systemWarnings(info, { cudaRuntime: '' }).map(w => w.code)).toEqual(['nvidia-unknown', 'other-gpu-vendor'])
   })
 
   test('nvidia-smi answering with no devices: none', async () => {
@@ -194,8 +194,8 @@ describe('warnings (decision 37)', () => {
     const nv = { ...info.nvidia!, maxCuda: null }
     const tooOld = { ...info, nvidia: nv, cudaLimits: cudaLimitsOf(nv)! }
     expect(tooOld.cudaLimits.maxMajor).toBeNull()
-    expect(codes(tooOld)).toEqual(['driver-too-old', 'compute-cap-unsupported'])
-    const volta = { ...info, cudaLimits: { maxMajor: 13, maxComputeCap: 7.0 } }
+    expect(codes(tooOld)).toEqual(['driver-too-old', 'compute-cap-unsupported', 'other-gpu-vendor'])
+    const volta = { ...info, nvidia: { ...info.nvidia!, driver: '617.14', gpus: info.nvidia!.gpus.map(g => ({ ...g, computeCap: 7.0 })) }, recommend: { acceleration: 'cuda' as const }, cudaLimits: { maxMajor: 13, maxComputeCap: 7.0 } }
     expect(codes(volta)).toEqual(['compute-cap-below-latest-cuda'])
   })
 

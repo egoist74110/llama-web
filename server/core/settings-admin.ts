@@ -9,13 +9,14 @@ import { ArgsSyntaxError, PARAM_DEFS, paramValueOk, splitArgs, type LaunchDefaul
 import { cleanWizard, hasCpuChannel, hasDeviceSelection, MAX_LOADED_LIMIT, NO_ROOM_POLICIES, TUNNEL_MODES, TUNNEL_PROTOCOLS, type ModelsDoc, type NoRoomPolicy, type Settings, type TunnelMode, type TunnelProtocol } from './config'
 import { normalizeCustomMirror } from './mirrors'
 import { LOCALES, type LocaleCode } from '../../i18n/messages'
+import type { Acceleration, PlatformInfo, RuntimeSelection, RuntimeTarget } from './platform'
 import type { PublicStatus } from './public-entry'
 import type { ModelDir } from './types'
 
 export type SettingsErrorCode =
   | 'bad-request' | 'dir-path' | 'dir-duplicate' | 'dir-depth' | 'dir-in-use' | 'dir-limit'
   | 'bad-param' | 'bad-extra-args' | 'bad-image' | 'bad-port' | 'bad-port-range' | 'bad-timeout'
-  | 'bad-public-port' | 'bad-domain' | 'bad-mirror' | 'bad-max-loaded' | 'bad-on-no-room' | 'bad-locale'
+  | 'bad-public-port' | 'bad-domain' | 'bad-mirror' | 'bad-max-loaded' | 'bad-on-no-room' | 'bad-locale' | 'bad-acceleration'
 
 export class SettingsError extends Error {
   constructor(public code: SettingsErrorCode, public detail = '') {
@@ -242,6 +243,35 @@ export function applyPublic(draft: Settings, raw: unknown): void {
   draft.public = { enabled, port, domain, tunnelEnabled, tunnelMode: tunnelMode as TunnelMode, tunnelProtocol: tunnelProtocol as TunnelProtocol, wizard }
 }
 
+/** Editable global acceleration choices; Macs keep the current setting (decision 38). */
+export function accelerationOptions(host: { os: NodeJS.Platform, arch?: string }, current: Acceleration): Acceleration[] {
+  if (host.os === 'win32' && host.arch === 'x64') return ['auto', 'cuda', 'cpu', 'vulkan']
+  if (host.os === 'darwin') return [current]
+  return []
+}
+
+export interface AccelerationView {
+  saved: Acceleration
+  active: RuntimeTarget['acceleration']
+  gpuChannel: NonNullable<RuntimeTarget['gpuChannel']> | null
+  choiceNeeded: boolean
+  reason: 'nvidia-missing' | 'nvidia-failed' | 'cuda-unusable' | null
+  options: Acceleration[]
+  restartNeeded: boolean
+}
+
+/** Saved preferences beside the startup snapshot: saving does not change the running target. */
+export function describeAcceleration(saved: Acceleration, host: PlatformInfo, boot: RuntimeSelection): AccelerationView {
+  const choiceNeeded = !!boot.selectionError
+  const reason = choiceNeeded && host.os === 'win32'
+    ? host.nvidiaProbe === 'found' && host.cudaRunnable === false ? 'cuda-unusable' : host.nvidiaProbe === 'missing' ? 'nvidia-missing' : host.nvidiaProbe === 'failed' ? 'nvidia-failed' : null
+    : null
+  return {
+    saved, active: boot.target.acceleration, gpuChannel: boot.target.gpuChannel ?? null,
+    choiceNeeded, reason, options: accelerationOptions(host, saved), restartNeeded: saved !== boot.requested,
+  }
+}
+
 export interface SettingsPatch {
   modelDirs?: unknown
   defaults?: unknown
@@ -250,6 +280,7 @@ export interface SettingsPatch {
   image?: unknown
   server?: unknown
   public?: unknown
+  /** Runtime preferences: autoUpdate, and acceleration (takes effect after restart). */
   llamacpp?: unknown
   /** Own mirror prefix: { custom: string }. */
   mirror?: unknown
@@ -262,7 +293,7 @@ export interface SettingsPatch {
 const SECTIONS = ['modelDirs', 'defaults', 'defaultsCpu', 'image', 'server', 'public', 'setupDone', 'llamacpp', 'mirror', 'ui']
 
 /** Apply every section present in the patch; validation of any section failing aborts the whole patch. */
-export function applySettingsPatch(draft: Settings, patch: unknown, models: ModelsDoc, host: { os: NodeJS.Platform } = { os: process.platform }): void {
+export function applySettingsPatch(draft: Settings, patch: unknown, models: ModelsDoc, host: { os: NodeJS.Platform, arch?: string } = { os: process.platform, arch: process.arch }): void {
   if (!isObj(patch) || !SECTIONS.some(k => patch[k] !== undefined)) throw new SettingsError('bad-request')
   const p = patch as SettingsPatch
   if (p.modelDirs !== undefined) applyModelDirs(draft, p.modelDirs, models)
@@ -276,8 +307,15 @@ export function applySettingsPatch(draft: Settings, patch: unknown, models: Mode
   if (p.server !== undefined) applyServer(draft, p.server)
   if (p.public !== undefined) applyPublic(draft, p.public)
   if (p.llamacpp !== undefined) {
-    if (!isObj(p.llamacpp) || typeof p.llamacpp.autoUpdate !== 'boolean' || Object.keys(p.llamacpp).some(k => k !== 'autoUpdate')) throw new SettingsError('bad-request')
-    draft.llamacpp.autoUpdate = p.llamacpp.autoUpdate
+    const raw = p.llamacpp
+    if (!isObj(raw) || !Object.keys(raw).length || Object.keys(raw).some(k => k !== 'autoUpdate' && k !== 'acceleration')) throw new SettingsError('bad-request')
+    const updateAuto = Object.hasOwn(raw, 'autoUpdate')
+    const updateAccel = Object.hasOwn(raw, 'acceleration')
+    if (updateAuto && typeof raw.autoUpdate !== 'boolean') throw new SettingsError('bad-request')
+    if (updateAccel && !accelerationOptions(host, draft.llamacpp.acceleration).includes(raw.acceleration as Acceleration)) throw new SettingsError('bad-acceleration')
+    // Validate both fields before changing either; the store persists the whole patch atomically.
+    if (updateAuto) draft.llamacpp.autoUpdate = raw.autoUpdate as boolean
+    if (updateAccel) draft.llamacpp.acceleration = raw.acceleration as Acceleration
   }
   if (p.mirror !== undefined) {
     if (!isObj(p.mirror) || Object.keys(p.mirror).some(k => k !== 'custom')) throw new SettingsError('bad-request')
@@ -315,6 +353,8 @@ export interface SettingsDoc {
   mirror: Settings['mirror']
   /** Interface language (decision 18), so the page can show and change it without a restart. */
   ui: Settings['ui']
+  /** Saved global acceleration beside the fixed startup state. */
+  acceleration: AccelerationView
   server: { port: number, portRange: [number, number], loadTimeoutSec: number, drainTimeoutSec: number, multiLoad: boolean, maxLoaded: number, onNoRoom: NoRoomPolicy }
   public: Settings['public'] & {
     /** State of the public listener right now. */

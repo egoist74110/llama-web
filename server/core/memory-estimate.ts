@@ -417,26 +417,26 @@ export function estimateMemory(input: EstimateInput): MemoryEstimate {
   const hostBudget = system.availableMiB === null ? null : Math.max(0, system.availableMiB - reserve)
 
   const pools: Pool[] = []
-  const shared = devices.length > 0 && devices.every(d => d.memory === 'shared')
+  const shared = devices.some(d => d.memory === 'shared')
   let unknownBudget = false
-  const mk = (id: string, name: string, kind: Pool['kind'], b: Breakdown, budget: number | null): Pool => {
+  const mk = (id: string, name: string, kind: Pool['kind'], b: Breakdown, budget: number | null, partialBudget = false): Pool => {
     const fin = finish(b)
     const t = tierOf(fin.totalMiB, budget)
     // A part of the budget that could not be read can only make it smaller: "does not fit" stands, anything else is unknown.
-    return { id, name, kind, ...fin, budgetMiB: budget, ...(unknownBudget && t.tier !== 'nofit' ? { ratio: t.ratio, tier: 'unknown' as Tier } : t) }
+    return { id, name, kind, ...fin, budgetMiB: budget, ...(partialBudget && t.tier !== 'nofit' ? { ratio: t.ratio, tier: 'unknown' as Tier } : t) }
   }
   if (shared) {
     // Device and host draw from one memory: one pool, limited by the device cap and by what the system can still give.
-    const merged = sumBreakdown(hostPool, ...devPools)
-    const caps = devices.map(d => (d.freeMiB !== null ? d.freeMiB : d.capMiB ?? null))
+    const sharedDevices = devices.filter(d => d.memory === 'shared')
+    const merged = sumBreakdown(hostPool, ...devPools.filter((_, i) => devices[i]!.memory === 'shared'))
+    const caps = sharedDevices.map(d => (d.freeMiB !== null ? d.freeMiB : d.capMiB ?? null))
     const known = [...caps, hostBudget].filter((n): n is number => n !== null)
     unknownBudget = known.length < caps.length + 1
     const budget = known.length ? Math.min(...known) : null
-    pools.push(mk(devices.map(d => d.id).join(','), devices.map(d => d.name).join(', '), 'shared', merged, budget))
-  } else {
-    devices.forEach((d, i) => { if (devPools[i]!.weightsMiB + devPools[i]!.kvMiB + devPools[i]!.stateMiB + devPools[i]!.draftMiB + devPools[i]!.mmprojMiB > 0) pools.push(mk(d.id, d.name, 'separate', devPools[i]!, d.freeMiB)) })
-    pools.push(mk('host', '', 'host', hostPool, hostBudget))
+    pools.push(mk(sharedDevices.map(d => d.id).join(','), sharedDevices.map(d => d.name).join(', '), 'shared', merged, budget, unknownBudget))
   }
+  devices.forEach((d, i) => { if (d.memory === 'separate' && (devPools[i]!.weightsMiB + devPools[i]!.kvMiB + devPools[i]!.stateMiB + devPools[i]!.draftMiB + devPools[i]!.mmprojMiB > 0)) pools.push(mk(d.id, d.name, 'separate', devPools[i]!, d.freeMiB)) })
+  if (!shared) pools.push(mk('host', '', 'host', hostPool, hostBudget))
   if (unknownBudget || pools.some(p => p.budgetMiB === null)) notes.add('budget-unknown')
 
   const lockedInRam = !!params.mlock

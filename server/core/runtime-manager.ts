@@ -9,7 +9,7 @@ import { installedDir } from './llamacpp'
 import type { RuntimeTarget } from './platform'
 import {
   channelsFor, customDir, entryRunsHere, installedOfficial, officialRef, parseRuntimeRef, refOfExe,
-  type RuntimeAccel, type RuntimeEntry, type RuntimeEnv, type RuntimeRegistry,
+  type RuntimeAccel, type RuntimeEntryAccel, type RuntimeEntry, type RuntimeEnv, type RuntimeRegistry,
 } from './runtimes'
 
 export type DeleteErrorCode = 'bad-ref' | 'not-found' | 'latest-official' | 'in-use' | 'needs-confirm' | 'locked' | 'failed'
@@ -24,7 +24,7 @@ export class DeleteError extends Error {
 export interface RuntimeRow {
   ref: string
   kind: 'official' | 'custom'
-  accel: RuntimeAccel
+  accel: RuntimeEntryAccel
   /** `b11146`; empty for a hand-added build whose number is unknown. */
   tag: string
   label: string

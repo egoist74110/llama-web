@@ -68,10 +68,12 @@ export interface Settings {
   llamacpp: {
     /** Empty = automatic: the newest CUDA runtime the driver and GPU can run (decision 37); a version here is the user's override. */
     cudaRuntime: string
-    /** Current version of the GPU channel (on a Mac: of its only channel). */
+    /** Current version of the CUDA channel (on a Mac: of its only channel). */
     current: string
     /** Current version of the Windows CPU channel (decision 36); empty until the CPU build is downloaded. */
     currentCpu: string
+    /** Current version of the experimental Windows Vulkan channel; empty until downloaded. */
+    currentVulkan: string
     keepVersions: number
     /** Daily checks always run; this preference enables automatic installation. */
     autoUpdate: boolean
@@ -156,7 +158,7 @@ export type NoRoomPolicy = 'unload' | 'error'
 export const NO_ROOM_POLICIES: readonly NoRoomPolicy[] = ['unload', 'error']
 export const MAX_LOADED_LIMIT = 99
 
-export const SETTINGS_VERSION = 11
+export const SETTINGS_VERSION = 12
 export const MODELS_VERSION = 1
 
 /**
@@ -178,11 +180,19 @@ export const hasDeviceSelection = (host: { os: NodeJS.Platform }) => host.os !==
 
 /** Current version setting of an official channel. */
 export const currentTagFor = (s: Settings, host: { os: NodeJS.Platform }, accel: string): string =>
-  hasCpuChannel(host) && accel === 'cpu' ? s.llamacpp.currentCpu : s.llamacpp.current
+  accel === 'vulkan' ? s.llamacpp.currentVulkan : hasCpuChannel(host) && accel === 'cpu' ? s.llamacpp.currentCpu : s.llamacpp.current
 
 /** Launch defaults for a launch that ends up on a runtime of this type. */
-export const defaultsFor = (s: Settings, host: { os: NodeJS.Platform }, accel: string): LaunchDefaults =>
-  hasCpuChannel(host) && accel === 'cpu' ? s.defaultsCpu : s.defaults
+export function defaultsFor(s: Settings, host: { os: NodeJS.Platform }, accel: string): LaunchDefaults {
+  if (hasCpuChannel(host) && accel === 'cpu') return s.defaultsCpu
+  if (!['vulkan', 'sycl', 'rocm'].includes(accel)) return s.defaults
+  const defaults = { ...s.defaults }
+  // CUDA's built-in defaults are not inherited by experimental backends; explicit overrides merge later.
+  for (const field of ['flashAttn', 'cacheTypeK', 'cacheTypeV'] as const) {
+    if (defaults[field] === DEFAULT_LAUNCH_DEFAULTS[field]) defaults[field] = null
+  }
+  return defaults
+}
 
 /** The facts first-run tuning needs (a subset of the system detection result). */
 export interface TuneInput {
@@ -237,7 +247,7 @@ export function defaultSettings(platform?: PlatformInfo): Settings {
     public: { enabled: false, port: 8080, domain: '', tunnelEnabled: false, tunnelMode: 'token', tunnelProtocol: 'http2', wizard: null },
     modelDirs: [],
     mirror: { custom: '' },
-    llamacpp: { cudaRuntime: '', current: '', currentCpu: '', keepVersions: 2, autoUpdate: false, acceleration: 'auto' },
+    llamacpp: { cudaRuntime: '', current: '', currentCpu: '', currentVulkan: '', keepVersions: 2, autoUpdate: false, acceleration: 'auto' },
     scheduler: { maxLoaded: 1, multiLoad: false, onNoRoom: 'unload', loadTimeoutSec: 600, drainTimeoutSec: 300, heartbeatSec: 15, portRange: [7100, 7199] },
     defaults: windowsCuda ? { ...DEFAULT_LAUNCH_DEFAULTS } : {
       ...DEFAULT_LAUNCH_DEFAULTS, cacheTypeK: null, cacheTypeV: null, flashAttn: null,
@@ -325,6 +335,12 @@ export const SETTINGS_MIGRATIONS: Record<number, (old: any) => any> = {
     old.ui.locale ??= DEFAULT_LOCALE
     return old
   },
+  // 12: the experimental Windows Vulkan channel; keep every existing value.
+  11: (old) => {
+    if (!isObj(old.llamacpp)) old.llamacpp = {}
+    old.llamacpp.currentVulkan ??= ''
+    return old
+  },
 }
 
 /** The online limit that is in force: 1 unless `multiLoad` is on, never more than there are ports for the processes. */
@@ -364,7 +380,7 @@ export function normalizeSettings(doc: Settings): Settings {
   if (!TUNNEL_MODES.includes(out.public.tunnelMode)) out.public.tunnelMode = 'token'
   if (!TUNNEL_PROTOCOLS.includes(out.public.tunnelProtocol)) out.public.tunnelProtocol = 'http2'
   out.public.wizard = cleanWizard(out.public.wizard)
-  if (!['auto', 'cuda', 'cpu', 'metal'].includes(out.llamacpp.acceleration)) throw new Error('Invalid llamacpp.acceleration')
+  if (!['auto', 'cuda', 'cpu', 'metal', 'vulkan'].includes(out.llamacpp.acceleration)) throw new Error('Invalid llamacpp.acceleration')
   if (typeof out.llamacpp.autoUpdate !== 'boolean') throw new Error('Invalid llamacpp.autoUpdate')
   // A hand-edited unacceptable mirror is dropped (= built-in mirrors only), never used.
   out.mirror.custom = normalizeCustomMirror(out.mirror.custom) ?? ''

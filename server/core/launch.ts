@@ -12,7 +12,7 @@ import type { RuntimeTarget } from './platform'
 import { currentTagFor, defaultsFor, hasDeviceSelection, type ModelConfig, type ModelsDoc, type Settings } from './config'
 import type { Target } from './scheduler'
 import { resolveFileRef } from './scanner'
-import { parseRuntimeRef, resolveRuntimeRef, RuntimeResolveError, type FallbackReason, type RuntimeAccel, type RuntimeEnv } from './runtimes'
+import { parseRuntimeRef, resolveRuntimeRef, RuntimeResolveError, type FallbackReason, type RuntimeEntryAccel, type RuntimeEnv } from './runtimes'
 
 export type LaunchConfigErrorCode = 'model-missing' | 'profile-missing' | 'file-missing' | 'no-runtime' | 'bad-args' | 'device-missing' | 'split-mode-unsupported' | 'config-changed'
 
@@ -29,7 +29,7 @@ export interface RuntimeUse {
   ref: string | null
   label: string
   /** Type of the build that runs; picks the global defaults (decision 36). */
-  accel: RuntimeAccel
+  accel: RuntimeEntryAccel
   fallback: null | { from: string, reason: FallbackReason, to: string }
 }
 

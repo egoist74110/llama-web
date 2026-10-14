@@ -241,3 +241,36 @@ test('row / tensor split over several cards is not judged: the cards are unknown
     expect(c.tier).toBe('unknown')
   }
 })
+
+test('Windows integrated GPUs share the host pool, capped by device free/total and the host budget', () => {
+  const integrated = (name: string, freeMiB: number | null = 7000): DeviceList => ({ source: 'list-devices', gpus: [{ id: 'Vulkan0', name, totalMiB: 8000, freeMiB }] })
+  for (const name of ['Intel Arc(TM) 140V GPU', 'AMD Radeon(TM) Graphics']) {
+    const l = integrated(name)
+    expect(deviceInputs({ os: 'win32', device: 'Vulkan0', list: l })[0]).toMatchObject({ memory: 'shared', capMiB: 8000, freeMiB: 7000 })
+    const c = checkLaunch(base({ device: 'Vulkan0', list: l, system: { totalMiB: 16384, availableMiB: 9000 } }))
+    expect(c.estimate!.pools.map(p => p.kind)).toEqual(['shared'])
+    expect(c.estimate!.pools[0]!.budgetMiB).toBe(Math.min(7000, 9000 - systemReserveMiB(16384)))
+    const lowHost = checkLaunch(base({ device: 'Vulkan0', list: l, system: { totalMiB: 16384, availableMiB: 4000 } }))
+    expect(lowHost.estimate!.pools[0]!.budgetMiB).toBe(4000 - systemReserveMiB(16384))
+    const cap = checkLaunch(base({ device: 'Vulkan0', list: integrated(name, null) }))
+    expect(cap.estimate!.pools[0]!.budgetMiB).toBe(8000)
+  }
+  expect(deviceInputs({ os: 'win32', device: 'Vulkan0', list: integrated('Intel Arc(TM) A770') })[0]!.memory).toBe('separate')
+  expect(deviceInputs({ os: 'win32', device: 'Vulkan0', list: integrated('Radeon RX 7900 XTX') })[0]!.memory).toBe('separate')
+  expect(deviceInputs({ os: 'win32', device: 'Vulkan0', list: integrated('Intel UHD Graphics'), cpuBuild: true })).toEqual([])
+})
+
+test('a Windows group containing integrated and discrete GPUs retains a shared host pool', async () => {
+  const { admissionFrom } = await import('../../server/core/admission')
+  const l: DeviceList = { source: 'list-devices', gpus: [
+    { id: 'Vulkan0', name: 'Intel UHD Graphics', totalMiB: 16000, freeMiB: 12000 },
+    { id: 'Vulkan1', name: 'Radeon RX 7900 XTX', totalMiB: 24000, freeMiB: 22000 },
+  ] }
+  const c = checkLaunch(base({ device: 'Vulkan0,Vulkan1', list: l, args: ['-c', '4096', '-ts', '1,1'] }))
+  expect(c.estimate!.pools.map(p => [p.kind, p.id])).toEqual([['shared', 'Vulkan0'], ['separate', 'Vulkan1']])
+  expect(c.estimate!.pools[0]!.budgetMiB).toBe(12000)
+  expect(admissionFrom(c.estimate).pools).toEqual(['system', 'Vulkan1'])
+  const unknownHost = checkLaunch(base({ device: 'Vulkan0,Vulkan1', list: l, args: ['-c', '4096', '-ts', '1,1'], system: { totalMiB: 65536, availableMiB: null } }))
+  expect(unknownHost.estimate!.pools[0]!.tier).toBe('unknown')
+  expect(unknownHost.estimate!.pools[1]!.tier).toBe('ok')
+})

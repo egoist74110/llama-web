@@ -191,3 +191,15 @@ describe('Watchdog', () => {
     expect(events).toEqual([])
   })
 })
+
+test('Windows integrated GPU admissions are watched through the system pool', async () => {
+  const { poolSampleId } = await import('../../server/core/admission')
+  const id = poolSampleId({ id: 'Vulkan0', kind: 'shared' })
+  expect(id).toBe('system')
+  const { dog, stops } = setup([cand('integrated', { pools: [id] })], () => [pool(id, 16000, 100)])
+  try {
+    expect(await dog.tick()).not.toBeNull()
+    expect(stops[0]!.target.modelId).toBe('integrated')
+    expect(stops[0]!.cause.pool).toBe('system')
+  } finally { await dog.stop() }
+})

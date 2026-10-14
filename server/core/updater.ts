@@ -9,6 +9,7 @@ import { join, posix, win32 } from 'node:path'
 import type { CudaLimits } from './cuda'
 import { isInsideDir } from './residue'
 import type { RuntimeListing } from './runtime-manager'
+import { t } from './i18n'
 import { targetKey } from './platform'
 import { UpdateCheckStore } from './update-check'
 import {
@@ -90,7 +91,7 @@ export function versionOfExe(dataDir: string, exe: string, platform = process.pl
   const parts = path.relative(base, exe).toLowerCase().split(/[\\/]/)
   const first = parts[0] ?? ''
   if (TAG_RE.test(first)) return first
-  return /^(win32|darwin)-(x64|arm64)-(cuda|cpu|metal)$/.test(first) && TAG_RE.test(parts[1] ?? '') ? parts[1]! : null
+  return /^(win32|darwin)-(x64|arm64)-(cuda|cpu|metal|vulkan)$/.test(first) && TAG_RE.test(parts[1] ?? '') ? parts[1]! : null
 }
 
 /**
@@ -263,7 +264,7 @@ export class Updater {
       }
       this.checks.save(this.checkKey, at)
       this.checkView = { state: 'checking' }
-      if (this.opts.selectionError) throw new RuntimeError('asset-missing', 'Choose runtime acceleration in settings.json and restart', this.opts.selectionError)
+      if (this.opts.selectionError) throw new RuntimeError('asset-missing', t.llamacpp.chooseAcceleration)
       this.set({ state: 'working', step: 'resolve', detail: '' })
       // A mirror is only ever chosen by the user for this one run.
       const plain: FetchFn = this.opts.fetch ?? fetch

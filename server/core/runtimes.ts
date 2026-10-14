@@ -13,12 +13,13 @@ import { existsSync, readdirSync, readFileSync, renameSync, openSync, readSync, 
 import { randomBytes } from 'node:crypto'
 import { join, posix, win32 } from 'node:path'
 import { installedDir, listInstalled, serverExeName, versionsDir } from './llamacpp'
-import type { RuntimeTarget } from './platform'
+import type { RuntimeSelection, RuntimeTarget } from './platform'
 import { isInsideDir } from './residue'
 import { JsonStore, StoreError } from './store'
 
 export type RuntimeAccel = RuntimeTarget['acceleration']
-export const RUNTIME_ACCELS: RuntimeAccel[] = ['cuda', 'cpu', 'metal']
+export type RuntimeEntryAccel = RuntimeAccel | 'sycl' | 'rocm'
+export const RUNTIME_ACCELS: RuntimeEntryAccel[] = ['cuda', 'cpu', 'metal', 'vulkan', 'sycl', 'rocm']
 
 export type RuntimeSourceKind = 'dir' | 'archive' | 'github'
 
@@ -30,7 +31,7 @@ export interface RuntimeEntry {
   source: { kind: RuntimeSourceKind, from: string }
   os: NodeJS.Platform
   arch: string
-  accel: RuntimeAccel
+  accel: RuntimeEntryAccel
   /** `b11146` when the build number could be read, else empty. */
   tag: string
   addedAt: string
@@ -45,7 +46,7 @@ export interface RuntimesDoc {
 
 export const RUNTIMES_VERSION = 1
 const ID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/
-const OFFICIAL_REF_RE = /^(cuda|cpu|metal):(b\d+)$/
+const OFFICIAL_REF_RE = /^(cuda|cpu|metal|vulkan):(b\d+)$/
 const CUSTOM_REF_RE = /^custom:([a-z0-9][a-z0-9-]{0,31})$/
 
 export type RuntimeRef =
@@ -62,11 +63,19 @@ export function parseRuntimeRef(ref: unknown): RuntimeRef | null {
 export const officialRef = (accel: RuntimeAccel, tag: string) => `${accel}:${tag}`
 export const customRef = (id: string) => `custom:${id}`
 
-/** Official channels that exist for a host: Windows x64 has CUDA and CPU, Apple silicon Metal, Intel Mac CPU. */
-export function channelsFor(host: { os: NodeJS.Platform, arch: string }): RuntimeAccel[] {
-  if (host.os === 'win32' && host.arch === 'x64') return ['cuda', 'cpu']
+/** Official channels that exist for a host: Windows x64 has its startup GPU channel and CPU, Apple silicon Metal, Intel Mac CPU. */
+export function channelsFor(host: Pick<RuntimeTarget, 'os' | 'arch' | 'gpuChannel'>): RuntimeAccel[] {
+  if (host.os === 'win32' && host.arch === 'x64') return [host.gpuChannel ?? 'cuda', 'cpu']
   if (host.os === 'darwin') return [host.arch === 'arm64' ? 'metal' : 'cpu']
   return []
+}
+
+/** A pending acceleration choice has no secondary updater, so nothing can be downloaded there. */
+export function secondaryRuntimeTarget(selection: RuntimeSelection): RuntimeTarget | null {
+  const { target, selectionError } = selection
+  if (target.os !== 'win32' || selectionError) return null
+  const other = channelsFor(target).find(a => a !== target.acceleration)
+  return other ? { ...target, acceleration: other } : null
 }
 
 /** An entry can run here only on the same os and the same architecture (no Rosetta, no emulation). */
@@ -301,7 +310,7 @@ export function resolveRuntimeRef(ref: string, env: RuntimeEnv): ResolvedRuntime
   const entry = p?.kind === 'custom' ? env.entries.find(x => x.id === p.id) : undefined
   const wanted = p?.kind === 'official' ? p.accel : entry?.accel
   const fallback = (reason: FallbackReason): ResolvedRuntime => {
-    const channel = wanted && channelsFor(host).includes(wanted) ? wanted : host.acceleration
+    const channel = channelsFor(host).find(a => a === wanted) ?? host.acceleration
     const tag = installedOfficial(env, channel)[0]
     if (!tag) throw new RuntimeResolveError('no-official', channel)
     const to = officialRef(channel, tag)
@@ -343,7 +352,7 @@ export function refOfExe(dataDir: string, exe: string, platform = process.platfo
   if (first === 'custom') return CUSTOM_REF_RE.test(`custom:${parts[1]}`) ? `custom:${parts[1]}` : null
   const tagOf = (s: string | undefined) => (/^b\d+$/.test(s?.toLowerCase() ?? '') ? s!.toLowerCase() : null)
   if (tagOf(first)) return officialRef('cuda', tagOf(first)!) // the old flat layout is the Windows CUDA build
-  const m = /^(win32|darwin)-(x64|arm64)-(cuda|cpu|metal)$/.exec(first)
+  const m = /^(win32|darwin)-(x64|arm64)-(cuda|cpu|metal|vulkan)$/.exec(first)
   const tag = tagOf(parts[1])
   return m && tag ? officialRef(m[3] as RuntimeAccel, tag) : null
 }

@@ -1018,6 +1018,7 @@ export const enSkeleton: PartialMessages = {
       'bad-mirror': 'Invalid custom mirror prefix: it must be a public domain starting with https://, without credentials, port or query, and must not be localhost, a private network or an IP address.',
       'bad-domain': 'Bad domain format; give only the host name, e.g. llm.example.com (no https:// or path): {detail}',
       'bad-locale': 'The interface language can only be a language llama-web has a dictionary for (zh-CN or en).',
+      'bad-acceleration': 'The acceleration is not supported on this computer.',
     },
     public: {
       port: 'Entry port',
@@ -1390,6 +1391,7 @@ export const enSkeleton: PartialMessages = {
     },
   },
   llamacpp: {
+    chooseAcceleration: 'Choose the runtime acceleration on the Settings page, then restart llama-web.',
     title: 'llama.cpp versions',
     hint: 'Checked once a day; auto-update is off by default, and when it is on a new version is downloaded and used automatically. The last {n} versions are kept, so you can roll back at any time.',
     status: 'Status',
@@ -1540,7 +1542,7 @@ export const enSkeleton: PartialMessages = {
   system: {
     warnings: {
       'no-nvidia': 'No NVIDIA GPU detected: the CPU build is recommended.',
-      'other-gpu-vendor': 'Detected {vendors} graphics: this project currently supports only NVIDIA (CUDA) and CPU, and these GPUs will not be used for inference.',
+      'other-gpu-vendor': 'Detected {vendors} graphics: you can try the experimental Vulkan build in runtime settings.',
       'nvidia-unknown': 'The graphics card information could not be read (nvidia-smi did not respond), so the CUDA runtime cannot be chosen automatically.',
       'driver-too-old': 'The graphics driver {driver} is too old to run any CUDA runtime: upgrade the driver, or use the CPU build.',
       'driver-below-latest-cuda': 'The graphics driver {driver} supports at most CUDA {maxMajor}.x, while the new CUDA {latestMajor}.x needs driver {minDriver} or newer: {maxMajor}.x was chosen automatically; you can also upgrade the driver.',
@@ -2058,6 +2060,7 @@ export const enSkeleton: PartialMessages = {
     // Recognised from the llama-server output (server/core/errors.ts).
     oom: 'Not enough VRAM',
     'cuda-error': 'CUDA error',
+    'gpu-error': 'GPU error',
     'dll-missing': 'A runtime library (DLL) is missing',
     'unknown-arg': 'llama-server does not recognize a start argument',
     'mmproj-mismatch': 'The mmproj does not match the model',
@@ -2072,6 +2075,7 @@ export const enSkeleton: PartialMessages = {
     advice: {
       oom: 'It does not fit in VRAM. You can: reduce the context length (ctx); reduce the layers handed to the GPU (-ngl); change the K / V cache type to q8_0; use a smaller quantized file; switch to a free card (device); stop the other online models first; or check the Overview page to see whether another program is holding VRAM.',
       'cuda-error': 'CUDA failed while running. Make sure the graphics driver is up to date and that no other program has the GPU to itself, then try again; if it keeps happening, send the log below to the developers.',
+      'gpu-error': 'The graphics backend failed. Update the graphics driver and check that this build supports your GPU, then try again.',
       'dll-missing': 'llama-server cannot start because a CUDA runtime library is missing. Check under Settings that llama.cpp was downloaded completely (cudart included), or restart llama-web so that it downloads again.',
       'file-missing': 'The model file (or the mmproj / draft model file) was not found. Check on the Models page whether the files are still there and whether a model directory was renamed.',
       'unknown-arg': 'llama-server rejected an argument, most likely a mistake in the extra arguments or an argument that does not belong to this llama.cpp version. Open the command preview of this profile and check it against the log below.',

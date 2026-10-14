@@ -10,6 +10,7 @@ import { blamesSplitMode, SplitModeLoadError } from './split-stats'
 export type FailureKind =
   // From the output of the process
   | 'oom' // not enough GPU / host memory
+  | 'gpu-error' // Vulkan / SYCL / HIP initialization or runtime error
   | 'cuda-error' // CUDA runtime error other than out-of-memory
   | 'dll-missing' // the process could not start: a DLL (CUDA runtime etc.) is missing
   | 'file-missing' // model / mmproj / draft file cannot be opened
@@ -37,7 +38,7 @@ export interface FailureDoc {
 /** Output pattern -> kind. Order matters: the first matching rule wins. */
 const OUTPUT_RULES: Array<[FailureKind, RegExp]> = [
   // "out of memory" alone also appears in harmless text: it needs a GPU / allocator word on the same line.
-  ['oom', /(?:cuda|cublas|vulkan|hip|metal|ggml|alloc|device)\w*[^\n]*out of memory|out of memory[^\n]*(?:cuda|vulkan|device)|cudaMalloc failed|failed to allocate (?:CUDA|Vulkan|\S+ )?(?:buffer|memory)|unable to allocate .*buffer|ggml_backend_\w*alloc_buffer: allocating .* failed|failed to allocate .*compute buffer|CUDA_ERROR_OUT_OF_MEMORY|ErrorOutOfDeviceMemory|std::bad_alloc|not enough memory|kIOGPUCommandBufferCallbackErrorOutOfMemory|ggml_metal\w*[^\n]*(?:failed to allocate|insufficient memory)|Insufficient Memory \(/i],
+  ['oom', /(?:cuda|cublas|vulkan|hip|sycl|metal|ggml|alloc|device)\w*[^\n]*out of memory|out of memory[^\n]*(?:cuda|vulkan|sycl|hip|device)|cudaMalloc failed|failed to allocate (?:CUDA|Vulkan|\S+ )?(?:buffer|memory)|unable to allocate .*buffer|ggml_backend_\w*alloc_buffer: allocating .* failed|failed to allocate .*compute buffer|hipErrorOutOfMemory|CUDA_ERROR_OUT_OF_MEMORY|UR_RESULT_ERROR_OUT_OF_(?:HOST|DEVICE)_MEMORY|ErrorOutOf(?:Device|Host)Memory|std::bad_alloc|not enough memory|kIOGPUCommandBufferCallbackErrorOutOfMemory|ggml_metal\w*[^\n]*(?:failed to allocate|insufficient memory)|Insufficient Memory \(/i],
   ['port-in-use', /couldn't bind HTTP server socket|address already in use|only one usage of each socket address/i],
   // llama-server: `error while handling argument "--device": invalid device: CUDA7` (checked on b11146); before unknown-arg, which would also match.
   ['device-missing', /invalid device: \S+/i],
@@ -46,6 +47,7 @@ const OUTPUT_RULES: Array<[FailureKind, RegExp]> = [
   ['unsupported-arch', /unknown model architecture|unsupported (?:model )?architecture/i],
   ['file-missing', /failed to open GGUF file|failed to open .*\.gguf|no such file or directory|cannot open (?:file|model)|system cannot find the (?:file|path)|file not found/i],
   ['cuda-error', /CUDA error|no CUDA-capable device|CUDA driver version is insufficient|cudaGetDeviceCount failed|ggml_cuda_init: failed/i],
+  ['gpu-error', /ggml_vulkan[^\n]*No devices found|vk::[^\n]*Error|ErrorDeviceLost|hipError|ROCm error|SYCL error|ggml_(?:vulkan|sycl|hip)(?:_init)?[^\n]*(?:failed|error)/i],
   // Only llama.cpp's own failure lines; a bare "failed to load model" elsewhere proves nothing.
   ['bad-model', /invalid magic|(?:llama_model_load|common_init_from_params|load_model): (?:error loading model|failed to load model)|model is corrupted|tensor .* data is not within the file bounds/i],
 ]

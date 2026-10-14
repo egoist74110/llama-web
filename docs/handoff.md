@@ -1,5 +1,13 @@
 # 交接记录
 
+## 2026-10-14 · 12-1 Intel / AMD / 老 N 卡（实验性 Vulkan，关键决定 61）后端 · 单会话
+- 起因：用户被问能否支持 I 卡 / A 卡。Haiku 5.5 侦察 4 路（运行库获取、显存、启动与文档、外部资料）后，用户推翻 2026-10-03「暂不考虑 AMD / Intel」，并逐条补充决定 61 ⑧–⑪：没装 N 卡驱动 / 老 N 卡请用户选 CPU 或 Vulkan、设置页可改加速方式（重启生效）、不继承 CUDA 默认的 flash-attn 与 KV 量化、失败只给「改用 CPU 版」与「复制诊断信息」（不自动切换、不上传）。
+- 分工（用户定的派模型规则）：后端 gpt-6.1-sol-high 实现，Claude（Opus 5.5）写规格、审查两轮。审查发现并修正：nvidia-smi 偶发失败会让 N 卡用户丢掉 CUDA 通道（改为 found / none / missing / failed 四种，failed 保持 CUDA）；`ccLow` 把 CUDA 11 的 3.5 算进下限（改为 `SHIPPED_CUDA_MAJORS = [12, 13]`）。
+- 给 12-2 用的接口：`GET /api/settings` 的 `acceleration`（saved / active / gpuChannel / choiceNeeded / reason = nvidia-missing / nvidia-failed / cuda-unusable / options / restartNeeded），`POST /api/settings` 的 `llamacpp.acceleration`；`GET /api/models/[id]/diagnostics` → `{ text }`；改用 CPU 走现有 `POST /api/models/[id]/runtime`（方案级运行库优先，按钮需要同时清掉方案覆盖）；运行库行的 `accel` 可能是 vulkan / sycl / rocm；失败类型新增 `gpu-error`。
+- 实际运行：`bun test` 1573 pass / 20 skip / 0 fail；`bun run typecheck` exit 0。
+- 没有运行：任何 Windows / Intel / AMD / 老 N 卡真机验证；`bun run build`；HTTP 服务实测（新接口只测了处理函数与服务层）。
+- 下一步：12-2 界面（agy，没额度换 Sonnet 5.5 中），见 plan 阶段 12。
+
 ## 2026-10-13 · 决定 60 收尾 · 单会话
 - 用户确认验收：ComfyUI 的情况特殊（开关只能停接口层，停不了另行启动、占显存的 ComfyUI），不再测「开关打开时停止」和「llama-server 随壳崩溃被清理」。plan 任务已打勾，说明里写明这两项没有真机验证；决定 60 ④ 补充「只停 llama-web 拉起的进程树」。
 

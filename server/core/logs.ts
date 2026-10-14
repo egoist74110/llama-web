@@ -223,14 +223,15 @@ export class LogStore {
     }
   }
 
-  /** Last `maxLines` lines of one log file (at most `maxBytes` read from its end). */
-  read(kind: LogKind, name: string, model?: string, opts: { maxLines?: number, maxBytes?: number } = {}): LogRead {
+  /** Last `maxLines` lines, or the header with `fromStart`; reads at most `maxBytes` and flushes open runs. */
+  read(kind: LogKind, name: string, model?: string, opts: { maxLines?: number, maxBytes?: number, fromStart?: boolean } = {}): LogRead {
     if (!FILE_NAME.test(name)) throw new LogError('bad-name', 'bad file name')
     if (kind === 'model' && !model) throw new LogError('bad-name', 'model is required')
     const dir = kind === 'model'
       ? join(this.opts.dir, 'models', modelDirName(model!))
       : join(this.opts.dir, kind)
     const file = join(dir, name)
+    for (const run of this.open) if (run.file === file) run.flush()
     let size: number
     try {
       // lstat: a link with a valid name must not lead outside the log directory.
@@ -241,8 +242,8 @@ export class LogStore {
       throw new LogError('not-found', 'no such log file')
     }
     const maxBytes = opts.maxBytes ?? 2 * 1024 * 1024
-    const start = Math.max(0, size - maxBytes)
-    const len = size - start
+    const start = opts.fromStart ? 0 : Math.max(0, size - maxBytes)
+    const len = Math.min(size - start, maxBytes)
     const buf = Buffer.alloc(len)
     const fd = openSync(file, 'r')
     try {
@@ -257,11 +258,11 @@ export class LogStore {
     }
     let lines = buf.toString('utf8').split(/\r?\n/)
     if (lines.at(-1) === '') lines.pop()
-    let truncated = start > 0
-    if (truncated) lines.shift() // the first line is most likely cut in half
+    let truncated = start > 0 || (opts.fromStart === true && size > maxBytes)
+    if (start > 0) lines.shift() // the first line is most likely cut in half
     const maxLines = opts.maxLines ?? 5000
     if (lines.length > maxLines) {
-      lines = lines.slice(-maxLines)
+      lines = opts.fromStart ? lines.slice(0, maxLines) : lines.slice(-maxLines)
       truncated = true
     }
     return { lines, truncated, size }

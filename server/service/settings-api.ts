@@ -5,7 +5,7 @@ import { fmt, setLocale, t } from '../core/i18n'
 import { StoreError } from '../core/store'
 import { existsSync } from 'node:fs'
 import { cloudflaredPath, findCloudflared, maskToken, TunnelError } from '../core/tunnel'
-import { dirStatus, SettingsError, type SettingsDoc } from '../core/settings-admin'
+import { describeAcceleration, dirStatus, SettingsError, type SettingsDoc } from '../core/settings-admin'
 import { getContext } from './context'
 
 /** What the page may know about the saved tunnel token. */
@@ -36,6 +36,7 @@ export function describeSettings(): SettingsDoc {
     image: s.preprocess.image,
     mirror: s.mirror,
     ui: s.ui,
+    acceleration: describeAcceleration(s.llamacpp.acceleration, ctx.platform, ctx.runtimeSelection),
     server: {
       port: s.server.port,
       portRange: s.scheduler.portRange,

@@ -21,6 +21,26 @@ export const CUDA_MIN_DRIVER: ReadonlyArray<{ major: number, driver: number }> =
 /** Lowest compute capability a CUDA runtime of this major still builds kernels for. */
 export const CUDA_MIN_COMPUTE_CAP: Readonly<Record<number, number>> = { 13: 7.5, 12: 5.0, 11: 3.5 }
 
+// What llama.cpp Windows releases ship; checked b11606 on 2026-10-13: cuda-12.4 and cuda-13.4.
+export const SHIPPED_CUDA_MAJORS = [12, 13] as const
+export const SHIPPED_CUDA_MIN_COMPUTE_CAP = Math.min(...SHIPPED_CUDA_MAJORS.map(m => CUDA_MIN_COMPUTE_CAP[m]!))
+export const SHIPPED_CUDA_MIN_DRIVER = Math.min(...CUDA_MIN_DRIVER.filter(r => SHIPPED_CUDA_MAJORS.some(m => m === r.major)).map(r => r.driver))
+
+export interface CudaHardware { computeCap: number | null, driver: string | number | null }
+
+/** Unknown facts never prove a build unusable (decision 61). */
+export function cudaRunnable({ computeCap, driver }: CudaHardware): boolean | null {
+  const d = Number.parseFloat(String(driver ?? ''))
+  if (computeCap === null || !Number.isFinite(computeCap) || computeCap <= 0 || !Number.isFinite(d) || d <= 0) return null
+  return SHIPPED_CUDA_MAJORS.some(m => computeCap >= CUDA_MIN_COMPUTE_CAP[m]! && d >= CUDA_MIN_DRIVER.find(r => r.major === m)!.driver)
+}
+
+/** A usable card wins; otherwise any unreadable card keeps the result unknown. */
+export function bestCudaRunnable(cards: CudaHardware[]): boolean | null {
+  const results = cards.map(cudaRunnable)
+  return results.includes(true) ? true : !results.length || results.includes(null) ? null : false
+}
+
 /** What the machine allows; every field null = unknown (never guessed). */
 export interface CudaLimits {
   /** Highest CUDA major the driver runs. */

@@ -12,7 +12,7 @@ export default defineEventHandler(async (event) => {
   let input: AddInput
   if ((b?.kind === 'dir' || b?.kind === 'archive') && typeof b.path === 'string' && b.path && b.path.length < 1024) input = { kind: b.kind, path: b.path }
   else if (b?.kind === 'github' && typeof b.url === 'string' && b.url.length < 512) {
-    if (b.accel !== undefined && b.accel !== 'cuda' && b.accel !== 'cpu') throw bad()
+    if (b.accel !== undefined && b.accel !== 'cuda' && b.accel !== 'cpu' && b.accel !== 'vulkan') throw bad()
     input = { kind: 'github', url: b.url, ...(b.accel ? { accel: b.accel } : {}) }
   } else throw bad()
   try {

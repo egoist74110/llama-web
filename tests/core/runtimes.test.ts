@@ -37,7 +37,7 @@ describe('references', () => {
     expect(parseRuntimeRef('cuda:b11146')).toEqual({ kind: 'official', accel: 'cuda', tag: 'b11146' })
     expect(parseRuntimeRef('metal:b9')).toEqual({ kind: 'official', accel: 'metal', tag: 'b9' })
     expect(parseRuntimeRef('custom:r1a2b3')).toEqual({ kind: 'custom', id: 'r1a2b3' })
-    for (const bad of ['', 'cuda:', 'cuda:1234', 'vulkan:b1', 'custom:../x', 'custom:A', 'custom:', 'b123', null, 5, 'cuda:b1;rm']) expect(parseRuntimeRef(bad)).toBeNull()
+    for (const bad of ['', 'cuda:', 'cuda:1234', 'sycl:b1', 'rocm:b1', 'custom:../x', 'custom:A', 'custom:', 'b123', null, 5, 'cuda:b1;rm']) expect(parseRuntimeRef(bad)).toBeNull()
   })
   test('channels per host', () => {
     expect(channelsFor({ os: 'win32', arch: 'x64' })).toEqual(['cuda', 'cpu'])
@@ -87,7 +87,7 @@ describe('registry file', () => {
     const reg = new RuntimeRegistry(data)
     reg.add(entry('r1'))
     expect(new RuntimeRegistry(data).list().map(e => e.id)).toEqual(['r1'])
-    const doc = normalizeRuntimes({ version: 1, entries: [entry('r1'), entry('../evil'), entry('r1'), entry('r3', { os: 'plan9' as never }), entry('r4', { accel: 'vulkan' as never }), entry('r5')] })
+    const doc = normalizeRuntimes({ version: 1, entries: [entry('r1'), entry('../evil'), entry('r1'), entry('r3', { os: 'plan9' as never }), entry('r4', { accel: 'unknown' as never }), entry('r5')] })
     expect(doc.entries.map(e => e.id)).toEqual(['r1', 'r5'])
   })
   test('corrupt file: moved aside, newest readable backup restored', () => {

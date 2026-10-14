@@ -10,6 +10,7 @@
 //   - `split-mode-unsupported`: the build's help does not list the chosen split mode (from the launch warnings).
 // Everything else (context above the training length, a micro-batch above the batch, ...) was run and starts, so it
 // is a `warning` only. A memory tier never refuses a save: the free memory changes, the decision is the user's.
+import { isIntegratedGpuName } from './platform'
 import { canonicalFlag, groupArgs, groupValue, type ArgGroup, type ArgWarning, type ParamValue } from './args'
 import { deviceMissing, type DeviceList, type GpuDevice } from './devices'
 import {
@@ -158,7 +159,7 @@ function sharesOf(devices: DeviceInput[], tensorSplit: string | null): number[] 
   return devices.map(() => 1)
 }
 
-/** The memory pools this launch draws on: nothing (CPU only), one shared memory (Mac), or the cards it uses. */
+/** The memory pools this launch draws on: nothing (CPU only), shared host memory (Mac / Windows integrated GPU), or the cards it uses. */
 export function deviceInputs(i: Pick<CheckInput, 'os' | 'device' | 'cpuBuild' | 'list' | 'fallbackGpus'> & { tensorSplit?: string | null }): DeviceInput[] {
   const gpus = i.list?.source === 'list-devices' ? i.list.gpus : (i.fallbackGpus ?? [])
   if (i.os === 'darwin') {
@@ -173,7 +174,8 @@ export function deviceInputs(i: Pick<CheckInput, 'os' | 'device' | 'cpuBuild' | 
   }
   const out: DeviceInput[] = ids.map((id) => {
     const g = gpus.find(x => x.id === id)
-    return { id, name: g?.name ?? id, memory: 'separate', freeMiB: g?.freeMiB ?? null }
+    const shared = i.os === 'win32' && !!g && isIntegratedGpuName(g.name)
+    return { id, name: g?.name ?? id, memory: shared ? 'shared' : 'separate', freeMiB: g?.freeMiB ?? null, ...(shared ? { capMiB: g?.totalMiB ?? null } : {}) }
   })
   // The raw split values: the estimate repeats llama.cpp's own float32 accumulation over them.
   const shares = sharesOf(out, i.tensorSplit ?? null)

@@ -20,7 +20,7 @@ import { download, getBody, RuntimeError, serverExeName, sha256File, versionsDir
 import type { RuntimeTarget } from './platform'
 import { killTree } from './runner'
 import {
-  binaryRunsHere, customDir, newRuntimeId, sniffFile, type RuntimeAccel, type RuntimeEntry, type RuntimeRegistry, type RuntimeSourceKind,
+  binaryRunsHere, customDir, newRuntimeId, sniffFile, type RuntimeAccel, type RuntimeEntryAccel, type RuntimeEntry, type RuntimeRegistry, type RuntimeSourceKind,
 } from './runtimes'
 
 export type AddErrorCode =
@@ -62,7 +62,7 @@ export interface AddPreview {
   files: number
   os: NodeJS.Platform
   arch: string
-  accel: RuntimeAccel
+  accel: RuntimeEntryAccel
   /** First line of `llama-server --version`. */
   version: string
   tag: string
@@ -222,15 +222,15 @@ export interface AssetChoice {
 }
 
 /**
- * The asset of this host: Windows x64 `...-bin-win-(cpu|cuda-X.Y)-x64.zip` (+ the matching
+ * The asset of this host: Windows x64 `...-bin-win-(cpu|vulkan|cuda-X.Y)-x64.zip` (+ the matching
  * `cudart-...` when present), macOS `...-bin-macos-<arch>.tar.gz|zip` with exactly the host's arch.
- * `wanted` picks CUDA or CPU on Windows; default CUDA when the host runs it.
+ * `wanted` picks CUDA, Vulkan or CPU on Windows; default CUDA when the host runs it.
  */
 export function pickAsset(names: string[], host: { os: NodeJS.Platform, arch: string }, wanted: RuntimeAccel): AssetChoice | null {
   if (host.os === 'win32' && host.arch === 'x64') {
-    if (wanted === 'cpu') {
-      const bin = names.find(n => /^llama-[^/\\]+-bin-win-cpu-x64\.zip$/.test(n))
-      return bin ? { bin, accel: 'cpu' } : null
+    if (wanted === 'cpu' || wanted === 'vulkan') {
+      const bin = names.find(n => /^llama-[^/\\]+-bin-win-(cpu|vulkan)-x64\.zip$/.test(n) && n.endsWith(`-win-${wanted}-x64.zip`))
+      return bin ? { bin, accel: wanted } : null
     }
     const cuda = names
       .map(n => /^llama-[^/\\]+-bin-win-cuda-(\d+)\.(\d+)-x64\.zip$/.exec(n))
@@ -437,7 +437,7 @@ export class RuntimeInstaller {
       throw new AddError('network', 'Cannot read the release', (e as RuntimeError).detail ?? (e as Error).message)
     }
     const assets = (rel.assets ?? []).filter(a => a && typeof a.name === 'string' && typeof a.browser_download_url === 'string')
-    const wanted: RuntimeAccel = wantedAccel ?? (this.opts.target.acceleration === 'cuda' ? 'cuda' : 'cpu')
+    const wanted: RuntimeAccel = wantedAccel ?? (this.opts.target.acceleration === 'vulkan' ? 'vulkan' : this.opts.target.acceleration === 'cuda' ? 'cuda' : 'cpu')
     const choice = pickAsset(assets.map(a => a.name), this.opts.target, this.opts.target.os === 'darwin' ? (this.opts.target.arch === 'arm64' ? 'metal' : 'cpu') : wanted)
     if (!choice) throw new AddError('no-asset', 'The release has no build for this computer', `${this.opts.target.os}-${this.opts.target.arch}`)
     const picked = [choice.bin, choice.cudart].filter((n): n is string => !!n).map(n => assets.find(a => a.name === n)!)
@@ -508,14 +508,18 @@ export class RuntimeInstaller {
   }
 }
 
-function detectAccel(root: string, target: RuntimeTarget): RuntimeAccel {
+export function detectAccel(root: string, target: RuntimeTarget): RuntimeEntryAccel {
   if (target.os === 'darwin') return target.arch === 'arm64' ? 'metal' : 'cpu'
-  return readdirSync(root).some(n => /^(lib)?ggml-cuda/i.test(n)) ? 'cuda' : 'cpu'
+  const names = readdirSync(root)
+  for (const [backend, accel] of [['cuda', 'cuda'], ['hip', 'rocm'], ['sycl', 'sycl'], ['vulkan', 'vulkan']] as const) {
+    if (names.some(n => new RegExp(`^(lib)?ggml-${backend}`, 'i').test(n))) return accel
+  }
+  return 'cpu'
 }
 
-function defaultLabel(tag: string, accel: RuntimeAccel, input: AddInput, source: string): string {
+function defaultLabel(tag: string, accel: RuntimeEntryAccel, input: AddInput, source: string): string {
   const name = input.kind === 'github' ? source.replace('https://github.com/', '') : basename(source).replace(/\.(zip|tar\.gz|tgz)$/i, '')
-  return [tag, accel === 'metal' ? '' : accel.toUpperCase(), name === tag ? '' : name].filter(Boolean).join(' · ').slice(0, 80)
+  return [tag, ({ cuda: 'CUDA', rocm: 'ROCm', sycl: 'SYCL', vulkan: 'Vulkan', cpu: 'CPU', metal: '' })[accel], name === tag ? '' : name].filter(Boolean).join(' · ').slice(0, 80)
 }
 
 async function defaultClearQuarantine(root: string): Promise<void> {

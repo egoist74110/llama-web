@@ -39,7 +39,7 @@ const install = (t: RuntimeTarget, tag: string) => {
 
 describe('settings version 6', () => {
   test('the version and the new defaults', () => {
-    expect(SETTINGS_VERSION).toBe(11)
+    expect(SETTINGS_VERSION).toBe(12)
     const d = defaultSettings()
     expect(d.version).toBe(SETTINGS_VERSION)
     expect(d.llamacpp.autoUpdate).toBe(false)

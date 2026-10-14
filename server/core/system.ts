@@ -7,7 +7,7 @@
 // warnings mentions a graphics device. Pure module: commands come in through `RunCmd`.
 import { execFile } from 'node:child_process'
 import { cpus, freemem, totalmem } from 'node:os'
-import { CUDA_MIN_COMPUTE_CAP, CUDA_MIN_DRIVER, cudaIncompatibility, maxMajorForDriver, parseVersion, type CudaLimits } from './cuda'
+import { bestCudaRunnable, CUDA_MIN_COMPUTE_CAP, CUDA_MIN_DRIVER, SHIPPED_CUDA_MIN_COMPUTE_CAP, SHIPPED_CUDA_MIN_DRIVER, SHIPPED_CUDA_MAJORS, cudaIncompatibility, maxMajorForDriver, parseVersion, type CudaLimits } from './cuda'
 
 export type RunCmd = (cmd: string, args: string[], timeoutMs: number) => Promise<string>
 
@@ -278,14 +278,13 @@ export async function detectSystem(o: DetectOptions = {}): Promise<Omit<SystemIn
       run('powershell', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(WIN_PROBE, 'utf16le').toString('base64')], timeout * 2).catch(() => ''),
     ])
     const probe = parseWinProbe(probeText)
-    if (nvidia.state !== 'ok') nvidia.otherVendors = otherGraphicsVendors(probe.video)
     const limits = cudaLimitsOf(nvidia)
-    const ccLow = limits?.maxComputeCap != null && limits.maxComputeCap < Math.min(...Object.values(CUDA_MIN_COMPUTE_CAP))
-    const driverTooOld = nvidia.state === 'ok' && limits !== null && limits.maxMajor === null && Number.isFinite(Number.parseFloat(nvidia.driver ?? ''))
+    const runnable = bestCudaRunnable(nvidia.gpus.map(g => ({ computeCap: g.computeCap, driver: nvidia.driver })))
+    if (nvidia.state !== 'ok' || runnable === false) nvidia.otherVendors = otherGraphicsVendors(probe.video)
     return {
       ...base, cpu: cpuFromWin(probe, fallback), memory, nvidia,
       ...(limits ? { cudaLimits: limits } : {}),
-      recommend: { acceleration: nvidia.state === 'ok' && !ccLow && !driverTooOld ? 'cuda' : 'cpu' },
+      recommend: { acceleration: nvidia.state === 'ok' && runnable !== false ? 'cuda' : 'cpu' },
     }
   }
 
@@ -309,21 +308,20 @@ export function systemWarnings(info: Omit<SystemInfo, 'warnings'>, cfg: { cudaRu
     const n = info.nvidia
     if (n.state === 'none') {
       w.push({ code: 'no-nvidia', severity: 'warning' })
-      if (n.otherVendors.length) w.push({ code: 'other-gpu-vendor', severity: 'info', params: { vendors: n.otherVendors.join(', ') } })
     } else if (n.state === 'unknown') {
       w.push({ code: 'nvidia-unknown', severity: 'info' })
     } else if (info.cudaLimits) {
       const lim = info.cudaLimits
-      const top = CUDA_MIN_DRIVER[0]!
-      if (lim.maxMajor === null && Number.isFinite(Number.parseFloat(n.driver ?? ''))) {
+      const top = CUDA_MIN_DRIVER.find(r => r.major === Math.max(...SHIPPED_CUDA_MAJORS))!
+      const unusable = bestCudaRunnable(n.gpus.map(g => ({ computeCap: g.computeCap, driver: n.driver }))) === false
+      if (unusable && Number.parseFloat(n.driver ?? '') < SHIPPED_CUDA_MIN_DRIVER) {
         w.push({ code: 'driver-too-old', severity: 'warning', params: { driver: n.driver ?? '' } })
-      } else if (lim.maxMajor !== null && lim.maxMajor < top.major) {
+      } else if (!unusable && lim.maxMajor !== null && lim.maxMajor >= Math.min(...SHIPPED_CUDA_MAJORS) && lim.maxMajor < top.major) {
         w.push({ code: 'driver-below-latest-cuda', severity: 'info', params: { driver: n.driver ?? '', maxMajor: lim.maxMajor, latestMajor: top.major, minDriver: top.driver } })
       }
-      const lowest = Math.min(...Object.values(CUDA_MIN_COMPUTE_CAP))
-      if (lim.maxComputeCap !== null && lim.maxComputeCap < lowest) {
+      if (unusable && lim.maxComputeCap !== null && lim.maxComputeCap < SHIPPED_CUDA_MIN_COMPUTE_CAP) {
         w.push({ code: 'compute-cap-unsupported', severity: 'warning', params: { computeCap: lim.maxComputeCap } })
-      } else if (lim.maxComputeCap !== null && lim.maxComputeCap < (CUDA_MIN_COMPUTE_CAP[top.major] ?? 0)) {
+      } else if (!unusable && lim.maxComputeCap !== null && lim.maxComputeCap >= SHIPPED_CUDA_MIN_COMPUTE_CAP && lim.maxComputeCap < (CUDA_MIN_COMPUTE_CAP[top.major] ?? 0)) {
         w.push({ code: 'compute-cap-below-latest-cuda', severity: 'info', params: { computeCap: lim.maxComputeCap, latestMajor: top.major } })
       }
       const why = cfg.cudaRuntime ? cudaIncompatibility(cfg.cudaRuntime, lim) : null
@@ -332,6 +330,9 @@ export function systemWarnings(info: Omit<SystemInfo, 'warnings'>, cfg: { cudaRu
   }
   if (f.avx2 === false && f.neon !== true) w.push({ code: 'no-avx2', severity: 'warning' })
   if (info.cpu.logicalCores > 64) w.push({ code: 'many-logical-cores', severity: 'info', params: { logical: info.cpu.logicalCores } })
+  if (info.os === 'win32' && info.recommend?.acceleration !== 'cuda' && info.nvidia?.otherVendors.length) {
+    w.push({ code: 'other-gpu-vendor', severity: 'info', params: { vendors: info.nvidia.otherVendors.join(', ') } })
+  }
   return w
 }
 

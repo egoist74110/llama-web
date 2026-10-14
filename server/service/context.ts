@@ -1,6 +1,7 @@
 // Process-wide wiring: config stores, runner, scheduler and the /v1 proxy. Created once
 // (kept on globalThis so dev-server reloads do not orphan running llama-server processes)
 // and shared by the custom Bun entry, the Nitro plugin and the dev-mode routes.
+import { DIAGNOSTIC_META_PREFIX, redactDiagnostics } from '../core/diagnostics'
 import { join } from 'node:path'
 import {
   currentTagFor, defaultModels, defaultSettings, effectiveMaxLoaded, tunedDefaults, hasCpuChannel, hasDeviceSelection, MODELS_VERSION, normalizeModels, normalizeSettings, SETTINGS_MIGRATIONS, SETTINGS_VERSION,
@@ -14,7 +15,7 @@ import type { SystemMemory } from '../core/memory-estimate'
 import { chooseExe, LaunchConfigError, llamaServerExe, planLaunch, runtimeKeyOf, type DeviceInfo } from '../core/launch'
 import { comboKey } from '../core/gpu-group'
 import { blamesSplitMode, SplitModeLoadError, SplitStats } from '../core/split-stats'
-import { diagnose } from '../core/errors'
+import { diagnose, type FailureKind } from '../core/errors'
 import { LogStore } from '../core/logs'
 import { nextBootSeq } from '../core/boot-seq'
 import { UsageStore } from '../core/usage'
@@ -43,7 +44,7 @@ import { CloudflareSetup } from '../core/cloudflare'
 import { Updater } from '../core/updater'
 import { RuntimeInstaller } from '../core/runtime-add'
 import { RuntimeManager } from '../core/runtime-manager'
-import { channelsFor, resolveRuntimeRef, RuntimeRegistry, type RuntimeAccel } from '../core/runtimes'
+import { officialRef, parseRuntimeRef, secondaryRuntimeTarget, resolveRuntimeRef, RuntimeRegistry, type RuntimeAccel } from '../core/runtimes'
 import { cudaLimitsFor, detectSystem, runCmd, systemWarnings, type SystemInfo } from '../core/system'
 import { APP_REPO, APP_VERSION } from '../core/app-info'
 import { AppUpdater } from '../core/app-update'
@@ -54,7 +55,7 @@ import { defaultUpstreams, normalizeUpstreams, recordTest, UPSTREAMS_VERSION, vi
 import { UpstreamLauncher } from '../core/upstream-launcher'
 import { testConnection } from '../core/upstream-test'
 import { httpProbe, UpstreamHealth } from '../core/upstream-health'
-import { detectPlatform, runtimeTarget, type PlatformInfo, type RuntimeTarget } from '../core/platform'
+import { detectPlatform, selectRuntime, type PlatformInfo, type RuntimeSelection, type RuntimeTarget } from '../core/platform'
 
 export interface MemoryProbe {
   list: DeviceList | null
@@ -66,6 +67,8 @@ export interface AppContext {
   dataDir: string
   platform: PlatformInfo
   runtimeTarget: RuntimeTarget
+  /** Immutable startup selection, including the requested auto value and any pending choice. */
+  runtimeSelection: RuntimeSelection
   /** Port configured when the process started (the listening port only changes on restart). */
   bootPort: number
   getSettings(): Settings
@@ -91,6 +94,8 @@ export interface AppContext {
   refresh(): void
   /** State of the llama.cpp startup check / download. */
   getRuntimeStatus(): RuntimeStatus
+  /** Most recent failure observed for this model in this process, across its profiles. */
+  getLastModelFailure(modelId: string): FailureKind | null
   /** llama.cpp versions: list, switch (rollback), pruning. */
   updater: Updater
   /**
@@ -287,12 +292,8 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
   // saved one (decision 18): applied once at startup and again on every reload or own update.
   const applyLocale = () => setLocale(getSettings().ui.locale)
   applyLocale()
-  let selectedTarget: RuntimeTarget, selectionError: string | undefined
-  try { selectedTarget = runtimeTarget(platform, getSettings().llamacpp.acceleration) }
-  catch (e) {
-    selectionError = (e as Error).message
-    selectedTarget = { os: platform.os, arch: platform.arch, acceleration: 'cpu' }
-  }
+  const runtimeSelection = selectRuntime(platform, getSettings().llamacpp.acceleration)
+  const { target: selectedTarget, selectionError } = runtimeSelection
   const getModels = modelsRef.get
   // The guide's menu entry follows `setup.done` alone: an installation set up before that flag counts as done
   // (shown at once, saved with the first-run tuning below, when every listener of a settings write exists).
@@ -333,7 +334,8 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
   runtimeAdd.clearLeftovers()
   startupClose.push(() => runtimeAdd.dispose())
   const setCurrentTag = (tag: string, accel: RuntimeAccel) => settingsRef.update((s) => {
-    if (hasCpuChannel(platform) && accel === 'cpu') s.llamacpp.currentCpu = tag
+    if (accel === 'vulkan') s.llamacpp.currentVulkan = tag
+    else if (hasCpuChannel(platform) && accel === 'cpu') s.llamacpp.currentCpu = tag
     else s.llamacpp.current = tag
   })
   // Hardware facts for the automatic CUDA runtime choice and /api/system: detected once at start (the
@@ -372,8 +374,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     },
   })
   const updater = channelUpdater(selectedTarget, true)
-  const otherAccel = channelsFor(selectedTarget).find(a => a !== selectedTarget.acceleration)
-  const secondaryTarget: RuntimeTarget | null = hasCpuChannel(platform) && !selectionError && otherAccel ? { ...selectedTarget, acceleration: otherAccel } : null
+  const secondaryTarget = secondaryRuntimeTarget(runtimeSelection)
   const secondary = secondaryTarget
     ? { accel: secondaryTarget.acceleration as RuntimeAccel, updater: channelUpdater(secondaryTarget, false), current: () => currentTagFor(getSettings(), platform, secondaryTarget.acceleration) }
     : null
@@ -432,6 +433,11 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
   let memoryEvents = 0
   const measure = { used: (ids: readonly string[]) => usedOf(ids, platform.os) }
   const MEASURE_TIMEOUT_MS = 5000
+  const lastFailures = new Map<string, FailureKind>()
+  const pruneFailures = () => {
+    const ids = new Set(getModels().models.map(m => m.id))
+    for (const id of lastFailures.keys()) if (!ids.has(id)) lastFailures.delete(id)
+  }
   const scheduler: Scheduler = new Scheduler({
     // Read at every load: the switch and the limit apply to the next one without a restart.
     get maxLoaded() { return effectiveMaxLoaded(getSettings()) },
@@ -444,6 +450,11 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     get drainTimeoutMs() { return getSettings().scheduler.drainTimeoutSec * 1000 },
     onEvent: (e) => {
       if (e.type === 'state' && e.to !== 'ready') memoryEvents++
+      if (e.type === 'state' && (e.to === 'failed' || e.to === 'crashed')) {
+        const failure = diagnose(e.error)
+        if (failure) lastFailures.set(e.target.modelId, failure.kind)
+        pruneFailures()
+      }
       logSchedulerEvent(e); live.onSchedulerEvent(e)
     },
     // Initial llama.cpp download still running (or not installed yet): not a model failure.
@@ -488,9 +499,17 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
         const stopTracking = trackWeightLoad({ files: plan.weightFiles, progress, report, usedMiB: totalUsedMiB })
         // One output file per start; lines also go to the live feed of the log page.
         const run = logs.startRun(target.modelId)
-        run.append(`# llama-web: starting ${plan.tag} at ${new Date().toISOString()}`)
-        if (admitted?.dropMlock) run.append('# llama-web: mlock removed from the arguments (more than the free memory would be locked)')
         try {
+          run.append(`# llama-web: starting ${plan.tag} at ${new Date().toISOString()}`)
+          const usedRef = plan.runtime.ref ?? officialRef(selectedTarget.acceleration, plan.runtime.label)
+          const used = parseRuntimeRef(usedRef)
+          const usedTag = used?.kind === 'official' ? used.tag : used?.kind === 'custom' ? registry.get(used.id)?.tag ?? '' : ''
+          const keys = secretsRef.get()
+          const credentials = [...keys.apiKeys.map(k => k.key), ...Object.values(keys.upstreamKeys), keys.tunnelToken, keys.cloudflareToken]
+          // Persist the actual build, not a later configuration choice. Labels are redacted before logging.
+          run.append(DIAGNOSTIC_META_PREFIX + JSON.stringify({ profile: redactDiagnostics(target.profile, credentials, ''), runtime: { ref: usedRef,
+            label: redactDiagnostics(plan.runtime.label, credentials, '').slice(0, 80), accel: plan.runtime.accel, tag: usedTag } }))
+          if (admitted?.dropMlock) run.append('# llama-web: mlock removed from the arguments (more than the free memory would be locked)')
           const rp = await runner.start({
             exe: plan.exe, args: launchArgs, tag: plan.tag, loadTimeoutMs: plan.loadTimeoutMs,
             onLine: (stream, line) => {
@@ -710,10 +729,11 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
   let closing: Promise<void> | null = null
   return {
     dataDir, bootPort: getSettings().server.port, getSettings, getSettingsRev: settingsRef.rev, getSettingsBoot: () => settingsBoot, getModels, updateSettings: settingsRef.update, updateModels: modelsRef.update,
-    platform, runtimeTarget: selectedTarget,
+    platform, runtimeTarget: selectedTarget, runtimeSelection,
     getSecrets: secretsRef.get, updateSecrets: secretsRef.update, getUpstreams: upstreamsRef.get, updateUpstreams: upstreamsRef.update, health, launcher, tunnel, applyTunnel, cloudflare,
     refresh: () => { settingsRef.refresh(); modelsRef.refresh(); upstreamsRef.refresh() },
     getRuntimeStatus: () => updater.getStatus(), updater, secondary,
+    getLastModelFailure(modelId) { pruneFailures(); return lastFailures.get(modelId) ?? null },
     async downloadSecondary() {
       if (!secondary) throw new Error('No second channel on this computer')
       await detect()
@@ -782,6 +802,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
         gpu.stop()
         watchdog.stop()
         await scheduler.shutdown()
+        lastFailures.clear()
         await runner.stopAll()
         usage.close()
         logs.closeAll()
