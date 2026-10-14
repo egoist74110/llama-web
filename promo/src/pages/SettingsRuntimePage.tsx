@@ -1,5 +1,5 @@
 import React from 'react';
-import {Download, History, Plus, RefreshCw, Trash2} from 'lucide-react';
+import {Download, History, Plus, RefreshCw, Trash2, TriangleAlert} from 'lucide-react';
 import {COLORS, FONT} from '../theme';
 import {SIDEBAR_W} from '../ui/AppShell';
 import {AppCard, Btn, Chip, PageHeader, Radio, Switch} from '../ui/lw';
@@ -21,6 +21,9 @@ export const SETTINGS_LAYOUT = {
   updateDownloadBtn: {x: CARDS_X + CARDS_W - 20 - 50 - 8 - 44, y: 446}, // {x: 1274, y: 446}
   rollbackBtn: {x: CARDS_X + CARDS_W - 20 - 50 - 8 - 56, y: 488}, // {x: 1262, y: 488}
   customBranchRow: {x: CARDS_X + 130, y: 530}, // {x: 614, y: 530}
+  choicePromptCpuBtn: {x: 580, y: 382},
+  choicePromptVulkanBtn: {x: 700, y: 382},
+  vulkanDownloadBtn: {x: 765, y: 466},
 } as const;
 
 export type SettingsRuntimePageProps = {
@@ -31,6 +34,11 @@ export type SettingsRuntimePageProps = {
   highlightCurrent?: number; // 0..1 subtle emphasis
   highlightAvailable?: number; // 0..1 subtle emphasis
   highlightRollback?: number; // 0..1 subtle emphasis
+  showChoicePrompt?: boolean;
+  choicePromptCpuPressed?: number;
+  choicePromptVulkanPressed?: number;
+  showVulkanChannel?: boolean;
+  vulkanDownloading?: boolean;
 };
 
 const TOC_SECTIONS = [
@@ -54,6 +62,11 @@ export const SettingsRuntimePage: React.FC<SettingsRuntimePageProps> = ({
   highlightCurrent = 0,
   highlightAvailable = 0,
   highlightRollback = 0,
+  showChoicePrompt = false,
+  choicePromptCpuPressed = 0,
+  choicePromptVulkanPressed = 0,
+  showVulkanChannel = false,
+  vulkanDownloading = false,
 }) => {
   return (
     <div style={{width: CONTAINER_W, display: 'flex', flexDirection: 'column', gap: 18}}>
@@ -131,7 +144,9 @@ export const SettingsRuntimePage: React.FC<SettingsRuntimePageProps> = ({
             }}
           >
             <div style={{fontSize: 14, fontWeight: 600, color: COLORS.textMuted}}>本机</div>
-            <span style={{fontSize: 12, color: COLORS.textFaint}}>NVIDIA GeForce RTX 4070 · 12 GB 显存</span>
+            {showChoicePrompt || showVulkanChannel ? null : (
+              <span style={{fontSize: 12, color: COLORS.textFaint}}>NVIDIA GeForce RTX 4070 · 12 GB 显存</span>
+            )}
           </div>
 
           {/* 3. llama.cpp 版本 Card (Focused Core Feature) */}
@@ -149,6 +164,50 @@ export const SettingsRuntimePage: React.FC<SettingsRuntimePageProps> = ({
             }
           >
             <div style={{display: 'flex', flexDirection: 'column', gap: 14}}>
+              {/* Choice Prompt banner */}
+              {showChoicePrompt ? (
+                <div
+                  style={{
+                    borderRadius: 10,
+                    border: '1px solid rgba(251, 191, 36, 0.4)',
+                    background: 'rgba(251, 191, 36, 0.06)',
+                    padding: '12px 14px',
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 10,
+                  }}
+                >
+                  <TriangleAlert size={16} color={COLORS.warn} style={{marginTop: 2, flexShrink: 0}} />
+                  <div style={{flex: 1, display: 'flex', flexDirection: 'column', gap: 6}}>
+                    <div style={{fontSize: 14, fontWeight: 500, color: COLORS.text}}>
+                      选择运行库加速方式
+                    </div>
+                    <div style={{fontSize: 12, color: COLORS.textMuted, lineHeight: 1.4}}>
+                      没有检测到 NVIDIA 显卡驱动。你可以使用 CPU 版，或在支持的 Intel / AMD 显卡上试用 Vulkan 版。
+                    </div>
+                    <div style={{display: 'flex', alignItems: 'center', gap: 8, paddingTop: 4}}>
+                      <Btn
+                        size="xs"
+                        variant="outline"
+                        label="用 CPU 版"
+                        pressed={choicePromptCpuPressed}
+                      />
+                      <Btn
+                        size="xs"
+                        variant="primary"
+                        label="试用 Vulkan 版（实验性）"
+                        pressed={choicePromptVulkanPressed}
+                        style={{
+                          background: COLORS.accentSoft,
+                          color: COLORS.accentText,
+                          border: '1px solid rgba(79, 91, 213, 0.4)',
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
               {/* LlamacppUpdateControls row */}
               <div
                 style={{
@@ -181,6 +240,53 @@ export const SettingsRuntimePage: React.FC<SettingsRuntimePageProps> = ({
                   自动更新已关闭，每天检查并在版本号旁提示，可手动更新。
                 </div>
               </div>
+
+              {/* Vulkan Channel Section (experimental, downloading) */}
+              {showVulkanChannel ? (
+                <div
+                  style={{
+                    padding: '10px 12px',
+                    borderRadius: 8,
+                    background: 'rgba(255, 255, 255, 0.02)',
+                    border: `1px solid ${COLORS.border}`,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 8,
+                  }}
+                >
+                  <div style={{fontSize: 12, fontWeight: 600, color: COLORS.textMuted}}>
+                    Vulkan（实验性，Intel / AMD / 老 N 卡）
+                  </div>
+                  <div style={{display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap'}}>
+                    <span style={{fontSize: 13, color: COLORS.textMuted}}>还没有下载过Vulkan。</span>
+                    <span
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        height: 20,
+                        padding: '0 6px',
+                        borderRadius: 4,
+                        background: 'rgba(251, 191, 36, 0.12)',
+                        color: COLORS.warn,
+                        border: '1px solid rgba(251, 191, 36, 0.25)',
+                        fontSize: 11,
+                        fontWeight: 500,
+                      }}
+                    >
+                      实验性
+                    </span>
+                    <Btn
+                      size="xs"
+                      variant="outline"
+                      icon={Download}
+                      label="正在下载Vulkan……"
+                      disabled
+                      style={{borderColor: COLORS.borderStrong}}
+                    />
+                    <span style={{fontSize: 12, color: COLORS.textFaint}}>{vulkanDownloading ? '正在下载……' : ''}</span>
+                  </div>
+                </div>
+              ) : null}
 
               {/* Version list */}
               <ul style={{listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column'}}>

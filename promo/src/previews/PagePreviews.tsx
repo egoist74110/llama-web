@@ -9,6 +9,7 @@ import {ModelEditorDrawer, MODEL_EDITOR_LAYOUT, MODEL_PROFILES_LAYOUT} from '../
 import {OverviewPage, OVERVIEW_LAYOUT} from '../pages/OverviewPage';
 import {SettingsRuntimePage, SETTINGS_LAYOUT} from '../pages/SettingsRuntimePage';
 import {RuntimeAddModal, RUNTIME_ADD_LAYOUT} from '../pages/RuntimeAddModal';
+import {VulkanConfirmModal, VULKAN_CONFIRM_LAYOUT} from '../pages/VulkanConfirmModal';
 import {ConnectionsPage, CONNECTIONS_LAYOUT} from '../pages/ConnectionsPage';
 import {UpstreamEditorDrawer, UPSTREAM_EDITOR_LAYOUT} from '../pages/UpstreamEditorDrawer';
 import {LogsPage, LOGS_LAYOUT} from '../pages/LogsPage';
@@ -262,6 +263,32 @@ export const SettingsPreview: React.FC = () => (
         }
       >
         <SettingsRuntimePage hasCustomBranch />
+      </AppShell>
+    </Camera>
+  </AbsoluteFill>
+);
+
+export const VulkanConfirmPreview: React.FC = () => (
+  <AbsoluteFill style={{background: '#000'}}>
+    <Camera shot={FULL}>
+      <AppShell
+        active="settings"
+        counts={{models: 1}}
+        overlay={
+          <>
+            <VulkanConfirmModal open enter={1} />
+            {[
+              SETTINGS_LAYOUT.choicePromptCpuBtn,
+              SETTINGS_LAYOUT.choicePromptVulkanBtn,
+              VULKAN_CONFIRM_LAYOUT.confirmBtn,
+              VULKAN_CONFIRM_LAYOUT.cancelBtn,
+            ].map((p, i) => (
+              <Dot key={i} x={p.x} y={p.y} />
+            ))}
+          </>
+        }
+      >
+        <SettingsRuntimePage showChoicePrompt />
       </AppShell>
     </Camera>
   </AbsoluteFill>

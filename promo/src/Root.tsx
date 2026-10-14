@@ -13,7 +13,7 @@ import {PublicChapter} from './chapters/C8Public';
 import {ClientChapter} from './chapters/C9Client';
 import {RoadmapChapter} from './chapters/C95Roadmap';
 import {OutroChapter} from './chapters/C10Outro';
-import {ConnectionsPreview, EditorPreview, FirstStartPreview, LogsPreview, ModelsPreview, OverviewPreview, ProfilesPreview, RuntimeAddPreview, SettingsPreview, SetupPreview, UpstreamEditorPreview} from './previews/PagePreviews';
+import {ConnectionsPreview, EditorPreview, FirstStartPreview, LogsPreview, ModelsPreview, OverviewPreview, ProfilesPreview, RuntimeAddPreview, SettingsPreview, SetupPreview, UpstreamEditorPreview, VulkanConfirmPreview} from './previews/PagePreviews';
 import {PublicOverviewPreview, PublicWizardPreview} from './previews/PublicPreviews';
 import {STORY} from './story';
 import {loadProductFonts} from './fonts';
@@ -54,6 +54,7 @@ export const RemotionRoot: React.FC = () => (
       <Composition id="Page-Overview" component={OverviewPreview} durationInFrames={1} fps={VIDEO.fps} width={VIDEO.width} height={VIDEO.height} />
       <Composition id="Page-Settings" component={SettingsPreview} durationInFrames={1} fps={VIDEO.fps} width={VIDEO.width} height={VIDEO.height} />
       <Composition id="Page-RuntimeAdd" component={RuntimeAddPreview} durationInFrames={1} fps={VIDEO.fps} width={VIDEO.width} height={VIDEO.height} />
+      <Composition id="Page-VulkanConfirm" component={VulkanConfirmPreview} durationInFrames={1} fps={VIDEO.fps} width={VIDEO.width} height={VIDEO.height} />
       <Composition id="Page-Connections" component={ConnectionsPreview} durationInFrames={1} fps={VIDEO.fps} width={VIDEO.width} height={VIDEO.height} />
       <Composition id="Page-UpstreamEditor" component={UpstreamEditorPreview} durationInFrames={1} fps={VIDEO.fps} width={VIDEO.width} height={VIDEO.height} />
       <Composition id="Page-Logs" component={LogsPreview} durationInFrames={1} fps={VIDEO.fps} width={VIDEO.width} height={VIDEO.height} />

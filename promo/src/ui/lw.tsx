@@ -468,31 +468,40 @@ export const Modal: React.FC<{
   description?: string;
   footer?: React.ReactNode;
   children?: React.ReactNode;
-}> = ({width, enter, title, description, footer, children}) => (
-  <>
-    <div style={{position: 'absolute', inset: 0, background: `rgba(0,0,0,${0.5 * enter})`}} />
-    <div
-      style={{
-        position: 'absolute',
-        left: '50%',
-        top: '50%',
-        width,
-        transform: `translate(-50%, -50%) scale(${0.96 + 0.04 * enter})`,
-        opacity: enter,
-        background: COLORS.surface,
-        border: `1px solid ${COLORS.borderStrong}`,
-        borderRadius: 12,
-        boxShadow: '0 24px 60px rgba(0,0,0,.5)',
-      }}
-    >
-      <div style={{padding: '18px 22px 6px'}}>
-        <div style={{fontSize: 16, fontWeight: 600, color: COLORS.text}}>{title}</div>
-        {description ? <div style={{fontSize: 13, color: COLORS.textMuted, marginTop: 4}}>{description}</div> : null}
+  top?: number | string;
+  left?: number | string;
+  style?: Style;
+}> = ({width, enter, title, description, footer, children, top = '50%', left = '50%', style}) => {
+  const isCentered = top === '50%' && left === '50%';
+  return (
+    <>
+      <div style={{position: 'absolute', inset: 0, background: `rgba(0,0,0,${0.5 * enter})`}} />
+      <div
+        style={{
+          position: 'absolute',
+          left,
+          top,
+          width,
+          transform: `${isCentered ? 'translate(-50%, -50%) ' : typeof left === 'string' && left.includes('%') ? 'translateX(-50%) ' : ''}scale(${0.96 + 0.04 * enter})`,
+          opacity: enter,
+          background: COLORS.surface,
+          border: `1px solid ${COLORS.borderStrong}`,
+          borderRadius: 12,
+          boxShadow: '0 24px 60px rgba(0,0,0,.5)',
+          ...style,
+        }}
+      >
+        <div style={{padding: '18px 22px 6px'}}>
+          <div style={{fontSize: 16, fontWeight: 600, color: COLORS.text}}>{title}</div>
+          {description ? (
+            <div style={{fontSize: 13, color: COLORS.textMuted, marginTop: 6, lineHeight: 1.5}}>{description}</div>
+          ) : null}
+        </div>
+        {children ? <div style={{padding: '12px 22px'}}>{children}</div> : null}
+        {footer ? (
+          <div style={{padding: '14px 22px 18px', display: 'flex', justifyContent: 'flex-end', gap: 8}}>{footer}</div>
+        ) : null}
       </div>
-      <div style={{padding: '12px 22px'}}>{children}</div>
-      {footer ? (
-        <div style={{padding: '12px 22px 18px', display: 'flex', justifyContent: 'flex-end', gap: 8}}>{footer}</div>
-      ) : null}
-    </div>
-  </>
-);
+    </>
+  );
+};

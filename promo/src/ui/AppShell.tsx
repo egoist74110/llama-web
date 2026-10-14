@@ -203,7 +203,7 @@ export const AppShell: React.FC<AppShellProps> = ({
           llama.cpp {llamacpp.tag ?? '未安装'}
           {llamacpp.newTag ? <span style={{color: COLORS.accentText, fontFamily: FONT.sans}}> 发现新版 {llamacpp.newTag}</span> : null}
         </div>
-        <div style={{fontFamily: FONT.mono}}>llama-web v1.0.0</div>
+        <div style={{fontFamily: FONT.mono}}>llama-web v1.2.0</div>
       </div>
       <Seg options={['中文', 'EN']} active={0} height={26} style={{display: 'flex', marginTop: 10}} />
       <Seg options={['系统', '浅色', '深色']} active={0} height={26} style={{display: 'flex', marginTop: 6}} />

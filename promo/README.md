@@ -1,6 +1,6 @@
 # llama-web 宣传动画（第二版）
 
-用 [Remotion](https://www.remotion.dev/)（React + TypeScript）制作的产品宣传动画第二版：1920×1080，30fps，整片时长约 2:55（5241 帧，12 个章节含 12 帧章节交叉淡化；有配音，无 BGM）。
+用 [Remotion](https://www.remotion.dev/)（React + TypeScript）制作的产品宣传动画第二版：1920×1080，30fps，整片时长约 3:07（5603 帧，12 个章节含 12 帧章节交叉淡化；有配音，无 BGM）。
 
 全片绝大多数画面由代码 1:1 精确复刻 llama-web 真实产品界面（深色模式），除少量概念连线图外均为可交互状态的组件还原。
 

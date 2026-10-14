@@ -10,6 +10,7 @@ import {ModelEditorDrawer, MODEL_EDITOR_LAYOUT} from '../pages/ModelEditorDrawer
 import {ModelsPage} from '../pages/ModelsPage';
 import {RuntimeAddModal, RUNTIME_ADD_LAYOUT} from '../pages/RuntimeAddModal';
 import {SettingsRuntimePage, SETTINGS_LAYOUT} from '../pages/SettingsRuntimePage';
+import {VulkanConfirmModal, VULKAN_CONFIRM_LAYOUT} from '../pages/VulkanConfirmModal';
 import {cue, STORY} from '../story';
 import {AppShell} from '../ui/AppShell';
 import {Camera, mixShot, project, Shot} from '../ui/Camera';
@@ -24,6 +25,7 @@ const C = STORY.c5Runtime;
 const c5_1 = cue('c5Runtime', 'c5-1');
 const c5_2 = cue('c5Runtime', 'c5-2');
 const c5_3 = cue('c5Runtime', 'c5-3');
+const c5_4 = cue('c5Runtime', 'c5-4');
 
 const URL_TEXT = 'https://github.com/example/llama.cpp-fork';
 const LABEL_TEXT = '我的分支';
@@ -66,6 +68,20 @@ const B = {
   moveRuntimeSelect: c5_3 + 8,
   clickRuntimeSelect: c5_3 + 16,
   previewSettled: c5_3 + 28,
+
+  // c5-4: Vulkan choice & confirmation
+  switchSettingsBack: c5_4 - 4,
+  focusChoicePrompt: c5_4 + 10,
+  moveVulkanChoice: c5_4 + 20,
+  clickVulkanChoice: c5_4 + 70,
+  vulkanModalOpen: c5_4 + 76,
+  vulkanModalSettled: c5_4 + 86,
+  moveVulkanConfirm: c5_4 + 100,
+  clickVulkanConfirm: c5_4 + 140,
+  vulkanModalClose: c5_4 + 146,
+  vulkanModalClosed: c5_4 + 154,
+  vulkanDownloadStart: c5_4 + 156,
+  moveVulkanDownloading: c5_4 + 180,
 } as const;
 
 // Camera shots
@@ -84,6 +100,9 @@ const SHOTS: readonly {at: number; v: Shot}[] = [
 
   // c5-3: Transition cleanly to Model Editor Drawer (focus on runtime select & command preview above captions)
   {at: c5_3 - 6, v: {zoom: 1.20, x: 1140, y: 470}},
+
+  // c5-4: Return to Settings page, push in closely on llama.cpp version card with choice banner & Vulkan channel
+  {at: c5_4 - 4, v: {zoom: 1.24, x: 940, y: 440}},
 ];
 
 // Click events for pressAt & ripple feedback
@@ -94,6 +113,8 @@ const CLICKS = [
   B.clickConfirmRun,
   B.clickAddConfirm,
   B.clickRuntimeSelect,
+  B.clickVulkanChoice,
+  B.clickVulkanConfirm,
 ] as const;
 
 // Cursor track in native app coordinates (1440 x 810)
@@ -141,6 +162,19 @@ const CURSOR = [
   {at: B.moveRuntimeSelect, v: {x: 1280, y: 320}},
   {at: B.clickRuntimeSelect, v: MODEL_EDITOR_LAYOUT.runtimeSelect},
   {at: B.previewSettled, v: {x: 1040, y: 640}},
+
+  // c5-4: Move to "试用 Vulkan 版（实验性）" button
+  {at: c5_4, v: {x: 1040, y: 640}},
+  {at: B.clickVulkanChoice - 24, v: SETTINGS_LAYOUT.choicePromptVulkanBtn},
+  {at: B.clickVulkanChoice + 10, v: SETTINGS_LAYOUT.choicePromptVulkanBtn},
+
+  // Move to modal "下载 Vulkan 版"
+  {at: B.clickVulkanConfirm - 20, v: VULKAN_CONFIRM_LAYOUT.confirmBtn},
+  {at: B.clickVulkanConfirm + 8, v: VULKAN_CONFIRM_LAYOUT.confirmBtn},
+
+  // Move to Vulkan downloading button
+  {at: B.moveVulkanDownloading, v: SETTINGS_LAYOUT.vulkanDownloadBtn},
+  {at: STORY.c5Runtime.durationInFrames, v: SETTINGS_LAYOUT.vulkanDownloadBtn},
 ] as const;
 
 export const RuntimeChapter: React.FC = () => {
@@ -201,8 +235,20 @@ export const RuntimeChapter: React.FC = () => {
       : 0;
 
   // c5-3 Drawer State
-  const inDrawerPhase = frame >= c5_3 - 6;
+  const inDrawerPhase = frame >= c5_3 - 6 && frame < c5_4 - 4;
   const runtimeSelected = frame >= B.clickRuntimeSelect;
+
+  // c5-4 State
+  const showChoicePrompt = frame >= c5_4 - 4 && frame < B.vulkanModalClosed;
+  const vulkanModalOpen = frame >= B.vulkanModalOpen && frame < B.vulkanModalClosed;
+  const vulkanModalEnter =
+    frame < B.vulkanModalOpen
+      ? 0
+      : frame < B.vulkanModalClose
+        ? ramp(frame, B.vulkanModalOpen, B.vulkanModalSettled)
+        : 1 - ramp(frame, B.vulkanModalClose, B.vulkanModalClosed);
+
+  const showVulkanChannel = frame >= B.vulkanDownloadStart;
 
   return (
     <AbsoluteFill>
@@ -244,6 +290,16 @@ export const RuntimeChapter: React.FC = () => {
                   runtimeSelectPressed={isClicking(B.clickRuntimeSelect) ? 1 : 0}
                 />
               ) : null}
+
+              {/* Vulkan Download Confirm Modal in c5-4 */}
+              {vulkanModalOpen ? (
+                <VulkanConfirmModal
+                  open
+                  enter={vulkanModalEnter}
+                  confirmPressed={isClicking(B.clickVulkanConfirm) ? 1 : 0}
+                />
+              ) : null}
+
             </>
           }
         >
@@ -256,6 +312,10 @@ export const RuntimeChapter: React.FC = () => {
               highlightCurrent={highlightCurrent}
               highlightAvailable={highlightAvailable}
               highlightRollback={highlightRollback}
+              showChoicePrompt={showChoicePrompt}
+              choicePromptVulkanPressed={isClicking(B.clickVulkanChoice) ? 1 : 0}
+              showVulkanChannel={showVulkanChannel}
+              vulkanDownloading={showVulkanChannel}
             />
           )}
         </AppShell>
