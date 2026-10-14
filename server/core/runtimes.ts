@@ -5,7 +5,8 @@
 //   not registered). Reference: `cuda:b11146` / `cpu:b11146` / `metal:b11146`.
 // - Hand-added builds live in data/runtime/llama.cpp/custom/<id>/ and are listed in
 //   data/runtimes.json. Reference: `custom:<id>`. The executable path is always derived from the
-//   id, never read from the file, so a hand-edited registry cannot point outside data/runtime.
+//   id and a validated basename, never a path read from the file, so a hand-edited registry
+//   cannot point outside data/runtime.
 // - Platform isolation: entries and references that belong to another os / architecture are
 //   hidden and resolve as "other platform" (never deleted, never launched).
 // Pure module (no Nitro): everything the host provides comes in through RuntimeEnv.
@@ -21,7 +22,12 @@ export type RuntimeAccel = RuntimeTarget['acceleration']
 export type RuntimeEntryAccel = RuntimeAccel | 'sycl' | 'rocm'
 export const RUNTIME_ACCELS: RuntimeEntryAccel[] = ['cuda', 'cpu', 'metal', 'vulkan', 'sycl', 'rocm']
 
-export type RuntimeSourceKind = 'dir' | 'archive' | 'github'
+export type RuntimeSourceKind = 'dir' | 'archive' | 'github' | 'exe'
+
+/** A portable executable basename, never a path or a traversal component. */
+export const isSafeExeName = (name: unknown): name is string => typeof name === 'string'
+  && /^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$/.test(name)
+  && !name.includes('..') && !/[\u0000-\u001f]/.test(name)
 
 export interface RuntimeEntry {
   /** Lower-case letters, digits and `-`; names the directory under custom/. */
@@ -37,6 +43,8 @@ export interface RuntimeEntry {
   addedAt: string
   /** SHA-256 of the downloaded / chosen archive (not set for directories). */
   sha256?: string
+  /** Validated basename under custom/<id>/; omitted for the standard server name. */
+  exe?: string
 }
 
 export interface RuntimesDoc {
@@ -83,7 +91,7 @@ export const entryRunsHere = (e: Pick<RuntimeEntry, 'os' | 'arch'>, host: { os: 
   e.os === host.os && e.arch === host.arch
 
 export const customDir = (dataDir: string, id: string) => join(versionsDir(dataDir), 'custom', id)
-export const customExe = (dataDir: string, entry: Pick<RuntimeEntry, 'id' | 'os'>) => join(customDir(dataDir, entry.id), serverExeName(entry.os))
+export const customExe = (dataDir: string, entry: Pick<RuntimeEntry, 'id' | 'os' | 'exe'>) => join(customDir(dataDir, entry.id), entry.exe ?? serverExeName(entry.os))
 
 export const newRuntimeId = () => `r${randomBytes(5).toString('hex')}`
 
@@ -156,7 +164,7 @@ export function normalizeRuntimes(doc: RuntimesDoc): RuntimesDoc {
     if (!isObj(e) || typeof e.id !== 'string' || !ID_RE.test(e.id) || seen.has(e.id)) continue
     if (!['win32', 'darwin', 'linux'].includes(e.os) || typeof e.arch !== 'string' || !/^[a-z0-9_]{2,10}$/.test(e.arch)) continue
     if (!RUNTIME_ACCELS.includes(e.accel)) continue
-    const src = isObj(e.source) && ['dir', 'archive', 'github'].includes(e.source.kind) ? { kind: e.source.kind as RuntimeSourceKind, from: clean(e.source.from, 500) } : null
+    const src = isObj(e.source) && ['dir', 'archive', 'github', 'exe'].includes(e.source.kind) ? { kind: e.source.kind as RuntimeSourceKind, from: clean(e.source.from, 500) } : null
     if (!src) continue
     seen.add(e.id)
     const tag = typeof e.tag === 'string' && /^b\d{1,9}$/.test(e.tag) ? e.tag : ''
@@ -164,6 +172,7 @@ export function normalizeRuntimes(doc: RuntimesDoc): RuntimesDoc {
     entries.push({
       id: e.id, label: clean(e.label, 80) || e.id, source: src, os: e.os, arch: e.arch, accel: e.accel, tag,
       addedAt: clean(e.addedAt, 40), ...(sha ? { sha256: sha } : {}),
+      ...(isSafeExeName(e.exe) ? { exe: e.exe } : {}),
     })
   }
   return { version: RUNTIMES_VERSION, entries }

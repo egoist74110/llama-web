@@ -28,6 +28,22 @@ test('isInsideDir', () => {
 })
 
 describe('cleanupResidue (injected process table)', () => {
+  test('a renamed executable is killed only when its recorded path and identity match under runtime', async () => {
+    const ours = `${runtime}\\llama.cpp\\custom\\r1\\llama-kvmem-server.exe`
+    const outside = 'X:\\tools\\llama-kvmem-server.exe'
+    registry.add(rec(501, ours))
+    registry.add(rec(502, outside))
+    registry.add(rec(503, ours))
+    const killed: number[] = []
+    const result = await cleanupResidue(registry, runtime, {
+      platform: 'win32', identities, isAlive: () => true,
+      getExePaths: async () => new Map([[501, ours], [502, outside], [503, `${runtime}\\other.exe`]]),
+      killTree: async pid => { killed.push(pid) },
+    })
+    expect(killed).toEqual([501])
+    expect(result.skipped.map(r => r.pid)).toEqual([502, 503])
+    expect(registry.list()).toEqual([])
+  })
   test('kills only live processes whose exe is under runtime/, then empties the file', async () => {
     registry.add(rec(101)) // ours, alive -> kill
     registry.add(rec(102)) // ours, gone

@@ -30,8 +30,9 @@ const entry = (id: string, over: Partial<RuntimeEntry> = {}): RuntimeEntry => ({
 const addCustom = (reg: RuntimeRegistry, e: RuntimeEntry) => {
   reg.add(e)
   mkdirSync(customDir(data, e.id), { recursive: true })
-  writeFileSync(join(customDir(data, e.id), exeOf({ ...win, os: e.os })), '')
-  return join(customDir(data, e.id), exeOf({ ...win, os: e.os }))
+  const exe = join(customDir(data, e.id), e.exe ?? exeOf({ ...win, os: e.os }))
+  writeFileSync(exe, '')
+  return exe
 }
 const model = (id: string, runtime?: string, profiles: Record<string, string | undefined> = { default: undefined }) => ({
   id, name: id, backend: 'llama-server', file: { dirId: 'd', rel: `${id}.gguf` }, mmproj: null, draft: null, activeProfile: 'default',
@@ -90,6 +91,22 @@ describe('list', () => {
 })
 
 describe('delete protection', () => {
+  test('renamed custom executable is listed, protected in use, then removed with its entire directory', () => {
+    const s = setup()
+    const exe = addCustom(s.registry, entry('r-fork', { exe: 'llama-kvmem-server.exe', source: { kind: 'exe', from: 'X:\\build' } }))
+    writeFileSync(join(customDir(data, 'r-fork'), 'ggml-base.dll'), 'library')
+    s.used.push(exe)
+    expect(s.mgr.list().rows.find(r => r.ref === 'custom:r-fork')).toMatchObject({ inUse: true, deletable: false, source: { kind: 'exe' } })
+    expect(codeOf(() => s.mgr.remove('custom:r-fork'))).toBe('in-use')
+    expect(existsSync(exe)).toBe(true)
+    s.used.length = 0
+    expect(s.mgr.list().rows.find(r => r.ref === 'custom:r-fork')?.deletable).toBe(true)
+    s.mgr.remove('custom:r-fork')
+    expect(existsSync(customDir(data, 'r-fork'))).toBe(false)
+    expect(s.registry.list()).toEqual([])
+    expect(readdirSync(join(versionsDir(data), 'custom'))).toEqual([])
+    s.registry.close()
+  })
   test('the newest official build of each channel cannot be deleted (and nothing changes)', () => {
     install(win, 'b100'); install(win, 'b300'); install({ ...win, acceleration: 'cpu' }, 'b50')
     const s = setup()

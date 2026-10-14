@@ -1,5 +1,5 @@
-// Adding a llama.cpp build by hand (decision 34): a local directory, a local archive or a GitHub
-// release. External binaries and archives are a trust boundary, so every source goes through the
+// Adding a llama.cpp build by hand (decisions 34 / 62): a local executable, directory, archive
+// or GitHub release. External binaries and archives are a trust boundary, so every source goes through the
 // same two steps:
 //   1. preview: stage a private copy under data/runtime/llama.cpp/custom/.stage-<n>/ (copy /
 //      extract / download), check paths, links, sizes, disk space and the executable header
@@ -14,13 +14,13 @@ import {
   chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readlinkSync,
   realpathSync, renameSync, rmSync, statSync, statfsSync, symlinkSync,
 } from 'node:fs'
-import { basename, isAbsolute, join, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { checkExtractedTree, extractArchive, safeArchivePath, type ArchiveOptions } from './archive'
 import { download, getBody, RuntimeError, serverExeName, sha256File, versionsDir, type FetchFn, type ReleaseAsset } from './llamacpp'
 import type { RuntimeTarget } from './platform'
 import { killTree } from './runner'
 import {
-  binaryRunsHere, customDir, newRuntimeId, sniffFile, type RuntimeAccel, type RuntimeEntryAccel, type RuntimeEntry, type RuntimeRegistry, type RuntimeSourceKind,
+  binaryRunsHere, customDir, isSafeExeName, newRuntimeId, sniffFile, type RuntimeAccel, type RuntimeEntryAccel, type RuntimeEntry, type RuntimeRegistry, type RuntimeSourceKind,
 } from './runtimes'
 
 export type AddErrorCode =
@@ -50,6 +50,7 @@ export const ADD_LIMITS = {
 export type AddInput =
   | { kind: 'dir', path: string }
   | { kind: 'archive', path: string }
+  | { kind: 'exe', path: string }
   | { kind: 'github', url: string, accel?: RuntimeAccel }
 
 export interface AddPreview {
@@ -62,16 +63,18 @@ export interface AddPreview {
   files: number
   os: NodeJS.Platform
   arch: string
+  /** Executable basename within the staged build root. */
+  exe: string
   accel: RuntimeEntryAccel
-  /** First line of `llama-server --version`. */
+  /** Version line of `llama-server --version`; empty when an exe source has no readable version. */
   version: string
   tag: string
   suggestedLabel: string
-  /** SHA-256 of each downloaded / chosen archive; empty for a directory. */
+  /** SHA-256 of each downloaded / chosen archive; empty for a directory or executable source. */
   digests: Array<{ name: string, sha256: string, verified: boolean }>
   /** Confirming needs `acceptUnverified` (a downloaded file without a published SHA-256). */
   needsDigestConfirm: boolean
-  /** Items the caller should show next to the confirmation (`no-cudart`, `no-shared-libs`). */
+  /** Items the caller should show next to the confirmation (`no-cudart`, `no-shared-libs`, `no-version`). */
   warnings: string[]
 }
 
@@ -324,6 +327,8 @@ export class RuntimeInstaller {
       let needCheck = false
       if (input.kind === 'dir') {
         source = this.stageDir(input.path, dir)
+      } else if (input.kind === 'exe') {
+        source = this.stageExe(input.path, dir)
       } else if (input.kind === 'archive') {
         const r = await this.stageArchive(input.path, dir)
         source = r.source
@@ -338,8 +343,8 @@ export class RuntimeInstaller {
 
       this.checkCancelled()
       const out = join(dir, 'out')
-      const exe = serverExeName(this.opts.target.os)
-      const root = findRoot(out, exe)
+      const exe = input.kind === 'exe' ? basename(source) : serverExeName(this.opts.target.os)
+      const root = input.kind === 'exe' ? out : findRoot(out, exe)
       if (!root) throw new AddError('no-server-exe', `${exe} not found in the chosen source`)
       checkExtractedTree(root)
       const measured = measureTree(root, this.limits)
@@ -356,10 +361,19 @@ export class RuntimeInstaller {
       const warnings: string[] = []
       if (measured.libs === 0) warnings.push('no-shared-libs')
       this.checkCancelled()
-      const out2 = await (this.opts.runVersion ?? defaultRunVersion)(join(root, exe), root, this.limits.versionTimeoutMs, this.abort.signal)
+      let out2 = ''
+      try {
+        out2 = await (this.opts.runVersion ?? defaultRunVersion)(join(root, exe), root, this.limits.versionTimeoutMs, this.abort.signal)
+      } catch (e) {
+        this.checkCancelled()
+        if (input.kind !== 'exe' || (e instanceof AddError && e.code === 'cancelled')) throw e
+      }
       this.checkCancelled()
       const { line, tag } = parseVersionOutput(out2)
-      if (!line) throw new AddError('run-failed', 'llama-server --version printed no version')
+      if (!line) {
+        if (input.kind !== 'exe') throw new AddError('run-failed', 'llama-server --version printed no version')
+        warnings.push('no-version')
+      }
 
       const accel = accelHint ?? detectAccel(root, this.opts.target)
       const cudart = input.kind === 'github' && accel === 'cuda' && !digests.some(d => d.name.startsWith('cudart-'))
@@ -367,7 +381,7 @@ export class RuntimeInstaller {
       const stageId = newRuntimeId()
       const preview: AddPreview = {
         stageId, kind: input.kind, source, bytes: measured.bytes, files: measured.files,
-        os: this.opts.target.os, arch: this.opts.target.arch, accel, version: line, tag,
+        os: this.opts.target.os, arch: this.opts.target.arch, exe, accel, version: line, tag,
         suggestedLabel: defaultLabel(tag, accel, input, source), digests, needsDigestConfirm: needCheck, warnings,
       }
       this.stage = { id: stageId, dir, root, preview, created: this.now }
@@ -388,12 +402,25 @@ export class RuntimeInstaller {
     let st
     try { st = lstatSync(src) } catch { throw new AddError('not-found', 'The directory does not exist') }
     if (st.isSymbolicLink() || !st.isDirectory()) throw new AddError('bad-source', 'Choose a real directory')
+    this.stageTree(src, dir)
+    return src
+  }
+
+  private stageExe(path: string, dir: string): string {
+    const src = resolve(path)
+    let st
+    try { st = lstatSync(src) } catch { throw new AddError('not-found', 'The file does not exist') }
+    if (!st.isFile() || !isSafeExeName(basename(src))) throw new AddError('bad-source', 'Choose a regular executable with a safe basename')
+    this.stageTree(dirname(src), dir)
+    return src
+  }
+
+  private stageTree(src: string, dir: string): void {
     // Existing links must stay inside, the size is bounded, and there must be room for the copy.
     checkExtractedTree(src)
     const m = measureTree(src, this.limits)
     this.checkSpace(m.bytes * this.limits.dirSpaceFactor)
     copyTree(src, join(dir, 'out'))
-    return src
   }
 
   private async stageArchive(path: string, dir: string): Promise<{ source: string, digests: AddPreview['digests'] }> {
@@ -494,6 +521,7 @@ export class RuntimeInstaller {
     const entry: RuntimeEntry = {
       id, label, source: { kind: p.kind, from: p.source.slice(0, 500) }, os: p.os, arch: p.arch, accel: p.accel, tag: p.tag,
       addedAt: new Date(this.now).toISOString(), ...(p.digests[0] ? { sha256: p.digests[0].sha256 } : {}),
+      ...(p.exe !== serverExeName(p.os) ? { exe: p.exe } : {}),
     }
     renameSync(s.root, dest)
     try {
@@ -518,7 +546,7 @@ export function detectAccel(root: string, target: RuntimeTarget): RuntimeEntryAc
 }
 
 function defaultLabel(tag: string, accel: RuntimeEntryAccel, input: AddInput, source: string): string {
-  const name = input.kind === 'github' ? source.replace('https://github.com/', '') : basename(source).replace(/\.(zip|tar\.gz|tgz)$/i, '')
+  const name = input.kind === 'github' ? source.replace('https://github.com/', '') : basename(source).replace(input.kind === 'exe' ? /\.exe$/i : /\.(zip|tar\.gz|tgz)$/i, '')
   return [tag, ({ cuda: 'CUDA', rocm: 'ROCm', sycl: 'SYCL', vulkan: 'Vulkan', cpu: 'CPU', metal: '' })[accel], name === tag ? '' : name].filter(Boolean).join(' · ').slice(0, 80)
 }
 

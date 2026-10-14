@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { listInstalled, versionsDir } from '../../server/core/llamacpp'
 import type { RuntimeTarget } from '../../server/core/platform'
 import {
-  binaryRunsHere, channelsFor, customDir, normalizeRuntimes, parseRuntimeRef, refOfExe, resolveRuntimeRef, RuntimeRegistry, RuntimeResolveError,
+  binaryRunsHere, channelsFor, customDir, customExe, isSafeExeName, normalizeRuntimes, parseRuntimeRef, refOfExe, resolveRuntimeRef, RuntimeRegistry, RuntimeResolveError,
   selectableHere, sniffBinary, type RuntimeEntry,
 } from '../../server/core/runtimes'
 import { elf, machoArm64, machoUniversal, machoX64, peArm64, peX64 } from '../fixtures/fake-binary'
@@ -27,7 +27,7 @@ const install = (target: RuntimeTarget, tag: string) => {
   return join(dir, exe)
 }
 const addCustom = (e: RuntimeEntry) => {
-  const exe = e.os === 'win32' ? 'llama-server.exe' : 'llama-server'
+  const exe = e.exe ?? (e.os === 'win32' ? 'llama-server.exe' : 'llama-server')
   mkdirSync(customDir(data, e.id), { recursive: true })
   writeFileSync(join(customDir(data, e.id), exe), '')
 }
@@ -83,6 +83,20 @@ describe('platform isolation by file header', () => {
 })
 
 describe('registry file', () => {
+  test('accepts exe sources and keeps only safe executable basenames without changing the version', () => {
+    const good = entry('r1', { source: { kind: 'exe', from: 'X:\\build\\llama-kvmem-server.exe' }, exe: 'llama-kvmem-server.exe' })
+    const doc = normalizeRuntimes({ version: 1, entries: [good] })
+    expect(doc).toEqual({ version: 1, entries: [good] })
+    for (const exe of ['../x', 'a/b', 'a\\b', 'C:x', '', '..', 'a..b', 'a\n', 'a\u0000', 'a'.repeat(101)]) {
+      expect(isSafeExeName(exe)).toBe(false)
+      const normalized = normalizeRuntimes({ version: 1, entries: [entry('r1', { exe })] }).entries[0]!
+      expect(normalized.id).toBe('r1')
+      expect('exe' in normalized).toBe(false)
+      expect(customExe(data, normalized)).toBe(join(customDir(data, 'r1'), 'llama-server.exe'))
+    }
+    expect(isSafeExeName('server_1.2+cuda.exe')).toBe(true)
+    expect(isSafeExeName(null)).toBe(false)
+  })
   test('round trip, and a hand edit with a bad id / platform / accel is dropped', () => {
     const reg = new RuntimeRegistry(data)
     reg.add(entry('r1'))
@@ -126,6 +140,19 @@ describe('registry file', () => {
 
 describe('resolveRuntimeRef', () => {
   const env = (target = win, entries: RuntimeEntry[] = []) => ({ dataDir: data, target, entries })
+
+  test('custom basename resolves on Windows and macOS and falls back when that file is missing', () => {
+    for (const target of [win, mac]) {
+      const e = entry(`r-${target.os}`, { os: target.os, arch: target.arch, accel: target.acceleration, exe: target === win ? 'llama-kvmem-server.exe' : 'renamed-server', source: { kind: 'exe', from: 'X:\\build' } })
+      addCustom(e)
+      const ref = `custom:${e.id}`
+      expect(resolveRuntimeRef(ref, env(target, [e]))).toEqual({ ref, exe: customExe(data, e), label: e.label, fallback: null })
+      expect(refOfExe(data, customExe(data, e), target.os)).toBe(ref)
+      install(target, 'b300')
+      rmSync(customExe(data, e))
+      expect(resolveRuntimeRef(ref, env(target, [e])).fallback?.reason).toBe('missing')
+    }
+  })
 
   test('official reference of an installed version', () => {
     const exe = install(win, 'b200')

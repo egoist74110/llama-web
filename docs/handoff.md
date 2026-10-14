@@ -1,5 +1,12 @@
 # 交接记录
 
+## 2026-10-14 · 12-3 手动添加：选择程序（关键决定 62）+ 版本 1.2.1 · 单会话
+- 起因：用户想试用 KVMem 分支（服务端叫 `llama-kvmem-server.exe`）。Haiku 5.5 侦察：KVMem 的 GGUF 版只有 Windows CUDA（RTX 20 / V100），RTX 30+ 是另一种引擎（.ninfer），没有 Mac 版；llama-web 原来写死 `llama-server` 文件名，且要求 `--version` 有版本号。用户（在 Mac 上）要求：让用户自己选程序文件，说明它大概长什么样，点击弹出用户目录，能启动就行，版本号 1.2.1。
+- 分工：后端 gpt-6.1-sol-high（新来源 `exe`、`runtimes.json` 可选字段 `exe` + 安全文件名校验、`POST /api/fs/pick-file`、测试）；界面 Sonnet 5.5 中（「选择程序」标签、`usePickFile`、四个标签在窄屏铺满）；Claude 写规格、审查，自己改了 Mac 占位符（不用个人路径样式）和对话框说明，写 plan / README / 发布说明。
+- 实际运行：`bun test` 1620 pass / 20 skip / 0 fail；`bun run typecheck` exit 0；`osacompile` 编译 Mac 选择文件脚本通过。浏览器（Mac、开发服务器、临时数据目录）：用改名为 `llama-kvmem-server` 的 `/usr/bin/true` 走完「选择程序 → 运行提示 → 预览（显示程序名、「没读到版本号」）→ 添加」，`runtimes.json` 写入 `source.kind = exe`、`exe = llama-kvmem-server`，版本列表出现该条目；375 宽无横向滚动。
+- 没有运行：真实分支加载模型；Windows 上的任何验证；两个平台的系统选择文件对话框实际弹出（不想在用户屏幕上弹窗）；（`bun run build` 已通过，exit 0。）
+- 下一步：用户试用；有 Windows + RTX 20 / V100 的人可以用 KVMem 实测。发布 1.2.1 需要用户触发 Release 工作流。
+
 ## 2026-10-14 · 12-2 Intel / AMD / 老 N 卡界面（关键决定 61）· 单会话
 - 分工：agy 写初版界面；第一轮修改 agy 空跑（后台测试挂起、无改动），按规则换 Sonnet 5.5 中完成；后端补充由 gpt-6.1-sol-high 完成（`GET /api/models/[id]` 的 `effectiveRuntime`、`POST /api/models/[id]/use-cpu`，一次写入，没装 CPU 版返回 409 `no-cpu-build`）。Claude 审查：去掉前端对 `server/core/runtimes` 的运行时引用、不再在前端猜运行库、「改用 CPU」改为单个接口且不自动启动未运行的模型；自己修了「当前生效」占位符不匹配、自动模式说明与决定 61 不符、英文标题大小写、下拉框无障碍标签。
 - 实际运行：`bun test` 1596 pass / 20 skip / 0 fail；`bun run typecheck` exit 0；`bun run build` exit 0（Sonnet 运行，之后只改了文案与一个属性）。浏览器（Mac、开发服务器、临时数据目录，前端注入模拟的 `acceleration` 数据）：设置页的选择提示、加速方式下拉（自动 / CUDA / CPU / Vulkan（实验性））、中英、深色、375 宽无横向滚动。

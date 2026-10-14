@@ -1,7 +1,8 @@
 <script setup lang="ts">
-// "Add version" dialog: pick a source (folder / archive / GitHub address), stage it, show what was
+// "Add version" dialog: pick a source (folder / server program file / archive / GitHub address), stage it, show what was
 // found, and register it only after the user confirms. Staging runs the chosen llama-server
-// (`--version`), so a warning comes first. Closing the dialog throws the staged copy away.
+// (`--version`), so a warning comes first. The program source (decision 62) takes the path of a
+// server executable (any file name, e.g. a fork) and copies its whole parent folder. Closing the dialog throws the staged copy away.
 import { t } from '../composables/useLocale'
 import type { AddPreview } from '~~/server/core/runtime-add'
 
@@ -12,12 +13,14 @@ const s = t.llamacpp.manage.addDialog
 const ui = usePlatformUi()
 const toast = useToast()
 const { pick, picking } = usePickFolder()
+const { pick: pickExe, picking: pickingExe } = usePickFile()
 
-type Kind = 'dir' | 'archive' | 'github'
+type Kind = 'dir' | 'exe' | 'archive' | 'github'
 type Step = 'source' | 'confirm' | 'previewing' | 'preview' | 'adding'
 
 const kind = ref<Kind>('dir')
 const dirPath = ref('')
+const exePath = ref('')
 const archivePath = ref('')
 const url = ref('')
 const accel = ref('auto')
@@ -32,6 +35,7 @@ import { isExperimentalAccel } from '~/utils/experimental-backend'
 
 const kinds = computed<Array<{ value: Kind, label: string }>>(() => [
   { value: 'dir', label: s.kinds.dir },
+  { value: 'exe', label: s.kinds.exe },
   { value: 'archive', label: s.kinds.archive },
   { value: 'github', label: s.kinds.github },
 ])
@@ -42,12 +46,12 @@ const accelItems = computed(() => [
   { label: accelLabel('cpu', false), value: 'cpu' },
 ])
 
-const source = computed(() => (kind.value === 'dir' ? dirPath.value : kind.value === 'archive' ? archivePath.value : url.value).trim())
+const source = computed(() => (kind.value === 'dir' ? dirPath.value : kind.value === 'exe' ? exePath.value : kind.value === 'archive' ? archivePath.value : url.value).trim())
 const kindValue = computed(() => (stage.value ? accelLabel(stage.value.accel, ui.value.isMac) : ''))
 
 function reset() {
   kind.value = 'dir'
-  dirPath.value = archivePath.value = url.value = ''
+  dirPath.value = exePath.value = archivePath.value = url.value = ''
   accel.value = 'auto'
   step.value = 'source'
   stage.value = null
@@ -65,6 +69,11 @@ function messageOf(e: unknown): string {
 async function choose() {
   const p = await pick()
   if (p) dirPath.value = p
+}
+
+async function chooseExe() {
+  const p = await pickExe()
+  if (p) exePath.value = p
 }
 
 async function runPreview() {
@@ -139,7 +148,7 @@ const warningText = (code: string) => (s.warnings as Record<string, string>)[cod
   <UModal v-model:open="open" :title="step === 'preview' || step === 'adding' ? s.previewTitle : s.title" :description="step === 'confirm' ? '' : s.description" :ui="{ content: 'max-w-xl' }">
     <template #body>
       <div v-if="step === 'source'" class="space-y-4">
-        <div class="lw-seg" role="tablist" :aria-label="s.sourceLabel">
+        <div class="lw-seg fill" role="tablist" :aria-label="s.sourceLabel">
           <button
             v-for="k in kinds"
             :key="k.value"
@@ -163,6 +172,22 @@ const warningText = (code: string) => (s.warnings as Record<string, string>)[cod
           </div>
           <p class="text-xs text-dimmed">
             {{ s.dirHint }}
+          </p>
+        </div>
+
+        <div v-else-if="kind === 'exe'" class="space-y-1.5">
+          <label class="text-xs font-medium text-muted">{{ s.exeLabel }}</label>
+          <div class="flex flex-wrap gap-2">
+            <UInput v-model="exePath" class="min-w-0 flex-1 basis-60" :placeholder="ui.isMac ? t.platform.mac.exePlaceholder : s.exePlaceholder" :aria-label="s.exeLabel" :ui="{ base: 'font-mono text-xs' }" />
+            <UButton v-if="ui.canPickFolder" size="sm" color="neutral" variant="outline" icon="i-lucide-file-search" :loading="pickingExe" @click="chooseExe">
+              {{ s.pickExe }}
+            </UButton>
+          </div>
+          <p class="text-xs text-dimmed">
+            {{ ui.isMac ? t.platform.mac.exeHint : s.exeHint }}
+          </p>
+          <p class="text-xs text-dimmed">
+            {{ s.exeExtraArgs }}
           </p>
         </div>
 
@@ -199,7 +224,7 @@ const warningText = (code: string) => (s.warnings as Record<string, string>)[cod
           {{ s.runTitle }}
         </p>
         <p class="text-sm text-muted">
-          {{ s.runBody }}
+          {{ kind === 'exe' ? s.runBodyExe : s.runBody }}
         </p>
         <p class="break-all font-mono text-xs text-dimmed">
           {{ source }}
@@ -227,6 +252,14 @@ const warningText = (code: string) => (s.warnings as Record<string, string>)[cod
           <dd class="m-0">
             {{ fmt(s.sizeValue, { size: formatBytes(stage.bytes), files: stage.files }) }}
           </dd>
+          <template v-if="stage.exe">
+            <dt class="text-muted">
+              {{ s.program }}
+            </dt>
+            <dd class="min-w-0 break-all font-mono text-xs">
+              {{ stage.exe }}
+            </dd>
+          </template>
           <template v-if="kindValue">
             <dt class="text-muted">
               {{ s.kind }}

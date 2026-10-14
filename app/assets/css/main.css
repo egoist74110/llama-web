@@ -144,6 +144,8 @@ html, body {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 30px; padding: 0 12px;
   border: 0; border-radius: 7px; background: transparent; color: var(--lw-muted); font-size: 13px; cursor: pointer; white-space: nowrap;
 }
+.lw-seg.fill { display: flex; max-width: 100%; }
+.lw-seg.fill button { flex: 1 1 auto; min-width: 0; padding: 0 8px; }
 .lw-seg button:hover { color: var(--lw-text); }
 .lw-seg button.on { background: var(--lw-surface); color: var(--lw-text); font-weight: 500; box-shadow: var(--lw-shadow); }
 

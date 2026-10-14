@@ -26,7 +26,7 @@ const entry = (id: string, over: Partial<RuntimeEntry> = {}): RuntimeEntry => ({
 })
 const custom = (e: RuntimeEntry) => {
   mkdirSync(customDir(data, e.id), { recursive: true })
-  const exe = join(customDir(data, e.id), 'llama-server.exe')
+  const exe = join(customDir(data, e.id), e.exe ?? 'llama-server.exe')
   writeFileSync(exe, '')
   return exe
 }
@@ -51,6 +51,19 @@ const input = (m: ModelsDoc, entries: RuntimeEntry[] = []) => {
 const plan = (m: ModelsDoc, entries: RuntimeEntry[] = []) => planLaunch({ modelId: 'm', profile: 'default' }, input(m, entries))
 
 describe('planLaunch follows the runtime reference', () => {
+  test('renamed custom executable is the launch program and command preview, with argv intact', () => {
+    const e = entry('r-fork', { exe: 'llama-kvmem-server.exe', source: { kind: 'exe', from: 'X:\\build' } })
+    const exe = custom(e)
+    const m = models('custom:r-fork')
+    const p = plan(m, [e])
+    expect(p.exe).toBe(exe)
+    expect(p.runtime).toMatchObject({ ref: 'custom:r-fork', fallback: null })
+    expect(p.args(7100).slice(-4)).toEqual(['--host', '127.0.0.1', '--port', '7100'])
+    const preview = previewLaunch({ ...input(m, [e]), model: m.models[0]!, form: { overrides: {}, extraArgs: '', chatTemplate: null } })
+    expect(preview.command).toContain(exe)
+    expect(preview.missing).not.toContain('runtime')
+    expect(preview.args).toEqual(p.args(7100))
+  })
   test('no reference: the global current version, exactly as before', () => {
     const exe = install(win, 'b300')
     install(win, 'b200')

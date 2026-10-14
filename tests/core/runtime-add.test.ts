@@ -1,15 +1,15 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { versionsDir } from '../../server/core/llamacpp'
 import type { RuntimeTarget } from '../../server/core/platform'
 import {
-  AddError, parseGithubSource, parseVersionOutput, pickAsset, RuntimeInstaller, type InstallerOptions,
+  AddError, defaultRunVersion, parseGithubSource, parseVersionOutput, pickAsset, RuntimeInstaller, type InstallerOptions,
 } from '../../server/core/runtime-add'
-import { customDir, RuntimeRegistry } from '../../server/core/runtimes'
+import { customDir, customExe, resolveRuntimeRef, RuntimeRegistry } from '../../server/core/runtimes'
 import { machoArm64, machoX64, peX64 } from '../fixtures/fake-binary'
 
 let data: string
@@ -30,6 +30,33 @@ const exeName = (t: RuntimeTarget) => (t.os === 'win32' ? 'llama-server.exe' : '
 const sha = (b: string | Buffer) => createHash('sha256').update(b).digest('hex')
 const customBase = () => join(versionsDir(data), 'custom')
 const leftovers = () => (existsSync(customBase()) ? readdirSync(customBase()).filter(n => n.startsWith('.stage-')) : [])
+
+test('preview endpoint accepts exe with the existing path length limit', async () => {
+  const globals = globalThis as Record<string | symbol, unknown>
+  const key = Symbol.for('llama-web.context')
+  const received: unknown[] = []
+  const bindings = {
+    defineEventHandler: (handler: unknown) => handler,
+    readBody: async (event: { body: unknown }) => event.body,
+    createError: (info: { message: string, statusCode: number }) => Object.assign(new Error(info.message), info),
+  }
+  const previous = [...Object.keys(bindings).map(name => [name, globals[name]] as const), [key, globals[key]] as const]
+  Object.assign(globals, bindings)
+  globals[key] = { runtimeAdd: { preview: async (input: unknown) => { received.push(input); return { stageId: 'fake' } } } }
+  try {
+    const route = (await import('../../server/api/llamacpp/add/preview.post')).default
+    const body = { kind: 'exe', path: 'X:\\build\\llama-kvmem-server.exe' }
+    expect(await route({ body } as never)).toEqual({ stageId: 'fake' })
+    expect(received).toEqual([body])
+    expect(await route({ body: { kind: 'exe', path: 'a'.repeat(1023) } } as never)).toEqual({ stageId: 'fake' })
+    for (const path of ['', 'a'.repeat(1024), 5, null]) {
+      await expect(route({ body: { kind: 'exe', path } } as never)).rejects.toMatchObject({ statusCode: 400 })
+    }
+    expect(received.length).toBe(2)
+  } finally {
+    for (const [name, value] of previous) { if (value === undefined) delete globals[name]; else globals[name] = value }
+  }
+})
 
 function installer(over: Partial<InstallerOptions> = {}, target = win) {
   const registry = new RuntimeRegistry(data)
@@ -88,7 +115,7 @@ describe('local directory', () => {
     const src = buildDir()
     const { inst, registry } = installer()
     const p = await inst.preview({ kind: 'dir', path: src })
-    expect(p).toMatchObject({ kind: 'dir', os: 'win32', arch: 'x64', accel: 'cpu', tag: 'b11146', needsDigestConfirm: false, files: 2 })
+    expect(p).toMatchObject({ kind: 'dir', exe: 'llama-server.exe', os: 'win32', arch: 'x64', accel: 'cpu', tag: 'b11146', needsDigestConfirm: false, files: 2 })
     expect(p.version).toContain('build 11146')
     expect(p.warnings).toEqual([])
     expect(registry.list()).toEqual([]) // nothing registered before the confirmation
@@ -97,6 +124,7 @@ describe('local directory', () => {
     expect(existsSync(join(customDir(data, e.id), 'llama-server.exe'))).toBe(true)
     expect(existsSync(join(customDir(data, e.id), 'ggml-base.dll'))).toBe(true)
     expect(registry.list().map(x => x.id)).toEqual([e.id])
+    expect('exe' in e).toBe(false)
     expect(leftovers()).toEqual([])
     expect(existsSync(join(src, 'llama-server.exe'))).toBe(true)
   })
@@ -184,6 +212,188 @@ describe('local directory', () => {
   })
 })
 
+describe('local executable', () => {
+  function source(name = 'llama-kvmem-server.exe', target = win, header = peX64()) {
+    const dir = buildDir('fork', target, header, { 'ggml-cuda.dll': 'library' })
+    const file = join(dir, name)
+    renameSync(join(dir, exeName(target)), file)
+    return { dir, file }
+  }
+
+  test('stages the parent directory as the root, registers the basename and resolves it after reload', async () => {
+    const { dir, file } = source()
+    mkdirSync(join(dir, 'assets'))
+    writeFileSync(join(dir, 'assets', 'config.txt'), 'asset')
+    let probed = ''
+    const { inst, registry } = installer({ runVersion: async (exe, cwd) => {
+      probed = exe
+      expect(exe).toBe(join(cwd, 'llama-kvmem-server.exe'))
+      expect(cwd).toBe(join(customBase(), leftovers()[0]!, 'out'))
+      expect(readFileSync(join(cwd, 'ggml-cuda.dll'), 'utf8')).toBe('library')
+      return VERSION
+    } })
+    const p = await inst.preview({ kind: 'exe', path: file })
+    expect(p).toMatchObject({ kind: 'exe', source: file, exe: 'llama-kvmem-server.exe', files: 3, accel: 'cuda', tag: 'b11146', warnings: [], digests: [], needsDigestConfirm: false })
+    expect(p.suggestedLabel).toBe('b11146 · CUDA · llama-kvmem-server')
+    expect(registry.list()).toEqual([])
+    const e = inst.confirm(p.stageId)
+    expect(e.exe).toBe(p.exe)
+    expect(e.source).toEqual({ kind: 'exe', from: file })
+    registry.close()
+    const reloaded = new RuntimeRegistry(data)
+    try {
+      const saved = reloaded.list()[0]!
+      expect(customExe(data, saved)).toBe(join(customDir(data, e.id), p.exe))
+      expect(resolveRuntimeRef(`custom:${e.id}`, { dataDir: data, target: win, entries: reloaded.list() })).toMatchObject({ exe: customExe(data, saved), fallback: null })
+      expect(readFileSync(join(customDir(data, e.id), 'assets', 'config.txt'), 'utf8')).toBe('asset')
+      expect(existsSync(probed)).toBe(false)
+      expect(existsSync(file)).toBe(true)
+      expect(leftovers()).toEqual([])
+    } finally { reloaded.close() }
+  })
+
+  test('a standard executable name stores no optional exe field on either platform', async () => {
+    for (const target of [win, mac]) {
+      const src = buildDir(`standard-${target.os}`, target, target === win ? peX64() : machoArm64())
+      const { inst, registry } = installer({}, target)
+      const p = await inst.preview({ kind: 'exe', path: join(src, exeName(target)) })
+      expect(p.exe).toBe(exeName(target))
+      expect('exe' in inst.confirm(p.stageId)).toBe(false)
+      expect('exe' in registry.list().at(-1)!).toBe(false)
+      registry.close()
+    }
+  })
+
+  for (const failure of ['spawn', 'non-zero', 'timeout', 'no-line'] as const) {
+    test(`a ${failure} version probe allows confirmation with no-version`, async () => {
+      const { file } = source()
+      const { inst, registry } = installer({ limits: { versionTimeoutMs: 25 }, runVersion: async (_exe, _cwd, timeout, signal) => {
+        expect(timeout).toBe(25)
+        expect(signal?.aborted).toBe(false)
+        if (failure === 'spawn') throw new Error('spawn ENOENT')
+        if (failure === 'non-zero') throw new AddError('run-failed', 'exited with code 1', 'version: 123')
+        if (failure === 'timeout') throw new AddError('run-failed', 'timed out')
+        return 'fork does not support this flag'
+      } })
+      const p = await inst.preview({ kind: 'exe', path: file })
+      expect(p).toMatchObject({ version: '', tag: '', warnings: ['no-version'] })
+      expect(p.suggestedLabel).toBe('CUDA · llama-kvmem-server')
+      expect(inst.confirm(p.stageId)).toMatchObject({ exe: 'llama-kvmem-server.exe', tag: '' })
+      expect(leftovers()).toEqual([])
+      registry.close()
+    })
+  }
+
+  test.skipIf(process.platform === 'win32')('a real timed-out probe is stopped and exe preview still succeeds', async () => {
+    const { file } = source()
+    const probe = join(work, 'probe')
+    writeFileSync(probe, `#!${process.execPath}\nsetInterval(() => {}, 1000)\n`)
+    chmodSync(probe, 0o755)
+    const { inst, registry } = installer({ limits: { versionTimeoutMs: 50 }, runVersion: (_exe, cwd, timeout, signal) => defaultRunVersion(probe, cwd, timeout, signal) })
+    try {
+      const p = await inst.preview({ kind: 'exe', path: file })
+      expect(p).toMatchObject({ version: '', tag: '', warnings: ['no-version'] })
+    } finally { inst.dispose(); registry.close() }
+    expect(leftovers()).toEqual([])
+  })
+
+  test('a real spawn error remains a warning for exe preview', async () => {
+    const { file } = source()
+    const { inst, registry } = installer({ runVersion: (_exe, cwd, timeout, signal) => defaultRunVersion(join(work, 'missing-probe'), cwd, timeout, signal) })
+    try {
+      expect((await inst.preview({ kind: 'exe', path: file })).warnings).toEqual(['no-version'])
+    } finally { inst.dispose(); registry.close() }
+  })
+
+  test('cancel during a failing version probe still cancels and cleans up, then a new preview works', async () => {
+    const { file } = source()
+    let started: () => void = () => {}
+    const ready = new Promise<void>(r => { started = r })
+    let calls = 0
+    const { inst, registry } = installer({ runVersion: async (_exe, _cwd, _timeout, signal) => {
+      if (++calls > 1) return VERSION
+      started()
+      await new Promise<void>(r => signal!.addEventListener('abort', () => r(), { once: true }))
+      throw new AddError('run-failed', 'probe stopped')
+    } })
+    const settled = inst.preview({ kind: 'exe', path: file }).then(() => 'ok', (e: AddError) => e.code)
+    await ready
+    inst.cancel()
+    expect(await settled).toBe('cancelled')
+    expect(leftovers()).toEqual([])
+    expect(registry.list()).toEqual([])
+    expect(() => inst.confirm('stale')).toThrow(expect.objectContaining({ code: 'stale-stage' }))
+    const p = await inst.preview({ kind: 'exe', path: file })
+    expect(p.warnings).toEqual([])
+    inst.dispose()
+    registry.close()
+  })
+
+  test('directory, missing file, unsafe basenames and symlinks are refused before probing', async () => {
+    const src = buildDir()
+    let probes = 0
+    const { inst, registry } = installer({ runVersion: async () => { probes++; return VERSION } })
+    await expect(inst.preview({ kind: 'exe', path: src })).rejects.toMatchObject({ code: 'bad-source' })
+    await expect(inst.preview({ kind: 'exe', path: join(src, 'missing.exe') })).rejects.toMatchObject({ code: 'not-found' })
+    for (const name of ['bad name.exe', '-bad.exe', 'a..b.exe', 'a'.repeat(101)]) {
+      const file = join(src, name)
+      writeFileSync(file, peX64())
+      await expect(inst.preview({ kind: 'exe', path: file })).rejects.toMatchObject({ code: 'bad-source' })
+    }
+    const link = join(src, 'linked.exe')
+    let linked = false
+    try { symlinkSync(exeName(win), link); linked = true } catch { /* Windows may lack symlink privileges. */ }
+    if (linked) await expect(inst.preview({ kind: 'exe', path: link })).rejects.toMatchObject({ code: 'bad-source' })
+    expect(probes).toBe(0)
+    expect(leftovers()).toEqual([])
+    registry.close()
+  })
+
+  test('parent directory uses the existing tree and disk limits', async () => {
+    const { file } = source()
+    for (const opts of [{ limits: { maxFiles: 1 } }, { limits: { maxTreeBytes: 10 } }, { freeBytes: () => 10 }]) {
+      const { inst, registry } = installer(opts)
+      await expect(inst.preview({ kind: 'exe', path: file })).rejects.toMatchObject({ code: 'freeBytes' in opts ? 'disk-space' : 'too-large' })
+      registry.close()
+    }
+    expect(leftovers()).toEqual([])
+  })
+
+  test('an escaping sibling link is refused when staging the parent directory', async () => {
+    const { dir, file } = source()
+    const outside = join(work, 'outside.txt')
+    writeFileSync(outside, 'outside')
+    try { symlinkSync(outside, join(dir, 'evil.dll')) } catch { return }
+    const { inst, registry } = installer()
+    try {
+      await expect(inst.preview({ kind: 'exe', path: file })).rejects.toMatchObject({ code: 'unsafe' })
+      expect(leftovers()).toEqual([])
+    } finally { registry.close() }
+  })
+
+  test('renamed Mac binary is checked, chmodded and has quarantine cleared on the copied tree', async () => {
+    const { file } = source('renamed-server', mac, machoArm64())
+    let cleared = ''
+    const { inst, registry } = installer({ clearQuarantine: async dir => { cleared = dir } }, mac)
+    const p = await inst.preview({ kind: 'exe', path: file })
+    expect(p).toMatchObject({ exe: 'renamed-server', accel: 'metal', warnings: [] })
+    expect(cleared).not.toBe('')
+    if (process.platform !== 'win32') expect(statSync(join(cleared, p.exe)).mode & 0o777).toBe(0o755)
+    inst.dispose()
+    registry.close()
+  })
+
+  test('wrong platform or unrecognised binary is still refused', async () => {
+    const { inst, registry } = installer()
+    for (const [name, header] of [['mac', machoArm64()], ['text', Buffer.from('text')]] as const) {
+      const src = buildDir(name, win, header)
+      await expect(inst.preview({ kind: 'exe', path: join(src, exeName(win)) })).rejects.toMatchObject({ code: 'wrong-platform' })
+    }
+    expect(leftovers()).toEqual([])
+    registry.close()
+  })
+})
+
 describe('local archive', () => {
   const fakeExtract = (header = peX64(), t = win) => async (_file: string, dest: string) => {
     mkdirSync(dest, { recursive: true })
@@ -195,6 +405,7 @@ describe('local archive', () => {
     writeFileSync(zip, 'ZIPDATA')
     const { inst } = installer({ extract: fakeExtract() })
     const p = await inst.preview({ kind: 'archive', path: zip })
+    expect(p.exe).toBe('llama-server.exe')
     expect(p.digests).toEqual([{ name: 'llama-b1-bin-win-cpu-x64.zip', sha256: sha('ZIPDATA'), verified: false }])
     expect(p.needsDigestConfirm).toBe(false) // a file the user picked themselves
     const e = inst.confirm(p.stageId)
@@ -313,6 +524,7 @@ describe('GitHub release', () => {
     const f = fake()
     const { inst } = installer({ fetch: f.fetchFn, extract })
     const p = await inst.preview({ kind: 'github', url: 'https://github.com/o/r' })
+    expect(p.exe).toBe('llama-server.exe')
     expect(f.calls[0]).toBe('https://api.github.com/repos/o/r/releases/latest')
     expect(p).toMatchObject({ kind: 'github', accel: 'cuda', source: 'https://github.com/o/r', needsDigestConfirm: false })
     expect(p.digests).toEqual([{ name: BIN, sha256: sha('BIN'), verified: true }, { name: RT, sha256: sha('RT'), verified: true }])

@@ -44,6 +44,8 @@ export default {
       setupPathHint: '也可以直接粘贴路径：在访达里选中文件夹，按 ⌥⌘C 复制路径。',
       dirPlaceholder: '例如 ~/llama.cpp/b1234',
       archivePlaceholder: '例如 ~/Downloads/llama-b1234.tar.gz',
+      exePlaceholder: '例如 ~/llama.cpp/build/bin/llama-server',
+      exeHint: '通常叫 llama-server（没有扩展名，在 Finder 里显示为「Unix 可执行文件」）；第三方分支可能换了名字。会把它所在的整个文件夹（含 .dylib）一起复制，所以这个文件夹里最好只放这一个版本。',
       restartRequired: '端口已保存为 {port}，但当前进程仍在使用 {current}。退出 llama-web 后重新打开才会生效（桌面版从程序坞退出；源码版关闭运行 start.command 的终端窗口）。',
       // Findings of the save-time check and events that would otherwise say GPU / video memory.
       issues: {
@@ -1468,13 +1470,19 @@ export default {
       addCancelled: '已取消添加。',
       addDialog: {
         title: '添加 llama.cpp 版本',
-        description: '从一个文件夹、压缩包或 GitHub 发布页添加一个 llama.cpp 版本，复制到 data/runtime 里使用，不会改动原文件。',
+        description: '从一个文件夹、服务端程序、压缩包或 GitHub 发布页添加一个 llama.cpp 版本，复制到 data/runtime 里使用，不会改动原文件。',
         sourceLabel: '来源',
-        kinds: { dir: '选择目录', archive: '选择压缩包', github: 'GitHub 地址' },
+        kinds: { dir: '选择目录', exe: '选择程序', archive: '选择压缩包', github: 'GitHub 地址' },
         dirLabel: '目录路径',
         dirHint: '里面要有 llama-server 和它依赖的库。',
         dirPlaceholder: '例如 X:\\llama.cpp\\b1234',
         pick: '选择文件夹…',
+        exeLabel: '程序路径',
+        exeHint: '通常叫 llama-server.exe；第三方分支可能换了名字，例如 llama-kvmem-server.exe。会把它所在的整个文件夹（含 .dll）一起复制，所以这个文件夹里最好只放这一个版本。',
+        exePlaceholder: '例如 X:\\llama.cpp\\b1234\\llama-server.exe',
+        exeExtraArgs: '添加后用模型或方案的「额外参数」填写这个分支需要的参数（例如 --kvmem）；默认额外参数里如果有它不认识的参数，请删掉。',
+        pickExe: '选择程序…',
+        program: '程序',
         archiveLabel: '压缩包路径',
         archiveHint: '.zip 或 .tar.gz，需要写完整路径。',
         archivePlaceholder: '例如 X:\\downloads\\llama-b1234.zip',
@@ -1486,6 +1494,7 @@ export default {
         accelVulkan: 'Vulkan（实验性）',
         runTitle: '这会运行你选的程序',
         runBody: '为了读出版本号，添加之前会先运行一次所选的 llama-server（带 --version，限时 10 秒）。只添加你信任的来源。',
+        runBodyExe: '添加之前会先用所选程序运行一次 --version（限时 10 秒）。读不到版本号也照样添加，只是之后要能启动才行。只添加你信任的来源。',
         runConfirm: '我明白，继续预览',
         back: '返回',
         preview: '预览',
@@ -1505,6 +1514,7 @@ export default {
         warnings: {
           'no-cudart': '没有找到配套的 CUDA 运行库（cudart），在没装 CUDA 的电脑上可能跑不起来。',
           'no-shared-libs': '同目录没有找到依赖库（.dll / .dylib），运行时可能缺库。',
+          'no-version': '没读到版本号（这个程序可能不支持 --version），已跳过检查；能否正常启动以实际加载为准。',
         },
         confirm: '添加',
         adding: '正在添加……',
@@ -1513,8 +1523,13 @@ export default {
       },
     },
     runtimes: {
+      pickFile: {
+        title: '选择 llama-server 程序',
+        programsLabel: '程序',
+        allFilesLabel: '所有文件',
+      },
       add: {
-        'bad-source': '来源不对：请选择一个目录、一个 .zip / .tar.gz 压缩包，或填写 GitHub 地址。',
+        'bad-source': '来源不对：请选择一个程序文件、一个目录、一个 .zip / .tar.gz 压缩包，或填写 GitHub 地址。',
         'not-found': '找不到所选的目录或文件。',
         'bad-url': '只接受 https://github.com/ 开头的仓库或 Release 地址。',
         'network': '读取 GitHub 失败，请检查网络后重试。{detail}',
