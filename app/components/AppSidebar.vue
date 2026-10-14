@@ -91,12 +91,12 @@ const modes = computed(() => [
       </span>
     </NuxtLink>
 
-    <nav :aria-label="L.mainNav" class="grid grid-flow-col auto-cols-fr gap-1 min-[820px]:flex min-[820px]:flex-col min-[820px]:gap-0.5">
+    <nav :aria-label="L.mainNav" class="grid grid-flow-col auto-cols-[minmax(max-content,1fr)] gap-1 max-[819px]:overflow-x-auto max-[819px]:pb-1 min-[820px]:flex min-[820px]:flex-col min-[820px]:gap-0.5">
       <NuxtLink
         v-for="n in nav"
         :key="n.to"
         :to="n.to"
-        class="lw-nav-item justify-center max-[819px]:flex-col max-[819px]:gap-0.5 max-[819px]:px-1 max-[819px]:text-xs min-[820px]:justify-start"
+        class="lw-nav-item justify-center max-[819px]:flex-col max-[819px]:gap-0.5 max-[819px]:px-3 max-[819px]:text-xs min-[820px]:justify-start"
         :class="{ 'is-active': isActive(n.to) }"
         :aria-current="isActive(n.to) ? 'page' : undefined"
       >
