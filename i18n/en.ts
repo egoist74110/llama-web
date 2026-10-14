@@ -17,6 +17,10 @@ import type { Messages, PartialMessages } from './messages'
  * events / loadError / failure / api / admin / appUpdate / usage / logs / setup / chat, plus the
  * desktop start window; the remaining groups are still group-only skeletons and fall back to Chinese. */
 export const enSkeleton: PartialMessages = {
+  common: {
+    experimental: 'Experimental',
+    cancel: 'Cancel',
+  },
   // Desktop shell start window: choosing or copying an old data directory, recovery, start / stop / update states.
   desktop: {
     choose: 'Get started, or pick the data directory of an older llama-web. A backup is kept before copying and the original directory is left unchanged; quit the old version first.',
@@ -525,6 +529,7 @@ export const enSkeleton: PartialMessages = {
       'bad-thinking-limit': 'The maximum thinking length must be a non-negative integer; 0 means no limit.',
       'bad-context': 'Context must be a valid number; 0 means the model\'s own length, and leaving it empty omits the parameter.',
       'runtime-invalid': 'The chosen llama.cpp version does not exist, or does not belong to this computer\'s platform.',
+      'no-cpu-build': 'The current CPU build is not installed. Download it from runtime settings first.',
       'check-failed': 'These settings definitely cannot start as they are, so nothing was saved: {detail}',
       'device-invalid': 'Invalid device selection: choose "Auto", "CPU", one GPU, or turn on "Use several GPUs" and pick two or more; the split mode must be layer / row / tensor, the number of split shares must match the number of chosen GPUs, and the main GPU index must be within the chosen GPUs. On a Mac, devices cannot be chosen.',
     },
@@ -953,6 +958,8 @@ export const enSkeleton: PartialMessages = {
       recommend: 'Recommended build',
       recommendCuda: 'Use the NVIDIA (CUDA) build',
       recommendCpu: 'Use the CPU build',
+      recommendVulkanHint: ', or ',
+      recommendVulkanLink: 'try the experimental Vulkan build',
       chip: 'Chip',
       model: 'Model',
       macCores: 'Cores',
@@ -1392,6 +1399,36 @@ export const enSkeleton: PartialMessages = {
   },
   llamacpp: {
     chooseAcceleration: 'Choose the runtime acceleration on the Settings page, then restart llama-web.',
+    acceleration: {
+      title: 'Acceleration',
+      hint: 'Takes effect after restarting llama-web. Automatic: CUDA when a usable NVIDIA GPU is detected; otherwise you are asked to choose between the CPU build and the experimental Vulkan build.',
+      restartNeeded: 'Takes effect after restarting llama-web',
+      active: 'Currently active: {accel}',
+      options: {
+        auto: 'Auto',
+        cuda: 'CUDA',
+        vulkan: 'Vulkan (Experimental)',
+        cpu: 'CPU',
+      },
+    },
+    choicePrompt: {
+      title: 'Choose runtime acceleration',
+      reasons: {
+        'nvidia-missing': 'No NVIDIA graphics driver detected. You can use the CPU build, or try the Vulkan build on supported Intel / AMD graphics.',
+        'nvidia-failed': 'Failed to read NVIDIA graphics information (nvidia-smi probe failed). If this is a temporary issue, you can keep using CUDA; or you can use the CPU build, or try the Vulkan build.',
+        'cuda-unusable': 'This NVIDIA graphics card or driver cannot run any CUDA runtime (compute capability too low or driver too old). Please choose to use the CPU build, or try the Vulkan build.',
+      },
+      useCpu: 'Use CPU build',
+      tryVulkan: 'Try Vulkan (experimental)',
+      keepCuda: 'Keep CUDA',
+      savedRestart: 'Saved acceleration as {accel}. Takes effect after restarting llama-web.',
+    },
+    vulkanConfirm: {
+      title: 'Download experimental Vulkan runtime?',
+      body: 'The Vulkan build is experimental and has not been verified on real Intel / AMD hardware. The CPU build remains the fallback. Do you want to download it now?',
+      confirm: 'Download Vulkan',
+      cancel: 'Cancel',
+    },
     title: 'llama.cpp versions',
     hint: 'Checked once a day; auto-update is off by default, and when it is on a new version is downloaded and used automatically. The last {n} versions are kept, so you can roll back at any time.',
     status: 'Status',
@@ -1428,7 +1465,17 @@ export const enSkeleton: PartialMessages = {
       'store': 'data/settings.json has an error and nothing was written. Fix it first: {detail}',
     },
     manage: {
-      channels: { cuda: 'NVIDIA (CUDA) build', cpu: 'CPU build' },
+      channels: {
+        cuda: 'NVIDIA (CUDA) build',
+        cpu: 'CPU build',
+        vulkan: 'Vulkan',
+        sycl: 'SYCL',
+        rocm: 'ROCm',
+        metal: 'Metal',
+      },
+      channelHeaders: {
+        vulkan: 'Vulkan (Experimental, Intel / AMD / old NVIDIA)',
+      },
       channelEmpty: 'No {channel} has been downloaded yet.',
       channelDownload: 'Download {channel}',
       channelDownloading: 'Downloading {channel}...',
@@ -1477,6 +1524,7 @@ export const enSkeleton: PartialMessages = {
         githubPlaceholder: 'https://github.com/user/repo',
         accelLabel: 'Type',
         accelAuto: 'Auto',
+        accelVulkan: 'Vulkan (Experimental)',
         runTitle: 'This runs the program you picked',
         runBody: 'So that the version number can be read, the chosen llama-server is run once before the add (with --version, with a 10 second limit). Only add a source you trust.',
         runConfirm: 'I understand, continue to the preview',
@@ -2103,6 +2151,19 @@ export const enSkeleton: PartialMessages = {
     retry: 'Retry',
     rollback: 'If this model loaded fine before llama.cpp was updated, the new version {current} may be the problem; you can roll back to {tag} and try again.',
     rollbackButton: 'Roll back to {tag}',
+    switchToCpu: 'Start with CPU build',
+    copyDiagnostics: 'Copy diagnostics',
+    diagnosticsCopied: 'Copied to clipboard, ready to paste into feedback',
+    diagnosticsFailed: 'Failed to get diagnostics',
+    cpuSwitchConfirmTitle: 'Start with CPU build?',
+    cpuSwitchConfirmBody: 'Model "{name}" will use the CPU build from now on; the profile\'s own build choice is removed; a specific GPU device choice is reset to automatic. If the model is running it restarts (CPU is slow).',
+    cpuSwitchConfirmButton: 'Use CPU build',
+    cpuDownloadFirstTitle: 'Download CPU runtime?',
+    cpuDownloadFirstBody: 'No CPU runtime is installed on this computer yet. Do you want to download the CPU build first?',
+    cpuDownloadFirstButton: 'Download CPU build',
+    cpuDownloadStarted: 'Started downloading CPU runtime...',
+    cpuSwitched: 'Switched to the CPU build',
+    cpuDeviceCleared: 'The specific GPU choice was reset to automatic.',
   },
 
   // GitHub mirror chooser and the own-prefix setting (decision 53).

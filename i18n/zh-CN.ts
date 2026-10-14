@@ -1,6 +1,10 @@
 // All user-facing UI strings live here. Components must not hard-code Chinese text.
 // `{name}` placeholders are filled by `fmt()` in server/core/i18n.ts.
 export default {
+  common: {
+    experimental: '实验性',
+    cancel: '取消',
+  },
   desktop: {
     choose: '开始使用，或选择旧版 llama-web 的 data 目录。复制前会保留备份，原目录保持不变；请先退出旧版。',
     importing: '正在备份并复制旧数据，请稍候……',
@@ -490,6 +494,7 @@ export default {
       'bad-thinking-limit': '思考最大上限必须是非负整数，0 表示不限制。',
       'bad-context': '上下文需要填写有效数字；0 表示用模型自带的长度，留空则不传此参数。',
       'runtime-invalid': '所选的 llama.cpp 版本不存在，或不属于这台电脑的平台。',
+      'no-cpu-build': '当前 CPU 版尚未安装，请先在运行库设置中下载。',
       'check-failed': '这些设置现在一定无法启动，没有保存：{detail}',
       'device-invalid': '设备选择不合法：只能选「自动」、「CPU」、一张 GPU，或打开「使用多张 GPU」后选两张以上；切分模式要是 layer / row / tensor，比例的个数要和所选 GPU 一样多，主 GPU 序号要在所选 GPU 范围内。Mac 上不能选设备。',
     },
@@ -915,6 +920,8 @@ export default {
       recommend: '推荐的版本',
       recommendCuda: '用 NVIDIA（CUDA）版',
       recommendCpu: '用 CPU 版',
+      recommendVulkanHint: '，也可以',
+      recommendVulkanLink: '试用实验性的 Vulkan 版',
       chip: '芯片',
       model: '型号',
       macCores: '核心',
@@ -1351,6 +1358,36 @@ export default {
   },
   llamacpp: {
     chooseAcceleration: '请到「设置」页选择运行库加速方式，然后重启 llama-web。',
+    acceleration: {
+      title: '加速方式',
+      hint: '修改后重启 llama-web 生效。自动：检测到能用的 NVIDIA 显卡时用 CUDA；没有时会请你在 CPU 版和 Vulkan 版（实验性）之间选择。',
+      restartNeeded: '重启 llama-web 后生效',
+      active: '当前生效：{accel}',
+      options: {
+        auto: '自动',
+        cuda: 'CUDA',
+        vulkan: 'Vulkan（实验性）',
+        cpu: 'CPU',
+      },
+    },
+    choicePrompt: {
+      title: '选择运行库加速方式',
+      reasons: {
+        'nvidia-missing': '没有检测到 NVIDIA 显卡驱动。你可以使用 CPU 版，或在支持的 Intel / AMD 显卡上试用 Vulkan 版。',
+        'nvidia-failed': '无法读取 NVIDIA 显卡信息（nvidia-smi 运行失败）。如果这是临时故障，可以保持使用 CUDA；也可以选用 CPU 版，或试用 Vulkan 版。',
+        'cuda-unusable': '当前 NVIDIA 显卡或驱动无法运行任何 CUDA 运行库（算力过低或驱动过旧）。请选择使用 CPU 版，或试用 Vulkan 版。',
+      },
+      useCpu: '用 CPU 版',
+      tryVulkan: '试用 Vulkan 版（实验性）',
+      keepCuda: '保持使用 CUDA',
+      savedRestart: '已设置加速方式为 {accel}，重启 llama-web 后生效。',
+    },
+    vulkanConfirm: {
+      title: '下载实验性的 Vulkan 运行库？',
+      body: 'Vulkan 版是实验性功能，尚未在 Intel / AMD 真机硬件上进行完整验证。如果遇到兼容性问题或启动失败，CPU 版本仍作为兜底保障。确认现在下载吗？',
+      confirm: '下载 Vulkan 版',
+      cancel: '取消',
+    },
     title: 'llama.cpp 版本',
     hint: '每天检查一次，自动更新默认关闭；开启后会自动下载并使用新版。保留最近 {n} 个版本，可以随时回退。',
     status: '状态',
@@ -1387,7 +1424,17 @@ export default {
       'store': 'data/settings.json 有错误，没有写入。请先修正：{detail}',
     },
     manage: {
-      channels: { cuda: 'NVIDIA（CUDA）版', cpu: 'CPU 版' },
+      channels: {
+        cuda: 'NVIDIA（CUDA）版',
+        cpu: 'CPU 版',
+        vulkan: 'Vulkan',
+        sycl: 'SYCL',
+        rocm: 'ROCm',
+        metal: 'Metal',
+      },
+      channelHeaders: {
+        vulkan: 'Vulkan（实验性，Intel / AMD / 老 N 卡）',
+      },
       channelEmpty: '还没有下载过{channel}。',
       channelDownload: '下载{channel}',
       channelDownloading: '正在下载{channel}……',
@@ -1436,6 +1483,7 @@ export default {
         githubPlaceholder: 'https://github.com/用户/仓库',
         accelLabel: '类型',
         accelAuto: '自动',
+        accelVulkan: 'Vulkan（实验性）',
         runTitle: '这会运行你选的程序',
         runBody: '为了读出版本号，添加之前会先运行一次所选的 llama-server（带 --version，限时 10 秒）。只添加你信任的来源。',
         runConfirm: '我明白，继续预览',
@@ -2049,6 +2097,19 @@ export default {
     retry: '重试',
     rollback: '如果更新 llama.cpp 之前这个模型能正常加载，可能是新版本 {current} 的问题，可以回退到 {tag} 再试。',
     rollbackButton: '回退到 {tag}',
+    switchToCpu: '改用 CPU 版启动',
+    copyDiagnostics: '复制诊断信息',
+    diagnosticsCopied: '已复制，可贴到反馈里',
+    diagnosticsFailed: '获取诊断信息失败',
+    cpuSwitchConfirmTitle: '改用 CPU 版启动？',
+    cpuSwitchConfirmBody: '模型「{name}」之后都会使用 CPU 版运行库；该方案自己选的运行库会被移除；若指定了某块 GPU，会重置为自动。模型正在运行时会重启，CPU 版会很慢。',
+    cpuSwitchConfirmButton: '改用 CPU 版',
+    cpuDownloadFirstTitle: '下载 CPU 版运行库？',
+    cpuDownloadFirstBody: '这台电脑尚未安装 CPU 版运行库。是否先下载 CPU 版？',
+    cpuDownloadFirstButton: '下载 CPU 版',
+    cpuDownloadStarted: '已开始下载 CPU 版运行库……',
+    cpuSwitched: '已改用 CPU 版',
+    cpuDeviceCleared: '指定的 GPU 已重置为自动。',
   },
   // Updates of llama-web itself (settings card + prompt in the layout).
   // Shown only after the user started an update and github.com could not be reached (never for automatic checks).

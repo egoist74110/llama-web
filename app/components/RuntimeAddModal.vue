@@ -28,7 +28,8 @@ const acceptUnverified = ref(false)
 const error = ref('')
 let cancelledByUser = false
 
-// A computed: the labels are read again when the interface language changes.
+import { isExperimentalAccel } from '~/utils/experimental-backend'
+
 const kinds = computed<Array<{ value: Kind, label: string }>>(() => [
   { value: 'dir', label: s.kinds.dir },
   { value: 'archive', label: s.kinds.archive },
@@ -37,6 +38,7 @@ const kinds = computed<Array<{ value: Kind, label: string }>>(() => [
 const accelItems = computed(() => [
   { label: s.accelAuto, value: 'auto' },
   { label: accelLabel('cuda', false), value: 'cuda' },
+  { label: s.accelVulkan, value: 'vulkan' },
   { label: accelLabel('cpu', false), value: 'cpu' },
 ])
 
@@ -229,8 +231,9 @@ const warningText = (code: string) => (s.warnings as Record<string, string>)[cod
             <dt class="text-muted">
               {{ s.kind }}
             </dt>
-            <dd class="m-0">
-              {{ kindValue }}
+            <dd class="m-0 flex items-center gap-1.5">
+              <span>{{ kindValue }}</span>
+              <ExperimentalBadge v-if="stage && isExperimentalAccel(stage.accel)" />
             </dd>
           </template>
           <dt class="text-muted">

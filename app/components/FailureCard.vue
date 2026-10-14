@@ -33,6 +33,16 @@ const rollback = computed(() => {
   const l = live.value?.llamacpp
   return l?.rollback && !NOT_VERSION.has(props.failure.kind) ? { tag: l.rollback, current: l.current } : null
 })
+const { isExperimental, resolve: resolveAccel, copyDiagnostics, copying: copyingDiag } = useModelRuntimeAccel(
+  () => props.modelId,
+  () => props.profile,
+  () => props.failure.tail,
+)
+onMounted(() => { void resolveAccel() })
+watch(() => [props.modelId, props.profile, props.failure.tail.length].join('|'), () => { void resolveAccel() })
+
+const cpuSwitchOpen = ref(false)
+const modelName = computed(() => live.value?.models.find(m => m.id === props.modelId)?.name ?? props.modelId)
 </script>
 
 <template>
@@ -72,6 +82,21 @@ const rollback = computed(() => {
       <UButton v-if="retryButton" size="sm" icon="i-lucide-rotate-cw" :loading="working" @click="retry(modelId, profile)">
         {{ f.retry }}
       </UButton>
+      <template v-if="isExperimental">
+        <UButton size="sm" color="neutral" variant="outline" icon="i-lucide-copy" :loading="copyingDiag" @click="copyDiagnostics">
+          {{ f.copyDiagnostics }}
+        </UButton>
+        <UButton size="sm" color="neutral" variant="outline" icon="i-lucide-cpu" @click="cpuSwitchOpen = true">
+          {{ f.switchToCpu }}
+        </UButton>
+      </template>
     </div>
+
+    <CpuSwitchConfirmModal
+      v-model:open="cpuSwitchOpen"
+      :model-id="modelId"
+      :profile="profile"
+      :model-name="modelName"
+    />
   </div>
 </template>

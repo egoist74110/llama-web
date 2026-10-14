@@ -1008,7 +1008,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 
   <h3>12-2 · 界面与文案（agy / Sonnet 5.5）</h3>
   <ul class="tasks">
-    <li class="task" data-done="false"><span class="t">运行库页、加速方式选择、添加运行库弹窗加 Vulkan（SYCL / ROCm 只显示标签），一律标「实验性」；第一次下载 Vulkan 前提示实验性；没装 N 卡驱动 / 老 N 卡时的选择提示（CPU / Vulkan）；失败详情的「改用 CPU 版启动」与「复制诊断信息」；设置页的加速方式切换（提示重启生效）；本机卡片的 Intel / AMD 提示改为引导试用；中英文案；README 平台说明</span><span class="when"></span></li>
+    <li class="task" data-done="true"><span class="t">运行库页、加速方式选择、添加运行库弹窗加 Vulkan（SYCL / ROCm 只显示标签），一律标「实验性」；第一次下载 Vulkan 前提示实验性；没装 N 卡驱动 / 老 N 卡时的选择提示（CPU / Vulkan）；失败详情的「改用 CPU 版启动」与「复制诊断信息」；设置页的加速方式切换（提示重启生效）；本机卡片的 Intel / AMD 提示改为引导试用；中英文案；README 平台说明</span><span class="when">2026-10-14</span></li>
   </ul>
 
   <div class="accept"><h3>验收标准</h3>
@@ -1077,6 +1077,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 <section id="changelog">
   <h2>变更记录</h2>
   <table>
+    <tr><td>2026-10-14</td><td>12-2 完成（agy 初版，Sonnet 5.5 修审查意见，gpt-6.1-sol-high 补后端）：运行库与通道的「实验性」标记；设置页加速方式选择（重启生效）与「需要选择」提示（CPU / Vulkan，探测失败时可保持 CUDA）；首次下载 Vulkan 的确认；添加运行库可选 Vulkan；失败详情的「改用 CPU 版」（新接口 <code>POST /api/models/[id]/use-cpu</code>，一次写入：模型用 CPU 版、去掉该方案的运行库覆盖、清掉指定的显卡设备）与「复制诊断信息」；<code>GET /api/models/[id]</code> 新增 <code>effectiveRuntime</code>；本机卡片的 Vulkan 引导；README 平台说明。浏览器只在 Mac 上用模拟数据看了设置页（中英、深色、375 宽），Windows 界面与失败详情未实际查看</td></tr>
     <tr><td>2026-10-14</td><td>12-1 完成（gpt-6.1-sol-high 实现，Claude 审查两轮）：运行库类型加 <code>vulkan</code>（官方）与 <code>sycl</code> / <code>rocm</code>（手动添加）；Windows GPU 通道启动时按决定 61 ② ⑨ 确定，nvidia-smi 区分 found / none / missing / failed；settings v12（<code>currentVulkan</code>）；设置接口可改 <code>llamacpp.acceleration</code>（重启生效，<code>GET /api/settings</code> 的 <code>acceleration</code> 给出 saved / active / gpuChannel / choiceNeeded / reason / restartNeeded）；<code>SHIPPED_CUDA_MAJORS = [12, 13]</code> 统一「CUDA 能否运行」，修正 Kepler 算力 3.5 未被判为过低；Vulkan / SYCL / ROCm 不继承内置 CUDA 默认的 flash-attn 与 K / V 缓存类型；Windows 核显按共享内存；新错误类型 <code>gpu-error</code>；<code>GET /api/models/[id]/diagnostics</code>（去掉路径、用户名与 key），每次启动的日志多一行运行库元数据。没有 Intel / AMD / 老 N 卡真机验证</td></tr>
     <tr><td>2026-10-14</td><td>新增关键决定 61（用户 2026-10-14 确认，推翻 2026-10-03「暂不考虑 AMD / Intel」）：Windows 新增实验性的 Vulkan 官方通道（没有 NVIDIA 时作为 GPU 通道，<code>auto</code> 不选它），手动添加的运行库按 <code>ggml-*</code> 文件识别 CUDA / ROCm / SYCL / Vulkan，Windows 核显按共享内存。决定 37 加推翻说明；坑位「运行库」一行改写；新增阶段 12（12-1 后端、12-2 界面）</td></tr>
     <tr><td>2026-10-13</td><td>决定 60 任务打勾（用户确认验收）：真机只验证了「默认继续运行」；「开关打开时停止」与「llama-server 随壳崩溃被清理」未在真机验证，已在任务说明里写明。补充说明：开关只停 llama-web 拉起的进程，另行启动的 ComfyUI 等不受影响</td></tr>

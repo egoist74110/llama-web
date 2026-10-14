@@ -45,9 +45,11 @@ export function editError(e: unknown, vars: Record<string, string> = {}): never 
   const errors = t.models.errors as Record<string, string>
   if (e instanceof ProfileError || e instanceof FilesError) {
     const status = e.code === 'model-not-found' || e.code === 'profile-not-found' || e.code === 'file-not-found' ? 404
-      : e.code === 'profile-exists' || e.code === 'last-profile' || e.code === 'file-in-use' || e.code === 'in-use' ? 409 : 400
+      : e.code === 'profile-exists' || e.code === 'last-profile' || e.code === 'file-in-use' || e.code === 'in-use' || e.code === 'no-cpu-build' ? 409 : 400
     const detail = e instanceof ProfileError ? (e.detail ?? '') : ''
-    throw createError({ statusCode: status, message: fmt(errors[e.code] ?? e.code, { detail, ...vars }) })
+    throw createError({ statusCode: status, message: fmt(errors[e.code] ?? e.code, { detail, ...vars }),
+      ...(e.code === 'no-cpu-build' ? { data: { code: e.code } } : {}),
+    })
   }
   throw e
 }

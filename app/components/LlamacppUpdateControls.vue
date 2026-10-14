@@ -23,6 +23,19 @@ onMounted(load)
 watch(() => state.value?.llamacpp.runtime, load)
 watch(() => state.value?.llamacpp.secondary, load)
 
+const { doc: settingsDoc } = useSettings()
+const vulkanConfirmOpen = ref(false)
+
+function onDownloadClick() {
+  const isVulkan = settingsDoc.value?.acceleration.active === 'vulkan'
+  const hasVulkan = doc.value?.runtimes?.rows ? doc.value.runtimes.rows.some(r => r.accel === 'vulkan') : (doc.value?.versions.length ?? 0) > 0
+  if (isVulkan && !hasVulkan) {
+    vulkanConfirmOpen.value = true
+    return
+  }
+  void act('download')
+}
+
 async function act(action: 'check' | 'prefs' | 'download', autoUpdate?: boolean) {
   if (busy.value || (action !== 'prefs' && working.value)) return
   busy.value = true
@@ -56,10 +69,12 @@ async function act(action: 'check' | 'prefs' | 'download', autoUpdate?: boolean)
     <div v-if="check?.state === 'checked'" class="flex flex-wrap items-center gap-2 text-sm">
       <span>{{ fmt(check.available ? s.available : s.latest, { tag: check.tag }) }}</span>
       <ULink :to="check.url" target="_blank" class="text-xs text-primary">{{ s.release }}</ULink>
-      <UButton v-if="check.available && !installed" size="xs" :disabled="busy || working" icon="i-lucide-download" @click="act('download')">{{ s.download }}</UButton>
+      <UButton v-if="check.available && !installed" size="xs" :disabled="busy || working" icon="i-lucide-download" @click="onDownloadClick">{{ s.download }}</UButton>
       <span v-else-if="check.available" class="text-xs text-muted">{{ s.installed }}</span>
     </div>
-    <UButton v-else-if="!doc.versions.length && check?.state !== 'checking'" size="xs" :disabled="busy || working" icon="i-lucide-download" @click="act('download')">{{ s.download }}</UButton>
-    <p v-if="check?.state === 'error'" class="text-xs text-error">{{ fmt(s.error, { reason: appUpdateErrorText(check.code) }) }}</p>
+    <UButton v-else-if="!doc.versions.length && check?.state !== 'checking'" size="xs" :disabled="busy || working" icon="i-lucide-download" @click="onDownloadClick">{{ s.download }}</UButton>
+    <p v-if="check?.state === 'error'" class="text-xs text-error">{{ check.detail || fmt(s.error, { reason: appUpdateErrorText(check.code) }) }}</p>
+
+    <VulkanDownloadConfirmModal v-model:open="vulkanConfirmOpen" @confirm="act('download')" />
   </div>
 </template>

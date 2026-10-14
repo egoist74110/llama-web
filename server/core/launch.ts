@@ -118,6 +118,18 @@ export function chooseExe(
   return { exe: llamaServerExe(input.dataDir, input.settings, input.platform, input.target), runtime: { ref: null, label: cur, accel, fallback: null } }
 }
 
+/** The build a saved profile would launch, or null when its executable cannot be resolved. */
+export function effectiveRuntime(model: Pick<ModelConfig, 'runtime'>, profileRuntime: string | null | undefined, input: Parameters<typeof chooseExe>[1]): RuntimeUse | null {
+  try {
+    const { exe, runtime } = chooseExe(requestedRuntime(model, profileRuntime), input)
+    const exists = input.exists ?? input.runtimeEnv?.exists ?? existsSync
+    return exe && exists(exe) ? runtime : null
+  } catch (e) {
+    if (e instanceof RuntimeResolveError) return null
+    throw e
+  }
+}
+
 /** `data/runtime/llama.cpp/<current>/llama-server(.exe)`, or null when no version is set. */
 export function llamaServerExe(dataDir: string, settings: Settings, platform = process.platform, target?: RuntimeTarget): string | null {
   const cur = currentTagFor(settings, { os: target?.os ?? platform }, target?.acceleration ?? 'cuda')

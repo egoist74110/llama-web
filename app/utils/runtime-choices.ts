@@ -5,6 +5,7 @@ import type { DevicesView } from '../../server/core/devices'
 import type { RuntimeRow } from '../../server/core/runtime-manager'
 import { fmt, formatMiB } from '../composables/useFormat'
 import { withEmptyOption, type SelectItemDef } from './select-empty'
+import { isExperimentalAccel } from './experimental-backend'
 
 /** Name of a build type; empty on a Mac (decision 38: no acceleration wording there). */
 export function accelLabel(accel: string, isMac: boolean): string {
@@ -21,7 +22,8 @@ export function runtimeBaseName(r: Pick<RuntimeRow, 'kind' | 'label' | 'tag'>): 
 export function runtimeRowLabel(r: Pick<RuntimeRow, 'kind' | 'label' | 'tag' | 'accel'>, isMac: boolean): string {
   const accel = accelLabel(r.accel, isMac)
   const name = runtimeBaseName(r)
-  return accel ? `${name} · ${accel}` : name
+  const exp = !isMac && isExperimentalAccel(r.accel) ? ` (${t.common.experimental})` : ''
+  return accel ? `${name} · ${accel}${exp}` : name
 }
 
 /**

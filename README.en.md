@@ -126,6 +126,8 @@ Also requires [Bun](https://bun.sh). Downloading llama.cpp uses the official mac
 | macOS (Intel) | No installer, not tested |
 | Linux | Not supported yet |
 
+Windows Intel / AMD / old NVIDIA GPUs: experimental Vulkan build (not verified on real hardware); SYCL / ROCm builds can be added manually.
+
 ## Start
 
 Double-click `start.bat` (Windows) or `start.command` (macOS, double-click in Finder; if it says there is no execute permission the first time, run `chmod +x start.command` first). Both just call the same `scripts/launch.ts`. Closing the window or pressing Ctrl+C stops the service and ends every llama-server.

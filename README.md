@@ -126,6 +126,8 @@ bun install
 | macOS（Intel） | 不提供安装包，未测试 |
 | Linux | 未适配 |
 
+Windows Intel / AMD / 老 NVIDIA 显卡：实验性的 Vulkan 运行库（未在真机硬件验证）；可手动添加 SYCL / ROCm 运行库。
+
 ## 启动
 
 双击 `start.bat`（Windows）或 `start.command`（macOS，Finder 里双击；第一次若提示没有执行权限，先 `chmod +x start.command`）。两者都只是调用同一个 `scripts/launch.ts`。关闭窗口或按 Ctrl+C 即停止服务并结束所有 llama-server。

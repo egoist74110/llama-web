@@ -1,5 +1,12 @@
 # 交接记录
 
+## 2026-10-14 · 12-2 Intel / AMD / 老 N 卡界面（关键决定 61）· 单会话
+- 分工：agy 写初版界面；第一轮修改 agy 空跑（后台测试挂起、无改动），按规则换 Sonnet 5.5 中完成；后端补充由 gpt-6.1-sol-high 完成（`GET /api/models/[id]` 的 `effectiveRuntime`、`POST /api/models/[id]/use-cpu`，一次写入，没装 CPU 版返回 409 `no-cpu-build`）。Claude 审查：去掉前端对 `server/core/runtimes` 的运行时引用、不再在前端猜运行库、「改用 CPU」改为单个接口且不自动启动未运行的模型；自己修了「当前生效」占位符不匹配、自动模式说明与决定 61 不符、英文标题大小写、下拉框无障碍标签。
+- 实际运行：`bun test` 1596 pass / 20 skip / 0 fail；`bun run typecheck` exit 0；`bun run build` exit 0（Sonnet 运行，之后只改了文案与一个属性）。浏览器（Mac、开发服务器、临时数据目录，前端注入模拟的 `acceleration` 数据）：设置页的选择提示、加速方式下拉（自动 / CUDA / CPU / Vulkan（实验性））、中英、深色、375 宽无横向滚动。
+- 没有运行：Windows 上的任何界面；失败详情的「改用 CPU 版」/「复制诊断信息」点击（只有单元测试）；首次下载 Vulkan 的确认弹窗；任何 Intel / AMD / 老 N 卡真机。
+- 顺带看到（未处理，不在本包）：英文界面 375 宽时左侧导航标签互相重叠。
+- 阶段 12 两个工作包都已完成：等用户试用；需要有 Intel / AMD / 老 N 卡的用户实测 Vulkan。
+
 ## 2026-10-14 · 12-1 Intel / AMD / 老 N 卡（实验性 Vulkan，关键决定 61）后端 · 单会话
 - 起因：用户被问能否支持 I 卡 / A 卡。Haiku 5.5 侦察 4 路（运行库获取、显存、启动与文档、外部资料）后，用户推翻 2026-10-03「暂不考虑 AMD / Intel」，并逐条补充决定 61 ⑧–⑪：没装 N 卡驱动 / 老 N 卡请用户选 CPU 或 Vulkan、设置页可改加速方式（重启生效）、不继承 CUDA 默认的 flash-attn 与 KV 量化、失败只给「改用 CPU 版」与「复制诊断信息」（不自动切换、不上传）。
 - 分工（用户定的派模型规则）：后端 gpt-6.1-sol-high 实现，Claude（Opus 5.5）写规格、审查两轮。审查发现并修正：nvidia-smi 偶发失败会让 N 卡用户丢掉 CUDA 通道（改为 found / none / missing / failed 四种，failed 保持 CUDA）；`ccLow` 把 CUDA 11 的 3.5 算进下限（改为 `SHIPPED_CUDA_MAJORS = [12, 13]`）。

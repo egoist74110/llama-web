@@ -2,12 +2,12 @@
 // active profile, checking that configured files still exist. Pure module (no Nitro).
 import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { applyGpuChoice, hasGpuFields, sanitizeGpuChoice } from './gpu-group'
+import { applyGpuChoice, hasGpuFields, requiredDevices, resolveGpuSelection, sanitizeGpuChoice } from './gpu-group'
 import { ArgsSyntaxError, normalizeDevice, PARAM_DEFS, paramValueOk, splitArgs, type ParamOverrides, type ParamValue } from './args'
-import { DEFAULT_PROFILE, type ModelConfig, type ModelsDoc, type Profile } from './config'
+import { currentTagFor, DEFAULT_PROFILE, type ModelConfig, type ModelsDoc, type Profile, type Settings } from './config'
 import { aliasOf } from './importer'
 import { upstreamPrefixClash } from './upstreams'
-import { parseRuntimeRef } from './runtimes'
+import { installedOfficial, officialRef, parseRuntimeRef, selectableHere, type RuntimeEnv } from './runtimes'
 import { resolveFileRef, type ScanEntry } from './scanner'
 import type { FileRef, ModelDir } from './types'
 import { mtpExtraArgs, mtpValid, sameDirectory, type MtpInput, type MtpMode } from './mtp'
@@ -31,7 +31,7 @@ export class EnableError extends Error {
 
 export type ProfileErrorCode =
   | 'model-not-found' | 'profile-not-found' | 'profile-exists' | 'name-invalid' | 'last-profile'
-  | 'bad-overrides' | 'bad-extra-args' | 'template-not-found' | 'in-use' | 'bad-setup' | 'bad-context' | 'bad-thinking-limit' | 'runtime-invalid' | 'device-invalid' | 'check-failed'
+  | 'bad-overrides' | 'bad-extra-args' | 'template-not-found' | 'in-use' | 'bad-setup' | 'bad-context' | 'bad-thinking-limit' | 'runtime-invalid' | 'device-invalid' | 'check-failed' | 'no-cpu-build'
 
 export class ProfileError extends Error {
   constructor(public code: ProfileErrorCode, message: string = code, public detail?: string) {
@@ -381,6 +381,28 @@ export function setModelRuntime(doc: ModelsDoc, modelId: string, ref: string | n
   if (ref && runtimeOk && !runtimeOk(ref)) throw new ProfileError('runtime-invalid')
   if (ref) model.runtime = ref
   else delete model.runtime
+}
+
+/** Switch one profile path to the installed current CPU build in the caller's models transaction. */
+export function useCpuBuild(doc: ModelsDoc, modelId: string, profileName: string | undefined, settings: Settings, env: RuntimeEnv): { runtime: string, deviceCleared: boolean } {
+  const model = findModel(doc, modelId)
+  const name = profileName === undefined ? model.activeProfile : profileName
+  if (typeof name !== 'string' || !Object.hasOwn(model.profiles, name)) throw new ProfileError('profile-not-found')
+  const profile = model.profiles[name]!
+  const tag = currentTagFor(settings, env.target, 'cpu')
+  const runtime = officialRef('cpu', tag)
+  // Do not fall back to an older CPU version, or mistake a Mac's current Metal tag for a CPU build.
+  if (!selectableHere(runtime, env) || !installedOfficial(env, 'cpu').includes(tag)) throw new ProfileError('no-cpu-build')
+  const deviceCleared = requiredDevices(resolveGpuSelection(profile, model)).length > 0
+  model.runtime = runtime
+  delete profile.runtime
+  if (deviceCleared) {
+    const empty = sanitizeGpuChoice(null)!
+    for (const layer of [profile, model]) {
+      if (requiredDevices(resolveGpuSelection(layer)).length) applyGpuChoice(layer, empty)
+    }
+  }
+  return { runtime, deviceCleared }
 }
 
 /** The model's own device choice, single or GPU group (profiles can still choose their own); empty follows the global default. */

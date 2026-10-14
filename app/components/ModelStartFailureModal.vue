@@ -18,6 +18,15 @@ const title = computed(() => display.value?.name ? fmt(s.title, { name: display.
 const editTarget = ref<{ modelId: string, profile?: string } | null>(null)
 const editing = ref(false)
 
+const f = t.failure
+const { isExperimental, resolve: resolveAccel, copyDiagnostics, copying: copyingDiag } = useModelRuntimeAccel(
+  () => display.value?.modelId,
+  () => display.value?.profile,
+)
+watch(display, () => { void resolveAccel() }, { immediate: true })
+
+const cpuSwitchOpen = ref(false)
+
 async function recover() {
   const n = notice.value
   const v = view.value
@@ -59,10 +68,22 @@ async function logs() {
     <template #footer>
       <div class="flex w-full flex-wrap justify-end gap-2">
         <UButton size="sm" color="neutral" variant="ghost" @click="feedback.dismiss()">{{ s.close }}</UButton>
+        <template v-if="isExperimental && display?.modelId">
+          <UButton size="sm" color="neutral" variant="outline" icon="i-lucide-copy" :loading="copyingDiag" @click="copyDiagnostics">{{ f.copyDiagnostics }}</UButton>
+          <UButton size="sm" color="neutral" variant="outline" icon="i-lucide-cpu" @click="cpuSwitchOpen = true">{{ f.switchToCpu }}</UButton>
+        </template>
         <UButton v-if="view && view.recovery.to !== view.logTo" size="sm" color="neutral" variant="outline" @click="logs">{{ s.logs }}</UButton>
         <UButton v-if="view" size="sm" @click="recover">{{ view.recovery.label }}</UButton>
       </div>
     </template>
   </UModal>
   <ModelEditor v-if="editTarget" :key="`${editTarget.modelId}:${editTarget.profile}`" v-model:open="editing" :model-id="editTarget.modelId" :initial-profile="editTarget.profile" initial-tab="params" />
+  <CpuSwitchConfirmModal
+    v-if="display?.modelId"
+    v-model:open="cpuSwitchOpen"
+    :model-id="display.modelId"
+    :profile="display.profile"
+    :model-name="display.name"
+    @switched="feedback.dismiss()"
+  />
 </template>

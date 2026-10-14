@@ -50,6 +50,16 @@ const driver = computed(() => {
   return n.maxCuda ? fmt(s.driverValue, { driver: n.driver, cuda: n.maxCuda }) : fmt(s.driverOnly, { driver: n.driver })
 })
 const recommend = computed(() => (info.value?.recommend ? (info.value.recommend.acceleration === 'cuda' ? s.recommendCuda : s.recommendCpu) : ''))
+const canOfferVulkan = computed(() => !info.value?.mac && info.value?.recommend?.acceleration === 'cpu')
+const vulkanHintParts = computed(() => {
+  const [before, after] = s.recommendVulkanHint.split('{link}')
+  return { before: before ?? '', after: after ?? '' }
+})
+
+function scrollToLlama() {
+  document.getElementById('s-llama')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
 const mem = computed(() => (info.value ? fmt(s.memoryValue, { total: mib(info.value.memory.totalMiB), free: mib(info.value.memory.freeMiB) }) : ''))
 
 function warningText(w: SystemInfo['warnings'][number]): string {
@@ -170,8 +180,13 @@ const detectedAt = computed(() => (info.value ? fmt(s.detectedAt, { time: format
             <dt class="text-muted">
               {{ s.recommend }}
             </dt>
-            <dd class="m-0">
+            <dd class="m-0 flex flex-wrap items-center gap-x-2 gap-y-1">
               <span class="lw-chip lw-chip-accent">{{ recommend }}</span>
+              <span v-if="canOfferVulkan" class="text-xs text-muted">
+                {{ vulkanHintParts.before }}
+                <a href="#s-llama" class="text-primary hover:underline" @click.prevent="scrollToLlama">{{ s.recommendVulkanLink }}</a>
+                {{ vulkanHintParts.after }}
+              </span>
             </dd>
           </template>
         </template>
