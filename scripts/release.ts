@@ -292,7 +292,9 @@ async function main(): Promise<number> {
   if (staged.split('\n').some(f => f && f !== 'package.json' && !f.startsWith('docs/release-notes/'))) {
     fail(`Unexpected staged files:\n${staged}`)
   }
-  if (await runLive(['git', 'commit', '-m', `release: prepare ${tag}`]) !== 0) fail('git commit failed')
+  // Re-running a version whose bump and notes are already committed (e.g. after a failed build) has nothing to commit.
+  if (!staged) log(`nothing to commit for ${tag}; building the current commit`)
+  else if (await runLive(['git', 'commit', '-m', `release: prepare ${tag}`]) !== 0) fail('git commit failed')
   if (await runLive(['git', 'push', 'origin', 'main']) !== 0) fail('git push failed')
   const sha = git('rev-parse', 'HEAD')
 
