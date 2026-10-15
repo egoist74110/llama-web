@@ -16,7 +16,7 @@ import {
   clearLeftovers, installBuild, installedDir, listInstalled, resolveLatest, RuntimeError, versionsDir,
   type InstallOptions, type NetOptions, type RuntimeStatus,
 } from './llamacpp'
-import { NetworkAccess, DEFAULT_NETWORK, type DigestSource } from './net'
+import { NetworkAccess, STANDALONE_NETWORK, type DigestSource } from './net'
 import { mirrorById, mirrorHelps, type Mirror } from './mirrors'
 
 const TAG_RE = /^b\d+$/
@@ -121,7 +121,7 @@ export class Updater {
   private timer: ReturnType<typeof setTimeout> | null = null
 
   constructor(private readonly opts: UpdaterOptions) {
-    this.network = opts.network ?? new NetworkAccess({ settings: () => DEFAULT_NETWORK, customMirror: opts.customMirror, fetch: opts.fetch })
+    this.network = opts.network ?? new NetworkAccess({ settings: () => STANDALONE_NETWORK, customMirror: opts.customMirror, fetch: opts.fetch })
     this.installed = listInstalled(opts.dataDir, opts.platform, opts.target)
     this.checks = new UpdateCheckStore(opts.dataDir)
     this.checkKey = `llamacpp:${opts.target ? targetKey(opts.target) : opts.platform ?? process.platform}`

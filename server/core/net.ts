@@ -7,6 +7,8 @@ import { MIRRORS, customMirror, mirrorById, mirrorFetch, type Mirror } from './m
 export type NetworkSettings = Settings['network']
 export type DigestSource = 'github' | 'mirror'
 export const DEFAULT_NETWORK: NetworkSettings = { proxy: { mode: 'system', url: '' }, downloadSource: 'ask', mirror: '' }
+/** Fallback when no NetworkAccess is injected (tests, standalone use): never runs system proxy commands. The service always injects the user's settings. */
+export const STANDALONE_NETWORK: NetworkSettings = { ...DEFAULT_NETWORK, proxy: { mode: 'off', url: '' } }
 
 /** Bun 1.3 supports HTTP(S), not SOCKS. Never include the rejected value in an error. */
 export function normalizeProxyUrl(raw: unknown): string | null {

@@ -335,7 +335,10 @@ describe('local executable', () => {
     const { inst, registry } = installer({ runVersion: async () => { probes++; return VERSION } })
     await expect(inst.preview({ kind: 'exe', path: src })).rejects.toMatchObject({ code: 'bad-source' })
     await expect(inst.preview({ kind: 'exe', path: join(src, 'missing.exe') })).rejects.toMatchObject({ code: 'not-found' })
-    for (const name of ['bad?.exe', 'bad.exe ', 'bad.exe.', 'a'.repeat(101)]) {
+    // Windows cannot create '?' and silently drops a trailing space or dot, so only the names the
+    // host can create are tried as files here; the name rule itself is covered in runtimes.test.ts.
+    const unsafe = process.platform === 'win32' ? ['a'.repeat(101)] : ['bad?.exe', 'bad.exe ', 'bad.exe.', 'a'.repeat(101)]
+    for (const name of unsafe) {
       const file = join(src, name)
       writeFileSync(file, peX64())
       await expect(inst.preview({ kind: 'exe', path: file })).rejects.toMatchObject({ code: 'bad-source' })

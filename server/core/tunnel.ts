@@ -1,4 +1,4 @@
-import { NetworkAccess, DEFAULT_NETWORK, officialFirst, type DigestSource } from './net'
+import { NetworkAccess, STANDALONE_NETWORK, officialFirst, type DigestSource } from './net'
 import { fetchExpandedAssets, fetchReleasesAtom, fillAssetDigests } from './github-feed'
 // Cloudflare tunnel hosting (plan 阶段 4, 4-4): find (or download) cloudflared, run
 // `cloudflared tunnel run` with the tunnel token and watch it. Pure module (no Nitro).
@@ -221,7 +221,7 @@ export async function prepareCloudflared(opts: PrepareOptions): Promise<Prepared
   }
   if (sizeAndTime(dest)) return { exe: dest, source: 'downloaded' }
 
-  const fetchFn = (opts.network ?? new NetworkAccess({ settings: () => DEFAULT_NETWORK, fetch: opts.fetch })).source(opts.mirror)
+  const fetchFn = (opts.network ?? new NetworkAccess({ settings: () => STANDALONE_NETWORK, fetch: opts.fetch })).source(opts.mirror)
   // Unique per call: two overlapping preparations never share (or delete) each other's file.
   const work = `${dest}.${process.pid}.${++workSeq}.dl`
   const unpack = `${work}.out`

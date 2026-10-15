@@ -17,7 +17,7 @@ import {
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { checkExtractedTree, extractArchive, safeArchivePath, type ArchiveOptions } from './archive'
 import { cleanupParts, download, getBody, RuntimeError, resumableBytes, serverExeName, sha256File, versionsDir, type FetchFn, type ReleaseAsset } from './llamacpp'
-import { NetworkAccess, DEFAULT_NETWORK, officialFirst, type DigestSource } from './net'
+import { NetworkAccess, STANDALONE_NETWORK, officialFirst, type DigestSource } from './net'
 import { fetchExpandedAssets, fillAssetDigests } from './github-feed'
 import type { RuntimeTarget } from './platform'
 import { killTree } from './runner'
@@ -266,7 +266,7 @@ export class RuntimeInstaller {
   private abort = new AbortController()
 
   constructor(private readonly opts: InstallerOptions) {
-    this.network = opts.network ?? new NetworkAccess({ settings: () => DEFAULT_NETWORK, fetch: opts.fetch })
+    this.network = opts.network ?? new NetworkAccess({ settings: () => STANDALONE_NETWORK, fetch: opts.fetch })
     this.limits = { ...ADD_LIMITS, ...opts.limits }
   }
 

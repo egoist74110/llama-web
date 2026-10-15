@@ -10,7 +10,7 @@ import { join } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import { cleanupParts, download, getBody, RuntimeError, type FetchFn, type ReleaseAsset } from './llamacpp'
 import { apiFallbackCode, fetchExpandedAssets, fetchReleasesAtom, fillAssetDigests } from './github-feed'
-import { NetworkAccess, DEFAULT_NETWORK, canMirror, officialFirst, type DigestSource } from './net'
+import { NetworkAccess, STANDALONE_NETWORK, canMirror, officialFirst, type DigestSource } from './net'
 import { mirrorById, mirrorHelps, type Mirror } from './mirrors'
 import { JsonStore } from './store'
 import { UpdateCheckStore } from './update-check'
@@ -235,7 +235,7 @@ export class AppUpdater {
     this.feed = opts.feed ?? official
     const releasePrefix = `https://github.com/${opts.repo}/releases/download/`
     this.assetOk = this.feed === official ? url => url.startsWith(releasePrefix) : isLoopback
-    this.network = opts.network ?? new NetworkAccess({ settings: () => DEFAULT_NETWORK, customMirror: opts.customMirror, fetch: opts.fetch })
+    this.network = opts.network ?? new NetworkAccess({ settings: () => STANDALONE_NETWORK, customMirror: opts.customMirror, fetch: opts.fetch })
     this.now = opts.now ?? Date.now
     this.checks = new UpdateCheckStore(opts.dataDir)
     this.checkKey = `app:${this.feed}`

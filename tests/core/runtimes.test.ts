@@ -87,7 +87,7 @@ describe('registry file', () => {
     const good = entry('r1', { source: { kind: 'exe', from: 'X:\\build\\llama-kvmem-server.exe' }, exe: 'llama-kvmem-server.exe' })
     const doc = normalizeRuntimes({ version: 1, entries: [good] })
     expect(doc).toEqual({ version: 1, entries: [good] })
-    for (const exe of ['../x', 'a/b', 'a\\b', 'C:x', '', '..', 'a\n', 'a\u0000', 'a'.repeat(101)]) {
+    for (const exe of ['../x', 'a/b', 'a\\b', 'C:x', '', '..', 'a\n', 'a\u0000', 'a'.repeat(101), 'bad?.exe', 'bad.exe ', 'bad.exe.']) {
       expect(isSafeExeName(exe)).toBe(false)
       const normalized = normalizeRuntimes({ version: 1, entries: [entry('r1', { exe })] }).entries[0]!
       expect(normalized.id).toBe('r1')

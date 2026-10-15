@@ -11,7 +11,7 @@ import { pipeline } from 'node:stream/promises'
 import { checkExtractedTree, extractArchive, type ArchiveOptions } from './archive'
 import { pickCuda, type CudaLimits } from './cuda'
 import { freeBytes, neededBytes } from './disk-space'
-import { DEFAULT_NETWORK, NetworkAccess, canMirror, officialFirst, sourceFailed, type DigestSource } from './net'
+import { STANDALONE_NETWORK, NetworkAccess, canMirror, officialFirst, sourceFailed, type DigestSource } from './net'
 import { apiFallbackCode, fetchExpandedAssets, fillAssetDigests } from './github-feed'
 import { legacyWindows, targetKey, type RuntimeTarget } from './platform'
 
@@ -459,7 +459,7 @@ export function clearLeftovers(dataDir: string, target?: RuntimeTarget): void {
  */
 export async function installBuild(build: LatestBuild, opts: InstallOptions): Promise<string> {
   const platform = opts.target?.os ?? opts.platform ?? process.platform
-  const fetchFn = opts.fetch ?? (opts.network ?? new NetworkAccess({ settings: () => DEFAULT_NETWORK })).source()
+  const fetchFn = opts.fetch ?? (opts.network ?? new NetworkAccess({ settings: () => STANDALONE_NETWORK })).source()
   const extract = opts.extract ?? extractZip
   const exe = serverExeName(platform)
   if (!TAG_RE.test(build.tag)) throw new RuntimeError('bad-tag', 'Invalid build tag')
@@ -498,7 +498,7 @@ export async function installBuild(build: LatestBuild, opts: InstallOptions): Pr
 export async function installLatest(opts: InstallOptions): Promise<string> {
   clearLeftovers(opts.dataDir, opts.target)
   opts.onStep?.('resolve', '')
-  const fetchFn = opts.fetch ?? (opts.network ?? new NetworkAccess({ settings: () => DEFAULT_NETWORK })).source()
+  const fetchFn = opts.fetch ?? (opts.network ?? new NetworkAccess({ settings: () => STANDALONE_NETWORK })).source()
   const latest = await resolveLatest(fetchFn, opts.cudaRuntime, opts.platform ?? process.platform, opts.net, opts.target, opts.cudaLimits)
   return installBuild(latest, { ...opts, fetch: fetchFn })
 }
