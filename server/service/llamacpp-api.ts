@@ -36,7 +36,7 @@ export function runtimeError(e: unknown): never {
   if (e instanceof AddError) {
     const status = e.code === 'not-found' ? 404 : e.code === 'network' ? 502
       : ['busy', 'stale-stage', 'needs-digest-confirm', 'cancelled'].includes(e.code) ? 409 : 400
-    throw createError({ statusCode: status, message: fmt((msgs.add as Record<string, string>)[e.code] ?? e.code, { detail: e.detail ?? '' }) })
+    throw createError({ statusCode: status, message: fmt((msgs.add as Record<string, string>)[e.code] ?? e.code, { detail: e.detail ?? '' }), ...(e.digestSource ? { data: { digestSource: e.digestSource } } : {}) })
   }
   if (e instanceof DeleteError) {
     const status = e.code === 'not-found' ? 404 : e.code === 'bad-ref' ? 400 : e.code === 'failed' ? 500 : 409

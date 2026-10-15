@@ -13,11 +13,14 @@ export function useLlamacpp() {
   const pending = useState<string | null>('llamacpp-pending', () => null)
   /** Channel of that version when it is not the main one (the other channel on Windows). */
   const pendingChannel = useState<string | null>('llamacpp-pending-channel', () => null)
+  /** Display name of that version (a hand-added build's label instead of `custom:<id>`). */
+  const pendingLabel = useState<string | null>('llamacpp-pending-label', () => null)
   const { bump } = useRuntimeDoc()
   const busy = useState<boolean>('llamacpp-busy', () => false)
 
-  const ask = (tag: string, channel?: string) => {
+  const ask = (tag: string, channel?: string, label?: string) => {
     pendingChannel.value = channel ?? null
+    pendingLabel.value = label ?? null
     pending.value = tag
   }
 
@@ -28,7 +31,7 @@ export function useLlamacpp() {
     try {
       // The live snapshot picks up the new current version by itself.
       await $fetch('/api/llamacpp/current', { method: 'POST', body: { tag, ...(pendingChannel.value ? { channel: pendingChannel.value } : {}) } })
-      toast.add({ title: fmt(t.llamacpp.switched, { tag }), color: 'success', icon: 'i-lucide-check' })
+      toast.add({ title: fmt(t.llamacpp.switched, { tag: pendingLabel.value ?? tag }), color: 'success', icon: 'i-lucide-check' })
       pending.value = null
       bump()
     } catch (e) {
@@ -38,5 +41,5 @@ export function useLlamacpp() {
     }
   }
 
-  return { pending, busy, ask, confirm }
+  return { pending, pendingLabel, busy, ask, confirm }
 }

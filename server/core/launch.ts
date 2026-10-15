@@ -106,15 +106,18 @@ export function chosenDevice(profileDevice: string | null | undefined, model: Gp
 export function chooseExe(
   ref: string, input: { dataDir: string, settings: Settings, platform?: NodeJS.Platform, target?: RuntimeTarget, runtimeEnv?: RuntimeEnv, exists?: (p: string) => boolean },
 ): { exe: string | null, runtime: RuntimeUse } {
-  if (ref && input.runtimeEnv) {
-    const env = { ...input.runtimeEnv, exists: input.runtimeEnv.exists ?? input.exists }
+  const globalAccel = input.target?.acceleration ?? 'cuda'
+  const cur = currentTagFor(input.settings, { os: input.target?.os ?? input.platform ?? process.platform }, globalAccel)
+  const globalCustom = !ref && cur.startsWith('custom:')
+  if ((ref || globalCustom) && input.runtimeEnv) {
+    if (globalCustom) ref = cur
+    const env = { ...input.runtimeEnv, ...(globalCustom ? { fallbackChannel: globalAccel } : {}), exists: input.runtimeEnv.exists ?? input.exists }
     const r = resolveRuntimeRef(ref, env)
     const p = parseRuntimeRef(r.ref)
     const accel = p?.kind === 'official' ? p.accel : env.entries.find(e => p?.kind === 'custom' && e.id === p.id)?.accel ?? env.target.acceleration
     return { exe: r.exe, runtime: { ref: r.ref, label: r.label, accel, fallback: r.fallback } }
   }
   const accel = input.target?.acceleration ?? 'cuda'
-  const cur = currentTagFor(input.settings, { os: input.target?.os ?? input.platform ?? process.platform }, accel)
   return { exe: llamaServerExe(input.dataDir, input.settings, input.platform, input.target), runtime: { ref: null, label: cur, accel, fallback: null } }
 }
 
@@ -133,7 +136,7 @@ export function effectiveRuntime(model: Pick<ModelConfig, 'runtime'>, profileRun
 /** `data/runtime/llama.cpp/<current>/llama-server(.exe)`, or null when no version is set. */
 export function llamaServerExe(dataDir: string, settings: Settings, platform = process.platform, target?: RuntimeTarget): string | null {
   const cur = currentTagFor(settings, { os: target?.os ?? platform }, target?.acceleration ?? 'cuda')
-  if (!cur || /[\\/]|\.\./.test(cur)) return null
+  if (!/^b\d+$/.test(cur)) return null
   return join(installedDir(dataDir, cur, target), platform === 'win32' ? 'llama-server.exe' : 'llama-server')
 }
 

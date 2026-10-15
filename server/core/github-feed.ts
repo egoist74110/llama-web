@@ -97,3 +97,15 @@ export async function fetchExpandedAssets(fetchFn: FetchFn, repo: string, tag: s
 
 /** True when the API failure is one that the github.com pages can work around. */
 export const apiFallbackCode = (e: unknown): boolean => e instanceof RuntimeError && (e.code === 'rate-limited' || e.code === 'http')
+
+/** Fill missing API digests from the official expanded-assets page before a mirror is considered. */
+export async function fillAssetDigests(fetchFn: FetchFn, repo: string, tag: string, assets: ReleaseAsset[], net: NetOptions = {}): Promise<ReleaseAsset[]> {
+  if (assets.every(a => /^sha256:[0-9a-f]{64}$/i.test(a.digest ?? ''))) return assets
+  try {
+    const web = await fetchExpandedAssets(fetchFn, repo, tag, net)
+    return assets.map(a => {
+      const extra = web.find(b => b.name === a.name)
+      return /^sha256:[0-9a-f]{64}$/i.test(a.digest ?? '') || !extra ? a : { ...a, digest: extra.digest }
+    })
+  } catch { return assets } // Unpublished digests stay unpublished; callers decide whether to refuse.
+}

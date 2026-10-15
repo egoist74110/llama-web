@@ -15,8 +15,15 @@ export default defineEventHandler(async (event) => {
     if (b.accel !== undefined && b.accel !== 'cuda' && b.accel !== 'cpu' && b.accel !== 'vulkan') throw bad()
     input = { kind: 'github', url: b.url, ...(b.accel ? { accel: b.accel } : {}) }
   } else throw bad()
+  if (input.kind === 'archive' && b.cudartPath !== undefined) {
+    if (typeof b.cudartPath !== 'string' || !b.cudartPath || b.cudartPath.length >= 1024) throw bad()
+    input.cudartPath = b.cudartPath
+  }
+  if (input.kind === 'github' && typeof b.mirror === 'string') input.mirror = b.mirror
   try {
-    return await getContext().runtimeAdd.preview(input)
+    const ctx = getContext()
+    if (b?.remember === true) ctx.updateSettings(s => { s.network.downloadSource = 'auto' })
+    return await ctx.runtimeAdd.preview(input)
   } catch (e) {
     runtimeError(e)
   }

@@ -137,7 +137,7 @@ describe('prepareCloudflared', () => {
     const r = await prepareCloudflared({ dataDir: dir, env: noEnv, platform: 'win32', arch: 'x64', fetch: rel.fetchFn, exists: () => false, onStep: s => steps.push(s) })
     expect(r.source).toBe('downloaded')
     expect(readFileSync(r.exe, 'utf8')).toBe('OFFICIAL-BINARY')
-    expect(steps).toEqual(['find', 'download'])
+    expect(steps).toEqual(['find', 'download', 'download'])
     // Already there: no second download.
     const before = rel.calls.length
     expect((await prepareCloudflared({ dataDir: dir, env: noEnv, platform: 'win32', arch: 'x64', fetch: rel.fetchFn, exists: () => false })).source).toBe('downloaded')

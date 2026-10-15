@@ -3,7 +3,8 @@
 import { t } from '../composables/useLocale'
 
 const s = t.llamacpp
-const { pending, busy, confirm } = useLlamacpp()
+const { pending, pendingLabel, busy, confirm } = useLlamacpp()
+const name = computed(() => pendingLabel.value ?? pending.value ?? '')
 const open = computed({
   get: () => pending.value !== null,
   set: (v: boolean) => { if (!v) pending.value = null },
@@ -11,7 +12,7 @@ const open = computed({
 </script>
 
 <template>
-  <UModal v-model:open="open" :title="pending ? fmt(s.confirmTitle, { tag: pending }) : ''" :description="pending ? fmt(s.confirmBody, { tag: pending }) : ''">
+  <UModal v-model:open="open" :title="pending ? fmt(s.confirmTitle, { tag: name }) : ''" :description="pending ? fmt(s.confirmBody, { tag: name }) : ''">
     <template #footer>
       <div class="flex w-full justify-end gap-2">
         <UButton size="sm" color="neutral" variant="ghost" @click="pending = null">

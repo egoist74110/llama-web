@@ -35,6 +35,7 @@ export function describeSettings(): SettingsDoc {
     ...(hasCpuChannel(ctx.platform) ? { defaultsCpu: s.defaultsCpu, builtinDefaultsCpu: DEFAULT_CPU_DEFAULTS } : {}),
     image: s.preprocess.image,
     mirror: s.mirror,
+    network: s.network,
     ui: s.ui,
     acceleration: describeAcceleration(s.llamacpp.acceleration, ctx.platform, ctx.runtimeSelection),
     server: {

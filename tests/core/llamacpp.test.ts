@@ -57,7 +57,7 @@ test('digest mismatch: nothing installed, work directory removed', async () => {
 test('missing digest is refused', async () => {
   const f = fakeGithub({ digests: { 'cudart-llama-bin-win-cuda-13.3-x64.zip': null } })
   await expect(installLatest(opts(f))).rejects.toMatchObject({ code: 'no-digest' })
-  expect(readdirSync(versionsDir(data))).toEqual([])
+  expect(listInstalled(data, 'win32')).toEqual([])
 })
 
 test('missing asset, network failure, bad tag and extract failure are reported by code', async () => {

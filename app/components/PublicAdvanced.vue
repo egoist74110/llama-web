@@ -149,6 +149,7 @@ const setPort = (v: string | number | undefined) => { port.value = v == null ? '
 
     <p class="pt-3 text-xs text-muted">
       {{ s.cloudflared }}：{{ exeText }}
+      <DigestSourceNote :source="state?.tunnel.cloudflared?.digestSource" class="ml-2" />
     </p>
   </div>
 </template>

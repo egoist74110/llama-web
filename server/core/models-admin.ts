@@ -390,9 +390,9 @@ export function useCpuBuild(doc: ModelsDoc, modelId: string, profileName: string
   if (typeof name !== 'string' || !Object.hasOwn(model.profiles, name)) throw new ProfileError('profile-not-found')
   const profile = model.profiles[name]!
   const tag = currentTagFor(settings, env.target, 'cpu')
-  const runtime = officialRef('cpu', tag)
+  const runtime = tag.startsWith('custom:') ? tag : officialRef('cpu', tag)
   // Do not fall back to an older CPU version, or mistake a Mac's current Metal tag for a CPU build.
-  if (!selectableHere(runtime, env) || !installedOfficial(env, 'cpu').includes(tag)) throw new ProfileError('no-cpu-build')
+  if (!selectableHere(runtime, env) || (tag.startsWith('custom:') ? !env.entries.some(e => `custom:${e.id}` === tag && e.accel === 'cpu') : !installedOfficial(env, 'cpu').includes(tag))) throw new ProfileError('no-cpu-build')
   const deviceCleared = requiredDevices(resolveGpuSelection(profile, model)).length > 0
   model.runtime = runtime
   delete profile.runtime

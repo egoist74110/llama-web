@@ -35,8 +35,8 @@ test('a download that would not leave three times its size is refused before any
 
 test('enough room, unknown room or unknown size: the download goes on', async () => {
   const fetchFn = (async () => new Response('hello')) as typeof fetch
-  const asset = { name: 'a.zip', browser_download_url: 'https://github.com/x/a.zip', size: 100, digest: null }
-  await download(fetchFn, asset, join(dir, 'ok.zip'), {}, true, () => 300)
+  const asset = { name: 'a.zip', browser_download_url: 'https://github.com/x/a.zip', size: 5, digest: null }
+  await download(fetchFn, asset, join(dir, 'ok.zip'), {}, true, () => 15)
   expect(readFileSync(join(dir, 'ok.zip'), 'utf8')).toBe('hello')
   await download(fetchFn, asset, join(dir, 'unknown.zip'), {}, true, () => null)
   await download(fetchFn, { ...asset, size: undefined }, join(dir, 'nosize.zip'), {}, true, () => 1)

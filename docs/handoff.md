@@ -1,5 +1,14 @@
 # 交接记录
 
+## 2026-10-15 · 阶段 13 大陆网络与本地导入（关键决定 63）· 单会话（13-1 + 13-2，用户要求一起做）
+- 起因：大陆用户反馈「手动导入的 llama.cpp 无法切换使用」，并要求下载避免被墙、本地导入要可靠。Haiku 5.5 侦察两路：导入不是坏了，是缺功能（设置页手动添加的行没有「使用」，全局当前版本只接受官方版本号，决定 35 只允许按模型 / 方案选）；下载侧只有决定 53 的 GitHub 镜像弹窗，没有代理、续传、重试，cloudflared 与 GitHub 手动添加没有镜像。用户确认：允许设为全局（改决定 35），下载可靠性一起做。
+- 分工：后端 gpt-6.1-sol-high（`server/core/net.ts` 新模块：系统 / 手动代理、下载来源 询问 / 自动 / 固定镜像、镜像测速排序、官方优先的校验值；`llamacpp.ts` 下载改为 `.part` + 旁车文件续传、3 次重试；settings v13；`custom:<id>` 全局当前）；界面 Opus 5.5 中（`SettingsNetwork.vue` 取代 `SettingsMirror.vue`、`DigestSourceNote.vue`、运行库行「使用」、失败时复制地址 / 从本地导入、添加弹窗 cudart 与「设为当前版本」）；Claude 写规格、审查、核实。
+- 实际运行：`bun test` 1651 pass / 20 skip / 0 fail（两次，后端后与界面后）；`bun run typecheck` exit 0；`git diff --check` 通过。用 Bun 直接调 `NetworkAccess.direct`：手动代理指向没人监听的端口 → 请求失败，关闭代理 → 200，说明代理在 Bun 下生效。浏览器（Mac、开发服务器、临时数据目录）：「网络」卡片 375 宽无横向滚动；界面代理（Opus）另走了选择程序添加 → 设为当前 → 切回官方版本。
+- 注意：`bun run dev` 跑在 Node 上，Node 的 fetch 忽略 `proxy` 选项，所以开发模式下代理设置不生效；构建产物 / 桌面版（Bun）生效。Bun 1.3 不支持 SOCKS5，只接受 http / https 代理。
+- 没有运行：大陆真实网络、Windows 上的任何验证（注册表代理读取只有单元测试）、真实镜像下载与断点续传（只有假 fetch 的测试）、下载失败区块 / cudart 输入框 / 镜像弹窗「以后自动使用镜像」/「校验值来自镜像」提示在浏览器里的实际显示（因此 13-2 的两条任务没打勾）、`bun run build`。
+- 已知缺口：询问模式下 cloudflared 与 GitHub 手动添加失败时没有镜像弹窗（状态里没有 `offer`，自动 / 固定镜像模式下会走镜像）；事件日志的 `runtime` / `runtime-fallback` 仍显示 `custom:<id>` 而不是名称；首次完全断网且没有缓存的元数据时，失败区块只有发布页地址、没有具体文件名；`auto` 模式直连被墙时要等直连超时（每个请求 30 秒）才改走镜像。设置页约 1024 宽时左侧目录与卡片重叠（原有问题，界面代理顺带看到）。
+- 下一步：用户在大陆网络下真机试用（代理 / 自动镜像 / 失败后从本地导入）；需要的话再补询问模式下 cloudflared 的镜像弹窗和事件里的名称。
+
 ## 2026-10-14 · 12-3 手动添加：选择程序（关键决定 62）+ 版本 1.2.1 · 单会话
 - 起因：用户想试用 KVMem 分支（服务端叫 `llama-kvmem-server.exe`）。Haiku 5.5 侦察：KVMem 的 GGUF 版只有 Windows CUDA（RTX 20 / V100），RTX 30+ 是另一种引擎（.ninfer），没有 Mac 版；llama-web 原来写死 `llama-server` 文件名，且要求 `--version` 有版本号。用户（在 Mac 上）要求：让用户自己选程序文件，说明它大概长什么样，点击弹出用户目录，能启动就行，版本号 1.2.1。
 - 分工：后端 gpt-6.1-sol-high（新来源 `exe`、`runtimes.json` 可选字段 `exe` + 安全文件名校验、`POST /api/fs/pick-file`、测试）；界面 Sonnet 5.5 中（「选择程序」标签、`usePickFile`、四个标签在窄屏铺满）；Claude 写规格、审查，自己改了 Mac 占位符（不用个人路径样式）和对话框说明，写 plan / README / 发布说明。

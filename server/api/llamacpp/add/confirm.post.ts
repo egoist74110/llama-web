@@ -1,4 +1,5 @@
 // Register the previewed build: { stageId, label?, acceptUnverified? }.
+import { entryRunsHere } from '../../../core/runtimes'
 import { getContext } from '../../../service/context'
 import { describeLlamacpp, runtimeError } from '../../../service/llamacpp-api'
 
@@ -10,7 +11,7 @@ export default defineEventHandler(async (event) => {
       label: typeof b?.label === 'string' ? b.label : undefined, acceptUnverified: b?.acceptUnverified === true,
     })
     ctx.live.notify()
-    return { entry, ...describeLlamacpp() }
+    return { entry, selectable: entryRunsHere(entry, ctx.runtimeTarget), ...describeLlamacpp() }
   } catch (e) {
     runtimeError(e)
   }

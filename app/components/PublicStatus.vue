@@ -38,6 +38,10 @@ const tunnel = computed(() => {
   }
   return null
 })
+const digestSource = computed(() => {
+  const st = info.value?.status
+  return (st?.state === 'preparing' || st?.state === 'error') ? st.digestSource ?? null : null
+})
 const errorState = computed(() => (info.value?.status.state === 'error' ? info.value.status : null))
 const retryText = computed(() => {
   const e = errorState.value
@@ -66,6 +70,7 @@ async function retry() {
       <span class="w-16 shrink-0 text-muted">{{ row.label }}</span>
       <span class="min-w-0 break-words" :class="row.v?.color">{{ row.v?.text ?? '-' }}</span>
     </div>
+    <DigestSourceNote :source="digestSource" class="pl-6" />
     <div v-if="errorState" class="flex flex-wrap items-center gap-2 pl-6">
       <span class="text-xs text-muted">{{ retryText }}</span>
       <UButton size="xs" color="neutral" variant="outline" icon="i-lucide-refresh-cw" :loading="busy" @click="retry">

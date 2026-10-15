@@ -16,7 +16,9 @@ import {
 } from 'node:fs'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { checkExtractedTree, extractArchive, safeArchivePath, type ArchiveOptions } from './archive'
-import { download, getBody, RuntimeError, serverExeName, sha256File, versionsDir, type FetchFn, type ReleaseAsset } from './llamacpp'
+import { cleanupParts, download, getBody, RuntimeError, resumableBytes, serverExeName, sha256File, versionsDir, type FetchFn, type ReleaseAsset } from './llamacpp'
+import { NetworkAccess, DEFAULT_NETWORK, officialFirst, type DigestSource } from './net'
+import { fetchExpandedAssets, fillAssetDigests } from './github-feed'
 import type { RuntimeTarget } from './platform'
 import { killTree } from './runner'
 import {
@@ -28,7 +30,7 @@ export type AddErrorCode =
   | 'too-large' | 'disk-space' | 'run-failed' | 'digest-mismatch' | 'needs-digest-confirm' | 'stale-stage' | 'busy' | 'unavailable' | 'cancelled' | 'failed'
 
 export class AddError extends Error {
-  constructor(public code: AddErrorCode, message: string, public detail?: string) {
+  constructor(public code: AddErrorCode, message: string, public detail?: string, public digestSource?: DigestSource) {
     super(message)
     this.name = 'AddError'
   }
@@ -49,12 +51,13 @@ export const ADD_LIMITS = {
 
 export type AddInput =
   | { kind: 'dir', path: string }
-  | { kind: 'archive', path: string }
+  | { kind: 'archive', path: string, cudartPath?: string }
   | { kind: 'exe', path: string }
-  | { kind: 'github', url: string, accel?: RuntimeAccel }
+  | { kind: 'github', url: string, accel?: RuntimeAccel, mirror?: string }
 
 export interface AddPreview {
   stageId: string
+  digestSource?: DigestSource
   kind: RuntimeSourceKind
   /** Path or URL as given (display only). */
   source: string
@@ -90,6 +93,7 @@ interface Stage {
 
 export interface InstallerOptions {
   dataDir: string
+  network?: NetworkAccess
   target: RuntimeTarget
   registry: RuntimeRegistry
   fetch?: FetchFn
@@ -254,6 +258,7 @@ export function pickAsset(names: string[], host: { os: NodeJS.Platform, arch: st
 // ---------------------------------------------------------------------------------------------
 
 export class RuntimeInstaller {
+  private readonly network: NetworkAccess
   private stage: Stage | null = null
   private working = false
   private readonly limits: typeof ADD_LIMITS
@@ -261,6 +266,7 @@ export class RuntimeInstaller {
   private abort = new AbortController()
 
   constructor(private readonly opts: InstallerOptions) {
+    this.network = opts.network ?? new NetworkAccess({ settings: () => DEFAULT_NETWORK, fetch: opts.fetch })
     this.limits = { ...ADD_LIMITS, ...opts.limits }
   }
 
@@ -269,6 +275,7 @@ export class RuntimeInstaller {
 
   /** Remove staging / trash leftovers of an earlier run (call at startup, before anything is staged). */
   clearLeftovers(): void {
+    cleanupParts(join(versionsDir(this.opts.dataDir), '.downloads'))
     let names: string[]
     try { names = readdirSync(this.baseDir) } catch { return }
     for (const n of names) {
@@ -324,20 +331,22 @@ export class RuntimeInstaller {
     try {
       mkdirSync(join(dir, 'out'), { recursive: true })
       let source = '', digests: AddPreview['digests'] = [], accelHint: RuntimeAccel | undefined
-      let needCheck = false
+      let needCheck = false, digestSource: DigestSource | undefined
+      const nameTag = input.kind === 'archive' ? officialArchiveTag(input.path) : ''
       if (input.kind === 'dir') {
         source = this.stageDir(input.path, dir)
       } else if (input.kind === 'exe') {
         source = this.stageExe(input.path, dir)
       } else if (input.kind === 'archive') {
-        const r = await this.stageArchive(input.path, dir)
+        const r = await this.stageArchive(input.path, dir, input.cudartPath)
         source = r.source
         digests = r.digests
       } else if (input.kind === 'github') {
-        const r = await this.stageGithub(input.url, input.accel, dir)
+        const r = await this.stageGithub(input.url, input.accel, dir, input.mirror)
         source = r.source
         digests = r.digests
         accelHint = r.accel
+        digestSource = r.digestSource
         needCheck = r.digests.some(d => !d.verified)
       } else throw new AddError('bad-source', 'Unknown source kind')
 
@@ -366,12 +375,13 @@ export class RuntimeInstaller {
         out2 = await (this.opts.runVersion ?? defaultRunVersion)(join(root, exe), root, this.limits.versionTimeoutMs, this.abort.signal)
       } catch (e) {
         this.checkCancelled()
-        if (input.kind !== 'exe' || (e instanceof AddError && e.code === 'cancelled')) throw e
+        if ((input.kind !== 'exe' && !nameTag) || (e instanceof AddError && e.code === 'cancelled')) throw e
       }
       this.checkCancelled()
-      const { line, tag } = parseVersionOutput(out2)
+      const { line, tag: versionTag } = parseVersionOutput(out2)
+      const tag = versionTag || nameTag
       if (!line) {
-        if (input.kind !== 'exe') throw new AddError('run-failed', 'llama-server --version printed no version')
+        if (input.kind !== 'exe' && !nameTag) throw new AddError('run-failed', 'llama-server --version printed no version')
         warnings.push('no-version')
       }
 
@@ -380,7 +390,7 @@ export class RuntimeInstaller {
       if (cudart) warnings.push('no-cudart')
       const stageId = newRuntimeId()
       const preview: AddPreview = {
-        stageId, kind: input.kind, source, bytes: measured.bytes, files: measured.files,
+        stageId, ...(digestSource ? { digestSource } : {}), kind: input.kind, source, bytes: measured.bytes, files: measured.files,
         os: this.opts.target.os, arch: this.opts.target.arch, exe, accel, version: line, tag,
         suggestedLabel: defaultLabel(tag, accel, input, source), digests, needsDigestConfirm: needCheck, warnings,
       }
@@ -423,17 +433,35 @@ export class RuntimeInstaller {
     copyTree(src, join(dir, 'out'))
   }
 
-  private async stageArchive(path: string, dir: string): Promise<{ source: string, digests: AddPreview['digests'] }> {
-    const file = resolve(path)
-    let st
-    try { st = statSync(file) } catch { throw new AddError('not-found', 'The file does not exist') }
-    if (!st.isFile()) throw new AddError('bad-source', 'Choose an archive file')
-    if (!/\.(zip|tar\.gz|tgz)$/i.test(file)) throw new AddError('bad-source', 'Only .zip and .tar.gz archives are supported')
-    if (st.size > this.limits.maxDownloadBytes) throw new AddError('too-large', 'The archive is too large')
-    this.checkSpace(st.size * this.limits.archiveSpaceFactor)
-    const sha = await sha256File(file)
-    await this.extractInto(file, join(dir, 'out'))
-    return { source: file, digests: [{ name: basename(file), sha256: sha, verified: false }] }
+  private async stageArchive(path: string, dir: string, cudartPath?: string): Promise<{ source: string, digests: AddPreview['digests'] }> {
+    const files = [path, ...(cudartPath ? [cudartPath] : [])].map(resolvePath => resolve(resolvePath))
+    let total = 0
+    for (const file of files) {
+      let st
+      try { st = statSync(file) } catch { throw new AddError('not-found', 'The file does not exist') }
+      if (!st.isFile() || !/\.(zip|tar\.gz|tgz)$/i.test(file)) throw new AddError('bad-source', 'Choose an archive file')
+      total += st.size
+    }
+    if (total > this.limits.maxDownloadBytes) throw new AddError('too-large', 'The archives are too large')
+    this.checkSpace(total * this.limits.archiveSpaceFactor)
+    const digests: AddPreview['digests'] = []
+    let bytes = 0, count = 0
+    for (const [i, file] of files.entries()) {
+      const dest = i === 0 ? join(dir, 'out') : join(dir, 'extra')
+      const sha = await sha256File(file)
+      await this.extractInto(file, dest)
+      const m = measureTree(dest, this.limits)
+      bytes += m.bytes; count += m.files
+      if (bytes > this.limits.maxTreeBytes || count > this.limits.maxFiles) throw new AddError('too-large', 'The combined build is too large')
+      if (i > 0) {
+        const root = findRoot(join(dir, 'out'), serverExeName(this.opts.target.os)) ?? join(dir, 'out')
+        const names = readdirSync(dest)
+        const extraRoot = names.length === 1 && lstatSync(join(dest, names[0]!)).isDirectory() ? join(dest, names[0]!) : dest
+        copyTree(extraRoot, root)
+      }
+      digests.push({ name: basename(file), sha256: sha, verified: false })
+    }
+    return { source: files[0]!, digests }
   }
 
   private async extractInto(file: string, dest: string): Promise<void> {
@@ -454,15 +482,37 @@ export class RuntimeInstaller {
     measureTree(dest, this.limits) // refuses a bomb before anything else touches it
   }
 
-  private async stageGithub(url: string, wantedAccel: RuntimeAccel | undefined, dir: string) {
+  private async stageGithub(url: string, wantedAccel: RuntimeAccel | undefined, dir: string, mirror?: string) {
     const src = parseGithubSource(url)
-    const fetchFn = this.opts.fetch ?? fetch
+    const fetchFn = this.network.source(mirror)
     const net = { ...this.opts.net, signal: this.abort.signal }
     const api = `https://api.github.com/repos/${src.owner}/${src.repo}/releases/${src.tag ? `tags/${encodeURIComponent(src.tag)}` : 'latest'}`
-    let rel: { assets?: ReleaseAsset[] }
-    try { rel = await getBody(fetchFn, api, 'json', net) as { assets?: ReleaseAsset[] } } catch (e) {
-      throw new AddError('network', 'Cannot read the release', (e as RuntimeError).detail ?? (e as Error).message)
-    }
+    let rel: { assets?: ReleaseAsset[] }, digestSource: DigestSource
+    try {
+      const meta = await officialFirst(fetchFn, async f => {
+        try {
+          const release = await getBody(f, api, 'json', net) as { assets?: ReleaseAsset[], tag_name?: string }
+          const tag = src.tag ?? release.tag_name
+          if (tag && release.assets) release.assets = await fillAssetDigests(f, `${src.owner}/${src.repo}`, tag, release.assets, net)
+          return release
+        }
+        catch (e) {
+          let tag = src.tag
+          if (!tag) {
+            const releases = await import('./github-feed')
+            tag = (await releases.fetchReleasesAtom(f, `${src.owner}/${src.repo}`, net))[0]?.tag_name ?? null
+          }
+          if (!tag) throw e
+          return { assets: await fetchExpandedAssets(f, `${src.owner}/${src.repo}`, tag, net) }
+        }
+      }, release => {
+        const assets = release.assets ?? []
+        const wanted = wantedAccel ?? this.opts.target.acceleration
+        const choice = pickAsset(assets.map(a => a.name), this.opts.target, wanted)
+        return !!choice && [choice.bin, choice.cudart].filter(Boolean).every(name => /^sha256:[0-9a-f]{64}$/i.test(assets.find(a => a.name === name)?.digest ?? ''))
+      })
+      rel = meta.value; digestSource = meta.digestSource
+    } catch { throw new AddError('network', 'Cannot read the release') }
     const assets = (rel.assets ?? []).filter(a => a && typeof a.name === 'string' && typeof a.browser_download_url === 'string')
     const wanted: RuntimeAccel = wantedAccel ?? (this.opts.target.acceleration === 'vulkan' ? 'vulkan' : this.opts.target.acceleration === 'cuda' ? 'cuda' : 'cpu')
     const choice = pickAsset(assets.map(a => a.name), this.opts.target, this.opts.target.os === 'darwin' ? (this.opts.target.arch === 'arm64' ? 'metal' : 'cpu') : wanted)
@@ -476,12 +526,16 @@ export class RuntimeInstaller {
       if (a.size !== undefined && (!Number.isFinite(a.size) || a.size < 0 || a.size > this.limits.maxDownloadBytes)) throw new AddError('too-large', 'The download is too large')
       total += a.size ?? 0
     }
-    this.checkSpace(total * this.limits.archiveSpaceFactor)
+    if (total > this.limits.maxDownloadBytes) throw new AddError('too-large', 'The download is too large')
+    const downloads = join(versionsDir(this.opts.dataDir), '.downloads')
+    const resumed = picked.reduce((n, a) => n + resumableBytes(a, join(downloads, a.name)), 0)
+    this.checkSpace(Math.max(0, total * this.limits.archiveSpaceFactor - resumed))
     const digests: AddPreview['digests'] = []
-    mkdirSync(join(dir, 'dl'), { recursive: true })
+    mkdirSync(downloads, { recursive: true })
+    let downloaded = 0
     for (const a of picked) {
       if (a.name !== basename(a.name) || !/\.(zip|tar\.gz|tgz)$/.test(a.name)) throw new AddError('unsafe', 'Invalid archive name')
-      const file = join(dir, 'dl', a.name)
+      const file = join(downloads, a.name)
       let tooLarge = false
       const ac = new AbortController()
       const onOuter = () => ac.abort(this.abort.signal.reason)
@@ -489,20 +543,20 @@ export class RuntimeInstaller {
       try {
         const sha = await download(fetchFn, a, file, {
           ...net, signal: ac.signal,
-          onProgress: (got) => { if (got > this.limits.maxDownloadBytes && !tooLarge) { tooLarge = true; ac.abort(new Error('too large')) } },
+          onProgress: (got) => { if (downloaded + got > this.limits.maxDownloadBytes && !tooLarge) { tooLarge = true; ac.abort(new Error('too large')) } },
         }, true)
         digests.push({ name: a.name, sha256: sha, verified: /^sha256:[0-9a-f]{64}$/i.test(a.digest ?? '') })
       } catch (e) {
         if (tooLarge) throw new AddError('too-large', 'The download is too large')
-        if (e instanceof RuntimeError) throw new AddError(e.code === 'digest-mismatch' ? 'digest-mismatch' : 'network', e.message, e.detail)
+        if (e instanceof RuntimeError) throw new AddError(e.code === 'digest-mismatch' ? 'digest-mismatch' : 'network', e.message, e.detail, digestSource)
         throw e
       } finally {
         this.abort.signal.removeEventListener('abort', onOuter)
       }
-      await this.extractInto(file, join(dir, 'out'))
-      rmSync(file, { force: true })
+      downloaded += statSync(file).size
+      try { await this.extractInto(file, join(dir, 'out')) } finally { rmSync(file, { force: true }) }
     }
-    return { source: `https://github.com/${src.owner}/${src.repo}${src.tag ? `/releases/tag/${src.tag}` : ''}`, digests, accel: choice.accel }
+    return { source: `https://github.com/${src.owner}/${src.repo}${src.tag ? `/releases/tag/${src.tag}` : ''}`, digests, accel: choice.accel, digestSource }
   }
 
   /**
@@ -556,4 +610,9 @@ async function defaultClearQuarantine(root: string): Promise<void> {
     c.on('error', () => res())
     c.on('close', () => res())
   })
+}
+
+/** Offline official names supply a build number, never official trust or registration. */
+export function officialArchiveTag(file: string): string {
+  return /^llama-(b\d+)-bin-[A-Za-z0-9._-]+\.zip$/.exec(basename(file))?.[1] ?? ''
 }

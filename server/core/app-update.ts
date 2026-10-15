@@ -5,12 +5,13 @@
 // channel; the shell stops the service, checks the file again and starts the installer.
 // The source version only links to the release page. Pure module (no Nitro).
 import { createHash } from 'node:crypto'
-import { createReadStream, mkdirSync, renameSync, rmSync } from 'node:fs'
+import { createReadStream, mkdirSync, readdirSync, rmdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { pipeline } from 'node:stream/promises'
-import { download, getBody, RuntimeError, type FetchFn, type ReleaseAsset } from './llamacpp'
-import { apiFallbackCode, fetchExpandedAssets, fetchReleasesAtom } from './github-feed'
-import { mirrorById, mirrorFetch, mirrorHelps, type Mirror } from './mirrors'
+import { cleanupParts, download, getBody, RuntimeError, type FetchFn, type ReleaseAsset } from './llamacpp'
+import { apiFallbackCode, fetchExpandedAssets, fetchReleasesAtom, fillAssetDigests } from './github-feed'
+import { NetworkAccess, DEFAULT_NETWORK, canMirror, officialFirst, type DigestSource } from './net'
+import { mirrorById, mirrorHelps, type Mirror } from './mirrors'
 import { JsonStore } from './store'
 import { UpdateCheckStore } from './update-check'
 
@@ -129,16 +130,17 @@ export type AppUpdateCheck =
   | { state: 'idle' }
   | { state: 'checking' }
   | { state: 'latest', at: number }
-  | { state: 'available', at: number, release: AppRelease }
+  | { state: 'available', at: number, release: AppRelease, digestSource?: DigestSource }
   /** `offer`: the user started this check and a mirror may fix it (see mirrors.ts). */
   | { state: 'error', at: number, code: AppUpdateErrorCode, offer?: true }
 
-export type AppUpdateDownload =
+export type AppUpdateDownload = { digestSource?: DigestSource } & (
   | { state: 'none' }
   | { state: 'downloading', version: string, received: number, total: number | null }
   | { state: 'ready', version: string }
   | { state: 'installing', version: string }
   | { state: 'error', version: string, code: AppUpdateErrorCode, offer?: true }
+)
 
 /** Live view for the page (state snapshot `appUpdate`). */
 export interface AppUpdateView {
@@ -173,6 +175,7 @@ function normalizePrefs(doc: AppUpdatePrefs): AppUpdatePrefs {
 export interface InstallRequest { file: string, sha256: string, version: string }
 
 export interface AppUpdaterOptions {
+  network?: NetworkAccess
   current: string
   repo: string
   dataDir: string
@@ -219,7 +222,8 @@ export class AppUpdater {
   private prefsValue: AppUpdatePrefs
   private readonly feed: string
   private readonly assetOk: (url: string) => boolean
-  private readonly fetchFn: FetchFn
+  private readonly network: NetworkAccess
+  private digestSource?: DigestSource
   private readonly now: () => number
   private readonly checks: UpdateCheckStore
   private readonly checkKey: string
@@ -231,7 +235,7 @@ export class AppUpdater {
     this.feed = opts.feed ?? official
     const releasePrefix = `https://github.com/${opts.repo}/releases/download/`
     this.assetOk = this.feed === official ? url => url.startsWith(releasePrefix) : isLoopback
-    this.fetchFn = opts.fetch ?? ((url, init) => fetch(url, init))
+    this.network = opts.network ?? new NetworkAccess({ settings: () => DEFAULT_NETWORK, customMirror: opts.customMirror, fetch: opts.fetch })
     this.now = opts.now ?? Date.now
     this.checks = new UpdateCheckStore(opts.dataDir)
     this.checkKey = `app:${this.feed}`
@@ -246,8 +250,11 @@ export class AppUpdater {
     const cached = this.checks.get(this.checkKey)
     if (cached?.result) {
       try {
-        const r = cached.result as { current?: string, list?: GithubRelease[], error?: AppUpdateErrorCode }
-        if (r.current === opts.current && Array.isArray(r.list)) this.applyReleaseList(r.list, cached.at)
+        const r = cached.result as { current?: string, list?: GithubRelease[], error?: AppUpdateErrorCode, digestSource?: DigestSource }
+        if (r.current === opts.current && Array.isArray(r.list)) {
+          this.digestSource = r.digestSource === 'github' ? 'github' : 'mirror'
+          this.applyReleaseList(r.list, cached.at)
+        }
         else if (r.error === 'network' || r.error === 'rate-limited' || r.error === 'http' || r.error === 'bad-response') {
           this.checkState = { state: 'error', at: cached.at, code: r.error }
         }
@@ -257,7 +264,11 @@ export class AppUpdater {
 
   /** Remove installers of earlier runs (best effort: a running installer keeps its file) and schedule checks. */
   start(): void {
-    try { rmSync(this.dir, { recursive: true, force: true }) } catch { /* in use by the installer that started us */ }
+    cleanupParts(this.dir)
+    try {
+      for (const name of readdirSync(this.dir)) if (INSTALLER_RE.test(name)) rmSync(join(this.dir, name), { force: true })
+      rmdirSync(this.dir)
+    } catch { /* Active resumable files or an installer in use stay. */ }
     this.schedule(Math.max(this.opts.firstCheckMs ?? FIRST_CHECK_MS, this.checks.remaining(this.checkKey, this.now(), this.opts.everyMs ?? CHECK_EVERY_MS)))
   }
 
@@ -275,7 +286,7 @@ export class AppUpdater {
       autoUpdate: this.prefsValue.autoUpdate,
       skipped: this.prefsValue.skipped,
       check: this.checkState,
-      download: this.downloadState,
+      download: this.downloadState.state === 'none' ? this.downloadState : { ...this.downloadState, ...(this.digestSource ? { digestSource: this.digestSource } : {}) },
       releasesUrl: `https://github.com/${this.opts.repo}/releases`,
     }
   }
@@ -308,19 +319,24 @@ export class AppUpdater {
     const attemptedAt = this.now()
     try {
       this.checks.save(this.checkKey, attemptedAt)
-      const fetchFn = mirror ? mirrorFetch(mirror, this.fetchFn) : this.fetchFn
-      const list = await this.releaseList(fetchFn)
+      const fetchFn = this.network.source(mirror?.id, isLoopback(this.feed))
+      const meta = await officialFirst(fetchFn, f => this.releaseList(f), list => {
+        const selected = pickUpdate(list, this.opts.current, this.assetOk)
+        return !selected || !!selected.installer && !!selected.sums && /^sha256:[0-9a-f]{64}$/i.test(selected.installer.digest ?? '')
+      })
+      const list = meta.value
+      this.digestSource = meta.digestSource
       if (this.stopped) return
       this.applyReleaseList(list as GithubRelease[], this.now())
       // Cache only the selected release, with bounded notes and the two relevant assets.
       const c = this.candidate
       const selected: GithubRelease[] = c ? [{ tag_name: `v${c.version}`, name: c.name, body: c.notes, html_url: c.url, published_at: c.publishedAt, prerelease: c.prerelease, assets: [c.installer, c.sums].filter((a): a is ReleaseAsset => a !== null) }] : []
-      this.checks.save(this.checkKey, attemptedAt, { current: this.opts.current, list: selected })
+      this.checks.save(this.checkKey, attemptedAt, { current: this.opts.current, list: selected, digestSource: this.digestSource })
     } catch (e) {
       if (this.stopped) return
       const code: AppUpdateErrorCode = e instanceof AppUpdateError ? e.code
         : e instanceof RuntimeError && (e.code === 'network' || e.code === 'rate-limited' || e.code === 'http') ? e.code : 'bad-response'
-      this.checkState = { state: 'error', at: this.now(), code, ...(manual && mirrorHelps(code) ? { offer: true as const } : {}) }
+      this.checkState = { state: 'error', at: this.now(), code, ...(manual && this.network.sourceMode === 'ask' && mirrorHelps(code) ? { offer: true as const } : {}) }
       try { this.checks.save(this.checkKey, attemptedAt, { error: code }) } catch { /* Keep the reported failure. */ }
     }
     this.changed()
@@ -338,9 +354,15 @@ export class AppUpdater {
     try {
       const list = await getBody(fetchFn, `${this.feed}?per_page=30`, 'json', net)
       if (!Array.isArray(list)) throw new AppUpdateError('bad-response', 'Release list is not an array')
-      return list as GithubRelease[]
+      const releases = list as GithubRelease[]
+      const selected = pickUpdate(releases, this.opts.current, this.assetOk)
+      const entry = selected && releases.find(r => r.tag_name === `v${selected.version}`)
+      if (entry?.assets && selected?.installer && !/^sha256:[0-9a-f]{64}$/i.test(selected.installer.digest ?? '')) {
+        entry.assets = await fillAssetDigests(fetchFn, this.opts.repo, entry.tag_name!, entry.assets, net)
+      }
+      return releases
     } catch (e) {
-      if (!apiFallbackCode(e) || this.feed !== `https://api.github.com/repos/${this.opts.repo}/releases`) throw e
+      if (!(apiFallbackCode(e) || e instanceof RuntimeError && e.code === 'network' && canMirror(fetchFn)) || this.feed !== `https://api.github.com/repos/${this.opts.repo}/releases`) throw e
       const list = await fetchReleasesAtom(fetchFn, this.opts.repo, net)
       // Assets (and their digests) only for the release that would be offered.
       const found = pickUpdate(list, this.opts.current, () => true)
@@ -358,7 +380,7 @@ export class AppUpdater {
     if (!found) this.checkState = { state: 'latest', at }
     else {
       const { installer: _i, sums: _s, ...release } = found
-      this.checkState = { state: 'available', at, release }
+      this.checkState = { state: 'available', at, release, ...(this.digestSource ? { digestSource: this.digestSource } : {}) }
     }
   }
 
@@ -381,11 +403,11 @@ export class AppUpdater {
   async download(opts: { mirror?: string, manual?: boolean } = {}): Promise<void> {
     const c = this.downloadable()
     const mirror = opts.mirror ? mirrorById(opts.mirror, this.opts.customMirror?.()) : null
-    const fetchFn = mirror ? mirrorFetch(mirror, this.fetchFn) : this.fetchFn
+    const fetchFn = this.network.source(mirror?.id, isLoopback(this.feed))
     if (this.downloadState.state === 'ready' && this.downloadState.version === c.version) return
     const fail = (code: AppUpdateErrorCode) => {
       // Downloads are always started by the user (or the auto-update setting); only a user-picked path offers a mirror.
-      this.downloadState = { state: 'error', version: c.version, code, ...(opts.manual && mirrorHelps(code) ? { offer: true as const } : {}) }
+      this.downloadState = { state: 'error', version: c.version, code, ...(opts.manual && this.network.sourceMode === 'ask' && mirrorHelps(code) ? { offer: true as const } : {}) }
       this.changed()
       return new AppUpdateError(code, `Update download failed: ${code}`)
     }
@@ -396,16 +418,17 @@ export class AppUpdater {
     this.downloadState = { state: 'downloading', version: c.version, received: 0, total: null }
     this.changed()
     const file = join(this.dir, c.installer.name)
-    const part = `${file}.part`
     let last = 0
     try {
-      rmSync(this.dir, { recursive: true, force: true })
+      cleanupParts(this.dir)
       mkdirSync(this.dir, { recursive: true })
-      const sums = String(await getBody(fetchFn, c.sums.browser_download_url, 'text', { signal: abort.signal }))
+      const sumMeta = await officialFirst(fetchFn, f => getBody(f, c.sums!.browser_download_url, 'text', { signal: abort.signal }))
+      const sums = String(sumMeta.value)
+      this.digestSource = this.digestSource === 'mirror' || sumMeta.digestSource === 'mirror' ? 'mirror' : 'github'
       const listed = sumFor(sums, c.installer.name)
       if (!listed) throw new AppUpdateError('no-digest', 'Installer missing from SHA256SUMS')
       if (`sha256:${listed}` !== c.installer.digest!.toLowerCase()) throw new AppUpdateError('digest-mismatch', 'SHA256SUMS and asset digest differ')
-      await download(fetchFn, c.installer, part, {
+      await download(fetchFn, c.installer, file, {
         signal: abort.signal,
         onProgress: (received, total) => {
           if (this.downloadState.state !== 'downloading') return
@@ -416,12 +439,11 @@ export class AppUpdater {
         },
       })
       if (abort.signal.aborted) throw new AppUpdateError('cancelled', 'Cancelled')
-      renameSync(part, file)
       this.ready = { file, sha256: listed, version: c.version }
       this.downloadState = { state: 'ready', version: c.version }
       this.changed()
     } catch (e) {
-      try { rmSync(this.dir, { recursive: true, force: true }) } catch { /* retried on the next start */ }
+      // Resumable parts survive cancellation and network errors; download removes a bad digest.
       if (this.stopped) return
       const code: AppUpdateErrorCode = abort.signal.aborted ? 'cancelled'
         : e instanceof AppUpdateError ? e.code
@@ -429,6 +451,7 @@ export class AppUpdater {
             : 'failed'
       throw fail(code)
     } finally {
+      try { rmdirSync(this.dir) } catch { /* Contains a ready installer or resumable data. */ }
       if (this.abort === abort) this.abort = null
     }
   }

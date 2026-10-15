@@ -6,6 +6,7 @@ export default defineEventHandler(async (event) => {
   const body = await readBody(event)
   const mirror = typeof body?.mirror === 'string' ? body.mirror : undefined
   const ctx = getContext()
+  if (body?.remember === true) ctx.updateSettings(s => { s.network.downloadSource = 'auto' })
   await ctx.getSystem()
   await Promise.all([
     ctx.updater.run({ manual: true, mirror }),

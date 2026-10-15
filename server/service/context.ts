@@ -1,3 +1,5 @@
+import { NetworkAccess } from '../core/net'
+import { entryRunsHere } from '../core/runtimes'
 // Process-wide wiring: config stores, runner, scheduler and the /v1 proxy. Created once
 // (kept on globalThis so dev-server reloads do not orphan running llama-server processes)
 // and shared by the custom Bun entry, the Nitro plugin and the dev-mode routes.
@@ -12,7 +14,7 @@ import { setLocale } from '../core/i18n'
 import { describeDevices, DeviceProbe, type DeviceList, type DevicesView, type GpuDevice } from '../core/devices'
 import { sampleSystemMemory } from '../core/memory-sample'
 import type { SystemMemory } from '../core/memory-estimate'
-import { chooseExe, LaunchConfigError, llamaServerExe, planLaunch, runtimeKeyOf, type DeviceInfo } from '../core/launch'
+import { chooseExe, LaunchConfigError, planLaunch, runtimeKeyOf, type DeviceInfo } from '../core/launch'
 import { comboKey } from '../core/gpu-group'
 import { blamesSplitMode, SplitModeLoadError, SplitStats } from '../core/split-stats'
 import { diagnose, type FailureKind } from '../core/errors'
@@ -44,7 +46,7 @@ import { CloudflareSetup } from '../core/cloudflare'
 import { Updater } from '../core/updater'
 import { RuntimeInstaller } from '../core/runtime-add'
 import { RuntimeManager } from '../core/runtime-manager'
-import { officialRef, parseRuntimeRef, secondaryRuntimeTarget, resolveRuntimeRef, RuntimeRegistry, type RuntimeAccel } from '../core/runtimes'
+import { officialRef, parseRuntimeRef, secondaryRuntimeTarget, RuntimeRegistry, type RuntimeAccel } from '../core/runtimes'
 import { cudaLimitsFor, detectSystem, runCmd, systemWarnings, type SystemInfo } from '../core/system'
 import { APP_REPO, APP_VERSION } from '../core/app-info'
 import { AppUpdater } from '../core/app-update'
@@ -65,6 +67,7 @@ export interface MemoryProbe {
 
 export interface AppContext {
   dataDir: string
+  outbound: NetworkAccess
   platform: PlatformInfo
   runtimeTarget: RuntimeTarget
   /** Immutable startup selection, including the requested auto value and any pending choice. */
@@ -328,9 +331,10 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     usedExes: () => [...runner.list().map(p => p.spec.exe), ...launching.values()],
     setCurrent: (tag, accel) => setCurrentTag(tag, accel),
     updateModels: fn => { modelsRef.update(fn) },
-    onChanged: () => { updater.refresh(); secondary?.updater.refresh(); live.notify() },
+    onChanged: () => { updater.refresh(); updater.reflectCurrent(); secondary?.updater.refresh(); secondary?.updater.reflectCurrent(); live.notify() },
   })
-  const runtimeAdd = new RuntimeInstaller({ dataDir, target: selectedTarget, registry })
+  const outbound = new NetworkAccess({ settings: () => getSettings().network, customMirror: () => getSettings().mirror.custom })
+  const runtimeAdd = new RuntimeInstaller({ network: outbound, dataDir, target: selectedTarget, registry })
   runtimeAdd.clearLeftovers()
   startupClose.push(() => runtimeAdd.dispose())
   const setCurrentTag = (tag: string, accel: RuntimeAccel) => settingsRef.update((s) => {
@@ -350,8 +354,10 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
   const deviceProbe = new DeviceProbe(runCmd)
   const splitStats = new SplitStats(dataDir)
   const channelUpdater = (target: RuntimeTarget, withSelectionError: boolean) => new Updater({
-    dataDir,
+    network: outbound, dataDir,
     customMirror: () => getSettings().mirror.custom,
+    useCustom: ref => { runtimes.useCurrent(target.acceleration, ref) },
+    customRuntime: ref => { const p = parseRuntimeRef(ref); const e = p?.kind === 'custom' ? registry.get(p.id) : undefined; return e && entryRunsHere(e, selectedTarget) ? e : undefined },
     target, selectionError: withSelectionError ? selectionError : undefined,
     llamacpp: () => ({ ...getSettings().llamacpp, current: currentTagFor(getSettings(), platform, target.acceleration) }),
     cudaLimits: () => (systemCache ? cudaLimitsFor(systemCache.info) : null),
@@ -379,7 +385,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     ? { accel: secondaryTarget.acceleration as RuntimeAccel, updater: channelUpdater(secondaryTarget, false), current: () => currentTagFor(getSettings(), platform, secondaryTarget.acceleration) }
     : null
   // LLAMA_WEB_UPDATE_FEED: loopback release list for local acceptance tests only (checked by AppUpdater).
-  const appUpdateOpts = { current: APP_VERSION, repo: APP_REPO, dataDir, customMirror: () => getSettings().mirror.custom, onChange: () => live.notify() }
+  const appUpdateOpts = { network: outbound, current: APP_VERSION, repo: APP_REPO, dataDir, customMirror: () => getSettings().mirror.custom, onChange: () => live.notify() }
   let appUpdate: AppUpdater
   try { appUpdate = new AppUpdater({ ...appUpdateOpts, feed: process.env.LLAMA_WEB_UPDATE_FEED || undefined }) }
   catch (e) {
@@ -649,7 +655,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
   // The tunnel runs only while the public entry listens (the tunnel's target) and a token is saved.
   // Output is not logged (it is redacted and kept in memory for the error state); only transitions are.
   const tunnel = new TunnelManager({
-    dataDir,
+    network: outbound, dataDir,
     registry: new PidRegistry(join(dataDir, 'run', 'pids.json')),
     ready: cleanupDone,
     onStatus: (info: TunnelInfo) => {
@@ -720,7 +726,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
   /** Executable of a build reference (empty = the global version); null when it cannot be resolved. */
   const exeOf = (ref: string | null): string | null => {
     try {
-      return ref ? resolveRuntimeRef(ref, runtimes.env()).exe : llamaServerExe(dataDir, getSettings(), platform.os, selectedTarget)
+      return chooseExe(ref || '', { dataDir, settings: getSettings(), platform: platform.os, target: selectedTarget, runtimeEnv: runtimes.env() }).exe
     } catch {
       return null
     }
@@ -728,7 +734,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
 
   let closing: Promise<void> | null = null
   return {
-    dataDir, bootPort: getSettings().server.port, getSettings, getSettingsRev: settingsRef.rev, getSettingsBoot: () => settingsBoot, getModels, updateSettings: settingsRef.update, updateModels: modelsRef.update,
+    dataDir, outbound, bootPort: getSettings().server.port, getSettings, getSettingsRev: settingsRef.rev, getSettingsBoot: () => settingsBoot, getModels, updateSettings: settingsRef.update, updateModels: modelsRef.update,
     platform, runtimeTarget: selectedTarget, runtimeSelection,
     getSecrets: secretsRef.get, updateSecrets: secretsRef.update, getUpstreams: upstreamsRef.get, updateUpstreams: upstreamsRef.update, health, launcher, tunnel, applyTunnel, cloudflare,
     refresh: () => { settingsRef.refresh(); modelsRef.refresh(); upstreamsRef.refresh() },

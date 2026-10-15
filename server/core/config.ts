@@ -3,7 +3,7 @@
 import { DEFAULT_LAUNCH_DEFAULTS, type LaunchDefaults, type ParamOverrides } from './args'
 import { cleanStoredChoice, type GpuChoice } from './gpu-group'
 import type { FileRef, ModelDir } from './types'
-import type { Acceleration, PlatformInfo } from './platform'
+import type { Acceleration, PlatformInfo, RuntimeTarget } from './platform'
 import { normalizeCustomMirror } from './mirrors'
 import { normalizeUsageKeepDays } from './usage'
 import { DEFAULT_LOCALE, LOCALES, type LocaleCode } from '../../i18n/messages'
@@ -65,6 +65,7 @@ export interface Settings {
   modelDirs: ModelDir[]
   /** Own GitHub mirror prefix (decision 53); '' = only the built-in public mirrors. Validated by normalizeCustomMirror. */
   mirror: { custom: string }
+  network: { proxy: { mode: 'system' | 'manual' | 'off', url: string }, downloadSource: 'ask' | 'auto' | 'mirror', mirror: string }
   llamacpp: {
     /** Empty = automatic: the newest CUDA runtime the driver and GPU can run (decision 37); a version here is the user's override. */
     cudaRuntime: string
@@ -158,7 +159,7 @@ export type NoRoomPolicy = 'unload' | 'error'
 export const NO_ROOM_POLICIES: readonly NoRoomPolicy[] = ['unload', 'error']
 export const MAX_LOADED_LIMIT = 99
 
-export const SETTINGS_VERSION = 12
+export const SETTINGS_VERSION = 13
 export const MODELS_VERSION = 1
 
 /**
@@ -178,9 +179,15 @@ export const hasCpuChannel = (host: { os: NodeJS.Platform }) => host.os === 'win
 /** Device selection (decision 39) exists everywhere except on a Mac, which has one unified device (decision 38). */
 export const hasDeviceSelection = (host: { os: NodeJS.Platform }) => host.os !== 'darwin'
 
-/** Current version setting of an official channel. */
+/** Current value of a channel: an official tag or a custom reference. */
 export const currentTagFor = (s: Settings, host: { os: NodeJS.Platform }, accel: string): string =>
   accel === 'vulkan' ? s.llamacpp.currentVulkan : hasCpuChannel(host) && accel === 'cpu' ? s.llamacpp.currentCpu : s.llamacpp.current
+
+/** Channel receiving a custom global choice: every GPU build follows the host's active GPU channel. */
+export function customCurrentChannel(host: Pick<RuntimeTarget, 'os' | 'acceleration' | 'gpuChannel'>, accel: string): RuntimeTarget['acceleration'] {
+  if (hasCpuChannel(host)) return accel === 'cpu' ? 'cpu' : host.gpuChannel ?? (host.acceleration === 'vulkan' ? 'vulkan' : 'cuda')
+  return host.acceleration
+}
 
 /** Launch defaults for a launch that ends up on a runtime of this type. */
 export function defaultsFor(s: Settings, host: { os: NodeJS.Platform }, accel: string): LaunchDefaults {
@@ -247,6 +254,7 @@ export function defaultSettings(platform?: PlatformInfo): Settings {
     public: { enabled: false, port: 8080, domain: '', tunnelEnabled: false, tunnelMode: 'token', tunnelProtocol: 'http2', wizard: null },
     modelDirs: [],
     mirror: { custom: '' },
+    network: { proxy: { mode: 'system', url: '' }, downloadSource: 'ask', mirror: '' },
     llamacpp: { cudaRuntime: '', current: '', currentCpu: '', currentVulkan: '', keepVersions: 2, autoUpdate: false, acceleration: 'auto' },
     scheduler: { maxLoaded: 1, multiLoad: false, onNoRoom: 'unload', loadTimeoutSec: 600, drainTimeoutSec: 300, heartbeatSec: 15, portRange: [7100, 7199] },
     defaults: windowsCuda ? { ...DEFAULT_LAUNCH_DEFAULTS } : {
@@ -341,6 +349,15 @@ export const SETTINGS_MIGRATIONS: Record<number, (old: any) => any> = {
     old.llamacpp.currentVulkan ??= ''
     return old
   },
+  12: (old) => {
+    old.network ??= {}
+    old.network.proxy ??= {}
+    old.network.proxy.mode ??= 'system'
+    old.network.proxy.url ??= ''
+    old.network.downloadSource ??= 'ask'
+    old.network.mirror ??= ''
+    return old
+  },
 }
 
 /** The online limit that is in force: 1 unless `multiLoad` is on, never more than there are ports for the processes. */
@@ -382,6 +399,13 @@ export function normalizeSettings(doc: Settings): Settings {
   out.public.wizard = cleanWizard(out.public.wizard)
   if (!['auto', 'cuda', 'cpu', 'metal', 'vulkan'].includes(out.llamacpp.acceleration)) throw new Error('Invalid llamacpp.acceleration')
   if (typeof out.llamacpp.autoUpdate !== 'boolean') throw new Error('Invalid llamacpp.autoUpdate')
+  out.network.proxy = { ...def.network.proxy, ...(isObj(doc.network?.proxy) ? doc.network.proxy : {}) }
+  if (!['system', 'manual', 'off'].includes(out.network.proxy.mode)) throw new Error('Invalid network.proxy.mode')
+  if (typeof out.network.proxy.url !== 'string') throw new Error('Invalid network.proxy.url')
+  if (!['ask', 'auto', 'mirror'].includes(out.network.downloadSource) || typeof out.network.mirror !== 'string') throw new Error('Invalid network source')
+  for (const key of ['current', 'currentCpu', 'currentVulkan']) {
+    if (typeof out.llamacpp[key] !== 'string' || !/^(?:|b\d+|custom:[a-z0-9][a-z0-9-]{0,31})$/.test(out.llamacpp[key])) out.llamacpp[key] = ''
+  }
   // A hand-edited unacceptable mirror is dropped (= built-in mirrors only), never used.
   out.mirror.custom = normalizeCustomMirror(out.mirror.custom) ?? ''
   // The global device choice is one valid value or nothing (a hand-edited bad one is dropped = automatic).

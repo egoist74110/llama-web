@@ -1,7 +1,9 @@
 <script setup lang="ts">
 // Mounted once in the layout. After a check or download that the user started failed because
 // GitHub could not be reached (the server marks the failure with `offer`), asks which public
-// mirror to retry through. Automatic checks never reach this dialog.
+// mirror to retry through. Automatic checks never reach this dialog. The "from now on" box sends
+// `remember`, which switches the download source to automatic (settings › network, decision 63).
+// The tunnel (cloudflared) and the GitHub source of "add version" carry no offer, so they are not listed here.
 import { t } from '../composables/useLocale'
 import { customMirror, offeredMirrors } from '~~/server/core/mirrors'
 
@@ -19,7 +21,7 @@ interface Offer {
   key: string
   what: string
   reason: string
-  retry: (mirror: string) => Promise<unknown>
+  retry: (body: { mirror: string, remember?: true }) => Promise<unknown>
 }
 
 const offers = computed<Offer[]>(() => {
@@ -32,7 +34,7 @@ const offers = computed<Offer[]>(() => {
       key: `llama:${channel ?? 'main'}:${action}:${rt.code}:${rt.detail}`,
       what: s.whatLlama,
       reason: reasonOf(rt.code ?? ''),
-      retry: mirror => $fetch(`/api/llamacpp/${action}`, { method: 'POST', body: { mirror, ...(channel ? { channel } : {}) } }),
+      retry: body => $fetch(`/api/llamacpp/${action}`, { method: 'POST', body: { ...body, ...(channel ? { channel } : {}) } }),
     })
   }
   const l = state.value?.llamacpp
@@ -40,10 +42,10 @@ const offers = computed<Offer[]>(() => {
   llama(l?.secondary?.runtime as never, l?.secondary?.accel)
   const a = state.value?.appUpdate
   if (a?.check.state === 'error' && a.check.offer) {
-    out.push({ key: `app:check:${a.check.code}:${a.check.at}`, what: s.whatApp, reason: appUpdateErrorText(a.check.code), retry: mirror => $fetch('/api/app-update/check', { method: 'POST', body: { mirror } }) })
+    out.push({ key: `app:check:${a.check.code}:${a.check.at}`, what: s.whatApp, reason: appUpdateErrorText(a.check.code), retry: body => $fetch('/api/app-update/check', { method: 'POST', body }) })
   }
   if (a?.download.state === 'error' && a.download.offer) {
-    out.push({ key: `app:download:${a.download.code}:${a.download.version}`, what: s.whatApp, reason: appUpdateErrorText(a.download.code), retry: mirror => $fetch('/api/app-update/download', { method: 'POST', body: { mirror } }) })
+    out.push({ key: `app:download:${a.download.code}:${a.download.version}`, what: s.whatApp, reason: appUpdateErrorText(a.download.code), retry: body => $fetch('/api/app-update/download', { method: 'POST', body }) })
   }
   return out
 })
@@ -55,6 +57,8 @@ watch(() => current.value?.key, (k) => { if (k) void load() })
 watch(offers, (list) => { if (!list.length) dismissed.value = null })
 
 const busy = ref(false)
+const remember = ref(false)
+watch(() => current.value?.key, () => { remember.value = false })
 const open = computed({
   get: () => current.value !== null,
   set: (v: boolean) => { if (!v && current.value) dismissed.value = current.value.key },
@@ -66,7 +70,8 @@ async function use(id: string) {
   busy.value = true
   dismissed.value = offer.key
   try {
-    await offer.retry(id)
+    await offer.retry({ mirror: id, ...(remember.value ? { remember: true as const } : {}) })
+    if (remember.value) void load()
   } catch (e) {
     const err = e as { data?: { message?: string }, message?: string }
     toast.add({ title: s.title, description: err.data?.message ?? err.message, color: 'error', icon: 'i-lucide-circle-alert' })
@@ -93,7 +98,11 @@ async function use(id: string) {
           {{ fmt(s.use, { host: m.host }) }}
           <span class="text-xs opacity-80">（{{ m.id === 'custom' ? s.custom : i === 0 ? s.recommended : s.alternative }}）</span>
         </UButton>
-        <p class="m-0 mt-1 text-xs text-muted">
+        <label class="mt-1 flex cursor-pointer items-start gap-2 text-sm text-default">
+          <input v-model="remember" type="checkbox" class="mt-1">
+          <span>{{ s.remember }}</span>
+        </label>
+        <p class="m-0 text-xs text-muted">
           {{ s.risk }}
         </p>
       </div>

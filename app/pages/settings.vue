@@ -15,6 +15,7 @@ const all = computed(() => [
   { id: 's-image', label: t.settings.image.title, needsDoc: true },
   { id: 's-server', label: t.settings.server.title, needsDoc: true },
   { id: 's-public', label: t.publicAccess.title, needsDoc: true },
+  { id: 's-network', label: t.settings.network.title, needsDoc: true },
   { id: 's-about', label: t.appUpdate.title, needsDoc: false },
   { id: 's-import', label: t.import.title, needsDoc: false },
 ])
@@ -99,8 +100,8 @@ watch(() => route.hash, async () => { await nextTick(); goToHash() })
           <SettingsImage id="s-image" />
           <SettingsServer id="s-server" />
           <SettingsPublicAccess id="s-public" />
+          <SettingsNetwork id="s-network" />
         </template>
-        <SettingsMirror v-if="doc" id="s-mirror" />
         <SettingsAbout id="s-about" />
         <ImportCard id="s-import" @imported="load" />
       </div>

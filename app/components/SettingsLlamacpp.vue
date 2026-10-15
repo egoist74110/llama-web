@@ -5,6 +5,7 @@
 import { t } from '../composables/useLocale'
 import { profileLabel } from '~/utils/profile-label'
 import type { RuntimeRow } from '~~/server/core/runtime-manager'
+import type { RuntimeStatus as RuntimeStatusView } from '~~/server/core/llamacpp'
 import { channelHeaderTitle, choicePromptReasonText, isExperimentalAccel } from '~/utils/experimental-backend'
 
 const s = t.llamacpp
@@ -111,7 +112,9 @@ function availableFor(r: RuntimeRow): string | null {
 const needsDownload = (r: RuntimeRow) => !!availableFor(r) && !rows.value.some(v => v.kind === 'official' && v.accel === r.accel && v.tag === availableFor(r))
 
 function useRow(r: RuntimeRow) {
-  ask(r.tag, secondary.value && r.accel === secondary.value.accel ? r.accel : undefined)
+  // A hand-added build goes by its reference; the server picks the channel it becomes current on.
+  if (r.kind === 'custom') ask(r.ref, undefined, runtimeBaseName(r))
+  else ask(r.tag, secondary.value && r.accel === secondary.value.accel ? r.accel : undefined)
 }
 
 async function downloadChannel(accel: string) {
@@ -133,9 +136,36 @@ onBeforeUnmount(() => clearInterval(poll))
 
 // ---- Add / delete ----------------------------------------------------------------------------
 const addOpen = ref(false)
+const addKind = ref<'dir' | 'archive'>('dir')
+function openAdd(kind: 'dir' | 'archive' = 'dir') {
+  addKind.value = kind
+  addOpen.value = true
+}
 const removing = ref<RuntimeRow | null>(null)
 const rowName = (r: RuntimeRow) => runtimeRowLabel(r, ui.value.isMac)
+const refName = (ref: string) => { const r = rows.value.find(x => x.ref === ref); return r ? runtimeBaseName(r) : undefined }
 const removeWhy = (r: RuntimeRow) => (r.latestOfficial ? m.removeLatestWhy : r.inUse ? m.removeInUseWhy : '')
+
+// ---- Offline fallback (decision 63): a failed download names the official files to fetch by hand.
+type RtError = Extract<RuntimeStatusView, { state: 'error' }>
+const failed = computed<RtError | null>(() => {
+  for (const st of [status.value, secondary.value?.status]) {
+    if (st?.state === 'error' && (st.assets?.length || st.releasesUrl)) return st as RtError
+  }
+  return null
+})
+const offlineNames = computed(() => (failed.value?.assets ?? []).map(a => a.name))
+async function copyUrls() {
+  const f = failed.value
+  if (!f) return
+  const text = f.assets?.length ? f.assets.map(a => a.url).join('\n') : (f.releasesUrl ?? '')
+  try {
+    await navigator.clipboard.writeText(text)
+    toast.add({ title: m.offline.copied, color: 'success', icon: 'i-lucide-check' })
+  } catch {
+    toast.add({ title: m.offline.copyFailed, description: f.releasesUrl, color: 'error', icon: 'i-lucide-circle-alert' })
+  }
+}
 
 // ---- Fallback notice -------------------------------------------------------------------------
 type Fallback = Extract<NonNullable<typeof events.value>[number], { kind: 'runtime-fallback' }>
@@ -153,7 +183,7 @@ function dismissFallbacks() {
 <template>
   <AppCard :title="s.title" :hint="fmt(s.hint, { n: keep })">
     <template #actions>
-      <UButton size="xs" color="neutral" variant="outline" icon="i-lucide-plus" class="whitespace-nowrap" @click="addOpen = true">
+      <UButton size="xs" color="neutral" variant="outline" icon="i-lucide-plus" class="whitespace-nowrap" @click="openAdd()">
         {{ m.add }}
       </UButton>
     </template>
@@ -232,8 +262,27 @@ function dismissFallbacks() {
       </p>
       <p class="text-sm">
         <span class="text-muted">{{ s.status }}</span>
-        <span class="ml-2 text-default">{{ runtimeText(status) }}</span>
+        <span class="ml-2 text-default">{{ runtimeText(status, refName) }}</span>
+        <DigestSourceNote v-if="status && 'digestSource' in status" :source="status.digestSource" class="ml-2" />
       </p>
+      <div v-if="failed" class="space-y-2 rounded-[10px] border border-default bg-muted px-3.5 py-3">
+        <p class="m-0 text-xs text-default">
+          {{ m.offline.hint }}
+        </p>
+        <ul v-if="offlineNames.length" class="m-0 list-none space-y-0.5 p-0">
+          <li v-for="n in offlineNames" :key="n" class="break-all font-mono text-[11px] text-muted">
+            {{ n }}
+          </li>
+        </ul>
+        <div class="flex flex-wrap gap-2">
+          <UButton size="xs" color="neutral" variant="outline" icon="i-lucide-copy" @click="copyUrls">
+            {{ m.offline.copy }}
+          </UButton>
+          <UButton size="xs" color="neutral" variant="outline" icon="i-lucide-file-archive" @click="openAdd('archive')">
+            {{ m.offline.importLocal }}
+          </UButton>
+        </div>
+      </div>
       <p v-if="autoOff" class="text-xs text-muted">
         {{ s.autoOff }}
       </p>
@@ -252,6 +301,7 @@ function dismissFallbacks() {
               {{ downloading ? fmt(m.channelDownloading, { channel: channelTitle(g.accel) }) : fmt(m.channelDownload, { channel: channelTitle(g.accel) }) }}
             </UButton>
             <span v-if="secondary.status.state !== 'idle'" class="text-xs text-muted">{{ runtimeText(secondary.status) }}</span>
+            <DigestSourceNote v-if="'digestSource' in secondary.status" :source="secondary.status.digestSource" />
           </template>
         </div>
         <ul v-else class="list-none p-0">
@@ -267,7 +317,7 @@ function dismissFallbacks() {
             <span class="flex-1" />
             <UButton v-if="needsDownload(r)" size="xs" icon="i-lucide-download" :disabled="status?.state === 'working' || downloading" @click="requestDownloadChannel(r.accel)">{{ s.update.download }}</UButton>
             <UButton
-              v-if="r.kind === 'official' && !r.current"
+              v-if="!r.current"
               size="xs"
               color="neutral"
               variant="outline"
@@ -275,7 +325,7 @@ function dismissFallbacks() {
               :disabled="busy"
               @click="useRow(r)"
             >
-              {{ isRollback(r) ? s.rollback : s.use }}
+              {{ r.kind === 'official' && isRollback(r) ? s.rollback : s.use }}
             </UButton>
             <UButton
               size="xs"
@@ -306,7 +356,7 @@ function dismissFallbacks() {
     <USkeleton v-else class="h-20 w-full" />
 
     <VulkanDownloadConfirmModal v-model:open="vulkanConfirmOpen" @confirm="onConfirmVulkanDownload" />
-    <RuntimeAddModal v-model:open="addOpen" @added="load" />
+    <RuntimeAddModal v-model:open="addOpen" :initial-kind="addKind" @added="load" />
     <RuntimeDeleteModal :row="removing" @close="removing = null" @done="load" />
   </AppCard>
 </template>

@@ -1,9 +1,9 @@
 // Public GitHub mirrors for people who cannot reach github.com (decision 53). Never used on their
-// own: a mirror is offered only after the user started an update (llama.cpp or llama-web itself)
-// and the official site could not be reached, and the user picks it. Every mirror here takes the
+// own in ask mode: a failed user action offers a mirror for that action. Persistent auto/mirror
+// consent is applied by net.ts. Every mirror here takes the
 // original URL as a path suffix (`<base><https://github.com/...>`). Downloads are still checked
-// against a SHA-256; with a mirror that digest comes through the mirror as well, which the dialog
-// says out loud. Pure module (no Nitro).
+// against a SHA-256; net.ts tries official metadata before trusting a mirrored digest.
+// Pure module (no Nitro).
 import type { FetchFn } from './llamacpp'
 
 export interface Mirror {

@@ -39,20 +39,32 @@ export function reasonText(code: string | null): string {
   return (t.loadError as Record<string, string>)[code] ?? code
 }
 
-export function runtimeText(r: StateDoc['llamacpp']['runtime'] | undefined): string {
+/** `refName` names a hand-added build (`custom:<id>`) the status mentions as its previous version. */
+export function runtimeText(r: StateDoc['llamacpp']['runtime'] | undefined, refName?: (ref: string) => string | undefined): string {
   if (!r) return ''
   const rt = t.status.runtime
   switch (r.state) {
     case 'working': return fmt(rt.working[r.step], { detail: r.detail })
     case 'ready': {
-      const vars = { tag: r.tag, from: r.from ?? '', latest: r.latest ?? '' }
+      // A hand-added build reads by its name, never as the raw `custom:<id>` reference.
+      const vars = { tag: r.label || r.tag, from: (r.from && refName?.(r.from)) || r.from || '', latest: r.latest ?? '' }
       if (r.note === 'updated') return fmt(r.from ? rt.notes.updated : rt.notes.updatedFirst, vars)
       return r.note ? fmt(rt.notes[r.note], vars) : fmt(rt.ready, vars)
     }
-    case 'error': return fmt(r.using ? rt.errorUsing : rt.error, { code: (rt.errors as Record<string, string>)[r.code] ?? r.code, detail: r.detail, using: r.using ?? '' })
+    case 'error': return fmt(r.using ? rt.errorUsing : rt.error, { code: (rt.errors as Record<string, string>)[r.code] ?? r.code, detail: r.detail, using: r.usingLabel || r.using || '' })
     case 'disabled': return rt.disabled
     default: return rt.idle
   }
+}
+
+/** Name of the current llama.cpp version: the tag, or a hand-added build's label instead of `custom:<id>`. */
+export function llamacppCurrentName(l: StateDoc['llamacpp'] | undefined): string {
+  const cur = l?.current ?? ''
+  if (!cur.startsWith('custom:')) return cur
+  const r = l!.runtime
+  if (r.state === 'ready' && r.tag === cur && r.label) return r.label
+  if (r.state === 'error' && r.using === cur && r.usingLabel) return r.usingLabel
+  return cur
 }
 
 /** Chinese reason for a tunnel error code (`detail` is appended after a colon when present). */

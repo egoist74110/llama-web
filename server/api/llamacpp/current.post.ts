@@ -10,7 +10,9 @@ export default defineEventHandler(async (event) => {
   const body = await readBody(event)
   try {
     const ctx = getContext()
-    if (body?.channel !== undefined && body.channel !== ctx.runtimeTarget.acceleration) {
+    if (typeof body?.tag === 'string' && body.tag.startsWith('custom:')) {
+      ctx.runtimes.useCurrent(ctx.runtimeTarget.acceleration, body.tag)
+    } else if (body?.channel !== undefined && body.channel !== ctx.runtimeTarget.acceleration) {
       if (!ctx.secondary || body.channel !== ctx.secondary.accel) throw createError({ statusCode: 400, message: t.llamacpp.errors['bad-channel'] })
       ctx.runtimes.useCurrent(ctx.secondary.accel, body?.tag)
     } else ctx.updater.use(body?.tag)

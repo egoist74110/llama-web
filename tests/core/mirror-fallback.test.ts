@@ -142,7 +142,7 @@ test('a mirror is offered only when the user started the check or download that 
   await forced.u.stop()
 })
 
-test('a chosen mirror carries the whole manual check: every request goes through it', async () => {
+test('a chosen mirror tries official metadata first', async () => {
   const gh = llamaWeb({ api: 'limited', pagesOffline: true })
   const { u } = llamaUpdater(gh.fetchFn)
   expect(await u.run({ manual: true })).toMatchObject({ state: 'error', offer: 'check' })
@@ -151,7 +151,7 @@ test('a chosen mirror carries the whole manual check: every request goes through
   expect(done).toMatchObject({ state: 'disabled' })
   expect(u.getUpdateCheck()).toMatchObject({ state: 'checked', tag: 'b300' })
   expect(gh.calls.length).toBeGreaterThan(0)
-  expect(gh.calls.every(c => c.startsWith('https://ghfast.top/https://'))).toBe(true)
+  expect(gh.calls.some(c => c.startsWith('https://api.github.com/'))).toBe(true)
   await u.stop()
 })
 

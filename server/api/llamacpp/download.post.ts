@@ -6,6 +6,7 @@ import { describeLlamacpp } from '../../service/llamacpp-api'
 export default defineEventHandler(async (event) => {
   const body = await readBody(event)
   const ctx = getContext()
+  if (body?.remember === true) ctx.updateSettings(s => { s.network.downloadSource = 'auto' })
   const channel = body?.channel ?? ctx.runtimeTarget.acceleration
   const secondary = ctx.secondary
   const updater = channel === ctx.runtimeTarget.acceleration ? ctx.updater : secondary && secondary.accel === channel ? secondary.updater : null

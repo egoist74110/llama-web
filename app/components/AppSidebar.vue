@@ -55,7 +55,7 @@ const big = computed(() => {
   if (sp.phase === 'prompt') return { value: '…', unit: L.serving.prompt }
   return sp.generation === null ? { value: '–', unit: L.serving.waiting } : { value: n, unit: L.serving.last }
 })
-const version = computed(() => state.value?.llamacpp.current || L.llamacppNone)
+const version = computed(() => llamacppCurrentName(state.value?.llamacpp) || L.llamacppNone)
 const runtimeUpdate = computed(() => {
   const c = state.value?.llamacpp.check
   return c?.state === 'checked' && c.available ? c.tag : null

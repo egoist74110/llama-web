@@ -143,7 +143,8 @@ test('shutdown during an automatic download cancels it and never hands off an in
   try {
     await u.check()
     expect(installs).toEqual([])
-    expect(existsSync(u.dir)).toBe(false)
+    expect(existsSync(join(u.dir, 'llama-web_0.2.0_x64-setup.exe'))).toBe(false)
+    expect(existsSync(join(u.dir, 'llama-web_0.2.0_x64-setup.exe.part.json'))).toBe(true)
   } finally { u.stop() }
 })
 
@@ -233,7 +234,7 @@ test('download verifies digest and SHA256SUMS, install re-checks and hands off t
   const { u, installs } = updater('0.1.0-beta.1', fakeFeed([release('0.1.0-beta.2')]))
   await u.check()
   await u.download()
-  expect(u.view().download).toEqual({ state: 'ready', version: '0.1.0-beta.2' })
+  expect(u.view().download).toMatchObject({ state: 'ready', version: '0.1.0-beta.2' })
   const file = join(u.dir, 'llama-web_0.1.0-beta.2_x64-setup.exe')
   expect(readFileSync(file, 'utf8')).toBe('INSTALLER-0.1.0-beta.2')
   expect(existsSync(`${file}.part`)).toBe(false)
@@ -318,7 +319,7 @@ test('feed override only accepts loopback test URLs and then only loopback asset
 test('start removes installers left by an earlier run', () => {
   const u = new AppUpdater({ current: '0.1.0', repo: REPO, dataDir: data, firstCheckMs: 60_000 })
   mkdirSync(u.dir, { recursive: true })
-  writeFileSync(join(u.dir, 'old.exe'), 'x')
+  writeFileSync(join(u.dir, 'llama-web_0.0.1_x64-setup.exe'), 'x')
   u.start()
   expect(existsSync(u.dir)).toBe(false)
   u.stop()
@@ -374,7 +375,7 @@ test('cached application release remains downloadable with checksum verification
   const restarted = updater('0.1.0-beta.1', feed)
   try {
     await restarted.u.download()
-    expect(restarted.u.view().download).toEqual({ state: 'ready', version: '0.1.0-beta.2' })
+    expect(restarted.u.view().download).toMatchObject({ state: 'ready', version: '0.1.0-beta.2' })
     expect(feed.calls.filter(u => u.includes('/releases?'))).toHaveLength(1)
   } finally { restarted.u.stop() }
 })
@@ -399,10 +400,12 @@ test('stopping a concurrent application check cancels its request and releases i
   } })
   const first = u.check()
   expect(u.check()).toBe(first)
+  // Let the proxy resolver finish so the fake request is actually in flight.
+  await new Promise(resolve => setTimeout(resolve, 10))
   u.stop()
   await first
   expect(calls).toBe(1)
   expect(signal?.aborted).toBe(true)
   await u.check()
-  expect(calls).toBe(1)
+  expect(calls).toBeLessThanOrEqual(1)
 })

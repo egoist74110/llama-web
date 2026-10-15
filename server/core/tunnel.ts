@@ -1,3 +1,5 @@
+import { NetworkAccess, DEFAULT_NETWORK, officialFirst, type DigestSource } from './net'
+import { fetchExpandedAssets, fetchReleasesAtom, fillAssetDigests } from './github-feed'
 // Cloudflare tunnel hosting (plan 阶段 4, 4-4): find (or download) cloudflared, run
 // `cloudflared tunnel run` with the tunnel token and watch it. Pure module (no Nitro).
 // Quick mode (阶段 7, decision 31) runs `cloudflared tunnel --url http://127.0.0.1:<port>` instead:
@@ -10,9 +12,9 @@
 //   install is copied there), so the startup residue cleanup, which only kills processes whose
 //   executable is under data/runtime/, also covers a tunnel left behind by a hard kill.
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
-import { chmodSync, copyFileSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, copyFileSync, mkdirSync, readFileSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, posix, win32 } from 'node:path'
-import { download, getBody, RuntimeError, type FetchFn, type NetOptions, type ReleaseAsset } from './llamacpp'
+import { cleanupParts, download, getBody, RuntimeError, type FetchFn, type NetOptions, type ReleaseAsset } from './llamacpp'
 import type { TunnelMode, TunnelProtocol } from './config'
 import type { PublicStatus } from './public-entry'
 import { killTree, type PidRegistry } from './runner'
@@ -135,8 +137,22 @@ export const releaseAssetName = cloudflaredAssetName
 export async function resolveCloudflared(fetchFn: FetchFn, platform: NodeJS.Platform = process.platform, net: NetOptions = {}, arch: string = process.arch): Promise<ReleaseAsset> {
   const name = releaseAssetName(platform, arch)
   if (!name) throw new RuntimeError('asset-missing', 'No cloudflared build for this platform', `${platform}/${process.arch}`)
-  const rel = await getBody(fetchFn, `https://api.github.com/repos/${REPO}/releases/latest`, 'json', net) as { assets?: ReleaseAsset[] }
-  const asset = rel.assets?.find(a => a.name === name)
+  const meta = await officialFirst(fetchFn, async f => {
+    try {
+      const rel = await getBody(f, `https://api.github.com/repos/${REPO}/releases/latest`, 'json', net) as { assets?: ReleaseAsset[], tag_name?: string }
+      const assets = rel.tag_name ? await fillAssetDigests(f, REPO, rel.tag_name, rel.assets ?? [], net) : rel.assets ?? []
+      const chosen = assets.find(a => a.name === name)
+      if (chosen && !/^sha256:[0-9a-f]{64}$/i.test(chosen.digest ?? '')) throw new RuntimeError('no-digest', 'Release asset has no SHA-256')
+      return assets
+    }
+    catch (e) {
+      const tag = (await fetchReleasesAtom(f, REPO, net))[0]?.tag_name
+      if (!tag) throw e
+      return fetchExpandedAssets(f, REPO, tag, net)
+    }
+  })
+  const asset = meta.value.find(a => a.name === name)
+  if (asset) asset.digestSource = meta.digestSource
   if (!asset) throw new RuntimeError('asset-missing', 'Release asset not found', name)
   return asset
 }
@@ -147,11 +163,13 @@ export interface PrepareOptions {
   platform?: NodeJS.Platform
   arch?: string
   extract?: typeof extractArchive
+  network?: NetworkAccess
   fetch?: FetchFn
   exists?: (file: string) => boolean
   /** Time limits and the cancel signal of the download. */
   net?: ArchiveOptions
-  onStep?(step: 'find' | 'download', detail: string): void
+  mirror?: string
+  onStep?(step: 'find' | 'download', detail: string, digestSource?: DigestSource): void
 }
 
 let workSeq = 0
@@ -160,6 +178,7 @@ export interface PreparedCloudflared {
   /** Always under data/runtime/cloudflared/. */
   exe: string
   /** `system`: copied from an installation found on this machine; `downloaded`: official Release. */
+  digestSource?: DigestSource
   source: 'system' | 'downloaded'
 }
 
@@ -177,6 +196,7 @@ function sizeAndTime(file: string): { size: number, mtimeMs: number } | null {
 export async function prepareCloudflared(opts: PrepareOptions): Promise<PreparedCloudflared> {
   const platform = opts.platform ?? process.platform
   const dest = cloudflaredPath(opts.dataDir, platform, opts.arch)
+  cleanupParts(join(dirname(dest), '.downloads'))
   opts.onStep?.('find', '')
   const legacy = join(opts.dataDir, 'runtime', 'cloudflared', 'cloudflared.exe')
   const found = findCloudflared({ env: opts.env, platform, exists: opts.exists, skip: [dest] })
@@ -201,16 +221,17 @@ export async function prepareCloudflared(opts: PrepareOptions): Promise<Prepared
   }
   if (sizeAndTime(dest)) return { exe: dest, source: 'downloaded' }
 
-  const fetchFn = opts.fetch ?? fetch
+  const fetchFn = (opts.network ?? new NetworkAccess({ settings: () => DEFAULT_NETWORK, fetch: opts.fetch })).source(opts.mirror)
   // Unique per call: two overlapping preparations never share (or delete) each other's file.
   const work = `${dest}.${process.pid}.${++workSeq}.dl`
   const unpack = `${work}.out`
   try {
     opts.onStep?.('download', '')
     const asset = await resolveCloudflared(fetchFn, platform, opts.net, opts.arch)
+    opts.onStep?.('download', asset.name, asset.digestSource)
     mkdirSync(dirname(dest), { recursive: true })
     const archive = /\.(tgz|tar\.gz|zip)$/.test(asset.name)
-    const payload = archive ? `${work}.tgz` : work
+    const payload = join(dirname(dest), '.downloads', asset.name)
     try {
       await download(fetchFn, asset, payload, opts.net)
       let binary = payload
@@ -223,12 +244,13 @@ export async function prepareCloudflared(opts: PrepareOptions): Promise<Prepared
       if (platform !== 'win32') chmodSync(binary, 0o755)
       renameSync(binary, dest)
     } finally { rmSync(payload, { force: true }) }
-    return { exe: dest, source: 'downloaded' }
+    return { exe: dest, source: 'downloaded', digestSource: asset.digestSource }
   } catch (e) {
     if (e instanceof TunnelError) throw e
     if (e instanceof RuntimeError) throw new TunnelError('download-failed', `${e.code}: ${e.message}`)
     throw new TunnelError('prepare-failed', (e as Error).message)
   } finally {
+    try { rmdirSync(join(dirname(dest), '.downloads')) } catch { /* Resumable files remain. */ }
     rmSync(work, { force: true })
     rmSync(unpack, { recursive: true, force: true })
   }
@@ -250,18 +272,18 @@ export type TunnelOffReason = 'disabled' | 'no-token' | 'public-off' | 'public-u
 
 export type TunnelStatus =
   | { state: 'off', reason: TunnelOffReason }
-  | { state: 'preparing', step: 'find' | 'download' }
+  | { state: 'preparing', step: 'find' | 'download', digestSource?: DigestSource }
   /** Process running, no connection to Cloudflare yet. `lastError` is the latest ERR line (redacted). */
   | { state: 'starting', lastError: string | null }
   | { state: 'connected', connections: number }
   /** `retryAt` (epoch ms) is when it starts again by itself; null = needs the user (bad token). */
-  | { state: 'error', code: TunnelErrorCode, detail: string, retryAt: number | null, tail: string[] }
+  | { state: 'error', digestSource?: DigestSource, code: TunnelErrorCode, detail: string, retryAt: number | null, tail: string[] }
 
 export interface TunnelInfo {
   status: TunnelStatus
   /** Mode of the tunnel that is (or was last) set up; null before the first start. */
   mode: TunnelMode | null
-  cloudflared: { source: 'system' | 'downloaded', version: string | null } | null
+  cloudflared: { source: 'system' | 'downloaded', version: string | null, digestSource?: DigestSource } | null
   /**
    * Host names the tunnel routes to this public entry, from the configuration cloudflared
    * received from Cloudflare (null = not seen yet for this token).
@@ -394,6 +416,7 @@ export interface TunnelManagerOptions {
   prepare?: (o: PrepareOptions) => Promise<PreparedCloudflared>
   version?: (exe: string) => Promise<string | null>
   spawn?: typeof spawn
+  network?: NetworkAccess
   fetch?: FetchFn
   platform?: NodeJS.Platform
   env?: Record<string, string | undefined>
@@ -430,6 +453,7 @@ export class TunnelManager {
   /** The last configuration line cloudflared received (token mode), filtered again on a port change. */
   private ingressLine: string | null = null
   /** The running preparation (find / download cloudflared) and the way to cancel it. */
+  private retryMirror?: string
   private preparing: Promise<unknown> | null = null
   private prepareAbort: AbortController | null = null
   /** A process we killed because it could not be recorded: the next start waits for it. */
@@ -453,7 +477,8 @@ export class TunnelManager {
   }
 
   /** Start again now (after an error, instead of waiting for the automatic retry). */
-  retry(): void {
+  retry(opts: { mirror?: string } = {}): void {
+    this.retryMirror = opts.mirror
     this.queue = this.queue.then(async () => {
       if (this.closed || !this.active || this.child || this.info.status.state === 'preparing') return
       this.attempt = 0
@@ -561,11 +586,13 @@ export class TunnelManager {
       const abort = new AbortController()
       this.prepareAbort = abort
       const task = prepare({
-        dataDir: this.opts.dataDir, env: this.opts.env, platform: this.opts.platform, fetch: this.opts.fetch,
+        dataDir: this.opts.dataDir, env: this.opts.env, platform: this.opts.platform, fetch: this.opts.fetch, network: this.opts.network,
         net: { signal: abort.signal },
-        onStep: step => { if (!stale()) this.set({ state: 'preparing', step }) },
+        mirror: this.retryMirror,
+        onStep: (step, _detail, digestSource) => { if (!stale()) this.set({ state: 'preparing', step, ...(digestSource ? { digestSource } : {}) }) },
       })
       this.preparing = task
+      this.retryMirror = undefined
       let prepared: PreparedCloudflared
       try {
         prepared = await task
@@ -575,7 +602,7 @@ export class TunnelManager {
       if (stale()) return
       const version = await (this.opts.version ?? cloudflaredVersion)(prepared.exe)
       if (stale()) return
-      this.info = { ...this.info, cloudflared: { source: prepared.source, version } }
+      this.info = { ...this.info, cloudflared: { source: prepared.source, digestSource: prepared.digestSource, version } }
       const configFile = launch.mode === 'quick' ? ensureQuickConfig(this.opts.dataDir) : ''
       this.spawnChild(gen, prepared.exe, launch, configFile)
     } catch (e) {
@@ -738,6 +765,7 @@ export class TunnelManager {
   }
 
   private set(status: TunnelStatus): void {
+    if (status.state === 'error' && this.info.status.state === 'preparing' && this.info.status.digestSource) status = { ...status, digestSource: this.info.status.digestSource }
     const key = JSON.stringify([status, this.info.mode, this.info.cloudflared, this.info.hostnames, this.info.quickHost])
     this.info = { ...this.info, status }
     if (key === this.lastKey) return

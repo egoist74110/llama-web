@@ -22,7 +22,7 @@ export function savedClient(): CfClient {
 export const apiBase = () => process.env.LLAMA_WEB_CLOUDFLARE_API || CF_API
 
 /** Client for a token the user just pasted. */
-export const clientFor = (token: string) => new CfClient(token, fetch, apiBase())
+export const clientFor = (token: string) => new CfClient(token, getContext().outbound.direct, apiBase())
 
 const str = (v: unknown) => (typeof v === 'string' ? v : '')
 

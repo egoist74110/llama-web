@@ -22,7 +22,7 @@ const downloading = ref(false)
 
 const dirCount = computed(() => doc.value?.modelDirs.length ?? 0)
 const modelCount = computed(() => state.value?.models.length ?? 0)
-const runtimeTag = computed(() => state.value?.llamacpp.current || '')
+const runtimeTag = computed(() => llamacppCurrentName(state.value?.llamacpp))
 const runtimeStatus = computed(() => state.value?.llamacpp.runtime)
 const runtimeBusy = computed(() => downloading.value || runtimeStatus.value?.state === 'working')
 const pathHint = computed(() => (ui.value.isMac ? t.platform.mac.setupPathHint : s.dir.pathHint))

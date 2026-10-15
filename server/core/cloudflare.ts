@@ -15,6 +15,7 @@
 // - The API token is only ever sent in the Authorization header; it is never part of an error,
 //   a step result or a log line. The tunnel token is handed to `onSaved` and nowhere else.
 import { createHash } from 'node:crypto'
+import { DEFAULT_NETWORK, NetworkAccess } from './net'
 
 export type FetchFn = (url: string, init?: RequestInit) => Promise<Response>
 
@@ -80,7 +81,7 @@ interface Envelope<T> {
 const BAD_TOKEN_CODES = new Set([1000, 6003, 6100, 6101, 6102, 6103, 6111, 9106])
 
 export class CfClient {
-  constructor(private token: string, private fetchFn: FetchFn = fetch, private base = CF_API) {}
+  constructor(private token: string, private fetchFn: FetchFn = new NetworkAccess({ settings: () => DEFAULT_NETWORK }).direct, private base = CF_API) {}
 
   async call<T>(method: string, path: string, body?: unknown, perm?: Permission): Promise<{ result: T, info?: Envelope<T>['result_info'] }> {
     let res: Response

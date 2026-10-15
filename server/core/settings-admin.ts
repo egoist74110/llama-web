@@ -7,6 +7,7 @@ import { isAbsolute, join, resolve } from 'node:path'
 import { applyGpuChoice, hasGpuFields, sanitizeGpuChoice } from './gpu-group'
 import { ArgsSyntaxError, PARAM_DEFS, paramValueOk, splitArgs, type LaunchDefaults, type ParamValue } from './args'
 import { cleanWizard, hasCpuChannel, hasDeviceSelection, MAX_LOADED_LIMIT, NO_ROOM_POLICIES, TUNNEL_MODES, TUNNEL_PROTOCOLS, type ModelsDoc, type NoRoomPolicy, type Settings, type TunnelMode, type TunnelProtocol } from './config'
+import { normalizeProxyUrl } from './net'
 import { normalizeCustomMirror } from './mirrors'
 import { LOCALES, type LocaleCode } from '../../i18n/messages'
 import type { Acceleration, PlatformInfo, RuntimeSelection, RuntimeTarget } from './platform'
@@ -16,7 +17,7 @@ import type { ModelDir } from './types'
 export type SettingsErrorCode =
   | 'bad-request' | 'dir-path' | 'dir-duplicate' | 'dir-depth' | 'dir-in-use' | 'dir-limit'
   | 'bad-param' | 'bad-extra-args' | 'bad-image' | 'bad-port' | 'bad-port-range' | 'bad-timeout'
-  | 'bad-public-port' | 'bad-domain' | 'bad-mirror' | 'bad-max-loaded' | 'bad-on-no-room' | 'bad-locale' | 'bad-acceleration'
+  | 'bad-proxy' | 'bad-network' | 'bad-public-port' | 'bad-domain' | 'bad-mirror' | 'bad-max-loaded' | 'bad-on-no-room' | 'bad-locale' | 'bad-acceleration'
 
 export class SettingsError extends Error {
   constructor(public code: SettingsErrorCode, public detail = '') {
@@ -283,6 +284,7 @@ export interface SettingsPatch {
   /** Runtime preferences: autoUpdate, and acceleration (takes effect after restart). */
   llamacpp?: unknown
   /** Own mirror prefix: { custom: string }. */
+  network?: unknown
   mirror?: unknown
   /** Interface language (decision 18): { locale: 'zh-CN' | 'en' }. */
   ui?: unknown
@@ -290,7 +292,7 @@ export interface SettingsPatch {
   setupDone?: unknown
 }
 
-const SECTIONS = ['modelDirs', 'defaults', 'defaultsCpu', 'image', 'server', 'public', 'setupDone', 'llamacpp', 'mirror', 'ui']
+const SECTIONS = ['modelDirs', 'defaults', 'defaultsCpu', 'image', 'server', 'public', 'setupDone', 'llamacpp', 'mirror', 'ui', 'network']
 
 /** Apply every section present in the patch; validation of any section failing aborts the whole patch. */
 export function applySettingsPatch(draft: Settings, patch: unknown, models: ModelsDoc, host: { os: NodeJS.Platform, arch?: string } = { os: process.platform, arch: process.arch }): void {
@@ -316,6 +318,27 @@ export function applySettingsPatch(draft: Settings, patch: unknown, models: Mode
     // Validate both fields before changing either; the store persists the whole patch atomically.
     if (updateAuto) draft.llamacpp.autoUpdate = raw.autoUpdate as boolean
     if (updateAccel) draft.llamacpp.acceleration = raw.acceleration as Acceleration
+  }
+  if (p.network !== undefined) {
+    const raw = p.network
+    if (!isObj(raw) || Object.keys(raw).some(k => !['proxy', 'downloadSource', 'mirror'].includes(k))) throw new SettingsError('bad-network')
+    const next = { ...draft.network, proxy: { ...draft.network.proxy } }
+    if (raw.proxy !== undefined) {
+      if (!isObj(raw.proxy) || Object.keys(raw.proxy).some(k => !['mode', 'url'].includes(k))) throw new SettingsError('bad-proxy')
+      const mode = raw.proxy.mode ?? next.proxy.mode, url = raw.proxy.url ?? next.proxy.url
+      if (!['system', 'manual', 'off'].includes(String(mode)) || typeof url !== 'string') throw new SettingsError('bad-proxy')
+      if (url && !normalizeProxyUrl(url) || mode === 'manual' && !normalizeProxyUrl(url)) throw new SettingsError('bad-proxy')
+      next.proxy = { mode: mode as typeof next.proxy.mode, url: url ? normalizeProxyUrl(url)! : '' }
+    }
+    if (raw.downloadSource !== undefined) {
+      if (!['ask', 'auto', 'mirror'].includes(String(raw.downloadSource))) throw new SettingsError('bad-network')
+      next.downloadSource = raw.downloadSource as typeof next.downloadSource
+    }
+    if (raw.mirror !== undefined) {
+      if (typeof raw.mirror !== 'string' || !['', 'ghfast', 'gh-proxy', 'ghproxy-net', 'custom'].includes(raw.mirror)) throw new SettingsError('bad-network')
+      next.mirror = raw.mirror
+    }
+    draft.network = next
   }
   if (p.mirror !== undefined) {
     if (!isObj(p.mirror) || Object.keys(p.mirror).some(k => k !== 'custom')) throw new SettingsError('bad-request')
@@ -350,6 +373,7 @@ export interface SettingsDoc {
   defaultsCpu?: LaunchDefaults
   builtinDefaultsCpu?: LaunchDefaults
   image: Settings['preprocess']['image']
+  network: Settings['network']
   mirror: Settings['mirror']
   /** Interface language (decision 18), so the page can show and change it without a restart. */
   ui: Settings['ui']

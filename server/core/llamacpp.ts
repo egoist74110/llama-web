@@ -4,14 +4,15 @@
 // complete, so a failed download never leaves a half-installed version. The full update /
 // rollback flow is stage 4 (updater); this module is the initial-fetch part.
 import { createHash } from 'node:crypto'
-import { chmodSync, createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs'
+import { chmodSync, createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, rmdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { checkExtractedTree, extractArchive, type ArchiveOptions } from './archive'
 import { pickCuda, type CudaLimits } from './cuda'
 import { freeBytes, neededBytes } from './disk-space'
-import { apiFallbackCode, fetchExpandedAssets } from './github-feed'
+import { DEFAULT_NETWORK, NetworkAccess, canMirror, officialFirst, sourceFailed, type DigestSource } from './net'
+import { apiFallbackCode, fetchExpandedAssets, fillAssetDigests } from './github-feed'
 import { legacyWindows, targetKey, type RuntimeTarget } from './platform'
 
 const REPO = 'ggml-org/llama.cpp'
@@ -21,7 +22,7 @@ export type RuntimeErrorCode =
   | 'network' | 'rate-limited' | 'http' | 'no-nightly-tag' | 'bad-tag' | 'asset-missing' | 'no-digest' | 'digest-mismatch' | 'extract-failed' | 'extract-too-large' | 'no-server-exe' | 'no-compatible-cuda' | 'disk-space'
 
 export class RuntimeError extends Error {
-  constructor(public code: RuntimeErrorCode, message: string, public detail?: string) {
+  constructor(public code: RuntimeErrorCode, message: string, public detail?: string, public assets?: Array<{ name: string, url: string }>) {
     super(message)
     this.name = 'RuntimeError'
   }
@@ -65,11 +66,13 @@ export interface ReleaseAsset {
   digest?: string | null
   /** Size in bytes as published by GitHub (absent in test fixtures). */
   size?: number
+  digestSource?: DigestSource
 }
 
 export interface LatestBuild {
   tag: string
   bin: ReleaseAsset
+  digestSource?: DigestSource
   cudart?: ReleaseAsset
 }
 
@@ -84,6 +87,8 @@ const HEADERS = { 'User-Agent': 'llama-web', Accept: 'application/vnd.github+jso
  */
 export interface NetOptions {
   signal?: AbortSignal
+  retryDelaysMs?: readonly number[]
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>
   timeoutMs?: number
   stallMs?: number
   /** Download progress: bytes received so far and the announced size (null when unknown). */
@@ -131,14 +136,14 @@ function guard(outer: AbortSignal | undefined, ms: number) {
   }
 }
 
-async function fetchChecked(fetchFn: FetchFn, url: string, signal: AbortSignal): Promise<Response> {
+async function fetchChecked(fetchFn: FetchFn, url: string, signal: AbortSignal, headers?: HeadersInit): Promise<Response> {
   let res: Response
   try {
     // Already cancelled (shutdown while an earlier step was still running): do not start a request at all.
     if (signal.aborted) throw signal.reason ?? new Error('aborted')
-    res = await abortable(fetchFn(url, { headers: HEADERS, signal }), signal)
+    res = await abortable(fetchFn(url, { headers: { ...HEADERS, ...headers }, signal }), signal)
   } catch (e) {
-    throw new RuntimeError('network', `Cannot reach ${new URL(url).host}`, (e as Error)?.message ?? String(e))
+    throw new RuntimeError('network', `Cannot reach ${new URL(url).host}`, 'Request failed or timed out')
   }
   if (!res.ok) {
     let limited = res.status === 429 || (res.status === 403 && (res.headers.get('x-ratelimit-remaining') === '0' || res.headers.has('retry-after')))
@@ -172,7 +177,8 @@ export async function getBody(fetchFn: FetchFn, url: string, kind: 'json' | 'tex
     try {
       return await abortable(kind === 'json' ? res.json() : res.text(), g.signal)
     } catch (e) {
-      throw new RuntimeError('network', `Cannot read ${new URL(url).host}`, (e as Error)?.message ?? String(e))
+      sourceFailed(fetchFn)
+      throw new RuntimeError('network', `Cannot read ${new URL(url).host}`, 'Request failed or timed out')
     }
   } finally {
     g.done()
@@ -201,15 +207,33 @@ async function resolveViaWeb(fetchFn: FetchFn, net: NetOptions): Promise<{ tag: 
  * build; resolve it, then pick that build's CUDA assets.
  */
 export async function resolveLatest(fetchFn: FetchFn, cudaRuntime: string, platform = process.platform, net: NetOptions = {}, target?: RuntimeTarget, limits?: CudaLimits | null): Promise<LatestBuild> {
-  let found: { tag: string, assets: ReleaseAsset[] }
-  try {
-    found = await resolveViaApi(fetchFn, net)
-  } catch (e) {
-    // The API allows few anonymous requests an hour (and some mirrors do not forward it): the github.com pages carry the same facts.
-    if (!apiFallbackCode(e)) throw e
-    found = await resolveViaWeb(fetchFn, net)
-  }
-  const { tag, assets } = found
+  const metadata = await officialFirst(fetchFn, async f => {
+    let found: { tag: string, assets: ReleaseAsset[] }
+    try { found = await resolveViaApi(f, net) }
+    catch (e) {
+      if (!(e instanceof RuntimeError) || !(apiFallbackCode(e) || e.code === 'network' && canMirror(fetchFn)) || net.signal?.aborted) throw e
+      try { found = await resolveViaWeb(f, net) } catch { throw e }
+    }
+    try {
+      let build = selectBuild(found, cudaRuntime, platform, target, limits)
+      const hasDigest = (a: ReleaseAsset | undefined) => !a || /^sha256:[0-9a-f]{64}$/i.test(a.digest ?? '')
+      if (!hasDigest(build.bin) || !hasDigest(build.cudart)) {
+        found.assets = await fillAssetDigests(f, REPO, found.tag, found.assets, net)
+        build = selectBuild(found, cudaRuntime, platform, target, limits)
+        if (!hasDigest(build.bin) || !hasDigest(build.cudart)) throw new RuntimeError('no-digest', 'Release asset has no SHA-256 digest')
+      }
+      return build
+    } catch (e) {
+      if (e instanceof RuntimeError) e.assets = found.assets.filter(a => /^(llama-|cudart-)/.test(a.name) && a.browser_download_url.startsWith('https://github.com/')).map(a => ({ name: a.name, url: a.browser_download_url }))
+      throw e
+    }
+  })
+  const build = metadata.value
+  for (const a of [build.bin, build.cudart]) if (a) a.digestSource = metadata.digestSource
+  return { ...build, digestSource: metadata.digestSource }
+}
+
+function selectBuild({ tag, assets }: { tag: string, assets: ReleaseAsset[] }, cudaRuntime: string, platform: NodeJS.Platform, target?: RuntimeTarget, limits?: CudaLimits | null): LatestBuild {
   const os = platform === 'win32' ? 'win' : 'linux'
   if (target?.acceleration === 'vulkan' && (target.os !== 'win32' || target.arch !== 'x64')) throw new RuntimeError('asset-missing', 'Unsupported Vulkan target')
   if (target && target.acceleration !== 'cuda') {
@@ -268,45 +292,131 @@ export async function sha256File(file: string): Promise<string> {
  * connection or a shutdown ends it as `network`. Without a published digest it fails (`no-digest`)
  * unless `allowMissingDigest` is set (hand-added sources: the caller shows the value and asks).
  */
+const PART_TTL = 7 * 24 * 60 * 60_000
+const downloading = new Set<string>()
+
+/** Expired resumable data is never considered installed. Called at startup and before another download. */
+export function cleanupParts(dir: string, now = Date.now()): void {
+  let names: string[]
+  try { names = readdirSync(dir) } catch { return }
+  for (const name of names) {
+    if (!name.endsWith('.part') && !name.endsWith('.part.json')) continue
+    const part = join(dir, name.replace(/\.json$/, ''))
+    if (downloading.has(part.slice(0, -5))) continue
+    try {
+      if (now - statSync(part).mtimeMs < PART_TTL && existsSync(`${part}.json`)) continue
+    } catch { /* Orphan sidecar. */ }
+    rmSync(part, { force: true }); rmSync(`${part}.json`, { force: true })
+  }
+}
+
+/** Disk-space accounting uses only a matching, unexpired, digest-bound partial file. */
+export function resumableBytes(asset: ReleaseAsset, file: string, now = Date.now()): number {
+  const expected = /^sha256:([0-9a-f]{64})$/i.exec(asset.digest ?? '')?.[1]?.toLowerCase()
+  if (!expected) return 0
+  try {
+    const meta = JSON.parse(readFileSync(`${file}.part.json`, 'utf8'))
+    const st = statSync(`${file}.part`)
+    return meta.sha256 === expected && meta.size === (asset.size ?? null) && meta.name === asset.name
+      && now - st.mtimeMs < PART_TTL && (asset.size === undefined || st.size <= asset.size) ? st.size : 0
+  } catch { return 0 }
+}
+
+function waitRetry(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const stop = () => { clearTimeout(timer); signal?.removeEventListener('abort', stop); reject(new Error('Cancelled')) }
+    const timer = setTimeout(() => { signal?.removeEventListener('abort', stop); resolve() }, ms)
+    signal?.addEventListener('abort', stop, { once: true })
+    if (signal?.aborted) stop()
+  })
+}
+
 export async function download(fetchFn: FetchFn, asset: ReleaseAsset, file: string, net: NetOptions = {}, allowMissingDigest = false, freeOf: (dir: string) => number | null = freeBytes): Promise<string> {
   const expected = /^sha256:([0-9a-f]{64})$/i.exec(asset.digest ?? '')?.[1]?.toLowerCase()
   if (!expected && !allowMissingDigest) throw new RuntimeError('no-digest', 'Release asset has no SHA-256 digest', asset.name)
-  const stall = net.stallMs ?? DEFAULT_STALL_MS
-  // Not enough room for the download and its unpacked copy: refuse before anything is fetched (decision 44).
-  const need = neededBytes(asset.size)
-  const free = need === null ? null : freeOf(dirname(file))
-  if (need !== null && free !== null && free < need) throw new RuntimeError('disk-space', `Not enough free disk space for ${asset.name}`, String(need))
-  const g = guard(net.signal, stall)
+  if (downloading.has(file)) throw new RuntimeError('network', 'Download already in progress')
+  mkdirSync(dirname(file), { recursive: true })
+  cleanupParts(dirname(file))
+  downloading.add(file)
+  const part = `${file}.part`, sidecar = `${part}.json`
+  const identity = JSON.stringify({ sha256: expected ?? null, size: asset.size ?? null, name: asset.name })
+  const drop = () => { rmSync(part, { force: true }); rmSync(sidecar, { force: true }) }
+  const sizeOf = () => { try { return statSync(part).size } catch { return 0 } }
   try {
-    const res = await fetchChecked(fetchFn, asset.browser_download_url, g.signal)
-    if (!res.body) throw new RuntimeError('network', 'Empty response body', asset.name)
-    try {
-      const src = Readable.fromWeb(res.body as never)
-      const size = Number(res.headers.get('content-length'))
-      const total = Number.isSafeInteger(size) && size > 0 ? size : null
-      let received = 0
-      g.arm()
-      src.on('data', (chunk: Buffer) => {
-        g.arm()
-        received += chunk.length
-        net.onProgress?.(received, total)
-      })
-      await pipeline(src, createWriteStream(file), { signal: g.signal })
-    } catch (e) {
-      throw new RuntimeError('network', `Download interrupted: ${asset.name}`, (e as Error).message)
+    let same = false
+    try { same = !!expected && readFileSync(sidecar, 'utf8') === identity } catch { /* New asset. */ }
+    if (!same || (asset.size !== undefined && sizeOf() > asset.size)) drop()
+    if (expected) {
+      const tmp = `${sidecar}.tmp`
+      try { writeFileSync(tmp, identity); renameSync(tmp, sidecar) } finally { rmSync(tmp, { force: true }) }
+    }
+    const delays = net.retryDelaysMs ?? [2000, 5000, 10000]
+    for (let attempt = 0; ; attempt++) {
+      if (net.signal?.aborted) throw new RuntimeError('network', 'Download cancelled')
+      let offset = expected ? sizeOf() : 0
+      // Expanded-assets metadata can omit size. A fully received part must not get stuck on HTTP 416.
+      if (expected && offset > 0 && asset.size === undefined && await sha256File(part) === expected) {
+        if (net.signal?.aborted) throw new RuntimeError('network', 'Download cancelled')
+        renameSync(part, file); rmSync(sidecar, { force: true })
+        net.onProgress?.(offset, offset)
+        return expected
+      }
+      const need = neededBytes(asset.size)
+      const remaining = need === null ? null : Math.max(0, need - offset)
+      const free = remaining === null ? null : freeOf(dirname(file))
+      if (remaining !== null && free !== null && free < remaining) throw new RuntimeError('disk-space', `Not enough free disk space for ${asset.name}`, String(remaining))
+      const g = guard(net.signal, net.stallMs ?? DEFAULT_STALL_MS)
+      try {
+        // A previous attempt may have received every byte before cancellation. Verify without a 416 request.
+        if (!(expected && asset.size !== undefined && offset === asset.size && offset > 0)) {
+          const res = await fetchChecked(fetchFn, asset.browser_download_url, g.signal, offset ? { Range: `bytes=${offset}-` } : undefined)
+          if (!res.body) throw new RuntimeError('network', 'Empty response body', asset.name)
+          if (res.status === 206) {
+            const range = /^bytes (\d+)-(\d+)\/(\d+|\*)$/.exec(res.headers.get('content-range') ?? '')
+            if (!range || Number(range[1]) !== offset || Number(range[2]) < offset || (asset.size !== undefined && Number(range[3]) !== asset.size)) {
+              await res.body.cancel(); throw new RuntimeError('http', 'Invalid partial response')
+            }
+          } else if (res.status === 200) offset = 0
+          else { await res.body.cancel(); throw new RuntimeError('http', 'Unexpected download response') }
+          const src = Readable.fromWeb(res.body as never)
+          const length = Number(res.headers.get('content-length'))
+          const total = asset.size ?? (Number.isSafeInteger(length) && length > 0 ? offset + length : null)
+          let received = offset
+          net.onProgress?.(received, total)
+          g.arm()
+          src.on('data', (chunk: Buffer) => { g.arm(); received += chunk.length; net.onProgress?.(received, total) })
+          await pipeline(src, createWriteStream(part, { flags: offset ? 'a' : 'w' }), { signal: g.signal })
+          if (asset.size !== undefined && received !== asset.size) throw new RuntimeError('network', 'Incomplete download', asset.name)
+        }
+        const actual = await sha256File(part)
+        if (expected && actual !== expected) { drop(); throw new RuntimeError('digest-mismatch', `SHA-256 mismatch: ${asset.name}`) }
+        if (net.signal?.aborted) throw new RuntimeError('network', 'Download cancelled')
+        renameSync(part, file)
+        rmSync(sidecar, { force: true })
+        return actual
+      } catch (e) {
+        if (e instanceof RuntimeError && !['network', 'http'].includes(e.code)) throw e
+        const retryable = !(e instanceof RuntimeError) || e.code === 'network' || /^HTTP 5\d\d /.test(e.detail ?? '')
+        if (!retryable || net.signal?.aborted || attempt >= delays.length) {
+          if (e instanceof RuntimeError) throw e
+          throw new RuntimeError('network', `Download interrupted: ${asset.name}`)
+        }
+        sourceFailed(fetchFn)
+      } finally { g.done() }
+      try { await (net.sleep ?? waitRetry)(delays[attempt]!, net.signal) }
+      catch { throw new RuntimeError('network', 'Download cancelled') }
     }
   } finally {
-    g.done()
+    downloading.delete(file)
+    if (!expected) drop()
   }
-  const actual = await sha256File(file)
-  if (expected && actual !== expected) throw new RuntimeError('digest-mismatch', `SHA-256 mismatch: ${asset.name}`)
-  return actual
 }
 
 /** Compatibility alias for the bounded system archive installer. */
 export const extractZip = extractArchive
 
 export interface InstallOptions {
+  network?: NetworkAccess
   dataDir: string
   /** Empty = automatic (newest runtime the machine can run, see cuda.ts). */
   cudaRuntime: string
@@ -332,6 +442,7 @@ function findRoot(dir: string, exe: string): string | null {
 export function clearLeftovers(dataDir: string, target?: RuntimeTarget): void {
   if (target && legacyWindows(target)) clearLeftovers(dataDir)
   const base = versionsDir(dataDir, target)
+  cleanupParts(join(base, '.downloads'))
   let names: string[]
   try { names = readdirSync(base) } catch { return }
   for (const n of names) {
@@ -348,7 +459,7 @@ export function clearLeftovers(dataDir: string, target?: RuntimeTarget): void {
  */
 export async function installBuild(build: LatestBuild, opts: InstallOptions): Promise<string> {
   const platform = opts.target?.os ?? opts.platform ?? process.platform
-  const fetchFn = opts.fetch ?? fetch
+  const fetchFn = opts.fetch ?? (opts.network ?? new NetworkAccess({ settings: () => DEFAULT_NETWORK })).source()
   const extract = opts.extract ?? extractZip
   const exe = serverExeName(platform)
   if (!TAG_RE.test(build.tag)) throw new RuntimeError('bad-tag', 'Invalid build tag')
@@ -363,11 +474,11 @@ export async function installBuild(build: LatestBuild, opts: InstallOptions): Pr
     const extracted = join(work, 'out')
     for (const asset of [build.bin, build.cudart].filter((a): a is ReleaseAsset => !!a)) {
       if (asset.name !== asset.name.split(/[\\/]/).pop() || !/\.(zip|tar\.gz|tgz)$/.test(asset.name)) throw new RuntimeError('extract-failed', 'Invalid archive name')
-      const zip = join(work, 'dl', asset.name)
+      const zip = join(base, '.downloads', asset.name)
       opts.onStep?.('download', asset.name)
       await download(fetchFn, asset, zip, opts.net)
       opts.onStep?.('extract', asset.name)
-      await extract(zip, extracted, opts.net)
+      try { await extract(zip, extracted, opts.net) } finally { rmSync(zip, { force: true }) }
       if (opts.net?.signal?.aborted) throw new RuntimeError('extract-failed', 'Extraction cancelled')
     }
     const root = findRoot(extracted, exe)
@@ -378,6 +489,7 @@ export async function installBuild(build: LatestBuild, opts: InstallOptions): Pr
     renameSync(root, dest)
     return build.tag
   } finally {
+    try { rmdirSync(join(base, '.downloads')) } catch { /* resumable data remains */ }
     rmSync(work, { recursive: true, force: true })
   }
 }
@@ -386,8 +498,9 @@ export async function installBuild(build: LatestBuild, opts: InstallOptions): Pr
 export async function installLatest(opts: InstallOptions): Promise<string> {
   clearLeftovers(opts.dataDir, opts.target)
   opts.onStep?.('resolve', '')
-  const latest = await resolveLatest(opts.fetch ?? fetch, opts.cudaRuntime, opts.platform ?? process.platform, opts.net, opts.target, opts.cudaLimits)
-  return installBuild(latest, opts)
+  const fetchFn = opts.fetch ?? (opts.network ?? new NetworkAccess({ settings: () => DEFAULT_NETWORK })).source()
+  const latest = await resolveLatest(fetchFn, opts.cudaRuntime, opts.platform ?? process.platform, opts.net, opts.target, opts.cudaLimits)
+  return installBuild(latest, { ...opts, fetch: fetchFn })
 }
 
 /**
@@ -400,7 +513,7 @@ export async function installLatest(opts: InstallOptions): Promise<string> {
 export type RuntimeStatus =
   | { state: 'idle' }
   | { state: 'disabled' }
-  | { state: 'working', step: 'resolve' | 'download' | 'extract', detail: string, tag?: string }
-  | { state: 'ready', tag: string, note?: 'latest' | 'updated' | 'pinned' | 'auto-off' | 'switched' | 'cached' | 'available', from?: string | null, latest?: string }
+  | { state: 'working', digestSource?: DigestSource, step: 'resolve' | 'download' | 'extract', detail: string, tag?: string }
+  | { state: 'ready', digestSource?: DigestSource, tag: string, label?: string, note?: 'latest' | 'updated' | 'pinned' | 'auto-off' | 'switched' | 'cached' | 'available', from?: string | null, latest?: string }
   /** `offer`: a user-started check / download failed in a way a mirror may fix; the page then asks which mirror to use (never set by automatic checks). */
-  | { state: 'error', code: string, detail: string, using?: string | null, offer?: 'check' | 'download' }
+  | { state: 'error', digestSource?: DigestSource, assets?: Array<{ name: string, url: string }>, releasesUrl?: string, code: string, detail: string, using?: string | null, usingLabel?: string, offer?: 'check' | 'download' }

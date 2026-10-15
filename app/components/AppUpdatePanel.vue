@@ -21,6 +21,13 @@ const progressText = computed(() => {
     : fmt(s.downloadingUnknown, { received: formatBytes(d.received) })
 })
 const date = computed(() => (release.value?.publishedAt ? new Date(release.value.publishedAt).toLocaleDateString('zh-CN') : ''))
+// The checksum came from a mirror (decision 63): said next to the download, or the release when nothing is downloading.
+const digestSource = computed(() => {
+  const d = dl.value
+  if (d && 'digestSource' in d && d.digestSource) return d.digestSource
+  const c = view.value?.check
+  return c?.state === 'available' ? c.digestSource ?? null : null
+})
 const skipped = computed(() => !!release.value && view.value?.skipped === release.value.version)
 </script>
 
@@ -56,6 +63,8 @@ const skipped = computed(() => !!release.value && view.value?.skipped === releas
         </p>
       </template>
     </div>
+
+    <DigestSourceNote :source="digestSource" />
 
     <p v-if="skipped" class="text-xs text-muted">
       {{ s.skippedNote }}

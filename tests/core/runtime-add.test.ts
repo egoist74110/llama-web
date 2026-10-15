@@ -335,7 +335,7 @@ describe('local executable', () => {
     const { inst, registry } = installer({ runVersion: async () => { probes++; return VERSION } })
     await expect(inst.preview({ kind: 'exe', path: src })).rejects.toMatchObject({ code: 'bad-source' })
     await expect(inst.preview({ kind: 'exe', path: join(src, 'missing.exe') })).rejects.toMatchObject({ code: 'not-found' })
-    for (const name of ['bad name.exe', '-bad.exe', 'a..b.exe', 'a'.repeat(101)]) {
+    for (const name of ['bad?.exe', 'bad.exe ', 'bad.exe.', 'a'.repeat(101)]) {
       const file = join(src, name)
       writeFileSync(file, peX64())
       await expect(inst.preview({ kind: 'exe', path: file })).rejects.toMatchObject({ code: 'bad-source' })
@@ -602,4 +602,64 @@ describe('macOS host', () => {
     await expect(installer({ extract: macExtract(machoX64()) }, mac).inst.preview({ kind: 'archive', path: zip })).rejects.toMatchObject({ code: 'wrong-platform' })
     expect(leftovers()).toEqual([])
   })
+})
+
+test('two offline archives are checked separately, merged beside the executable and given the official-name tag when version is absent', async () => {
+  const bin = join(work, 'llama-b4321-bin-win-cuda-13.3-x64.zip'), cudart = join(work, 'cudart.zip')
+  writeFileSync(bin, 'bin'); writeFileSync(cudart, 'dll')
+  const seen: string[] = []
+  const { inst, registry } = installer({ runVersion: async () => '', extract: async (file, dest) => {
+    seen.push(file)
+    const root = join(dest, 'build')
+    mkdirSync(root, { recursive: true })
+    if (file === bin) { writeFileSync(join(root, 'llama-server.exe'), peX64()); writeFileSync(join(root, 'ggml-cuda.dll'), 'cuda') }
+    else writeFileSync(join(root, 'cudart64_13.dll'), 'runtime')
+  } })
+  try {
+    const p = await inst.preview({ kind: 'archive', path: bin, cudartPath: cudart })
+    expect(p).toMatchObject({ tag: 'b4321', version: '', accel: 'cuda', needsDigestConfirm: false })
+    expect(p.warnings).toContain('no-version')
+    expect(p.digests.map(d => d.name)).toEqual(['llama-b4321-bin-win-cuda-13.3-x64.zip', 'cudart.zip'])
+    expect(seen).toEqual([bin, cudart])
+    const e = inst.confirm(p.stageId)
+    expect(e.source.kind).toBe('archive')
+    expect(e.tag).toBe('b4321')
+    expect(readFileSync(join(customDir(data, e.id), 'cudart64_13.dll'), 'utf8')).toBe('runtime')
+    expect(resolveRuntimeRef(`custom:${e.id}`, { dataDir: data, target: win, entries: registry.list() }).fallback).toBeNull()
+  } finally { inst.dispose(); registry.close() }
+})
+
+test('combined archive download size and extracted file/byte limits cannot be bypassed by two inputs', async () => {
+  const bin = join(work, 'llama-b1-bin-win-cpu-x64.zip'), extra = join(work, 'cudart.zip')
+  writeFileSync(bin, '1234'); writeFileSync(extra, '5678')
+  const extract: InstallerOptions['extract'] = async (file, dest) => {
+    mkdirSync(dest, { recursive: true })
+    if (file === bin) writeFileSync(join(dest, 'llama-server.exe'), peX64())
+    else writeFileSync(join(dest, 'runtime.dll'), 'x')
+  }
+  for (const limits of [{ maxDownloadBytes: 7 }, { maxFiles: 1 }, { maxTreeBytes: peX64().length }]) {
+    const { inst, registry } = installer({ extract, limits })
+    try { await expect(inst.preview({ kind: 'archive', path: bin, cudartPath: extra })).rejects.toMatchObject({ code: 'too-large' }); expect(leftovers()).toEqual([]) }
+    finally { inst.dispose(); registry.close() }
+  }
+})
+
+test('GitHub runtime-add metadata and assets use the shared mirror layer with digest provenance', async () => {
+  const { NetworkAccess } = await import('../../server/core/net')
+  const bin = 'llama-b1-bin-win-cpu-x64.zip', archiveBody = 'archive'
+  const calls: string[] = []
+  const network = new NetworkAccess({ settings: () => ({ proxy: { mode: 'off', url: '' }, downloadSource: 'mirror', mirror: 'ghfast' }), fetch: async (url, init) => {
+    calls.push(url)
+    if (new Headers(init?.headers).get('range') === 'bytes=0-0') return new Response('x')
+    if (!url.startsWith('https://ghfast.top/')) throw new Error('offline')
+    if (url.includes('api.github.com')) return Response.json({ tag_name: 'b1', assets: [{ name: bin, size: archiveBody.length, digest: `sha256:${sha(archiveBody)}`, browser_download_url: `https://github.com/example/fork/releases/download/b1/${bin}` }] })
+    return new Response(archiveBody)
+  } })
+  const { inst, registry } = installer({ network, extract: async (_file, dest) => { mkdirSync(dest, { recursive: true }); writeFileSync(join(dest, 'llama-server.exe'), peX64()) } })
+  try {
+    const p = await inst.preview({ kind: 'github', url: 'https://github.com/example/fork/releases/tag/b1', accel: 'cpu' })
+    expect(p.digestSource).toBe('mirror')
+    expect(p.digests).toEqual([{ name: bin, sha256: sha(archiveBody), verified: true }])
+    expect(calls.some(url => url.startsWith('https://ghfast.top/https://github.com/example/fork/releases/download/'))).toBe(true)
+  } finally { inst.dispose(); registry.close() }
 })

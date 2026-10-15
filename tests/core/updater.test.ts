@@ -36,6 +36,7 @@ function setup(o: { current?: string, autoUpdate?: boolean, keep?: number, used?
     setCurrent: (t) => { cfg.current = t },
     usedExes: () => used.exes,
     onStatus: s => statuses.push(s),
+    net: { sleep: async () => {} },
     onPrune: r => prunes.push(r),
   })
   updaters.push(u)
@@ -85,7 +86,7 @@ test('a successful runtime check skips another startup while preserving rollback
 test('auto update off adopts an installed version and reports a new release without installing', async () => {
   install('b100', 'b200')
   const { u, cfg, gh } = setup({ autoUpdate: false, current: 'b999', gh: { tag: 'b300' } })
-  expect(await u.run()).toEqual({ state: 'ready', tag: 'b200', note: 'available', latest: 'b300' })
+  expect(await u.run()).toMatchObject({ state: 'ready', tag: 'b200', note: 'available', latest: 'b300' })
   expect(cfg.current).toBe('b200')
   expect(gh.calls).toHaveLength(3)
   expect(gh.downloads()).toEqual([])
@@ -94,7 +95,7 @@ test('auto update off adopts an installed version and reports a new release with
 
 test('first start: downloads the latest and makes it current', async () => {
   const { u, cfg, statuses } = setup({ gh: { tag: 'b300' } })
-  expect(await u.run()).toEqual({ state: 'ready', tag: 'b300', note: 'updated', from: null, latest: 'b300' })
+  expect(await u.run()).toMatchObject({ state: 'ready', tag: 'b300', note: 'updated', from: null, latest: 'b300' })
   expect(cfg.current).toBe('b300')
   expect(statuses.some(s => s.state === 'working' && s.step === 'download' && s.tag === 'b300')).toBe(true)
   expect(existsSync(join(dirOf('b300'), 'cudart64_13.dll'))).toBe(true)
@@ -166,7 +167,7 @@ test('turning automatic updates off during download prevents changing the select
 test('new release: installs it, switches current, keeps the previous one for rollback', async () => {
   install('b100', 'b200')
   const { u, cfg } = setup({ current: 'b200', gh: { tag: 'b300' } })
-  expect(await u.run()).toEqual({ state: 'ready', tag: 'b300', note: 'updated', from: 'b200', latest: 'b300' })
+  expect(await u.run()).toMatchObject({ state: 'ready', tag: 'b300', note: 'updated', from: 'b200', latest: 'b300' })
   expect(cfg.current).toBe('b300')
   expect(entries()).toEqual(['b200', 'b300']) // b100 pruned (keep 2)
   expect(u.versions()).toEqual([
@@ -179,7 +180,7 @@ test('new release: installs it, switches current, keeps the previous one for rol
 test('current is the latest: no download, nothing changes', async () => {
   install('b200', 'b300')
   const { u, cfg, gh } = setup({ current: 'b300', gh: { tag: 'b300' } })
-  expect(await u.run()).toEqual({ state: 'ready', tag: 'b300', note: 'latest', latest: 'b300' })
+  expect(await u.run()).toMatchObject({ state: 'ready', tag: 'b300', note: 'latest', latest: 'b300' })
   expect(gh.downloads()).toEqual([])
   expect(cfg.current).toBe('b300')
   expect(entries()).toEqual(['b200', 'b300'])
@@ -188,7 +189,7 @@ test('current is the latest: no download, nothing changes', async () => {
 test('a version rolled back to stays current on the next start (latest already installed)', async () => {
   install('b100', 'b200', 'b300')
   const { u, cfg } = setup({ current: 'b100', gh: { tag: 'b300' } })
-  expect(await u.run()).toEqual({ state: 'ready', tag: 'b100', note: 'pinned', latest: 'b300' })
+  expect(await u.run()).toMatchObject({ state: 'ready', tag: 'b100', note: 'pinned', latest: 'b300' })
   expect(cfg.current).toBe('b100')
   // The newest 2 are kept, and current is never removed even when it is beyond keepVersions.
   expect(entries()).toEqual(['b100', 'b200', 'b300'])
@@ -234,7 +235,7 @@ test('failed download (SHA-256 mismatch) leaves no half version and keeps the ol
 test('nothing installed and the download fails: error without a usable version', async () => {
   const { u } = setup({ gh: { fail: 'dl.test/llama-' } })
   expect(await u.run()).toMatchObject({ state: 'error', code: 'network', using: null })
-  expect(entries()).toEqual([])
+  expect(entries()).toEqual(['.downloads'])
 })
 
 test('loads during the download keep using the old version; a version picked meanwhile wins', async () => {
@@ -250,7 +251,7 @@ test('loads during the download keep using the old version; a version picked mea
       },
     },
   })
-  expect(await s.u.run()).toEqual({ state: 'ready', tag: 'b100', note: 'pinned', latest: 'b300' })
+  expect(await s.u.run()).toMatchObject({ state: 'ready', tag: 'b100', note: 'pinned', latest: 'b300' })
   expect(seenCurrent).toBe('b200')
   expect(s.cfg.current).toBe('b100')
   expect(existsSync(join(dirOf('b300'), EXE))).toBe(true)
@@ -327,7 +328,7 @@ const stuckBody = () => new Response(new ReadableStream({ start(c) { c.enqueue(n
 function stalled(o: { current?: string, fetch: typeof fetch, net?: { timeoutMs?: number, stallMs?: number } }) {
   const s = setup({ current: o.current })
   const u = new Updater({
-    dataDir: data, platform: 'win32', fetch: o.fetch as never, extract: fakeExtract(), net: o.net,
+    dataDir: data, platform: 'win32', fetch: o.fetch as never, extract: fakeExtract(), net: { ...o.net, sleep: async () => {} },
     llamacpp: () => ({ cudaRuntime: '13.3', current: s.cfg.current, keepVersions: 2, autoUpdate: true }),
     setCurrent: (t) => { s.cfg.current = t },
     usedExes: () => [],
@@ -350,7 +351,7 @@ test('a response body that stalls half way is a network error (JSON bodies are b
   expect(await u.run()).toMatchObject({ state: 'error', code: 'network', using: 'b200' })
 })
 
-test('a download that stops sending data is abandoned: no half version, no leftovers', async () => {
+test('a stalled download keeps a resumable part without exposing an installed build', async () => {
   install('b200')
   const gh = fakeGithub({ tag: 'b300' })
   const { u, cfg } = stalled({
@@ -360,7 +361,8 @@ test('a download that stops sending data is abandoned: no half version, no lefto
   const r = await u.run()
   expect(r).toMatchObject({ state: 'error', code: 'network', using: 'b200' })
   expect(cfg.current).toBe('b200')
-  expect(entries()).toEqual(['b200'])
+  expect(entries()).toEqual(['.downloads', 'b200'])
+  expect(existsSync(join(versionsDir(data), '.downloads', 'llama-b300-bin-win-cuda-13.3-x64.zip.part'))).toBe(true)
 })
 
 test('stop() cancels a running check and waits for it', async () => {

@@ -4,7 +4,7 @@
 // state change, so a version switch or a launch cannot slip in between.
 import { renameSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { currentTagFor, type ModelsDoc, type Settings } from './config'
+import { customCurrentChannel, currentTagFor, type ModelsDoc, type Settings } from './config'
 import { installedDir } from './llamacpp'
 import type { RuntimeTarget } from './platform'
 import {
@@ -111,7 +111,7 @@ export class RuntimeManager {
     const refs = new Set<string>()
     for (const accel of channelsFor(this.o.target)) {
       const cur = currentTagFor(this.o.getSettings(), this.o.target, accel)
-      if (cur) refs.add(officialRef(accel, cur))
+      if (cur) refs.add(cur.startsWith('custom:') ? cur : officialRef(accel, cur))
     }
     return refs
   }
@@ -136,7 +136,7 @@ export class RuntimeManager {
       const ref = `custom:${e.id}`
       const inUse = used.has(ref)
       rows.push({
-        ref, kind: 'custom', accel: e.accel, tag: e.tag, label: e.label, current: false, inUse, latestOfficial: false,
+        ref, kind: 'custom', accel: e.accel, tag: e.tag, label: e.label, current: current.has(ref), inUse, latestOfficial: false,
         deletable: !inUse, addedAt: e.addedAt, source: e.source,
       })
     }
@@ -160,6 +160,9 @@ export class RuntimeManager {
     } else {
       const e = env.entries.find(x => x.id === p.id)
       if (!e || !entryRunsHere(e, this.o.target)) throw new DeleteError('not-found', 'This version is not installed')
+      const channel = customCurrentChannel(this.o.target, e.accel)
+      isCurrent = currentTagFor(this.o.getSettings(), this.o.target, channel) === ref
+      if (isCurrent) becomes = installedOfficial(env, channel)[0] ?? null
     }
     if (!blocked && this.usedRefs().has(ref)) blocked = 'in-use'
     const affected = useOfRef(this.o.getModels(), ref)
@@ -205,7 +208,7 @@ export class RuntimeManager {
         })
       }
       if (p.kind === 'custom') { this.o.registry.remove(p.id); registryRemoved = true }
-      if (plan.isCurrent && plan.becomesCurrent) this.o.setCurrent(plan.becomesCurrent, p.kind === 'official' ? p.accel : this.o.target.acceleration)
+      if (plan.isCurrent) this.o.setCurrent(plan.becomesCurrent ?? '', p.kind === 'official' ? p.accel : customCurrentChannel(this.o.target, entry!.accel))
     } catch (e) {
       const undone: string[] = []
       if (registryRemoved && entry) { try { this.o.registry.add(entry) } catch { undone.push('registry') } }
@@ -230,8 +233,16 @@ export class RuntimeManager {
     return plan
   }
 
-  /** Make an installed official build the current version of its channel (the settings page). */
+  /** Make an installed official build or a selectable custom build the current version of its channel. */
   useCurrent(accel: RuntimeAccel, tag: unknown): string {
+    const p = parseRuntimeRef(tag)
+    if (p?.kind === 'custom') {
+      const e = this.env().entries.find(e => e.id === p.id)
+      if (!e || !entryRunsHere(e, this.o.target)) throw new DeleteError('not-found', 'This version is not installed')
+      this.o.setCurrent(tag as string, customCurrentChannel(this.o.target, e.accel))
+      this.o.onChanged?.()
+      return tag as string
+    }
     if (typeof tag !== 'string' || !/^b\d+$/.test(tag)) throw new DeleteError('bad-ref', 'Invalid version tag')
     if (!channelsFor(this.o.target).includes(accel) || !installedOfficial(this.env(), accel).includes(tag)) throw new DeleteError('not-found', 'This version is not installed')
     this.o.setCurrent(tag, accel)

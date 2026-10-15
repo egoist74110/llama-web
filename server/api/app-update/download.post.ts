@@ -4,7 +4,9 @@ import { appUpdateError } from '../../service/app-update-api'
 
 export default defineEventHandler(async (event) => {
   const body = await readBody(event)
-  const u = getContext().appUpdate
+  const ctx = getContext()
+  if (body?.remember === true) ctx.updateSettings(s => { s.network.downloadSource = 'auto' })
+  const u = ctx.appUpdate
   try {
     u.startDownload({ mirror: typeof body?.mirror === 'string' ? body.mirror : undefined })
   } catch (e) {

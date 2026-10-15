@@ -26,8 +26,10 @@ export type RuntimeSourceKind = 'dir' | 'archive' | 'github' | 'exe'
 
 /** A portable executable basename, never a path or a traversal component. */
 export const isSafeExeName = (name: unknown): name is string => typeof name === 'string'
-  && /^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$/.test(name)
-  && !name.includes('..') && !/[\u0000-\u001f]/.test(name)
+  && name.length > 0 && name.length <= 100 && name !== '..'
+  && !/[<>:"/\\|?*\u0000-\u001f\u007f-\u009f]/.test(name)
+  && !/^[ .]|[ .]$/.test(name)
+
 
 export interface RuntimeEntry {
   /** Lower-case letters, digits and `-`; names the directory under custom/. */
@@ -272,6 +274,7 @@ export interface RuntimeEnv {
   entries: RuntimeEntry[]
   /** Installed official tags of a channel, newest first (default: scan the directories). */
   installed?: (accel: RuntimeAccel) => string[]
+  fallbackChannel?: RuntimeAccel
   exists?: (path: string) => boolean
 }
 
@@ -319,7 +322,7 @@ export function resolveRuntimeRef(ref: string, env: RuntimeEnv): ResolvedRuntime
   const entry = p?.kind === 'custom' ? env.entries.find(x => x.id === p.id) : undefined
   const wanted = p?.kind === 'official' ? p.accel : entry?.accel
   const fallback = (reason: FallbackReason): ResolvedRuntime => {
-    const channel = channelsFor(host).find(a => a === wanted) ?? host.acceleration
+    const channel = env.fallbackChannel ?? channelsFor(host).find(a => a === wanted) ?? host.acceleration
     const tag = installedOfficial(env, channel)[0]
     if (!tag) throw new RuntimeResolveError('no-official', channel)
     const to = officialRef(channel, tag)

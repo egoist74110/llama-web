@@ -92,7 +92,7 @@ test('v11 migration adds only currentVulkan, preserves saved values and rejects 
   writeFileSync(join(dir, 'settings.json'), bytes)
   const store = new JsonStore({ dataDir: dir, name: 'settings.json', version: SETTINGS_VERSION, defaults: defaultSettings, validate: normalizeSettings, migrations: SETTINGS_MIGRATIONS })
   try {
-    expect(store.load()).toEqual({ ...old, version: 12, llamacpp: { ...old.llamacpp, currentVulkan: '' } })
+    expect(store.load()).toEqual({ ...old, version: SETTINGS_VERSION, llamacpp: { ...old.llamacpp, currentVulkan: '' } })
     expect(readFileSync(join(dir, 'backups', readdirSync(join(dir, 'backups'))[0]!), 'utf8')).toBe(bytes)
   } finally { store.close() }
   const existing = { llamacpp: { currentVulkan: 'b88', acceleration: 'vulkan' } }
@@ -102,7 +102,7 @@ test('v11 migration adds only currentVulkan, preserves saved values and rejects 
   expect(currentTagFor(s, cpu, 'vulkan')).toBe('b88')
   for (const accel of ['vulkan', 'sycl', 'rocm']) expect(defaultsFor(s, cpu, accel)).toEqual({ ...s.defaults, flashAttn: null, cacheTypeK: null, cacheTypeV: null })
   expect(defaultSettings(platformInfo('win32', 'x64', false)).llamacpp.acceleration).toBe('auto')
-  writeFileSync(join(dir, 'settings.json'), JSON.stringify({ ...old, version: 13 }))
+  writeFileSync(join(dir, 'settings.json'), JSON.stringify({ ...old, version: SETTINGS_VERSION + 1 }))
   const newer = new JsonStore({ dataDir: dir, name: 'settings.json', version: SETTINGS_VERSION, defaults: defaultSettings, validate: normalizeSettings, migrations: SETTINGS_MIGRATIONS })
   try { expect(() => newer.load()).toThrow() } finally { newer.close() }
 })

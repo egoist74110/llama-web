@@ -7,6 +7,8 @@ import { t } from '../composables/useLocale'
 import type { AddPreview } from '~~/server/core/runtime-add'
 
 const open = defineModel<boolean>('open', { default: false })
+/** Source tab the dialog opens on (the offline fallback opens it on the archive source). */
+const props = defineProps<{ initialKind?: 'dir' | 'exe' | 'archive' | 'github' }>()
 const emit = defineEmits<{ added: [] }>()
 
 const s = t.llamacpp.manage.addDialog
@@ -16,12 +18,13 @@ const { pick, picking } = usePickFolder()
 const { pick: pickExe, picking: pickingExe } = usePickFile()
 
 type Kind = 'dir' | 'exe' | 'archive' | 'github'
-type Step = 'source' | 'confirm' | 'previewing' | 'preview' | 'adding'
+type Step = 'source' | 'confirm' | 'previewing' | 'preview' | 'adding' | 'done'
 
 const kind = ref<Kind>('dir')
 const dirPath = ref('')
 const exePath = ref('')
 const archivePath = ref('')
+const cudartPath = ref('')
 const url = ref('')
 const accel = ref('auto')
 const step = ref<Step>('source')
@@ -30,6 +33,12 @@ const label = ref('')
 const acceptUnverified = ref(false)
 const error = ref('')
 let cancelledByUser = false
+/** The build just added, when it runs here and can become the current version. */
+const added = ref<{ ref: string, name: string } | null>(null)
+const settingCurrent = ref(false)
+/** Where the checksum of a failed GitHub download came from (shown under the error). */
+const errorDigest = ref<string | null>(null)
+const { bump } = useRuntimeDoc()
 
 import { isExperimentalAccel } from '~/utils/experimental-backend'
 
@@ -50,8 +59,8 @@ const source = computed(() => (kind.value === 'dir' ? dirPath.value : kind.value
 const kindValue = computed(() => (stage.value ? accelLabel(stage.value.accel, ui.value.isMac) : ''))
 
 function reset() {
-  kind.value = 'dir'
-  dirPath.value = exePath.value = archivePath.value = url.value = ''
+  kind.value = props.initialKind ?? 'dir'
+  dirPath.value = exePath.value = archivePath.value = cudartPath.value = url.value = ''
   accel.value = 'auto'
   step.value = 'source'
   stage.value = null
@@ -59,6 +68,9 @@ function reset() {
   acceptUnverified.value = false
   error.value = ''
   cancelledByUser = false
+  added.value = null
+  settingCurrent.value = false
+  errorDigest.value = null
 }
 
 function messageOf(e: unknown): string {
@@ -78,11 +90,12 @@ async function chooseExe() {
 
 async function runPreview() {
   error.value = ''
+  errorDigest.value = null
   cancelledByUser = false
   step.value = 'previewing'
   const body: Record<string, unknown> = kind.value === 'github'
     ? { kind: 'github', url: source.value, ...(ui.value.hasCpuChannel && accel.value !== 'auto' ? { accel: accel.value } : {}) }
-    : { kind: kind.value, path: source.value }
+    : { kind: kind.value, path: source.value, ...(kind.value === 'archive' && cudartPath.value.trim() ? { cudartPath: cudartPath.value.trim() } : {}) }
   try {
     const r = await $fetch<AddPreview>('/api/llamacpp/add/preview', { method: 'POST', body })
     // The dialog was closed while this was running: the server already dropped it on cancel.
@@ -93,6 +106,7 @@ async function runPreview() {
   } catch (e) {
     if (cancelledByUser || !open.value) return
     error.value = messageOf(e)
+    errorDigest.value = (e as { data?: { data?: { digestSource?: string } } })?.data?.data?.digestSource ?? null
     step.value = 'source'
   }
 }
@@ -110,14 +124,19 @@ async function confirm() {
   error.value = ''
   step.value = 'adding'
   try {
-    await $fetch('/api/llamacpp/add/confirm', {
+    const r = await $fetch<{ entry: { id: string, label: string }, selectable?: boolean }>('/api/llamacpp/add/confirm', {
       method: 'POST',
       body: { stageId: st.stageId, label: label.value.trim() || undefined, acceptUnverified: acceptUnverified.value },
     })
-    toast.add({ title: fmt(t.llamacpp.manage.added, { name: label.value.trim() || st.tag || st.suggestedLabel }), color: 'success', icon: 'i-lucide-check' })
+    const name = r.entry.label || label.value.trim() || st.tag || st.suggestedLabel
+    toast.add({ title: fmt(t.llamacpp.manage.added, { name }), color: 'success', icon: 'i-lucide-check' })
     stage.value = null
-    open.value = false
     emit('added')
+    // A build that runs here can become the current version in one click; otherwise the dialog is done.
+    if (r.selectable) {
+      added.value = { ref: `custom:${r.entry.id}`, name }
+      step.value = 'done'
+    } else open.value = false
   } catch (e) {
     error.value = messageOf(e)
     // An expired preview cannot be confirmed any more: start over from the source.
@@ -125,6 +144,22 @@ async function confirm() {
       stage.value = null
       step.value = 'source'
     } else step.value = 'preview'
+  }
+}
+
+async function setCurrent() {
+  const a = added.value
+  if (!a || settingCurrent.value) return
+  settingCurrent.value = true
+  try {
+    await $fetch('/api/llamacpp/current', { method: 'POST', body: { tag: a.ref } })
+    toast.add({ title: fmt(t.llamacpp.manage.setCurrentDone, { name: a.name }), color: 'success', icon: 'i-lucide-check' })
+    bump()
+    open.value = false
+  } catch (e) {
+    error.value = messageOf(e)
+  } finally {
+    settingCurrent.value = false
   }
 }
 
@@ -145,7 +180,7 @@ const warningText = (code: string) => (s.warnings as Record<string, string>)[cod
 </script>
 
 <template>
-  <UModal v-model:open="open" :title="step === 'preview' || step === 'adding' ? s.previewTitle : s.title" :description="step === 'confirm' ? '' : s.description" :ui="{ content: 'max-w-xl' }">
+  <UModal v-model:open="open" :title="step === 'done' ? s.doneTitle : step === 'preview' || step === 'adding' ? s.previewTitle : s.title" :description="step === 'confirm' || step === 'done' ? '' : s.description" :ui="{ content: 'max-w-xl' }">
     <template #body>
       <div v-if="step === 'source'" class="space-y-4">
         <div class="lw-seg fill" role="tablist" :aria-label="s.sourceLabel">
@@ -197,6 +232,13 @@ const warningText = (code: string) => (s.warnings as Record<string, string>)[cod
           <p class="text-xs text-dimmed">
             {{ s.archiveHint }}
           </p>
+          <template v-if="!ui.isMac">
+            <label class="block pt-2 text-xs font-medium text-muted">{{ s.cudartLabel }}</label>
+            <UInput v-model="cudartPath" class="w-full" :placeholder="s.cudartPlaceholder" :aria-label="s.cudartLabel" :ui="{ base: 'font-mono text-xs' }" />
+            <p class="text-xs text-dimmed">
+              {{ s.cudartHint }}
+            </p>
+          </template>
         </div>
 
         <div v-else class="space-y-3">
@@ -216,6 +258,7 @@ const warningText = (code: string) => (s.warnings as Record<string, string>)[cod
         <p v-if="error" class="text-sm text-error" role="alert">
           {{ error }}
         </p>
+        <DigestSourceNote v-if="error" :source="errorDigest" />
       </div>
 
       <div v-else-if="step === 'confirm'" class="space-y-2 rounded-[10px] border border-default bg-muted px-4 py-3">
@@ -228,6 +271,16 @@ const warningText = (code: string) => (s.warnings as Record<string, string>)[cod
         </p>
         <p class="break-all font-mono text-xs text-dimmed">
           {{ source }}
+        </p>
+      </div>
+
+      <div v-else-if="step === 'done' && added" class="space-y-3">
+        <p class="flex items-start gap-2 text-sm text-default">
+          <UIcon name="i-lucide-circle-check" class="mt-0.5 shrink-0 text-success" />
+          <span class="min-w-0 break-words">{{ fmt(s.doneBody, { name: added.name }) }}</span>
+        </p>
+        <p v-if="error" class="text-sm text-error" role="alert">
+          {{ error }}
         </p>
       </div>
 
@@ -281,6 +334,7 @@ const warningText = (code: string) => (s.warnings as Record<string, string>)[cod
           <p class="text-xs font-medium text-muted">
             {{ s.digest }}
           </p>
+          <DigestSourceNote :source="stage.digestSource" />
           <div v-for="d in stage.digests" :key="d.name" class="rounded-lg border border-default bg-muted px-3 py-2">
             <p class="break-all text-xs text-default">
               {{ d.name }}
@@ -332,6 +386,14 @@ const warningText = (code: string) => (s.warnings as Record<string, string>)[cod
           </UButton>
           <UButton size="sm" icon="i-lucide-play" @click="runPreview">
             {{ s.runConfirm }}
+          </UButton>
+        </template>
+        <template v-else-if="step === 'done'">
+          <UButton size="sm" color="neutral" variant="ghost" @click="open = false">
+            {{ s.done }}
+          </UButton>
+          <UButton size="sm" icon="i-lucide-circle-check" :loading="settingCurrent" @click="setCurrent">
+            {{ t.llamacpp.manage.setCurrent }}
           </UButton>
         </template>
         <template v-else-if="step === 'previewing'">
