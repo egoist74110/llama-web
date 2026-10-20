@@ -1,5 +1,14 @@
 # 交接记录
 
+## 2026-10-20 · 阶段 15 规划 + 15-1 知识库存储与检索核心（关键决定 65）· 单会话
+- 起因：用户要求外部 AI（Claude、Cursor、Cherry Studio 等）接入 llama-web 后能查询知识库，自己的模型也能用；「两个都要支持切换」= 注入与工具调用两种方式都要、按方案切换，本机与外部上游模型都适用。用户确认：MCP 放 `/v1/mcp`（公网规则不变）、API key 可限制知识库且默认全部、第一版不做 rerank、对话页选择器进第一版、扩展决定 57 的定位。规模不确定，首个用例是约 500 KB 的中文 txt。用户指定 Opus 5.5 规划、Sonnet 5.5 实现。
+- 计划：新增关键决定 65（13 条规则）、决定 57 加扩展说明、变更记录一行、阶段 15（15-1 至 15-5）。`docs/claude-guide.html` 只列到阶段 9，没有加。
+- 实现（Sonnet 5.5）：`server/core/kb/`（`sqlite.ts` Bun 用 `bun:sqlite`、Node 用 `node:sqlite`，非字面量动态导入，构建不打包；`registry.ts` `data/knowledge.json` v1；`text.ts` UTF-8 / UTF-16 BOM / GB18030；`chunk.ts` 段落 / 标题切块与出处；`tokenize.ts` 中文字二元组 + 英文词，查询每个词加引号再 OR；`kb-db.ts` 每库 `data/kb/<id>.sqlite`，WAL，FTS5 rowid = 块 id；`embed.ts` 经引擎租约取向量并归一化；`manager.ts` 导入队列、重建索引、混合检索 RRF k = 60、`recover()`）；`server/api/kb/*`；`context.ts` 接线、live 状态 `kb`；中英文错误文案。
+- 实际运行：`bun test` 1719 pass / 8 skip / 0 fail（子代理与我各跑一次）；`bun run typecheck` exit 0；`git diff --check` 通过；子代理跑了 `bun run build` exit 0，并用临时数据目录启动构建产物走通 建库 → 上传 txt → 检索（无引擎，`keyword`）→ 删库（sqlite 文件删除）、pdf 上传 400。`node:sqlite` 只单独验证了适配层（FTS5、bm25、事务、BLOB），没跑完整 `nuxt dev`。
+- 没有运行：真实向量引擎下的导入与混合检索（`engineEmbedder` 只用假实现测过）、用户那份 500 KB txt（plan 15-1 最后一条未打勾，会用到 GPU 上的向量引擎，开始前要告诉用户）。
+- 已知限制 / 待办：上传是 JSON `{name, contentBase64}`（管理接口中间件只收 JSON，没改 `origin.ts`），15-5 界面需要 base64；解码与切块在请求里同步完成，50 MB 文件会短暂阻塞；单条输入按 `ctxSize` 个字符截断；没清理无登记的孤立 `.sqlite`；Qwen3-Embedding 推荐查询加 `Instruct: …\nQuery:` 前缀，目前查询与文档同样处理，真机测完再决定是否加。
+- 下一步：用户提供 txt 后做 15-1 真机；然后 15-2（html / pdf，新依赖先问用户；文件夹同步）或按用户优先级先做 15-3（MCP）。
+
 ## 2026-10-20 · 14-1 向量引擎（关键决定 64）· 单会话
 - 起因：用户要求新增向量引擎模块接入 Embedding，可切换 CPU / GPU，并下载 Qwen3-Embedding-0.6B 测试。用户确认：独立常驻引擎（不进调度器）、同一运行库切设备（不换 CPU 版运行库）、下载 Q8_0。
 - 实现：`server/core/embedding.ts`（`data/embedding.json` v1、参数、`EmbeddingEngine`：按需启动 / 并发只启动一次 / 崩溃与停止中断租约 / 改设备等自动重启）；`proxy.ts` 按 `model` 名路由（对话模型同名优先）、`/v1/models` 列出、503 `embedding_unavailable`；`context.ts` 共用 Runner（端口范围、`pids.json` 标签 `embedding`）、随启动、独占本机时停止、退出时停止；`/api/embedding`（GET 含扫描候选、POST 保存、start / stop / test）；`EmbeddingPanel.vue` 作为「模型」页第三个标签；GGUF 读出 `pooling_type`，扫描发现标「向量模型」。顺带修了请求记录：llama-server 的 embeddings 响应把 `usage` 放在大数组之前，`UsageTap` 现在也保留开头 4 KB。

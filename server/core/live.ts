@@ -1,6 +1,7 @@
 // Live state for the UI: builds the state snapshot, keeps a short activity history and
 // pushes changes to /api/stream subscribers. Pure module (no Nitro), testable with bun test.
 import type { EmbeddingView } from './embedding'
+import type { KbLiveState } from './kb/manager'
 import type { ModelsDoc } from './config'
 import { diagnose, type FailureDoc } from './errors'
 import type { GpuDoc } from './gpu'
@@ -92,6 +93,8 @@ export interface StateDoc {
   exclusiveHolder?: string | null
   /** The embedding engine (decision 64); absent in tests that do not wire it. */
   embedding?: EmbeddingView
+  /** Knowledge base jobs: imports and re-indexes in progress (decision 65); absent in tests that do not wire them. */
+  kb?: KbLiveState
 }
 
 export type ActivityEvent =
@@ -317,7 +320,7 @@ export class LiveHub {
   }
 
   snapshot(): StateDoc {
-    const { scheduler, models, queue, llamacpp, tunnel, cloudflare, cloudflareRev, firstRun, setupDone, platform, appUpdate, network, connections, exclusiveHolder, embedding, locale, settingsRev, settingsBoot } = this.opts.snapshot()
+    const { scheduler, models, queue, llamacpp, tunnel, cloudflare, cloudflareRev, firstRun, setupDone, platform, appUpdate, network, connections, exclusiveHolder, embedding, kb, locale, settingsRev, settingsBoot } = this.opts.snapshot()
     return {
       now: this.now(),
       models: models.map(m => ({
@@ -335,6 +338,7 @@ export class LiveHub {
       ...(network ? { network } : {}),
       ...(connections ? { connections, exclusiveHolder: exclusiveHolder ?? null } : {}),
       ...(embedding ? { embedding } : {}),
+      ...(kb ? { kb } : {}),
       ...(locale ? { locale } : {}),
       ...(setupDone !== undefined ? { setupDone } : {}),
       ...(settingsRev !== undefined ? { settingsRev } : {}),

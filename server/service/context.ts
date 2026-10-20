@@ -56,6 +56,9 @@ import { acquireDataLock, type DataLock } from '../core/data-lock'
 import { defaultUpstreams, normalizeUpstreams, recordTest, UPSTREAMS_VERSION, viewUpstreams, type UpstreamsDoc } from '../core/upstreams'
 import { UpstreamLauncher } from '../core/upstream-launcher'
 import { defaultEmbedding, EMBEDDING_VERSION, EmbeddingEngine, normalizeEmbedding, planEmbedding, type EmbeddingDoc } from '../core/embedding'
+import { defaultKnowledge, KNOWLEDGE_VERSION, normalizeKnowledge, type KnowledgeDoc } from '../core/kb/registry'
+import { KbManager } from '../core/kb/manager'
+import { engineEmbedder } from '../core/kb/embed'
 import { testConnection } from '../core/upstream-test'
 import { httpProbe, UpstreamHealth } from '../core/upstream-health'
 import { detectPlatform, selectRuntime, type PlatformInfo, type RuntimeSelection, type RuntimeTarget } from '../core/platform'
@@ -144,6 +147,8 @@ export interface AppContext {
   updateEmbedding(fn: (draft: EmbeddingDoc) => EmbeddingDoc | void): EmbeddingDoc
   /** The embedding engine: its own llama-server next to the scheduler (decision 64). */
   embedding: EmbeddingEngine
+  /** Knowledge bases (decision 65): registry in data/knowledge.json, one SQLite file each under data/kb. */
+  kb: KbManager
   proxy: Proxy
   /** Public entry on 127.0.0.1 (settings.public); the custom Bun entry attaches the listener. */
   publicEntry: PublicListener
@@ -289,6 +294,10 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     dataDir, name: 'embedding.json', version: EMBEDDING_VERSION, defaults: defaultEmbedding, validate: normalizeEmbedding,
   })
   startupClose.push(() => embeddingStore.close())
+  const knowledgeStore = new JsonStore<KnowledgeDoc>({
+    dataDir, name: 'knowledge.json', version: KNOWLEDGE_VERSION, defaults: defaultKnowledge, validate: normalizeKnowledge,
+  })
+  startupClose.push(() => knowledgeStore.close())
   const changed = () => live.notify()
   // Settings edits (page or by hand) also start / stop / move the public listener.
   // `hold` is raised while a pair of writes is in flight (see onSaved of the Cloudflare setup): nothing reacts to half of it, one reconciliation runs afterwards.
@@ -301,6 +310,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
   const secretsRef = openStore(secretsStore, defaultSecrets, () => { if (!hold.held) applyTunnel() })
   const upstreamsRef = openStore(upstreamsStore, defaultUpstreams, changed)
   const embeddingRef = openStore(embeddingStore, defaultEmbedding, changed)
+  const knowledgeRef = openStore(knowledgeStore, defaultKnowledge, changed)
   const getSettings = settingsRef.get
   // The language everything this process says - events, API errors, the errors of `/v1/*` - is the
   // saved one (decision 18): applied once at startup and again on every reload or own update.
@@ -439,6 +449,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
       connections: viewUpstreams(upstreamsRef.get(), secretsRef.get().upstreamKeys).map(u => ({ ...u, up: health.isUp(u.id), checkedAt: health.state(u.id)?.checkedAt ?? null, launch: launcher.state(u.id), canStop: launcher.canStop(u.id) })),
       exclusiveHolder: health.holder(),
       embedding: embedding.view(),
+      kb: kb.liveView(),
     }),
   })
   void detectLanAddress({ signal: networkProbe.signal }).then(host => {
@@ -685,6 +696,13 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     const c = embeddingRef.get()
     if (c.enabled && c.autoStart) embedding.start().catch(e => logError('embedding engine did not start:', (e as Error)?.message ?? e))
   })
+  // Knowledge bases (decision 65): vectors come from the embedding engine; without it everything is keyword-only.
+  const kb = new KbManager({
+    dataDir, store: { get: knowledgeRef.get, update: knowledgeRef.update },
+    embedder: engineEmbedder({ engine: embedding, ctxSize: () => embeddingRef.get().ctxSize, host: () => runner.host }),
+    onChange: () => live.notify(), log,
+  })
+  void kb.recover().catch(e => logError('knowledge base recovery failed:', (e as Error)?.message ?? e))
   const proxy = createProxy({
     scheduler, getModels, getSettings, onEvent: logProxyEvent,
     onRequest: (r) => { logs.appendRequest(r); usage.record(r); live.onRequest(r) },
@@ -785,8 +803,8 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     dataDir, outbound, bootPort: getSettings().server.port, getSettings, getSettingsRev: settingsRef.rev, getSettingsBoot: () => settingsBoot, getModels, updateSettings: settingsRef.update, updateModels: modelsRef.update,
     platform, runtimeTarget: selectedTarget, runtimeSelection,
     getSecrets: secretsRef.get, updateSecrets: secretsRef.update, getUpstreams: upstreamsRef.get, updateUpstreams: upstreamsRef.update, health, launcher, tunnel, applyTunnel, cloudflare,
-    refresh: () => { settingsRef.refresh(); modelsRef.refresh(); upstreamsRef.refresh(); embeddingRef.refresh() },
-    getEmbedding: embeddingRef.get, updateEmbedding: embeddingRef.update, embedding,
+    refresh: () => { settingsRef.refresh(); modelsRef.refresh(); upstreamsRef.refresh(); embeddingRef.refresh(); knowledgeRef.refresh() },
+    getEmbedding: embeddingRef.get, updateEmbedding: embeddingRef.update, embedding, kb,
     getRuntimeStatus: () => updater.getStatus(), updater, secondary,
     getLastModelFailure(modelId) { pruneFailures(); return lastFailures.get(modelId) ?? null },
     async downloadSecondary() {
@@ -853,11 +871,13 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
         secretsStore.close()
         upstreamsStore.close()
         embeddingStore.close()
+        knowledgeStore.close()
         health.stop()
         await launcher.shutdown()
         gpu.stop()
         watchdog.stop()
         await scheduler.shutdown()
+        await kb.close()
         await embedding.stop()
         lastFailures.clear()
         await runner.stopAll()
