@@ -1162,7 +1162,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 
   <h3>15-5 · 界面（Sonnet 5.5）</h3>
   <ul class="tasks">
-    <li class="task" data-done="false"><span class="t">「知识库」页：列表、新建、导入（上传 / 绑定文件夹）、文档列表、导入与同步进度、重建索引提示、检索测试（中 / 英，375 宽无横向滚动，深色模式）</span><span class="when"></span></li>
+    <li class="task" data-done="false"><span class="t">「知识库」页：列表、新建 / 编辑 / 删除、上传 txt / md（点击或拖放，50 MB）、文档列表与状态、导入进度、重建索引提示、检索测试（中 / 英）——用户 2026-10-20 要求提前做，已实现；未打勾：绑定文件夹（等 15-2）、真实向量引擎下的进度与混合检索显示、浅色 375 宽未在浏览器里看</span><span class="when"></span></li>
     <li class="task" data-done="false"><span class="t">方案编辑里的知识库绑定；API key 的知识库白名单；「接入」说明里给出 MCP 地址与 REST 示例</span><span class="when"></span></li>
     <li class="task" data-done="false"><span class="t">「对话」页知识库选择器（知识库 + 注入 / 工具）（决定 65 ⑨）</span><span class="when"></span></li>
   </ul>
@@ -1171,7 +1171,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 <section id="changelog">
   <h2>变更记录</h2>
   <table>
-    <tr><td>2026-10-20</td><td>新增关键决定 65（用户 2026-10-20 确认：注入与工具两种方式都要并可切换、MCP 放在 <code>/v1/mcp</code>、API key 可限制知识库且默认全部、第一版不做 rerank、对话页选择器进第一版、扩展决定 57 的定位）：知识库（SQLite + FTS5 + 向量暴力余弦的混合检索，REST 与 MCP 给外部 AI，方案绑定的注入 / 工具模式给自己的模型）。新增阶段 15（15-1 至 15-5，用户指定 Opus 5.5 规划、Sonnet 5.5 实现）。15-1 完成（真机导入未做）：<code>server/core/kb/</code>、<code>/api/kb</code>、<code>data/knowledge.json</code>；上传暂用 JSON + base64（管理接口只收 JSON）</td></tr>
+    <tr><td>2026-10-20</td><td>新增关键决定 65（用户 2026-10-20 确认：注入与工具两种方式都要并可切换、MCP 放在 <code>/v1/mcp</code>、API key 可限制知识库且默认全部、第一版不做 rerank、对话页选择器进第一版、扩展决定 57 的定位）：知识库（SQLite + FTS5 + 向量暴力余弦的混合检索，REST 与 MCP 给外部 AI，方案绑定的注入 / 工具模式给自己的模型）。新增阶段 15（15-1 至 15-5，用户指定 Opus 5.5 规划、Sonnet 5.5 实现）。15-1 完成（真机导入未做）：<code>server/core/kb/</code>、<code>/api/kb</code>、<code>data/knowledge.json</code>；上传暂用 JSON + base64（管理接口只收 JSON）。用户要求提前做 15-5 的「知识库」页（上传、文档、检索测试），已实现</td></tr>
     <tr><td>2026-10-20</td><td>新增关键决定 64（用户 2026-10-20 确认：独立常驻引擎、同一运行库切 CPU / GPU）并完成 14-1：向量引擎（<code>data/embedding.json</code>、按 <code>model</code> 名路由到单独的 <code>--embedding</code> llama-server，不计入同时在线上限、不与对话模型互相卸载）、「模型」页「向量引擎」标签；请求记录的 token 数也从响应开头读取。新增阶段 14</td></tr>
     <tr><td>2026-10-15</td><td>新增关键决定 63（用户 2026-10-15 确认）并完成 13-1 / 13-2（gpt-6.1-sol-high 后端、Opus 5.5 界面、Claude 规格与审查）：手动添加的 llama.cpp 可设为全局当前版本（修改决定 35）；settings v13 <code>network</code>：出站代理（系统 / 手动 / 关闭，只用于 GitHub、镜像与 Cloudflare API）、下载来源（询问 / 自动 / 固定镜像，镜像测速排序，覆盖 cloudflared 与 GitHub 手动添加）、校验值优先取官方并标明来源、断点续传与自动重试、失败时给出官方下载地址与「从本地导入」、压缩包可附加 cudart、程序文件名放宽。决定 35 / 53 加修改说明；新增阶段 13</td></tr>
     <tr><td>2026-10-14</td><td>新增关键决定 62（用户 2026-10-14 确认）并完成 12-3：手动添加运行库可以直接选择服务端程序文件（任意文件名，复制所在文件夹），读不到版本号不拦；本机选择文件对话框；<code>runtimes.json</code> 可选字段 <code>exe</code>。起因是想试用 KVMem 分支（它只有 Windows CUDA 版，Mac 上没有可测的分支）。版本号 1.2.1</td></tr>

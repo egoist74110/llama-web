@@ -15,6 +15,7 @@ const nav = computed(() => [
   { to: '/', label: t.nav.overview, icon: 'i-lucide-layout-dashboard', count: null },
   { to: '/models', label: t.nav.models, icon: 'i-lucide-box', count: state.value?.models.length || null },
   { to: '/connections', label: t.nav.connections, icon: 'i-lucide-plug', count: state.value?.connections?.length || null },
+  { to: '/knowledge', label: t.nav.knowledge, icon: 'i-lucide-library', count: null },
   { to: '/chat', label: t.nav.chat, icon: 'i-lucide-message-square', count: null },
   { to: '/logs', label: t.nav.logs, icon: 'i-lucide-text', count: null },
   { to: '/settings', label: t.nav.settings, icon: 'i-lucide-sliders-horizontal', count: null },
