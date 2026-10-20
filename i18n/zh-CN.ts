@@ -488,6 +488,8 @@ export default {
       'last-profile': '至少要保留一个配置方案。',
       'in-use': '这个方案正在加载、运行，或有请求在排队等它加载，请先停止模型再改名或删除。',
       'bad-overrides': '参数值不合法：{detail}',
+      'bad-knowledge': '知识库设置不正确：需要 { enabled, kbs, mode（inject / tool）, topK }。',
+      'kb-not-found': '找不到知识库「{detail}」，可能已被删除。',
       'bad-extra-args': '额外参数无法解析：{detail}',
       'template-not-found': '聊天模板文件「{detail}」不在 data/templates/ 里。',
       'file-not-found': '扫描结果里没有所选的文件，文件可能已被移动，请重新打开编辑窗口。',
@@ -1961,6 +1963,8 @@ export default {
       'bad-key': 'API key 不能含换行或控制字符。',
       'bad-start-command': '启动命令不能含换行或控制字符，引号要成对，最多 2000 个字符。',
       'bad-start-cwd': '工作目录不能含控制字符，最多 500 个字符。',
+      'bad-knowledge': '知识库设置不正确：需要 { enabled, kbs, mode（inject / tool）, topK }。',
+      'kb-not-found': '找不到知识库「{detail}」，可能已被删除。',
       'not-found': '找不到这个外部服务。',
       'too-many': '外部服务数量已达上限。',
       'rollback-failed': '保存失败，而且没能恢复原来的设置，upstreams.json 和 secrets.json 可能不一致。请检查 data 目录（磁盘空间、权限）后再确认这个外部服务的地址和 key（{detail}）。',
@@ -2261,6 +2265,10 @@ export default {
     imageWithoutMmproj: '模型「{model}」没有配置 mmproj（视觉投影文件），不能处理图片。请在模型设置里选择 mmproj，或去掉图片后重试。',
     bodyTooLarge: '请求体超过上限（{limit} MB）。',
     badJson: '请求体不是有效的 JSON。',
+    // Decision 65 ⑨: the non-standard `knowledge` field of POST /v1/chat/completions.
+    kbNotFound: '找不到知识库「{name}」。可用的知识库见 GET /v1/kb。',
+    invalidKnowledge: '请求里的 knowledge 字段不正确：它可以是 false，或 { kbs?: string[], mode?: "inject" | "tool", top_k?: 数字 }。',
+    kbForbidden: '这个 API key 不能使用知识库「{name}」。',
     loadFailed: '模型「{model}」加载失败：{reason}。请查看日志，处理后手动重试。',
     modelStopped: '模型「{model}」已被手动停止，请求已取消。',
     shuttingDown: 'llama-web 正在关闭。',
@@ -2288,6 +2296,18 @@ export default {
     preprocessFailed: '请求预处理失败',
     unauthorized: '缺少或无效的 API key。请在请求头里带上 Authorization: Bearer <key>。',
     internalError: '服务器内部错误。',
+  },
+  // Text llama-web puts into a chat request when a knowledge base is used (decision 65 ⑩⑪); the model reads it, in the interface language.
+  kbPrompt: {
+    injectHeader: '以下是从知识库检索到的资料。回答时优先依据这些资料，并用 [编号] 注明出处；资料里没有的内容请直说。',
+    hitTitle: '[{n}] 《{doc}》 第 {line} 行',
+    hitHeading: ' · {heading}',
+    toolDescription: '在知识库（{names}）里检索资料。需要用到知识库里的内容时调用它；用资料回答时用 [编号] 注明出处，资料里没有的内容请直说。',
+    toolQuery: '检索用的关键词或问题',
+    toolTopK: '返回的资料条数（1 到 20）',
+    noResults: '知识库里没有找到相关资料。',
+    invalidArguments: '参数无效：需要 JSON 对象 {"query": "检索内容"}，query 不能为空。',
+    searchFailed: '知识库检索失败，请不借助知识库直接回答。',
   },
   // Short load-failure reasons, used inside api.loadFailed.
   loadError: {

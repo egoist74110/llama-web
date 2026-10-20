@@ -3,7 +3,7 @@
 //   duplicate { name, from }                    copy of `from`
 //   rename    { from, to }
 //   delete    { name }
-//   save      { name, form, restart? }          form = { overrides, extraArgs, chatTemplate }
+//   save      { name, form, restart? }          form = { overrides, extraArgs, chatTemplate, knowledge? }
 // Names travel in the body (not the URL) because they are free text, often Chinese.
 // Setting the current profile is POST /api/models/:id/profile.
 import {
@@ -56,7 +56,7 @@ export default defineEventHandler(async (event) => {
         // A combination that cannot start is refused; memory tiers and warnings never block (they come back for the interface).
         const check = await checkBeforeSave(model, name, body)
         const entries = form.mtp ? (await scanModelDirs(ctx.getSettings().modelDirs)).entries : []
-        ctx.updateModels((doc) => { saveProfile(doc, model.id, name, form, templates, r => selectableHere(r, env), () => hasDeviceSelection(ctx.platform), entries) })
+        ctx.updateModels((doc) => { saveProfile(doc, model.id, name, form, templates, r => selectableHere(r, env), () => hasDeviceSelection(ctx.platform), entries, ctx.getKnowledge().bases.map(b => b.id)) })
         const restarted = body.restart === true && restartIfUp(model.id, name)
         return { ok: true, restarted, check }
       }

@@ -40,6 +40,18 @@ export interface RequestRecord {
   images: ImageSummary | null
   /** Allow-listed request parameters (reasoning, sampling, limits), plus `messages` / `tools` counts. */
   params: Record<string, string | number | boolean>
+  /**
+   * Knowledge used for this request (decision 65 ⑫): the mode, the knowledge base ids, how many hits were handed to the
+   * model and how many search rounds ran. Never the query or any hit text. Missing / null = none.
+   */
+  knowledge?: KnowledgeSummary | null
+}
+
+export interface KnowledgeSummary {
+  mode: 'inject' | 'tool'
+  kbs: string[]
+  hits: number
+  rounds: number
 }
 
 export interface ImageSummary {

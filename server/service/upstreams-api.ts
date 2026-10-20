@@ -19,7 +19,7 @@ export function editContext(): EditContext {
   const ctx = getContext()
   const s = ctx.getSettings()
   const pub = ctx.publicEntry.status()
-  return { localNames: ctx.getModels().models.map(m => m.name), selfPorts: selfPortsOf(s.server.port, ctx.bootPort, pub) }
+  return { localNames: ctx.getModels().models.map(m => m.name), selfPorts: selfPortsOf(s.server.port, ctx.bootPort, pub), kbIds: ctx.getKnowledge().bases.map(b => b.id) }
 }
 
 /** `saveUpstreamsAndKeys` on the running context's files. */

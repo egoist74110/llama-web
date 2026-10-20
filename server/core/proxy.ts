@@ -11,7 +11,7 @@
 import type { ModelsDoc, Settings } from './config'
 import { fmt, t } from './i18n'
 import { resolvePreprocessOptions, runPreprocess, type PreprocessResult } from './preprocess'
-import { sourceOf, summarizeImages, summarizeParams, UsageTap, type RequestMeta, type RequestRecord } from './request-log'
+import { sourceOf, summarizeImages, summarizeParams, UsageTap, type KnowledgeSummary, type RequestMeta, type RequestRecord } from './request-log'
 import { findModel, hasImages, listModelNames, resolveTarget, type RouteResult } from './routing'
 import { findExternal, listExternalNames, type ExternalRoute, type Upstream, type UpstreamsDoc } from './upstreams'
 import { isJobId, jobOwnerOf, matchJobCreate, matchJobFollowUp, sameOwner, type AsyncJobApi, type JobRegistry } from './async-jobs'
@@ -21,6 +21,9 @@ import { redactHeaders, redactText, StreamRedactor } from './redact'
 import { effectiveReasoning, forceThinkingOff } from './thinking-guard'
 import type { SpeedMeter } from './speed'
 import { SchedulerError, type Lease, type NoRoomDetail, type Scheduler, type Target } from './scheduler'
+import { clampTopK, resolveKnowledge, type KbRef, type KnowledgeBinding } from './kb/binding'
+import { addTool, formatHits, hasToolNamed, injectBlock, injectIntoSystem, MAX_TOOL_ROUNDS, messagesOf, queryOf, removeTool, type HitText } from './kb/inject'
+import { addUsage, allOurs, callsOfMessage, followUp, hasUsage, noUsage, parseSearchArguments, SseSplitter, StreamRound, type ToolCall, type Usage } from './kb/tool-loop'
 
 /** Request body limit for /v1 and /upstream (bytes). */
 export const MAX_BODY_BYTES = 100 * 1024 * 1024
@@ -33,6 +36,10 @@ export type ProxyEvent =
   | { type: 'upstream-error', target: Target, error: unknown }
   /** A failure that is not a SchedulerError: server-side diagnostics only, never a client message. */
   | { type: 'internal-error', target: Target, error: unknown }
+  /** The knowledge search failed (decision 65 ⑨): the request went on without it. */
+  | { type: 'kb-error', error: unknown }
+  /** Bound knowledge bases that do not exist any more were left out of a request. */
+  | { type: 'kb-skipped', ids: string[] }
 
 /**
  * `p`, rejected early when `signal` aborts (or after `ms`). The abort listener lives only
@@ -67,6 +74,15 @@ export function activeBoundedWaits(): number {
   return activeWaits
 }
 
+/** What the proxy needs of the knowledge bases (decision 65 ⑨); `KbManager` provides it, tests use a fake. */
+export interface KnowledgeDeps {
+  search(kbIds: string[], query: string, opts: { topK: number }): Promise<{ hits: Array<HitText> }>
+  /** The knowledge bases that exist now. */
+  list(): readonly KbRef[]
+  /** Knowledge base ids the caller may use; null = all (API key lists arrive with 15-3). */
+  allowedKbs?(meta: RequestMeta | undefined): string[] | null
+}
+
 export interface ProxyDeps {
   scheduler: Pick<Scheduler, 'acquire' | 'snapshot' | 'stateOf'>
   getModels(): ModelsDoc
@@ -93,6 +109,8 @@ export interface ProxyDeps {
   fetchImpl?: typeof fetch
   /** Async job ids of external upstreams (decision 59); absent = follow-ups route like any request without a model. */
   jobs?: JobRegistry
+  /** Knowledge for the chat models (decision 65 ⑨); absent = none (the request field is still removed). */
+  knowledge?: KnowledgeDeps
   /** Embedding engine (decision 64); absent = none. */
   embedding?: {
     /** The name clients send, or null while the engine is off. */
@@ -134,6 +152,8 @@ class RequestTrace {
   stream = false
   params: RequestRecord['params'] = {}
   images: RequestRecord['images'] = null
+  /** Knowledge used (decision 65 ⑫); the tool loop keeps counting into it. */
+  knowledge: KnowledgeSummary | null = null
   /** Set when a streaming path owns the end of the exchange and will call finish() itself. */
   deferred = false
   private done = false
@@ -178,7 +198,7 @@ class RequestTrace {
         id: this.id, at: this.at, source, keyName, method: this.req.method, path: new URL(this.req.url).pathname,
         modelId: this.modelId, modelName: this.modelName, profile: this.profile, stream: this.stream,
         status, outcome, error, durationMs: Date.now() - this.at,
-        promptTokens, completionTokens, images: this.images, params: this.params,
+        promptTokens, completionTokens, images: this.images, params: this.params, knowledge: this.knowledge,
       })
     } catch { /* a broken listener must not affect the request */ }
   }
@@ -277,6 +297,25 @@ interface UpstreamCall {
   /** An upstream key that must not reach the client: masked in the response headers and body (external upstreams). */
   secret?: string
 }
+
+/** How to reach the upstream for each round of the knowledge tool loop (everything but the body and the lease). */
+interface RoundTarget {
+  path: string
+  headers: Headers
+  url?: string
+  failure?: (e: unknown) => Response
+  secret?: string
+}
+
+/** A request that goes through the tool loop: the body (mutated between rounds) and the counters of the request record. */
+interface ToolRun {
+  json: any
+  kbs: string[]
+  topK: number
+  summary: KnowledgeSummary
+}
+
+const CHAT_PATH = /^\/v1\/chat\/completions\/?$/
 
 export function createProxy(deps: ProxyDeps) {
   const limit = deps.maxBodyBytes ?? MAX_BODY_BYTES
@@ -411,7 +450,7 @@ export function createProxy(deps: ProxyDeps) {
   }
 
   /** Streaming request whose model is not ready: answer at once, heartbeat, then stream. */
-  function streamWhileLoading(req: Request, target: Target, path: string, body: Uint8Array<ArrayBuffer> | null, modelName: string, trace: RequestTrace): Response {
+  function streamWhileLoading(req: Request, target: Target, path: string, body: Uint8Array<ArrayBuffer> | null, modelName: string, trace: RequestTrace, tool?: { run: ToolRun, target: RoundTarget }): Response {
     trace.deferred = true
     const ts = new TransformStream<Uint8Array, Uint8Array>()
     const writer = ts.writable.getWriter()
@@ -459,6 +498,16 @@ export function createProxy(deps: ProxyDeps) {
         return
       }
       clearInterval(timer)
+
+      // Knowledge tool mode (decision 65 ⑪): the rounds run in runToolStream, which owns the lease from here on.
+      if (tool) {
+        try {
+          await runToolStream({ req, gone, writer, lease, target: tool.target, run: tool.run, modelName, trace, sendFinal })
+        } finally {
+          req.signal.removeEventListener('abort', onClient)
+        }
+        return
+      }
 
       // From here on the lease must be released on every path. The client listener stays
       // attached: under nuxt dev req.signal is the only disconnect notice we get.
@@ -538,6 +587,306 @@ export function createProxy(deps: ProxyDeps) {
     return new Response(ts.readable, { status: 200, headers: SSE_HEADERS })
   }
 
+  // -------------------------------------------------------------------------------------
+  // Knowledge for the chat models (decision 65 ⑨–⑫)
+
+  /**
+   * Resolve the knowledge this request uses (the request's `knowledge` field over `binding`), remove the field from the
+   * body (always, so it never reaches an upstream) and apply it: inject mode puts the retrieved block into the system
+   * message, tool mode adds `search_knowledge` and returns what the loop needs. Only POST /v1/chat/completions with a JSON
+   * object body; everything else is left alone. `changed` = the body was modified and has to be encoded again.
+   */
+  async function applyKnowledge(req: Request, trace: RequestTrace, json: any, path: string, binding: KnowledgeBinding | undefined, meta: RequestMeta | undefined): Promise<{ error: Response } | { changed: boolean, tool: ToolRun | null }> {
+    if (req.method !== 'POST' || !CHAT_PATH.test(path) || !json || typeof json !== 'object' || Array.isArray(json)) return { changed: false, tool: null }
+    const hadField = 'knowledge' in json
+    const raw = json.knowledge
+    delete json.knowledge
+    const kn = deps.knowledge
+    if (!kn) return { changed: hadField, tool: null }
+    const bases = kn.list()
+    const r = resolveKnowledge({ binding, raw, bases, allowed: kn.allowedKbs?.(meta) ?? null })
+    if (!r.ok) {
+      const text = r.code === 'kb_not_found' ? t.api.kbNotFound : r.code === 'kb_forbidden' ? t.api.kbForbidden : t.api.invalidKnowledge
+      return { error: errorResponse(r.status, r.code, fmt(text, { name: r.name })) }
+    }
+    if (r.skipped.length) deps.onEvent?.({ type: 'kb-skipped', ids: r.skipped })
+    const eff = r.effective
+    if (!eff || !messagesOf(json)) return { changed: hadField, tool: null }
+
+    if (eff.mode === 'tool') {
+      // The client's own tool of that name wins: nothing is added and the request passes through.
+      if (hasToolNamed(json)) return { changed: hadField, tool: null }
+      addTool(json, eff.kbs.map(id => bases.find(b => b.id === id)?.name ?? id))
+      const summary: KnowledgeSummary = { mode: 'tool', kbs: eff.kbs, hits: 0, rounds: 0 }
+      trace.knowledge = summary
+      return { changed: true, tool: { json, kbs: eff.kbs, topK: eff.topK, summary } }
+    }
+
+    const summary: KnowledgeSummary = { mode: 'inject', kbs: eff.kbs, hits: 0, rounds: 0 }
+    trace.knowledge = summary
+    const query = queryOf(json)
+    if (!query) return { changed: hadField, tool: null }
+    try {
+      const found = await bounded(kn.search(eff.kbs, query, { topK: eff.topK }), req.signal)
+      summary.rounds = 1
+      summary.hits = found.hits.length
+      if (!found.hits.length) return { changed: hadField, tool: null }
+      injectIntoSystem(json, injectBlock(found.hits))
+      return { changed: true, tool: null }
+    } catch (e) {
+      // The client left while it waited: nothing to answer. Any other failure: the chat goes on without knowledge.
+      if (req.signal.aborted) return { error: errorResponse(499, 'cancelled', t.api.cancelled) }
+      deps.onEvent?.({ type: 'kb-error', error: e })
+      return { changed: hadField, tool: null }
+    }
+  }
+
+  /** The tool results for our calls (one text each); a failed search becomes text for the model, never an error. */
+  async function runSearches(run: ToolRun, calls: readonly ToolCall[], signal: AbortSignal): Promise<string[]> {
+    const out: string[] = []
+    for (const call of calls) {
+      const args = parseSearchArguments(call.arguments)
+      if (!args) { out.push(t.kbPrompt.invalidArguments); continue }
+      try {
+        const found = await bounded(deps.knowledge!.search(run.kbs, args.query, { topK: args.topK === undefined ? run.topK : clampTopK(args.topK) }), signal)
+        run.summary.hits += found.hits.length
+        out.push(found.hits.length ? formatHits(found.hits) : t.kbPrompt.noResults)
+      } catch (e) {
+        if (signal.aborted) throw e
+        deps.onEvent?.({ type: 'kb-error', error: e })
+        out.push(t.kbPrompt.searchFailed)
+      }
+    }
+    return out
+  }
+
+  /** Non-streaming tool mode: every round is buffered JSON, the client gets the last one; the lease is held throughout and released once. */
+  async function toolBuffered(req: Request, lease: Lease, target: RoundTarget, run: ToolRun, modelName: string, trace: RequestTrace): Promise<Response> {
+    trace.deferred = true
+    const json = run.json
+    const gone = new AbortController()
+    const onClient = () => gone.abort(req.signal.reason)
+    const onLease = () => gone.abort(lease.signal.reason)
+    if (req.signal.aborted) onClient()
+    req.signal.addEventListener('abort', onClient, { once: true })
+    lease.signal.addEventListener('abort', onLease, { once: true })
+    let released = false
+    const finish = (status: number, outcome: RequestRecord['outcome'], code: string | null = null) => {
+      if (released) return
+      released = true
+      req.signal.removeEventListener('abort', onClient)
+      lease.signal.removeEventListener('abort', onLease)
+      lease.release(outcome === 'ok' ? 'ok' : undefined)
+      trace.finish(status, outcome, code)
+    }
+    let prior: Usage = noUsage()
+    try {
+      for (;;) {
+        if (run.summary.rounds >= MAX_TOOL_ROUNDS) removeTool(json)
+        let res: Response
+        let text: string
+        try {
+          const up = await callUpstream({ lease, req, path: target.path, body: enc.encode(JSON.stringify(json)), headers: target.headers, url: target.url, failure: target.failure, secret: target.secret })
+          res = up.res
+          // The body is read before the abort listeners come off: a client that leaves now still stops the read.
+          try { text = await res.text() } finally { up.cleanup() }
+        } catch (e) {
+          const failure = target.failure ? target.failure(e) : upstreamFailure(e, lease, modelName)
+          finish(failure.status, lease.signal.aborted || req.signal.aborted ? 'aborted' : 'error', codeOf(failure))
+          return failure
+        }
+        let obj: any = null
+        if (res.ok) { try { obj = JSON.parse(text) } catch { /* not JSON: relayed as it is */ } }
+        const message = obj?.choices?.[0]?.message
+        const calls = callsOfMessage(message)
+        if (obj && run.summary.rounds < MAX_TOOL_ROUNDS && allOurs(calls)) {
+          prior = addUsage(prior, obj.usage)
+          run.summary.rounds++
+          let results: string[]
+          try {
+            results = await runSearches(run, calls, gone.signal)
+          } catch {
+            finish(499, 'aborted')
+            return errorResponse(499, 'cancelled', t.api.cancelled)
+          }
+          json.messages.push(...followUp({ content: typeof message.content === 'string' ? message.content : null, extra: typeof message.reasoning_content === 'string' ? { reasoning_content: message.reasoning_content } : {} }, calls, results))
+          continue
+        }
+        let out = text
+        if (obj && hasUsage(prior)) {
+          obj.usage = { ...(obj.usage && typeof obj.usage === 'object' ? obj.usage : {}), ...addUsage(prior, obj.usage) }
+          out = JSON.stringify(obj)
+        }
+        trace.chunk(enc.encode(out))
+        const secret = target.secret ?? ''
+        const headers = redactHeaders(forwardResponseHeaders(res.headers), secret)
+        finish(res.status, res.status >= 400 ? 'error' : 'ok')
+        return new Response(redactText(out, secret), { status: res.status, headers })
+      }
+    } catch (e) {
+      deps.onEvent?.({ type: 'internal-error', target: lease.target, error: e })
+      finish(500, 'error', 'internal_error')
+      return errorResponse(500, 'internal_error', t.api.internalError)
+    } finally {
+      // Backstop: every path above has finished already (finish is idempotent); this only matters for a path added carelessly.
+      finish(500, 'error', 'internal_error')
+    }
+  }
+
+  /**
+   * Streaming tool mode, after the lease is held: one SSE response for all rounds. Content / reasoning deltas go through at
+   * once; tool-call events, the finish / usage events and `[DONE]` of a round are held until the round ends (StreamRound).
+   * A round whose calls are all `search_knowledge` is dropped and answered (searches, follow-up messages, next round into
+   * the same writer); any other round is flushed as it came and ends the stream. The lease is released exactly once, on
+   * every path: normal end, upstream or search failure, client disconnect, model unloaded.
+   */
+  async function runToolStream(a: {
+    req: Request
+    gone: AbortController
+    writer: WritableStreamDefaultWriter<Uint8Array>
+    lease: Lease
+    target: RoundTarget
+    run: ToolRun
+    modelName: string
+    trace: RequestTrace
+    sendFinal(r: Response): Promise<void>
+  }): Promise<void> {
+    const { gone, writer, lease, target, run, modelName, trace } = a
+    const json = run.json
+    const fakeReq = new Request(a.req.url, { method: a.req.method, headers: a.req.headers, signal: gone.signal })
+    const secret = target.secret ?? ''
+    const redactor = new StreamRedactor(secret)
+    let ok = false
+    let released = false
+    let status = 200
+    let result: { status: number, outcome: RequestRecord['outcome'], code: string | null } | null = null
+    const finish = () => {
+      if (released) return
+      released = true
+      lease.release(ok ? 'ok' : undefined)
+      trace.finish(result?.status ?? status, result?.outcome ?? (!ok ? 'aborted' : status >= 400 ? 'error' : 'ok'), result?.code ?? null)
+    }
+    // Client gone or model unloaded: release at once, also while a search is running (like forward()).
+    gone.signal.addEventListener('abort', finish, { once: true })
+    lease.signal.addEventListener('abort', finish, { once: true })
+    let current: AbortController | null = null
+    const emit = async (text: string, signal: AbortSignal) => {
+      if (!text) return
+      const bytes = enc.encode(text)
+      trace.chunk(bytes)
+      const masked = redactor.push(bytes)
+      if (!masked.length) return
+      // Parked here when the client stopped reading; each wait is bounded by the abort signal (see streamWhileLoading).
+      await bounded(writer.ready, signal)
+      await bounded(writer.write(masked), signal)
+    }
+    let prior: Usage = noUsage()
+    let first = true
+    try {
+      for (;;) {
+        if (run.summary.rounds >= MAX_TOOL_ROUNDS) removeTool(json)
+        let up: Awaited<ReturnType<typeof callUpstream>>
+        try {
+          up = await callUpstream({ lease, req: fakeReq, path: target.path, body: enc.encode(JSON.stringify(json)), headers: target.headers, url: target.url, failure: target.failure, secret: target.secret })
+        } catch (e) {
+          if (gone.signal.aborted) {
+            result = { status: 200, outcome: 'aborted', code: null }
+            finish()
+            writer.abort().catch(() => {})
+          } else {
+            const failure = target.failure ? target.failure(e) : upstreamFailure(e, lease, modelName)
+            result = { status: 200, outcome: lease.signal.aborted ? 'aborted' : 'error', code: codeOf(failure) }
+            finish()
+            await a.sendFinal(failure)
+          }
+          return
+        }
+        const { res, ac, cleanup } = up
+        current = ac
+        if (first) { trace.startFlow(); first = false }
+        let round!: StreamRound
+        try {
+          if (!res.ok || !res.body) {
+            // Headers are already sent as SSE: the upstream's own body is relayed as an event, or one from the dictionary.
+            const text = await res.text()
+            const relayed = redactText(text, secret) || JSON.stringify({ error: { message: fmt(t.api.upstreamStreamError, { status: res.status }), code: res.status } })
+            await bounded(writer.ready, ac.signal)
+            await bounded(writer.write(enc.encode(`data: ${relayed}\n\n`)), ac.signal)
+            status = res.status
+            trace.chunk(enc.encode(text))
+            ok = res.status < 500
+            if (res.status >= 400) result = { status: res.status, outcome: 'error', code: null }
+            break
+          }
+          const reader = res.body.getReader()
+          const splitter = new SseSplitter()
+          round = new StreamRound(run.summary.rounds > 0)
+          for (;;) {
+            const { done, value } = await reader.read()
+            if (done) break
+            for (const ev of splitter.push(value)) await emit(round.push(ev), ac.signal)
+          }
+          const rest = splitter.flush()
+          if (rest.trim()) await emit(round.push(rest.endsWith('\n') ? rest : `${rest}\n\n`), ac.signal)
+        } finally {
+          cleanup()
+        }
+        const calls = round.calls()
+        if (run.summary.rounds < MAX_TOOL_ROUNDS && allOurs(calls)) {
+          // Ours: what was held is dropped, the client never sees these calls.
+          prior = addUsage(prior, round.usage)
+          run.summary.rounds++
+          await emit(': knowledge search\n\n', gone.signal)
+          const results = await runSearches(run, calls, gone.signal)
+          json.messages.push(...followUp({ content: round.content || null, extra: round.reasoning ? { reasoning_content: round.reasoning } : {} }, calls, results))
+          continue
+        }
+        await emit(round.flush(prior), gone.signal)
+        // The request record reads the token counts from the last bytes sent; a round without a usage chunk of its own gets the sum.
+        if (hasUsage(prior) && !round.usage) trace.tap.push(enc.encode(JSON.stringify({ usage: addUsage(prior, null) })))
+        ok = true
+        break
+      }
+      const tail = redactor.flush()
+      if (tail.length) await bounded(writer.write(tail), gone.signal)
+      await bounded(writer.close(), gone.signal)
+    } catch (e) {
+      current?.abort(e)
+      if (!gone.signal.aborted && lease.signal.aborted) {
+        // Model gone, client still connected: try to tell it (bounded, see streamWhileLoading's sendFinal).
+        await a.sendFinal(errorResponse(503, 'model_interrupted', fmt(t.api.interrupted, { model: modelName })))
+      } else {
+        writer.abort(e).catch(() => {})
+      }
+    } finally {
+      gone.signal.removeEventListener('abort', finish)
+      lease.signal.removeEventListener('abort', finish)
+      finish()
+    }
+  }
+
+  /** Streaming tool mode with the lease already held (the model is ready, or an external upstream). */
+  function streamTool(req: Request, lease: Lease, target: RoundTarget, run: ToolRun, modelName: string, trace: RequestTrace): Response {
+    trace.deferred = true
+    const ts = new TransformStream<Uint8Array, Uint8Array>()
+    const writer = ts.writable.getWriter()
+    const gone = new AbortController()
+    const onClient = () => gone.abort(req.signal.reason)
+    if (req.signal.aborted) onClient()
+    req.signal.addEventListener('abort', onClient, { once: true })
+    writer.closed.catch(() => gone.abort(new Error('client disconnected')))
+    const finalEventMs = deps.finalEventTimeoutMs ?? 5000
+    const sendFinal = async (r: Response) => {
+      const told = await bounded((async () => {
+        await writer.write(enc.encode(`data: ${await r.text()}\n\n`))
+        await writer.close()
+      })(), gone.signal, finalEventMs).then(() => true, () => false)
+      if (!told) writer.abort().catch(() => {})
+    }
+    void runToolStream({ req, gone, writer, lease, target, run, modelName, trace, sendFinal }).finally(() => req.signal.removeEventListener('abort', onClient))
+    return new Response(ts.readable, { status: 200, headers: SSE_HEADERS })
+  }
+
   function modelsList(): Response {
     const created = Math.floor(Date.now() / 1000)
     const ext = deps.getUpstreams ? listExternalNames(deps.getUpstreams()) : []
@@ -608,7 +957,12 @@ export function createProxy(deps: ProxyDeps) {
     trace.modelId = `upstream:${u.id}`
     trace.modelName = ext.name
     let body = raw
+    let tool: ToolRun | null = null
     if (json && typeof json === 'object') {
+      // Knowledge first: a bad `knowledge` field is refused before any work, and the field never reaches the upstream.
+      const kn = await applyKnowledge(req, trace, json, url.pathname, u.knowledge, meta)
+      if ('error' in kn) return kn.error
+      tool = kn.tool
       const global = deps.getSettings().preprocess
       const image = { ...global.image, ...(u.imageCompress === 'inherit' ? {} : { enabled: u.imageCompress === 'on' }) }
       try {
@@ -622,6 +976,10 @@ export function createProxy(deps: ProxyDeps) {
       body = new TextEncoder().encode(JSON.stringify(json))
     }
     const headers = forwardRequestHeaders(req.headers)
+    if (tool) {
+      const { lease, round } = externalRound(trace, u, ext.name, headers, url)
+      return json.stream === true ? streamTool(req, lease, round, tool, ext.name, trace) : toolBuffered(req, lease, round, tool, ext.name, trace)
+    }
     if (form) {
       const rewritten = rewriteMultipartField(form, 'model', ext.modelId)
       body = rewritten.body
@@ -708,6 +1066,12 @@ export function createProxy(deps: ProxyDeps) {
    * masked in what comes back. The response body is streamed through (forward()), never buffered.
    */
   function sendExternal(req: Request, trace: RequestTrace, u: Upstream, modelName: string, body: Uint8Array<ArrayBuffer> | null, headers: Headers, url: URL): Promise<Response> {
+    const { lease, round, key } = externalRound(trace, u, modelName, headers, url)
+    return forward({ lease, req, path: round.path, body, headers, url: round.url, failure: round.failure, secret: key }, modelName, trace)
+  }
+
+  /** What a call to an external upstream needs: its own key instead of the client's, a lease that never aborts, the failure text. */
+  function externalRound(trace: RequestTrace, u: Upstream, modelName: string, headers: Headers, url: URL): { lease: Lease, round: RoundTarget & { url: string, failure: (e: unknown) => Response }, key: string } {
     trace.modelId = `upstream:${u.id}`
     trace.modelName = modelName
     const key = deps.getUpstreamKey?.(u.id) ?? ''
@@ -721,7 +1085,7 @@ export function createProxy(deps: ProxyDeps) {
       return errorResponse(502, 'upstream_unreachable', fmt(t.api.externalUnreachable, { upstream: u.name }))
     }
     const path = url.pathname.replace(/^\/v1(?=\/|$)/, '') + url.search
-    return forward({ lease, req, path, body, headers, url: `${u.baseUrl}${path}`, failure, secret: key }, modelName, trace)
+    return { lease, key, round: { path, headers, url: `${u.baseUrl}${path}`, failure, secret: key } }
   }
 
   async function handleV1Inner(req: Request, trace: RequestTrace, meta: RequestMeta | undefined): Promise<Response> {
@@ -776,17 +1140,22 @@ export function createProxy(deps: ProxyDeps) {
     trace.profile = target.profile
 
     let body = raw
+    let tool: ToolRun | null = null
     if (json && typeof json === 'object') {
       if (hasImages(json) && !model.mmproj) {
         return errorResponse(400, 'image_without_mmproj', fmt(t.api.imageWithoutMmproj, { model: model.name }))
       }
+      // Knowledge (decision 65 ⑨): the profile's binding and the request's own field; the field is removed from the body.
+      const kn = await applyKnowledge(req, trace, json, path, profile.knowledge, meta)
+      if ('error' in kn) return kn.error
+      tool = kn.tool
       try {
         const result = await runPreprocess(json, { options: resolvePreprocessOptions(deps.getSettings().preprocess, profile) })
         if (Object.keys(result.reports).length) deps.onEvent?.({ type: 'preprocess', target, result })
         trace.images = summarizeImages(result.reports.image)
         // A profile with thinking off is a hard rule: the request cannot switch it back on.
         const thinkingForced = effectiveReasoning(deps.getSettings(), profile) === 'off' && forceThinkingOff(json)
-        if (result.changed || thinkingForced) body = new TextEncoder().encode(JSON.stringify(json))
+        if (result.changed || thinkingForced || kn.changed) body = new TextEncoder().encode(JSON.stringify(json))
       } catch (e) {
         deps.onEvent?.({ type: 'internal-error', target, error: e })
         return errorResponse(500, 'preprocess_failed', t.api.preprocessFailed)
@@ -795,8 +1164,9 @@ export function createProxy(deps: ProxyDeps) {
 
     const upstreamPath = path + url.search
     const streaming = !!json && json.stream === true
+    const round: RoundTarget = { path: upstreamPath, headers: forwardRequestHeaders(req.headers) }
     if (streaming && deps.scheduler.stateOf(target) !== 'ready') {
-      return streamWhileLoading(req, target, upstreamPath, body, model.name, trace)
+      return streamWhileLoading(req, target, upstreamPath, body, model.name, trace, tool ? { run: tool, target: round } : undefined)
     }
     let lease: Lease
     try {
@@ -804,6 +1174,7 @@ export function createProxy(deps: ProxyDeps) {
     } catch (e) {
       return schedulerErrorResponse(e, target, model.name)
     }
+    if (tool) return streaming ? streamTool(req, lease, round, tool, model.name, trace) : toolBuffered(req, lease, round, tool, model.name, trace)
     return forward({ lease, req, path: upstreamPath, body }, model.name, trace)
   }
 

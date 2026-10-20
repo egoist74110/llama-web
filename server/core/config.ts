@@ -6,6 +6,7 @@ import type { FileRef, ModelDir } from './types'
 import type { Acceleration, PlatformInfo, RuntimeTarget } from './platform'
 import { normalizeCustomMirror } from './mirrors'
 import { normalizeUsageKeepDays } from './usage'
+import { normalizeBinding, type KnowledgeBinding } from './kb/binding'
 import { DEFAULT_LOCALE, LOCALES, type LocaleCode } from '../../i18n/messages'
 
 /** Name of the built-in profile created when a model is enabled or imported. */
@@ -125,6 +126,8 @@ export interface Profile extends Pick<GpuChoice, 'devices' | 'splitMode' | 'tens
    * A GPU group (`devices`, two or more ids, with `splitMode` / `tensorSplit` / `mainGpu`) replaces it, see gpu-group.ts.
    */
   device?: string | null
+  /** Knowledge this profile uses (decision 65 ⑨); absent = none. Applies to every request this profile serves (`model:profile`, or the plain name while it is the current profile). */
+  knowledge?: KnowledgeBinding
 }
 
 export interface ModelConfig extends Pick<GpuChoice, 'devices' | 'splitMode' | 'tensorSplit' | 'mainGpu'> {
@@ -450,6 +453,8 @@ export function normalizeModels(doc: ModelsDoc): ModelsDoc {
     // Same for the device: a valid choice or nothing.
     cleanStoredChoice(m)
     for (const p of Object.values(m.profiles)) if (isObj(p)) cleanStoredChoice(p)
+    // Knowledge binding (decision 65 ⑨): optional, so no version bump; a malformed one is cleaned, a non-object dropped.
+    for (const p of Object.values(m.profiles)) if (isObj(p) && p.knowledge !== undefined) { if (isObj(p.knowledge)) p.knowledge = normalizeBinding(p.knowledge); else delete p.knowledge }
   }
   return doc
 }

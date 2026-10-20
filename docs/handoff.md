@@ -1,5 +1,14 @@
 # 交接记录
 
+## 2026-10-21 · 15-4 后端：本机模型与外部上游用知识库（注入 / 工具）· 同一会话续
+- 起因：用户验证 15-1 + 知识库页能拿到需要的内容；要求本机模型接上知识库，外部上游也要，但每个服务要有开关。之后又补充：本机模型也要开关，默认关，打开后选知识库（默认全部）和方式，由人自己选——列为下一个任务。规格写在会话共享笔记 `15-4-spec.md`（不在仓库里），要点已进决定 65 ⑨⑩⑪。
+- 实现（Sonnet 5.5）：`server/core/kb/binding.ts`（绑定类型、请求字段 `knowledge` 解析与合并）、`inject.ts`（取最后一条用户消息、编号出处片段、system 注入、`search_knowledge` 工具增删）、`tool-loop.ts`（SSE 拆分、流式工具调用拼装、用量合并）；`proxy.ts` 接入（无知识库的请求仍走原 `forward()`）；`Profile.knowledge`（可选字段，models 版本不变）；`upstreams.json` v2 迁移加 `knowledge`（默认关）；保存时校验知识库存在；请求记录加 `knowledge` 摘要；新事件 `kb-error` / `kb-skipped`；`tests/core/proxy-knowledge.test.ts` 43 条。
+- 实际运行：`bun test` 1765 pass / 8 skip / 0 fail（子代理与我各一次；子代理一次中间运行里 `cleanupResidue (real processes)` 偶发失败，最后一次通过）；`bun run typecheck` exit 0；`git diff --check` 通过；子代理跑了 `bun run build` exit 0。
+- 没有运行：真实 llama-server / 外部上游 / 向量引擎下的注入与工具模式（全部是假上游）；真实 SSE 的怪情况（工具调用没有 index、用量和结束块合在一起）；接口层的 HTTP 测试。`allowedKbs` 钩子恒为全部，等 15-3。
+- 还没有界面：方案绑定、外部上游开关、本机模型开关、对话页选择器都没做；现在只能直接改 `data/models.json` / `data/upstreams.json` 或在请求里带 `knowledge` 字段。
+- 下一步（用户指定）：本机模型的「使用知识库」开关（每个模型，默认关，打开后选知识库默认全部 + 模式），连同外部上游开关的界面一起做；然后用户真机验证注入 / 工具模式。注意「全部」要做成动态的（新建的知识库也算），当前绑定只存 id 列表。
+- 分支：远端只有 `claude/vigorous-bohr-8286e0`，早已合入 main，无需合并。`src-tauri/Cargo.lock` 的改动在本会话开始前就有，不是本工作的，未提交。
+
 ## 2026-10-20 · 15-5 提前：「知识库」页（用户要求能直接上传）· 同一会话续
 - 起因：15-1 没有界面，用户不知道去哪里传 txt，要求先把界面做了。用户说真机验证由用户自己做，会话只给步骤。
 - 实现（Sonnet 5.5）：`app/pages/knowledge.vue`、`KbEditor.vue`（新建 / 编辑）、`KbDocs.vue`（文档列表、点击或拖放上传 .txt / .md、状态与进度）、`KbSearch.vue`（检索测试）、`KbConfirm.vue`、`app/utils/kb.ts`；侧栏「知识库」入口（接入之后）；中英文案；`tests/app/kb-page.test.ts`（客户端 50 MB 上限与服务端一致等）。服务端未改：Bun 默认请求体上限 128 MiB，50 MB 文件（JSON 约 70 MB）实测可传。进度来自 `useLive()` 的 `kb.jobs`，任务变化时重新取列表，不轮询。

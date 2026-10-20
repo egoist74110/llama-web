@@ -12,6 +12,7 @@ import { resolveFileRef, type ScanEntry } from './scanner'
 import type { FileRef, ModelDir } from './types'
 import { mtpExtraArgs, mtpValid, sameDirectory, type MtpInput, type MtpMode } from './mtp'
 import { thinkingBudget, validThinkingLimit } from './thinking-limit'
+import { BindingError, parseBinding, unknownBoundKb, type KnowledgeBinding } from './kb/binding'
 
 export { MTP_DEFAULT_N, MTP_MAX_N, stripMtpArgs } from './mtp'
 
@@ -31,7 +32,7 @@ export class EnableError extends Error {
 
 export type ProfileErrorCode =
   | 'model-not-found' | 'profile-not-found' | 'profile-exists' | 'name-invalid' | 'last-profile'
-  | 'bad-overrides' | 'bad-extra-args' | 'template-not-found' | 'in-use' | 'bad-setup' | 'bad-context' | 'bad-thinking-limit' | 'runtime-invalid' | 'device-invalid' | 'check-failed' | 'no-cpu-build'
+  | 'bad-overrides' | 'bad-extra-args' | 'template-not-found' | 'in-use' | 'bad-setup' | 'bad-context' | 'bad-thinking-limit' | 'runtime-invalid' | 'device-invalid' | 'check-failed' | 'no-cpu-build' | 'bad-knowledge' | 'kb-not-found'
 
 export class ProfileError extends Error {
   constructor(public code: ProfileErrorCode, message: string = code, public detail?: string) {
@@ -286,6 +287,8 @@ export interface ProfileForm {
   gpu?: ReturnType<typeof sanitizeGpuChoice> & object
   /** Present only when the dedicated MTP control changed. Stored using existing args + draft fields. */
   mtp?: MtpInput
+  /** Knowledge binding (decision 65 ⑨): undefined = leave the saved one, null = remove it. */
+  knowledge?: KnowledgeBinding | null
 }
 
 /** The whole device choice from a client body (single value or GPU group + split settings); throws `device-invalid` when it does not hold together. */
@@ -326,9 +329,19 @@ export function sanitizeForm(raw: unknown): ProfileForm {
     overrides, extraArgs, chatTemplate,
     ...(r.mtp === undefined ? {} : { mtp: sanitizeMtp(r.mtp) }),
     ...(r.runtime === undefined ? {} : { runtime: sanitizeRuntimeRef(r.runtime) }),
+    ...(r.knowledge === undefined ? {} : { knowledge: sanitizeKnowledge(r.knowledge) }),
     ...(hasGpuFields(r)
       ? (() => { const gpu = sanitizeGpu(r); return { gpu, device: gpu.device || null } })()
       : {}),
+  }
+}
+
+/** A knowledge binding from the client; null / false clears it. Whether the knowledge bases exist is checked by saveProfile. */
+export function sanitizeKnowledge(raw: unknown): KnowledgeBinding | null {
+  if (raw === null || raw === false) return null
+  try { return parseBinding(raw) } catch (e) {
+    if (e instanceof BindingError) throw new ProfileError('bad-knowledge')
+    throw e
   }
 }
 
@@ -341,9 +354,12 @@ function sanitizeMtp(raw: unknown): MtpInput {
 }
 
 /** Save the form into a profile. Extra args must parse and the template must exist. */
-export function saveProfile(doc: ModelsDoc, modelId: string, name: string, form: ProfileForm, templates: string[], runtimeOk?: (ref: string) => boolean, deviceOk?: (device: string) => boolean, entries: ScanEntry[] = []): Profile {
+export function saveProfile(doc: ModelsDoc, modelId: string, name: string, form: ProfileForm, templates: string[], runtimeOk?: (ref: string) => boolean, deviceOk?: (device: string) => boolean, entries: ScanEntry[] = [], kbIds?: readonly string[]): Profile {
   const model = findModel(doc, modelId)
   if (!Object.hasOwn(model.profiles, name)) throw new ProfileError('profile-not-found')
+  // A binding is saved only to knowledge bases that exist now (one deleted later is skipped at request time).
+  const missingKb = form.knowledge && kbIds ? unknownBoundKb(form.knowledge, kbIds) : null
+  if (missingKb) throw new ProfileError('kb-not-found', 'kb-not-found', missingKb)
   try {
     splitArgs(form.extraArgs)
   } catch (e) {
@@ -367,6 +383,8 @@ export function saveProfile(doc: ModelsDoc, modelId: string, name: string, form:
     if (form.runtime) profile.runtime = form.runtime
     else delete profile.runtime
   }
+  if (form.knowledge) profile.knowledge = form.knowledge
+  else if (form.knowledge === null) delete profile.knowledge
   if (form.gpu) applyGpuChoice(profile, form.gpu)
   else if (form.device !== undefined) {
     if (form.device) profile.device = form.device

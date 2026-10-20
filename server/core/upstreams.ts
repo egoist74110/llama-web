@@ -5,6 +5,7 @@ import { randomBytes } from 'node:crypto'
 import { ArgsSyntaxError, splitArgs } from './args'
 import type { SecretsDoc } from './keys'
 import type { LaunchState } from './upstream-launcher'
+import { BindingError, defaultBinding, normalizeBinding, parseBinding, unknownBoundKb, type KnowledgeBinding } from './kb/binding'
 
 export type ImageCompressMode = 'inherit' | 'on' | 'off'
 
@@ -39,6 +40,8 @@ export interface Upstream {
   manualModels: string[]
   /** ISO time of the last connection test; '' = never. */
   testedAt: string
+  /** Knowledge for every model of this upstream (decision 65 ⑨); off by default. */
+  knowledge: KnowledgeBinding
 }
 
 export interface UpstreamsDoc {
@@ -46,7 +49,7 @@ export interface UpstreamsDoc {
   upstreams: Upstream[]
 }
 
-export const UPSTREAMS_VERSION = 1
+export const UPSTREAMS_VERSION = 2
 export const MAX_UPSTREAMS = 20
 export const MAX_NAME_LENGTH = 24
 export const MAX_MODELS = 500
@@ -55,13 +58,24 @@ export function defaultUpstreams(): UpstreamsDoc {
   return { version: UPSTREAMS_VERSION, upstreams: [] }
 }
 
+/** `migrations[n]` turns a version-n upstreams.json into version n + 1. */
+export const UPSTREAMS_MIGRATIONS: Record<number, (old: any) => any> = {
+  // 2: knowledge binding per upstream (decision 65 ⑨): off, so nothing changes for an existing upstream.
+  1: (old) => {
+    if (Array.isArray(old?.upstreams)) {
+      for (const u of old.upstreams) if (u && typeof u === 'object' && u.knowledge === undefined) u.knowledge = defaultBinding()
+    }
+    return old
+  },
+}
+
 const isObj = (v: unknown): v is Record<string, any> => !!v && typeof v === 'object' && !Array.isArray(v)
 
 export type UpstreamErrorCode =
   | 'bad-key'
   | 'bad-name' | 'name-taken' | 'name-local-conflict' | 'bad-url' | 'url-self' | 'bad-monitor-url'
   | 'rollback-failed'
-  | 'bad-model' | 'not-found' | 'too-many' | 'bad-mode' | 'bad-start-command' | 'bad-start-cwd'
+  | 'bad-model' | 'not-found' | 'too-many' | 'bad-mode' | 'bad-start-command' | 'bad-start-cwd' | 'bad-knowledge' | 'kb-not-found'
 
 export class UpstreamError extends Error {
   constructor(public code: UpstreamErrorCode, public detail = '') {
@@ -205,6 +219,7 @@ export function normalizeUpstreams(doc: UpstreamsDoc): UpstreamsDoc {
       u.manualModels = cleanModelIds(u.manualModels)
       u.startCommand = cleanStartCommand(u.startCommand)
       u.startCwd = cleanStartCwd(u.startCwd)
+      u.knowledge = normalizeBinding(u.knowledge)
     } catch (e) {
       throw new Error(`upstream "${u.id}": ${(e as Error).message}`)
     }
@@ -279,6 +294,7 @@ export interface UpstreamForm {
   startCommand?: unknown
   startCwd?: unknown
   stopOnExit?: unknown
+  knowledge?: unknown
 }
 
 /**
@@ -292,7 +308,21 @@ export function selfPortsOf(serverPort: number, bootPort: number, publicEntry: {
 export interface EditContext {
   localNames: readonly string[]
   selfPorts: readonly number[]
+  /** Ids of the knowledge bases that exist; when given, a binding to another one is refused. */
+  kbIds?: readonly string[]
   rand?: (n: number) => Buffer
+}
+
+/** A binding from a form: the shape must hold, and (when `ctx.kbIds` is known) every knowledge base must exist. */
+export function cleanKnowledge(raw: unknown, ctx: EditContext): KnowledgeBinding {
+  let binding: KnowledgeBinding
+  try { binding = parseBinding(raw) } catch (e) {
+    if (e instanceof BindingError) throw new UpstreamError('bad-knowledge')
+    throw e
+  }
+  const missing = ctx.kbIds ? unknownBoundKb(binding, ctx.kbIds) : null
+  if (missing) throw new UpstreamError('kb-not-found', missing)
+  return binding
 }
 
 function checkName(draft: UpstreamsDoc, name: string, exceptId: string | null, ctx: EditContext) {
@@ -315,6 +345,7 @@ export function createUpstream(draft: UpstreamsDoc, form: UpstreamForm, ctx: Edi
     imageCompress: cleanMode(form.imageCompress), local: form.local !== false, exclusive: form.exclusive !== false,
     startCommand: cleanStartCommand(form.startCommand), startCwd: cleanStartCwd(form.startCwd), stopOnExit: form.stopOnExit === true,
     models: [], manualModels: cleanModelIds(form.manualModels), testedAt: '',
+    knowledge: form.knowledge === undefined ? defaultBinding() : cleanKnowledge(form.knowledge, ctx),
   }
   draft.upstreams.push(u)
   return u
@@ -341,6 +372,7 @@ export function updateUpstream(draft: UpstreamsDoc, id: unknown, form: UpstreamF
   if (form.startCommand !== undefined) u.startCommand = cleanStartCommand(form.startCommand)
   if (form.startCwd !== undefined) u.startCwd = cleanStartCwd(form.startCwd)
   if (form.stopOnExit !== undefined) u.stopOnExit = form.stopOnExit === true
+  if (form.knowledge !== undefined) u.knowledge = cleanKnowledge(form.knowledge, ctx)
   return u
 }
 
@@ -379,7 +411,7 @@ export interface ConnectionView extends UpstreamView {
 }
 
 export function viewUpstreams(doc: UpstreamsDoc, keys: Record<string, string>): UpstreamView[] {
-  return doc.upstreams.map(u => ({ ...u, models: [...u.models], manualModels: [...u.manualModels], hasKey: !!keys[u.id] }))
+  return doc.upstreams.map(u => ({ ...u, models: [...u.models], manualModels: [...u.manualModels], knowledge: { ...u.knowledge, kbs: [...u.knowledge.kbs] }, hasKey: !!keys[u.id] }))
 }
 
 /** Model ids out of an OpenAI-style `/models` answer; anything else is an empty list. */

@@ -53,7 +53,7 @@ import { AppUpdater } from '../core/app-update'
 import { Hold } from '../core/write-pair'
 import { cloudflareHooks } from './cloudflare-hooks'
 import { acquireDataLock, type DataLock } from '../core/data-lock'
-import { defaultUpstreams, normalizeUpstreams, recordTest, UPSTREAMS_VERSION, viewUpstreams, type UpstreamsDoc } from '../core/upstreams'
+import { defaultUpstreams, normalizeUpstreams, recordTest, UPSTREAMS_MIGRATIONS, UPSTREAMS_VERSION, viewUpstreams, type UpstreamsDoc } from '../core/upstreams'
 import { UpstreamLauncher } from '../core/upstream-launcher'
 import { defaultEmbedding, EMBEDDING_VERSION, EmbeddingEngine, normalizeEmbedding, planEmbedding, type EmbeddingDoc } from '../core/embedding'
 import { defaultKnowledge, KNOWLEDGE_VERSION, normalizeKnowledge, type KnowledgeDoc } from '../core/kb/registry'
@@ -149,6 +149,8 @@ export interface AppContext {
   embedding: EmbeddingEngine
   /** Knowledge bases (decision 65): registry in data/knowledge.json, one SQLite file each under data/kb. */
   kb: KbManager
+  /** data/knowledge.json: the registry of knowledge bases (ids and names for bindings). */
+  getKnowledge(): KnowledgeDoc
   proxy: Proxy
   /** Public entry on 127.0.0.1 (settings.public); the custom Bun entry attaches the listener. */
   publicEntry: PublicListener
@@ -241,6 +243,10 @@ function logProxyEvent(e: ProxyEvent) {
         x ? `${x.width}x${x.height} ${x.format} ${Math.round(x.bytes / 1024)}KB` : '?'
       log(`image ${describeTarget(e.target)} #${r.message}.${r.part}: ${r.action} ${size(b)}${a ? ` -> ${size(a)}` : ''}${r.detail ? ` (${r.detail})` : ''}`)
     }
+  } else if (e.type === 'kb-error') {
+    logError('knowledge:', (e.error as Error)?.message ?? e.error)
+  } else if (e.type === 'kb-skipped') {
+    log(`knowledge: skipped knowledge bases that no longer exist (${e.ids.join(', ')})`)
   } else if (e.type === 'upstream-error') {
     logError(`upstream ${describeTarget(e.target)}:`, (e.error as Error)?.message ?? e.error)
   } else {
@@ -287,7 +293,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
   })
   startupClose.push(() => secretsStore.close())
   const upstreamsStore = new JsonStore<UpstreamsDoc>({
-    dataDir, name: 'upstreams.json', version: UPSTREAMS_VERSION, defaults: defaultUpstreams, validate: normalizeUpstreams,
+    dataDir, name: 'upstreams.json', version: UPSTREAMS_VERSION, defaults: defaultUpstreams, validate: normalizeUpstreams, migrations: UPSTREAMS_MIGRATIONS,
   })
   startupClose.push(() => upstreamsStore.close())
   const embeddingStore = new JsonStore<EmbeddingDoc>({
@@ -712,6 +718,8 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     getUpstreamKey: id => secretsRef.get().upstreamKeys[id] ?? '',
     jobs: new JobStore({ dataDir, onError: e => logError('async jobs (data/jobs.json):', (e as Error)?.message ?? e) }),
     embedding,
+    // Decision 65 ⑨: knowledge for the chat models. Permission lists per API key come with 15-3 (null = every knowledge base).
+    knowledge: { search: (ids, q, o) => kb.search(ids, q, o), list: () => knowledgeRef.get().bases, allowedKbs: () => null },
   })
   const publicEntry: PublicListener = new PublicListener((req, ip) => handlePublic(req, {
     authenticate: header => authenticate(secretsRef.get(), header),
@@ -804,7 +812,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     platform, runtimeTarget: selectedTarget, runtimeSelection,
     getSecrets: secretsRef.get, updateSecrets: secretsRef.update, getUpstreams: upstreamsRef.get, updateUpstreams: upstreamsRef.update, health, launcher, tunnel, applyTunnel, cloudflare,
     refresh: () => { settingsRef.refresh(); modelsRef.refresh(); upstreamsRef.refresh(); embeddingRef.refresh(); knowledgeRef.refresh() },
-    getEmbedding: embeddingRef.get, updateEmbedding: embeddingRef.update, embedding, kb,
+    getEmbedding: embeddingRef.get, updateEmbedding: embeddingRef.update, embedding, kb, getKnowledge: knowledgeRef.get,
     getRuntimeStatus: () => updater.getStatus(), updater, secondary,
     getLastModelFailure(modelId) { pruneFailures(); return lastFailures.get(modelId) ?? null },
     async downloadSecondary() {

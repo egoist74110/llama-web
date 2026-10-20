@@ -523,6 +523,8 @@ export const enSkeleton: PartialMessages = {
       'last-profile': 'At least one config profile must be kept.',
       'in-use': 'This profile is loading, running, or has requests queued for its load; stop the model before renaming or deleting it.',
       'bad-overrides': 'Invalid parameter values: {detail}',
+      'bad-knowledge': 'The knowledge settings are not valid: expected { enabled, kbs, mode (inject / tool), topK }.',
+      'kb-not-found': 'Knowledge base "{detail}" was not found; it may have been deleted.',
       'bad-extra-args': 'Extra arguments cannot be parsed: {detail}',
       'template-not-found': 'The chat template file "{detail}" is not in data/templates/.',
       'file-not-found': 'The chosen file is not in the scan results; it may have been moved. Reopen the editor.',
@@ -2004,6 +2006,8 @@ export const enSkeleton: PartialMessages = {
       'bad-key': 'An API key cannot carry a line break or a control character.',
       'bad-start-command': 'A start command cannot carry a line break or a control character, its quotes have to be paired, and it is at most 2000 characters long.',
       'bad-start-cwd': 'A working directory cannot carry control characters and is at most 500 characters long.',
+      'bad-knowledge': 'The knowledge settings are not valid: expected { enabled, kbs, mode (inject / tool), topK }.',
+      'kb-not-found': 'Knowledge base "{detail}" was not found; it may have been deleted.',
       'not-found': 'This external service cannot be found.',
       'too-many': 'The number of external services has reached its limit.',
       'rollback-failed': 'Saving failed and the previous settings could not be restored, so upstreams.json and secrets.json may disagree. Check the data folder (disk space, permissions), then check this service\'s address and key ({detail}).',
@@ -2315,6 +2319,9 @@ export const enSkeleton: PartialMessages = {
     imageWithoutMmproj: 'Model "{model}" has no mmproj (vision projection file) configured, so it cannot handle images. Pick an mmproj in the model settings, or retry without the images.',
     bodyTooLarge: 'The request body exceeds the limit ({limit} MB).',
     badJson: 'The request body is not valid JSON.',
+    kbNotFound: 'Knowledge base "{name}" was not found. GET /v1/kb lists the ones that are available.',
+    invalidKnowledge: 'The knowledge field of the request is not valid: it can be false, or { kbs?: string[], mode?: "inject" | "tool", top_k?: number }.',
+    kbForbidden: 'This API key cannot use the knowledge base "{name}".',
     loadFailed: 'Model "{model}" failed to load: {reason}. Check the logs, fix the problem, then retry manually.',
     modelStopped: 'Model "{model}" was stopped by hand and the request was cancelled.',
     shuttingDown: 'llama-web is shutting down.',
@@ -2340,6 +2347,19 @@ export const enSkeleton: PartialMessages = {
     preprocessFailed: 'Request preprocessing failed',
     unauthorized: 'Missing or invalid API key. Send Authorization: Bearer <key> in the request headers.',
     internalError: 'Internal server error.',
+  },
+
+  // Text llama-web puts into a chat request when a knowledge base is used (decision 65); the model reads it, in the interface language.
+  kbPrompt: {
+    injectHeader: 'Below is material retrieved from the knowledge base. Answer from it first and cite sources with [number]; if the material does not contain the answer, say so.',
+    hitTitle: '[{n}] "{doc}" line {line}',
+    hitHeading: ' · {heading}',
+    toolDescription: 'Search the knowledge base ({names}). Call it when you need content from the knowledge base; when you answer from the results, cite sources with [number] and say so if they do not contain the answer.',
+    toolQuery: 'Keywords or a question to search for',
+    toolTopK: 'Number of results to return (1 to 20)',
+    noResults: 'No relevant material was found in the knowledge base.',
+    invalidArguments: 'Invalid arguments: expected a JSON object {"query": "what to search"} with a non-empty query.',
+    searchFailed: 'The knowledge base search failed; answer without it.',
   },
 
   // One line per load-failure reason, keyed exactly like `loadFailureReason()`.
