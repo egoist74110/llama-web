@@ -3,11 +3,12 @@ import { t } from '../composables/useLocale'
 
 const { state } = useLive()
 const route = useRoute()
-const tab = ref<'enabled' | 'discover'>(route.query.tab === 'discover' ? 'discover' : 'enabled')
+const tab = ref<'enabled' | 'discover' | 'embedding'>(route.query.tab === 'discover' || route.query.tab === 'embedding' ? route.query.tab : 'enabled')
 // A computed: the labels are read again when the interface language changes.
 const tabs = computed(() => [
   { value: 'enabled' as const, label: t.models.tabs.enabled },
   { value: 'discover' as const, label: t.models.tabs.discover },
+  { value: 'embedding' as const, label: t.models.tabs.embedding },
 ])
 const list = computed(() => state.value?.models ?? [])
 const filter = ref('')
@@ -53,6 +54,7 @@ const shown = computed(() => (needle.value ? list.value.filter(m => m.name.toLow
       <div class="flex flex-wrap items-center gap-2">
         <ModelAddDir @added="onDirAdded" />
         <UInput
+          v-if="tab !== 'embedding'"
           v-model="filter"
           class="w-[min(280px,100%)]"
           icon="i-lucide-search"
@@ -88,6 +90,8 @@ const shown = computed(() => (needle.value ? list.value.filter(m => m.name.toLow
         <ModelCard v-for="m in shown" :key="m.id" :model="m" />
       </section>
     </template>
+
+    <EmbeddingPanel v-else-if="tab === 'embedding'" />
 
     <div v-else ref="discoverEl" class="scroll-mt-4">
       <DiscoverPanel ref="discover" :filter="needle" />

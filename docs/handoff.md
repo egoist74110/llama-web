@@ -1,5 +1,13 @@
 # 交接记录
 
+## 2026-10-20 · 14-1 向量引擎（关键决定 64）· 单会话
+- 起因：用户要求新增向量引擎模块接入 Embedding，可切换 CPU / GPU，并下载 Qwen3-Embedding-0.6B 测试。用户确认：独立常驻引擎（不进调度器）、同一运行库切设备（不换 CPU 版运行库）、下载 Q8_0。
+- 实现：`server/core/embedding.ts`（`data/embedding.json` v1、参数、`EmbeddingEngine`：按需启动 / 并发只启动一次 / 崩溃与停止中断租约 / 改设备等自动重启）；`proxy.ts` 按 `model` 名路由（对话模型同名优先）、`/v1/models` 列出、503 `embedding_unavailable`；`context.ts` 共用 Runner（端口范围、`pids.json` 标签 `embedding`）、随启动、独占本机时停止、退出时停止；`/api/embedding`（GET 含扫描候选、POST 保存、start / stop / test）；`EmbeddingPanel.vue` 作为「模型」页第三个标签；GGUF 读出 `pooling_type`，扫描发现标「向量模型」。顺带修了请求记录：llama-server 的 embeddings 响应把 `usage` 放在大数组之前，`UsageTap` 现在也保留开头 4 KB。
+- 实际运行：`bun test` 1680 pass / 8 skip / 0 fail；`bun run typecheck` exit 0；`bun run build` exit 0；`git diff --check` 通过。模型从 HuggingFace 官方仓库下载到用户第一个模型目录下的 `Qwen3-Embedding-0.6B/`，SHA-256 与 HF 的 X-Linked-ETag 一致，GGUF `pooling_type` = 3（last）。直接用引擎参数起 b11146：GPU / CPU 都出 1024 维，同一句的 GPU 与 CPU 向量余弦 0.9996；GPU 模式进程出现在 nvidia-smi 计算进程里，CPU 模式不出现。构建产物 + 临时数据目录（运行库目录用联接指过去）：界面选文件（名字自动填 `Qwen3-Embedding-0.6B`）→ 启用 → 保存；第一个 `/v1/embeddings` 请求约 1.1 秒内启动 GPU 引擎并返回；中文问答余弦 0.82、无关句 0.26；运行中改 CPU 保存后自动重启到 CPU（nvidia-smi 不再有 llama-server），界面「测试」1024 维 20 ms；改回 GPU、错误名字 400、停止后无残留进程；打开「随 llama-web 启动」后重启服务，引擎自动起来。英文界面、375 宽无横向滚动。
+- 没有运行：引擎运行时加载 / 切换真实对话模型（互不卸载只由结构保证 + 单测）；macOS 上任何验证（`--device none` 在 Metal 版上的表现）；深色模式截图；Windows 桌面安装包。plan 14-1 最后一条因此没打勾。
+- 已知限制：只有一个引擎、一个模型；不支持重排序（rank）模型；引擎占用不计入对话模型加载前的内存估算（只反映在实测空闲内存里）；运行日志在日志页显示为模型 `embedding`。
+- 下一步：用户试用（引擎 + 对话模型同时用、CPU / GPU 切换）；需要的话再做 reranker 或多个 Embedding 模型。
+
 ## 2026-10-15 · 阶段 13 大陆网络与本地导入（关键决定 63）· 单会话（13-1 + 13-2，用户要求一起做）
 - 起因：大陆用户反馈「手动导入的 llama.cpp 无法切换使用」，并要求下载避免被墙、本地导入要可靠。Haiku 5.5 侦察两路：导入不是坏了，是缺功能（设置页手动添加的行没有「使用」，全局当前版本只接受官方版本号，决定 35 只允许按模型 / 方案选）；下载侧只有决定 53 的 GitHub 镜像弹窗，没有代理、续传、重试，cloudflared 与 GitHub 手动添加没有镜像。用户确认：允许设为全局（改决定 35），下载可靠性一起做。
 - 分工：后端 gpt-6.1-sol-high（`server/core/net.ts` 新模块：系统 / 手动代理、下载来源 询问 / 自动 / 固定镜像、镜像测速排序、官方优先的校验值；`llamacpp.ts` 下载改为 `.part` + 旁车文件续传、3 次重试；settings v13；`custom:<id>` 全局当前）；界面 Opus 5.5 中（`SettingsNetwork.vue` 取代 `SettingsMirror.vue`、`DigestSourceNote.vue`、运行库行「使用」、失败时复制地址 / 从本地导入、添加弹窗 cudart 与「设为当前版本」）；Claude 写规格、审查、核实。

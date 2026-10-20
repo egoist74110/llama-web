@@ -111,6 +111,7 @@ async function doEnable(e: Entry) {
               <span v-else-if="!e.complete" class="lw-st lw-st-loading">{{ t.models.discover.incomplete }}</span>
               <span v-if="e.shards" class="lw-chip">{{ fmt(t.models.discover.shards, { count: e.shards.length }) }}</span>
               <span v-if="e.meta?.hasChatTemplate" class="lw-chip">{{ t.models.discover.template }}</span>
+              <span v-if="[1, 2, 3].includes(e.meta?.poolingType ?? -1)" class="lw-chip" :title="t.models.discover.embeddingHint">{{ t.models.discover.embedding }}</span>
             </div>
             <span class="font-mono text-xs text-dimmed [overflow-wrap:anywhere]">{{ e.ref.dirId }}/{{ e.ref.rel }}</span>
           </div>

@@ -55,6 +55,7 @@ import { cloudflareHooks } from './cloudflare-hooks'
 import { acquireDataLock, type DataLock } from '../core/data-lock'
 import { defaultUpstreams, normalizeUpstreams, recordTest, UPSTREAMS_VERSION, viewUpstreams, type UpstreamsDoc } from '../core/upstreams'
 import { UpstreamLauncher } from '../core/upstream-launcher'
+import { defaultEmbedding, EMBEDDING_VERSION, EmbeddingEngine, normalizeEmbedding, planEmbedding, type EmbeddingDoc } from '../core/embedding'
 import { testConnection } from '../core/upstream-test'
 import { httpProbe, UpstreamHealth } from '../core/upstream-health'
 import { detectPlatform, selectRuntime, type PlatformInfo, type RuntimeSelection, type RuntimeTarget } from '../core/platform'
@@ -138,6 +139,11 @@ export interface AppContext {
   watchdog: Watchdog
   /** Management actions (start / stop / restart / switch); use these instead of the scheduler directly. */
   ops: ModelOps
+  /** data/embedding.json: the embedding engine's configuration (decision 64). */
+  getEmbedding(): EmbeddingDoc
+  updateEmbedding(fn: (draft: EmbeddingDoc) => EmbeddingDoc | void): EmbeddingDoc
+  /** The embedding engine: its own llama-server next to the scheduler (decision 64). */
+  embedding: EmbeddingEngine
   proxy: Proxy
   /** Public entry on 127.0.0.1 (settings.public); the custom Bun entry attaches the listener. */
   publicEntry: PublicListener
@@ -279,6 +285,10 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     dataDir, name: 'upstreams.json', version: UPSTREAMS_VERSION, defaults: defaultUpstreams, validate: normalizeUpstreams,
   })
   startupClose.push(() => upstreamsStore.close())
+  const embeddingStore = new JsonStore<EmbeddingDoc>({
+    dataDir, name: 'embedding.json', version: EMBEDDING_VERSION, defaults: defaultEmbedding, validate: normalizeEmbedding,
+  })
+  startupClose.push(() => embeddingStore.close())
   const changed = () => live.notify()
   // Settings edits (page or by hand) also start / stop / move the public listener.
   // `hold` is raised while a pair of writes is in flight (see onSaved of the Cloudflare setup): nothing reacts to half of it, one reconciliation runs afterwards.
@@ -290,6 +300,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
   // An unreadable secrets.json falls back to "no keys": every public request is refused. A new tunnel token restarts the tunnel.
   const secretsRef = openStore(secretsStore, defaultSecrets, () => { if (!hold.held) applyTunnel() })
   const upstreamsRef = openStore(upstreamsStore, defaultUpstreams, changed)
+  const embeddingRef = openStore(embeddingStore, defaultEmbedding, changed)
   const getSettings = settingsRef.get
   // The language everything this process says - events, API errors, the errors of `/v1/*` - is the
   // saved one (decision 18): applied once at startup and again on every reload or own update.
@@ -427,6 +438,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
       ...(settingsBoot !== null ? { settingsBoot } : {}),
       connections: viewUpstreams(upstreamsRef.get(), secretsRef.get().upstreamKeys).map(u => ({ ...u, up: health.isUp(u.id), checkedAt: health.state(u.id)?.checkedAt ?? null, launch: launcher.state(u.id), canStop: launcher.canStop(u.id) })),
       exclusiveHolder: health.holder(),
+      embedding: embedding.view(),
     }),
   })
   void detectLanAddress({ signal: networkProbe.signal }).then(host => {
@@ -599,6 +611,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
       live.notify()
     },
     afterTick: () => {
+      if (health.holder() && embedding.active) void embedding.stop().then(() => log(`upstream ${health.holder()}: stopped the embedding engine`))
       if (enforcing || !health.holder() || !ops.anyUp()) return
       enforcing = true
       ops.stopAll().then(n => log(`upstream ${health.holder()}: stopped ${n} local model(s)`), e => logError('could not stop the local models for an exclusive upstream:', (e as Error).message)).finally(() => { enforcing = false })
@@ -638,6 +651,40 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
   })
   watchdog.start()
   startupClose.push(() => watchdog.stop())
+  const embedding: EmbeddingEngine = new EmbeddingEngine({
+    config: embeddingRef.get,
+    plan: cfg => planEmbedding(cfg, {
+      dirs: getSettings().modelDirs, exe: exeOf(null), host: runner.host, loadTimeoutMs: getSettings().scheduler.loadTimeoutSec * 1000,
+    }),
+    spawn: async (launch) => {
+      await cleanupDone
+      const run = logs.startRun('embedding')
+      run.append(`# llama-web: starting the embedding engine (${launch.device}) at ${new Date().toISOString()}`)
+      try {
+        const rp = await runner.start({
+          exe: launch.exe, args: launch.args, tag: launch.tag, loadTimeoutMs: launch.loadTimeoutMs,
+          onLine: (stream, line) => { run.append(line); live.onLogLine('embedding', '-', stream, line) },
+        })
+        void rp.exited.then((x) => {
+          run.append(`# llama-web: exited code=${x.code ?? '-'} signal=${x.signal ?? '-'}${x.requested ? ' (stopped by llama-web)' : ''}`)
+          run.close()
+        })
+        return rp
+      } catch (e) {
+        run.append(`# llama-web: could not start: ${(e as Error).message}`)
+        run.close()
+        throw e
+      }
+    },
+    blocked: () => health.holder(),
+    onChange: () => live.notify(),
+    log,
+  })
+  // Started with llama-web when asked to (after residue cleanup; a missing build or file only fails the engine).
+  void cleanupDone.then(() => {
+    const c = embeddingRef.get()
+    if (c.enabled && c.autoStart) embedding.start().catch(e => logError('embedding engine did not start:', (e as Error)?.message ?? e))
+  })
   const proxy = createProxy({
     scheduler, getModels, getSettings, onEvent: logProxyEvent,
     onRequest: (r) => { logs.appendRequest(r); usage.record(r); live.onRequest(r) },
@@ -646,6 +693,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     getUpstreams: upstreamsRef.get,
     getUpstreamKey: id => secretsRef.get().upstreamKeys[id] ?? '',
     jobs: new JobStore({ dataDir, onError: e => logError('async jobs (data/jobs.json):', (e as Error)?.message ?? e) }),
+    embedding,
   })
   const publicEntry: PublicListener = new PublicListener((req, ip) => handlePublic(req, {
     authenticate: header => authenticate(secretsRef.get(), header),
@@ -737,7 +785,8 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     dataDir, outbound, bootPort: getSettings().server.port, getSettings, getSettingsRev: settingsRef.rev, getSettingsBoot: () => settingsBoot, getModels, updateSettings: settingsRef.update, updateModels: modelsRef.update,
     platform, runtimeTarget: selectedTarget, runtimeSelection,
     getSecrets: secretsRef.get, updateSecrets: secretsRef.update, getUpstreams: upstreamsRef.get, updateUpstreams: upstreamsRef.update, health, launcher, tunnel, applyTunnel, cloudflare,
-    refresh: () => { settingsRef.refresh(); modelsRef.refresh(); upstreamsRef.refresh() },
+    refresh: () => { settingsRef.refresh(); modelsRef.refresh(); upstreamsRef.refresh(); embeddingRef.refresh() },
+    getEmbedding: embeddingRef.get, updateEmbedding: embeddingRef.update, embedding,
     getRuntimeStatus: () => updater.getStatus(), updater, secondary,
     getLastModelFailure(modelId) { pruneFailures(); return lastFailures.get(modelId) ?? null },
     async downloadSecondary() {
@@ -803,11 +852,13 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
         modelsStore.close()
         secretsStore.close()
         upstreamsStore.close()
+        embeddingStore.close()
         health.stop()
         await launcher.shutdown()
         gpu.stop()
         watchdog.stop()
         await scheduler.shutdown()
+        await embedding.stop()
         lastFailures.clear()
         await runner.stopAll()
         usage.close()

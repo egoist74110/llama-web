@@ -28,6 +28,8 @@ export interface GgufMeta {
   contextLength: number | null
   /** Whether tokenizer.chat_template is embedded. */
   hasChatTemplate: boolean
+  /** `<arch>.pooling_type` (llama.cpp: 0 none, 1 mean, 2 cls, 3 last, 4 rank); set by embedding / rerank models. */
+  poolingType: number | null
   tensorCount: number
   /** split.count / split.no (zero-based) for sharded files. */
   splitCount: number | null
@@ -350,6 +352,7 @@ export async function readGguf(file: string): Promise<{ meta: GgufMeta, layout: 
       fileType,
       contextLength: num(key('context_length')),
       hasChatTemplate,
+      poolingType: num(key('pooling_type')),
       tensorCount,
       splitCount: num(kv.get('split.count')),
       splitNo: num(kv.get('split.no')),

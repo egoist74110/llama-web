@@ -89,10 +89,15 @@ describe('UsageTap', () => {
     expect(e.result()).toMatchObject({ promptTokens: 9, completionTokens: null })
     expect(new UsageTap().result()).toEqual({ promptTokens: null, completionTokens: null, promptPerSecond: null, predictedPerSecond: null })
 
-    const big = new UsageTap(1024)
+    const big = new UsageTap(1024, 0)
     big.push(enc.encode('{"usage":{"prompt_tokens":1,"completion_tokens":1}}'))
     for (let i = 0; i < 200; i++) big.push(enc.encode('x'.repeat(100)))
     expect(big.result()).toMatchObject({ promptTokens: null, completionTokens: null }) // far from the end: not found, not an error
+    // The first bytes are kept too (llama-server's embeddings response puts usage before the data array): the prompt count is found there.
+    const headFirst = new UsageTap(1024)
+    headFirst.push(enc.encode('{"usage":{"prompt_tokens":7,"total_tokens":7},"data":['))
+    for (let i = 0; i < 200; i++) headFirst.push(enc.encode('0.1,'.repeat(25)))
+    expect(headFirst.result()).toMatchObject({ promptTokens: 7, completionTokens: null })
   })
 
   test('reads llama-server timings (decimal speeds) from the final chunk', () => {

@@ -93,6 +93,13 @@ export interface ProxyDeps {
   fetchImpl?: typeof fetch
   /** Async job ids of external upstreams (decision 59); absent = follow-ups route like any request without a model. */
   jobs?: JobRegistry
+  /** Embedding engine (decision 64); absent = none. */
+  embedding?: {
+    /** The name clients send, or null while the engine is off. */
+    routeName(): string | null
+    /** Lease the engine for one request, starting it when needed; rejects with an EmbeddingError. */
+    acquire(signal?: AbortSignal): Promise<Lease>
+  }
 }
 
 // ---------------------------------------------------------------------------------------
@@ -534,7 +541,8 @@ export function createProxy(deps: ProxyDeps) {
   function modelsList(): Response {
     const created = Math.floor(Date.now() / 1000)
     const ext = deps.getUpstreams ? listExternalNames(deps.getUpstreams()) : []
-    const names = [...new Set([...listModelNames(deps.getModels()), ...ext])]
+    const emb = embeddingOf(deps.embedding?.routeName())
+    const names = [...new Set([...listModelNames(deps.getModels()), ...(emb ? [emb] : []), ...ext])]
     const data = names.map(id => ({ id, object: 'model', created, owned_by: 'llama-web' }))
     return Response.json({ object: 'list', data })
   }
@@ -564,6 +572,30 @@ export function createProxy(deps: ProxyDeps) {
     const ext = findExternal(doc, field)
     if (!ext) return null
     return findModel(deps.getModels().models, ext.name) ? null : ext
+  }
+
+  /** The embedding engine's name when `field` is it (case-insensitive) and no local model has that name (decision 64). */
+  function embeddingOf(field: unknown): string | null {
+    const name = deps.embedding?.routeName()
+    if (!name || typeof field !== 'string' || field.trim().toLowerCase() !== name.toLowerCase()) return null
+    return findModel(deps.getModels().models, field.trim()) ? null : name
+  }
+
+  /** Forward to the embedding engine (decision 64): no scheduler, no preprocessing; the body goes as it is. */
+  async function forwardEmbedding(req: Request, trace: RequestTrace, name: string, path: string, body: Uint8Array<ArrayBuffer> | null): Promise<Response> {
+    trace.modelId = 'embedding'
+    trace.modelName = name
+    trace.profile = '-'
+    let lease: Lease
+    try {
+      lease = await deps.embedding!.acquire(req.signal)
+    } catch (e) {
+      if (req.signal.aborted) return errorResponse(499, 'cancelled', t.api.cancelled)
+      const code = (e as { code?: unknown })?.code
+      deps.onEvent?.({ type: 'upstream-error', target: { modelId: 'embedding', profile: '-' }, error: e })
+      return errorResponse(503, 'embedding_unavailable', fmt(t.api.embeddingUnavailable, { model: name, code: typeof code === 'string' ? code : 'error' }))
+    }
+    return forward({ lease, req, path, body }, name, trace)
   }
 
   /**
@@ -700,7 +732,7 @@ export function createProxy(deps: ProxyDeps) {
     if (job) return forwardJobFollowUp(req, trace, job.api.kind, job.id, url, meta)
     if (req.method === 'GET' && path.startsWith('/v1/models/')) {
       const name = safeDecode(path.slice('/v1/models/'.length))
-      if (!resolveTarget(deps.getModels(), name).ok && !externalOf(name)) {
+      if (!resolveTarget(deps.getModels(), name).ok && !externalOf(name) && !embeddingOf(name)) {
         return errorResponse(404, 'model_not_found', fmt(t.api.modelNotFound, { name }))
       }
       return Response.json({ id: name, object: 'model', created: Math.floor(Date.now() / 1000), owned_by: 'llama-web' })
@@ -732,6 +764,8 @@ export function createProxy(deps: ProxyDeps) {
     trace.stream = !!json && typeof json === 'object' && json.stream === true
     trace.params = summarizeParams(json)
     const models = deps.getModels()
+    const emb = embeddingOf(modelField)
+    if (emb) return forwardEmbedding(req, trace, emb, path + url.search, raw)
     const ext = externalOf(modelField)
     if (ext) return forwardExternal(req, trace, ext, raw, json, url, form, meta)
     const route = resolveTarget(models, modelField, deps.scheduler.snapshot().models)

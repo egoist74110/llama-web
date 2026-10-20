@@ -69,6 +69,7 @@ flowchart LR
 - 首次运行按本机硬件给出默认参数；实时速度、加载进度、显存、失败诊断
 - 官方 llama.cpp 版本管理：每天检查新版本，可手动下载或开启自动更新（默认关闭），保留旧版本，界面一键回退
 - 启动 `llama-server` 时只传参数数组、端口由 llama-web 分配；退出时结束整个进程树，不误杀你自己手动启动的 llama-server
+- **向量引擎**：「模型」页「向量引擎」标签选一个 Embedding 模型（如 Qwen3-Embedding），单独起一个 `llama-server --embedding` 供 `/v1/embeddings` 使用；可切换 GPU / CPU（同一个 llama.cpp 版本），不占「同时在线」名额、不和对话模型互相卸载；可随 llama-web 启动，否则第一个请求时启动
 
 ### 独立 API 网关
 

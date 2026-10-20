@@ -150,15 +150,24 @@ export function summarizeImages(reports: ImageReport[] | undefined): ImageSummar
 
 /**
  * Keeps the last bytes of a response (non-stream JSON or an SSE stream) so the token usage can
- * be read at the end without decoding every chunk while it streams.
+ * be read at the end without decoding every chunk while it streams. The first bytes are kept too:
+ * llama-server puts `usage` before the (large) `data` array of an embeddings response.
  */
 export class UsageTap {
   private chunks: Uint8Array[] = []
   private held = 0
+  private head = new Uint8Array(0)
 
-  constructor(private readonly keep = 16 * 1024) {}
+  constructor(private readonly keep = 16 * 1024, private readonly keepHead = 4 * 1024) {}
 
   push(chunk: Uint8Array): void {
+    if (this.head.byteLength < this.keepHead) {
+      const take = chunk.subarray(0, this.keepHead - this.head.byteLength)
+      const next = new Uint8Array(this.head.byteLength + take.byteLength)
+      next.set(this.head)
+      next.set(take, this.head.byteLength)
+      this.head = next
+    }
     // A single oversized chunk is cut to its tail right away (copied, so the big buffer is not kept alive).
     if (chunk.byteLength > this.keep) chunk = chunk.slice(chunk.byteLength - this.keep)
     this.chunks.push(chunk)
@@ -181,8 +190,9 @@ export class UsageTap {
     let off = 0
     for (const c of this.chunks) { all.set(c, off); off += c.byteLength }
     const text = new TextDecoder().decode(all.subarray(Math.max(0, all.byteLength - this.keep)))
+    const head = () => new TextDecoder().decode(this.head)
     return {
-      promptTokens: lastNumber(text, 'prompt_tokens'),
+      promptTokens: lastNumber(text, 'prompt_tokens') ?? lastNumber(head(), 'prompt_tokens'),
       completionTokens: lastNumber(text, 'completion_tokens'),
       promptPerSecond: lastNumber(text, 'prompt_per_second'),
       predictedPerSecond: lastNumber(text, 'predicted_per_second'),
