@@ -3,7 +3,7 @@
 // including ones created later, or a picked list), how they are used and how many hits. v-model = the binding.
 // Saving is up to the parent (it can use bindingIncomplete() to block a save with nothing picked).
 import { t } from '../composables/useLocale'
-import { bindingIncomplete } from '~/utils/kb'
+import { bindingIncomplete, mergeTags, parseSimilarity } from '~/utils/kb'
 import type { KnowledgeBinding } from '~~/server/core/kb/binding'
 import type { KbView } from '~~/server/core/kb/manager'
 
@@ -39,6 +39,24 @@ const setTopK = (v: string | number) => {
   patch({ topK: Number.isFinite(n) ? Math.min(20, Math.max(1, n)) : model.value.topK })
 }
 const incomplete = computed(() => bindingIncomplete(model.value))
+
+// Tags of the knowledge bases this binding covers (all of them, or the picked ones); tags already in the binding stay listed.
+const tagOptions = computed(() => {
+  const covered = (bases.value ?? []).filter(b => model.value.all || model.value.kbs.includes(b.id))
+  return mergeTags(covered.map(b => b.tags ?? []), model.value.tags)
+})
+
+const simText = ref(model.value.minSimilarity === null ? '' : String(model.value.minSimilarity))
+const simBad = computed(() => !parseSimilarity(simText.value).ok)
+const setSimilarity = (v: string | number) => {
+  simText.value = String(v ?? '')
+  const r = parseSimilarity(simText.value)
+  if (r.ok) patch({ minSimilarity: r.value })
+}
+// The parent loads the saved binding after this form exists: follow it.
+watch(() => model.value.minSimilarity, (v) => {
+  if (parseSimilarity(simText.value).value !== v) simText.value = v === null ? '' : String(v)
+})
 </script>
 
 <template>
@@ -109,6 +127,25 @@ const incomplete = computed(() => bindingIncomplete(model.value))
         <UInput :model-value="model.topK" type="number" :min="1" :max="20" class="w-28" :aria-label="k.topK" @update:model-value="setTopK" />
         <p class="m-0 text-xs text-dimmed">
           {{ k.topKHint }}
+        </p>
+      </div>
+
+      <div v-if="tagOptions.length" class="flex flex-col gap-1.5">
+        <span class="text-xs font-medium text-muted">{{ k.tags }}</span>
+        <KbTagPicker :model-value="model.tags" :options="tagOptions" :label="k.tags" @update:model-value="(v: string[]) => patch({ tags: v })" />
+        <p class="m-0 text-xs text-dimmed">
+          {{ k.tagsHint }}
+        </p>
+      </div>
+
+      <div class="flex flex-col gap-1.5">
+        <label class="text-xs font-medium text-muted">{{ k.minSimilarity }}</label>
+        <UInput :model-value="simText" type="number" min="0" max="1" step="0.05" class="w-28" :placeholder="k.minSimilarityPlaceholder" :aria-label="k.minSimilarity" :color="simBad ? 'error' : undefined" @update:model-value="setSimilarity" />
+        <p v-if="simBad" role="alert" class="m-0 text-xs text-error">
+          {{ k.minSimilarityBad }}
+        </p>
+        <p v-else class="m-0 text-xs text-dimmed">
+          {{ k.minSimilarityHint }}
         </p>
       </div>
     </template>

@@ -22,6 +22,7 @@ import { effectiveReasoning, forceThinkingOff } from './thinking-guard'
 import type { SpeedMeter } from './speed'
 import { SchedulerError, type Lease, type NoRoomDetail, type Scheduler, type Target } from './scheduler'
 import { clampTopK, resolveKnowledge, type KbRef, type KnowledgeBinding } from './kb/binding'
+import type { TagCount } from './kb/tags'
 import { addTool, formatHits, hasToolNamed, injectBlock, injectIntoSystem, MAX_TOOL_ROUNDS, messagesOf, queryOf, removeTool, type HitText } from './kb/inject'
 import { addUsage, allOurs, callsOfMessage, followUp, hasUsage, noUsage, parseSearchArguments, SseSplitter, StreamRound, type ToolCall, type Usage } from './kb/tool-loop'
 
@@ -76,7 +77,9 @@ export function activeBoundedWaits(): number {
 
 /** What the proxy needs of the knowledge bases (decision 65 ⑨); `KbManager` provides it, tests use a fake. */
 export interface KnowledgeDeps {
-  search(kbIds: string[], query: string, opts: { topK: number }): Promise<{ hits: Array<HitText> }>
+  search(kbIds: string[], query: string, opts: { topK: number, tags?: readonly string[], minSimilarity?: number | null }): Promise<{ hits: Array<HitText> }>
+  /** Tags (with chunk counts) of these knowledge bases; absent = none known, so the tool gets no `tags` parameter. */
+  tags?(kbIds: string[]): Promise<TagCount[]>
   /** The knowledge bases that exist now. */
   list(): readonly KbRef[]
   /** Knowledge base ids the caller may use; null = all (API key lists arrive with 15-3). */
@@ -312,6 +315,11 @@ interface ToolRun {
   json: any
   kbs: string[]
   topK: number
+  /** The binding's tag filter (the ceiling for the model) and similarity floor. */
+  tags: string[]
+  minSimilarity: number | null
+  /** Tags the model may pick from: the bound knowledge bases' tags, narrowed to the binding's tags when it has some. */
+  available: string[]
   summary: KnowledgeSummary
 }
 
@@ -616,10 +624,16 @@ export function createProxy(deps: ProxyDeps) {
     if (eff.mode === 'tool') {
       // The client's own tool of that name wins: nothing is added and the request passes through.
       if (hasToolNamed(json)) return { changed: hadField, tool: null }
-      addTool(json, eff.kbs.map(id => bases.find(b => b.id === id)?.name ?? id))
+      // The model may filter by the tags of the bound knowledge bases, narrowed to the binding's own tags when it has some.
+      let counts: TagCount[] = []
+      try { counts = (await bounded(kn.tags?.(eff.kbs) ?? Promise.resolve([]), req.signal)).filter(x => !eff.tags.length || eff.tags.includes(x.tag)) } catch (e) {
+        if (req.signal.aborted) return { error: errorResponse(499, 'cancelled', t.api.cancelled) }
+        deps.onEvent?.({ type: 'kb-error', error: e })
+      }
+      addTool(json, eff.kbs.map(id => bases.find(b => b.id === id)?.name ?? id), counts)
       const summary: KnowledgeSummary = { mode: 'tool', kbs: eff.kbs, hits: 0, rounds: 0 }
       trace.knowledge = summary
-      return { changed: true, tool: { json, kbs: eff.kbs, topK: eff.topK, summary } }
+      return { changed: true, tool: { json, kbs: eff.kbs, topK: eff.topK, tags: eff.tags, minSimilarity: eff.minSimilarity, available: counts.map(x => x.tag), summary } }
     }
 
     const summary: KnowledgeSummary = { mode: 'inject', kbs: eff.kbs, hits: 0, rounds: 0 }
@@ -627,7 +641,7 @@ export function createProxy(deps: ProxyDeps) {
     const query = queryOf(json)
     if (!query) return { changed: hadField, tool: null }
     try {
-      const found = await bounded(kn.search(eff.kbs, query, { topK: eff.topK }), req.signal)
+      const found = await bounded(kn.search(eff.kbs, query, { topK: eff.topK, tags: eff.tags, minSimilarity: eff.minSimilarity }), req.signal)
       summary.rounds = 1
       summary.hits = found.hits.length
       if (!found.hits.length) return { changed: hadField, tool: null }
@@ -641,6 +655,16 @@ export function createProxy(deps: ProxyDeps) {
     }
   }
 
+  /**
+   * The tag filter of one tool call: the model's tags inside what the binding allows (its own tags, or every tag when it
+   * has none). Nothing valid left = as if the model gave none: the binding's tags, which are always the ceiling.
+   */
+  function toolTags(run: ToolRun, asked: readonly string[] | undefined): string[] {
+    const allowed = run.tags.length ? run.tags : run.available
+    const picked = (asked ?? []).filter(x => allowed.includes(x))
+    return picked.length ? picked : run.tags
+  }
+
   /** The tool results for our calls (one text each); a failed search becomes text for the model, never an error. */
   async function runSearches(run: ToolRun, calls: readonly ToolCall[], signal: AbortSignal): Promise<string[]> {
     const out: string[] = []
@@ -648,7 +672,11 @@ export function createProxy(deps: ProxyDeps) {
       const args = parseSearchArguments(call.arguments)
       if (!args) { out.push(t.kbPrompt.invalidArguments); continue }
       try {
-        const found = await bounded(deps.knowledge!.search(run.kbs, args.query, { topK: args.topK === undefined ? run.topK : clampTopK(args.topK) }), signal)
+        const found = await bounded(deps.knowledge!.search(run.kbs, args.query, {
+          topK: args.topK === undefined ? run.topK : clampTopK(args.topK),
+          tags: toolTags(run, args.tags),
+          minSimilarity: run.minSimilarity,
+        }), signal)
         run.summary.hits += found.hits.length
         out.push(found.hits.length ? formatHits(found.hits) : t.kbPrompt.noResults)
       } catch (e) {

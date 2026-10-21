@@ -2,6 +2,7 @@
 // Search test: ask the knowledge base(s) a question and show what comes back, with the mode that was actually used.
 import { t } from '../composables/useLocale'
 import type { KbView, SearchResponse } from '~~/server/core/kb/manager'
+import { mergeTags, parseSimilarity } from '~/utils/kb'
 
 const props = defineProps<{ kbs: KbView[], selectedId: string | null }>()
 
@@ -11,6 +12,8 @@ const query = ref('')
 const topK = ref('5')
 const scope = ref<'current' | 'all'>('current')
 const searching = ref(false)
+const minSimilarity = ref('')
+const pickedTags = ref<string[]>([])
 const result = ref<SearchResponse | null>(null)
 
 // "Current" needs a selection; without one the search covers every knowledge base.
@@ -20,6 +23,14 @@ const scopes = computed(() => [
   { value: 'all' as const, label: s.scopeAll, off: false },
 ])
 
+// Tags of what is searched: the selected knowledge base, or all of them.
+const tagOptions = computed(() => mergeTags((effective.value === 'current' ? props.kbs.filter(k => k.id === props.selectedId) : props.kbs).map(k => k.tags ?? [])))
+watch(tagOptions, (opts) => {
+  const known = new Set(opts.map(o => o.tag))
+  if (pickedTags.value.some(x => !known.has(x))) pickedTags.value = pickedTags.value.filter(x => known.has(x))
+})
+const similarity = computed(() => parseSimilarity(minSimilarity.value))
+
 function messageOf(e: unknown): string {
   const err = e as { data?: { message?: string }, statusMessage?: string, message?: string }
   return err?.data?.message ?? err?.statusMessage ?? err?.message ?? String(e)
@@ -27,13 +38,18 @@ function messageOf(e: unknown): string {
 
 async function run() {
   const q = query.value.trim()
-  if (!q || searching.value) return
+  if (!q || searching.value || !similarity.value.ok) return
   searching.value = true
   try {
     const k = Math.min(20, Math.max(1, Math.floor(Number(topK.value)) || 5))
     result.value = await $fetch<SearchResponse>('/api/kb/search', {
       method: 'POST',
-      body: { query: q, topK: k, ...(effective.value === 'current' ? { kbIds: [props.selectedId] } : {}) },
+      body: {
+        query: q, topK: k,
+        ...(effective.value === 'current' ? { kbIds: [props.selectedId] } : {}),
+        ...(pickedTags.value.length ? { tags: pickedTags.value } : {}),
+        ...(similarity.value.value !== null ? { minSimilarity: similarity.value.value } : {}),
+      },
     })
   } catch (e) {
     result.value = null
@@ -52,7 +68,7 @@ const showKb = computed(() => effective.value === 'all')
     <form class="flex flex-col gap-3" @submit.prevent="run">
       <div class="flex flex-wrap items-center gap-2">
         <UInput v-model="query" class="min-w-0 flex-1 basis-60" icon="i-lucide-search" :placeholder="s.placeholder" :aria-label="s.query" />
-        <UButton type="submit" size="md" icon="i-lucide-search" :loading="searching" :disabled="!query.trim() || !kbs.length">
+        <UButton type="submit" size="md" icon="i-lucide-search" :loading="searching" :disabled="!query.trim() || !kbs.length || !similarity.ok">
           {{ s.run }}
         </UButton>
       </div>
@@ -66,6 +82,17 @@ const showKb = computed(() => effective.value === 'all')
           <span class="text-muted">{{ s.topK }}</span>
           <UInput v-model="topK" type="number" size="sm" class="w-20" min="1" max="20" />
         </label>
+        <label class="flex items-center gap-2 text-sm">
+          <span class="text-muted">{{ s.minSimilarity }}</span>
+          <UInput v-model="minSimilarity" type="number" size="sm" class="w-28" min="0" max="1" step="0.05" :placeholder="s.minSimilarityPlaceholder" :color="similarity.ok ? undefined : 'error'" />
+        </label>
+      </div>
+      <p v-if="!similarity.ok" role="alert" class="m-0 text-xs text-error">
+        {{ s.minSimilarityBad }}
+      </p>
+      <div v-if="tagOptions.length" class="flex flex-col gap-1.5">
+        <span class="text-xs text-muted">{{ s.tags }} · {{ s.tagsHint }}</span>
+        <KbTagPicker v-model="pickedTags" :options="tagOptions" :label="s.tags" />
       </div>
     </form>
 

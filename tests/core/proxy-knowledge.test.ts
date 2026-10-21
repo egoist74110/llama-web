@@ -14,7 +14,7 @@ setLocale('zh-CN')
 
 const BASES = [{ id: 'kb-aaaa1111', name: 'Manual' }, { id: 'kb-bbbb2222', name: '手册' }]
 const HIT = { docName: '手册.txt', startLine: 12, headingPath: '第一章 > 安装', text: '步骤一：先装驱动。' }
-const bind = (over: Partial<KnowledgeBinding> = {}): KnowledgeBinding => ({ enabled: true, all: false, kbs: ['kb-aaaa1111'], mode: 'inject', topK: 5, ...over })
+const bind = (over: Partial<KnowledgeBinding> = {}): KnowledgeBinding => ({ enabled: true, all: false, kbs: ['kb-aaaa1111'], mode: 'inject', topK: 5, tags: [], minSimilarity: null, ...over })
 const UPSTREAM_KEY = 'sk-upstream-own-key-0123456789' // pre-commit:allow fake test key
 
 const closers: Array<() => unknown> = []
@@ -27,7 +27,7 @@ describe('resolveKnowledge', () => {
   const resolve = (raw: unknown, binding: KnowledgeBinding | null = bind(), allowed: string[] | null = null, bases = BASES) => resolveKnowledge({ binding, raw, bases, allowed })
 
   test('the binding applies when the request says nothing; off or empty means none', () => {
-    expect(resolve(undefined)).toEqual({ ok: true, effective: { mode: 'inject', kbs: ['kb-aaaa1111'], topK: 5 }, skipped: [] })
+    expect(resolve(undefined)).toEqual({ ok: true, effective: { mode: 'inject', kbs: ['kb-aaaa1111'], topK: 5, tags: [], minSimilarity: null }, skipped: [] })
     expect(resolve(undefined, bind({ enabled: false }))).toMatchObject({ ok: true, effective: null })
     expect(resolve(undefined, null)).toMatchObject({ ok: true, effective: null })
     expect(resolve(undefined, bind({ kbs: [] }))).toMatchObject({ ok: true, effective: null })
@@ -60,7 +60,7 @@ describe('resolveKnowledge', () => {
 
   test('all: every knowledge base that exists now, also ones created later; kbs is ignored', () => {
     const all = bind({ all: true, kbs: ['kb-aaaa1111'] })
-    expect(resolve(undefined, all)).toEqual({ ok: true, effective: { mode: 'inject', kbs: ['kb-aaaa1111', 'kb-bbbb2222'], topK: 5 }, skipped: [] })
+    expect(resolve(undefined, all)).toEqual({ ok: true, effective: { mode: 'inject', kbs: ['kb-aaaa1111', 'kb-bbbb2222'], topK: 5, tags: [], minSimilarity: null }, skipped: [] })
     const later = [...BASES, { id: 'kb-cccc3333', name: 'Later' }]
     expect(resolve(undefined, all, null, later)).toMatchObject({ effective: { kbs: ['kb-aaaa1111', 'kb-bbbb2222', 'kb-cccc3333'] } })
     expect(resolve(undefined, bind({ all: true, enabled: false }))).toMatchObject({ ok: true, effective: null })
@@ -69,7 +69,7 @@ describe('resolveKnowledge', () => {
 
   test('all with an allowed list drops the not-allowed ones silently (no 403)', () => {
     const all = bind({ all: true })
-    expect(resolve(undefined, all, ['kb-bbbb2222'])).toEqual({ ok: true, effective: { mode: 'inject', kbs: ['kb-bbbb2222'], topK: 5 }, skipped: [] })
+    expect(resolve(undefined, all, ['kb-bbbb2222'])).toEqual({ ok: true, effective: { mode: 'inject', kbs: ['kb-bbbb2222'], topK: 5, tags: [], minSimilarity: null }, skipped: [] })
     expect(resolve(undefined, all, [])).toEqual({ ok: true, effective: null, skipped: [] })
     // Named knowledge bases in the binding keep the 403.
     expect(resolve(undefined, bind(), ['kb-bbbb2222'])).toMatchObject({ ok: false, status: 403 })
@@ -91,9 +91,9 @@ describe('resolveKnowledge', () => {
 
 describe('configuration', () => {
   test('normalizeBinding repairs hand edits; parseBinding refuses wrong types', () => {
-    expect(normalizeBinding({ enabled: 'yes', kbs: ['a', 3, 'a'], mode: 'x', topK: 99 })).toEqual({ enabled: false, all: false, kbs: ['a'], mode: 'inject', topK: 20 })
-    expect(normalizeBinding(null)).toEqual({ enabled: false, all: false, kbs: [], mode: 'inject', topK: 5 })
-    expect(parseBinding({ enabled: true, kbs: ['a'] })).toEqual({ enabled: true, all: false, kbs: ['a'], mode: 'inject', topK: 5 })
+    expect(normalizeBinding({ enabled: 'yes', kbs: ['a', 3, 'a'], mode: 'x', topK: 99 })).toEqual({ enabled: false, all: false, kbs: ['a'], mode: 'inject', topK: 20, tags: [], minSimilarity: null })
+    expect(normalizeBinding(null)).toEqual({ enabled: false, all: false, kbs: [], mode: 'inject', topK: 5, tags: [], minSimilarity: null })
+    expect(parseBinding({ enabled: true, kbs: ['a'] })).toEqual({ enabled: true, all: false, kbs: ['a'], mode: 'inject', topK: 5, tags: [], minSimilarity: null })
     expect(normalizeBinding({ enabled: true, all: true })).toMatchObject({ all: true })
     expect(normalizeBinding({ enabled: true, all: 'yes' })).toMatchObject({ all: false })
     expect(parseBinding({ enabled: true, all: true })).toMatchObject({ all: true, kbs: [] })
@@ -112,7 +112,7 @@ describe('configuration', () => {
       }],
     } as ModelsDoc)
     expect(doc.models[0]!.profiles.a!.knowledge).toBeUndefined()
-    expect(doc.models[0]!.profiles.b!.knowledge).toEqual({ enabled: true, all: false, kbs: ['x'], mode: 'tool', topK: 3 })
+    expect(doc.models[0]!.profiles.b!.knowledge).toEqual({ enabled: true, all: false, kbs: ['x'], mode: 'tool', topK: 3, tags: [], minSimilarity: null })
     expect(doc.models[0]!.profiles.c!.knowledge).toBeUndefined()
   })
 
@@ -132,9 +132,9 @@ describe('configuration', () => {
   test('upstreams.json v1 -> v2 adds the default binding; new upstreams carry it; edits validate it', () => {
     expect(UPSTREAMS_VERSION).toBe(2)
     const migrated = UPSTREAMS_MIGRATIONS[1]!({ version: 1, upstreams: [{ id: 'u-1', name: 'A', baseUrl: 'http://x/v1' }, { id: 'u-2', name: 'B', baseUrl: 'http://x/v1', knowledge: bind() }] })
-    expect(migrated.upstreams[0].knowledge).toEqual({ enabled: false, all: false, kbs: [], mode: 'inject', topK: 5 })
+    expect(migrated.upstreams[0].knowledge).toEqual({ enabled: false, all: false, kbs: [], mode: 'inject', topK: 5, tags: [], minSimilarity: null })
     expect(migrated.upstreams[1].knowledge).toEqual(bind())
-    expect(normalizeUpstreams({ version: 1, upstreams: [{ id: 'u1', name: 'A', baseUrl: 'http://x/v1' } as any] }).upstreams[0]!.knowledge).toEqual({ enabled: false, all: false, kbs: [], mode: 'inject', topK: 5 })
+    expect(normalizeUpstreams({ version: 1, upstreams: [{ id: 'u1', name: 'A', baseUrl: 'http://x/v1' } as any] }).upstreams[0]!.knowledge).toEqual({ enabled: false, all: false, kbs: [], mode: 'inject', topK: 5, tags: [], minSimilarity: null })
 
     const ctx = { localNames: [], selfPorts: [], kbIds: ['kb-aaaa1111'] }
     const doc: UpstreamsDoc = defaultUpstreams()
@@ -146,7 +146,7 @@ describe('configuration', () => {
     expect(u.knowledge.enabled).toBe(false) // untouched when absent
     const code = (fn: () => unknown) => { try { fn() } catch (e) { return (e as UpstreamError).code } }
     updateUpstream(doc, u.id, { knowledge: { enabled: true, all: true, mode: 'tool', topK: 7 } }, ctx)
-    expect(u.knowledge).toEqual({ enabled: true, all: true, kbs: [], mode: 'tool', topK: 7 })
+    expect(u.knowledge).toEqual({ enabled: true, all: true, kbs: [], mode: 'tool', topK: 7, tags: [], minSimilarity: null })
     expect(createUpstream(doc, { name: 'Other', baseUrl: 'http://x/v1', knowledge: { enabled: true, all: true, kbs: ['kb-gone'] } }, ctx).knowledge).toMatchObject({ all: true }) // `all` needs no existing id
     expect(code(() => cleanKnowledge(bind({ kbs: ['kb-zzzz'] }), ctx))).toBe('kb-not-found')
     expect(code(() => cleanKnowledge('x', ctx))).toBe('bad-knowledge')
@@ -211,6 +211,9 @@ const answerRound = (text: string, usage = [20, 8]): string[] => [
 const jsonCall = (query: string, id = 'call_1', name = 'search_knowledge', usage = { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }) => Response.json({
   id: 'r', choices: [{ index: 0, finish_reason: 'tool_calls', message: { role: 'assistant', content: null, tool_calls: [{ id, type: 'function', function: { name, arguments: JSON.stringify({ query }) } }] } }], usage,
 })
+const jsonCallWith = (args: object) => Response.json({
+  id: 'r', choices: [{ index: 0, finish_reason: 'tool_calls', message: { role: 'assistant', content: null, tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'search_knowledge', arguments: JSON.stringify(args) } }] } }], usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+})
 const jsonAnswer = (text: string, usage = { prompt_tokens: 20, completion_tokens: 8, total_tokens: 28 }) => Response.json({ id: 'r', choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: text } }], usage })
 
 interface LeaseRec { released: number, acquired: Target | null, ac: AbortController }
@@ -226,6 +229,8 @@ function setup(opts: {
   allowed?: string[] | null
   ready?: boolean
   knowledge?: boolean
+  /** Tags (with chunk counts) the fake knowledge bases report. */
+  tagCounts?: Array<{ tag: string, count: number }>
 }) {
   const srv = scriptedServer(opts.rounds)
   const models: ModelsDoc = {
@@ -237,15 +242,18 @@ function setup(opts: {
   createUpstream(upstreams, { name: 'Strata', baseUrl: srv.url, manualModels: ['qwen-x'], ...(opts.upstream ? { knowledge: opts.upstream } : {}) }, { localNames: [], selfPorts: [] })
   const leases: LeaseRec[] = []
   const searches: Array<{ ids: string[], q: string, topK: number }> = []
+  const filters: Array<{ tags: readonly string[] | undefined, minSimilarity: number | null | undefined }> = []
   const records: RequestRecord[] = []
   const events: ProxyEvent[] = []
   const knowledge: KnowledgeDeps = {
     search: async (ids, q, o) => {
       searches.push({ ids, q, topK: o.topK })
+      filters.push({ tags: o.tags, minSimilarity: o.minSimilarity })
       if (opts.searchError) throw new Error('index broken')
       const hits = typeof opts.hits === 'function' ? opts.hits(q) : opts.hits ?? [HIT]
       return { hits }
     },
+    tags: async () => opts.tagCounts ?? [],
     list: () => BASES,
     allowedKbs: () => opts.allowed ?? null,
   }
@@ -270,7 +278,7 @@ function setup(opts: {
   })
   const post = (body: unknown, init: { signal?: AbortSignal, path?: string } = {}) =>
     proxy.handleV1(new Request(`http://localhost${init.path ?? '/v1/chat/completions'}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: init.signal }))
-  return { srv, post, leases, searches, records, events, proxy }
+  return { srv, post, leases, searches, filters, records, events, proxy }
 }
 
 const chat = (over: Record<string, unknown> = {}) => ({ model: 'Alpha:KB', messages: [{ role: 'user', content: '怎么安装？' }], ...over })
@@ -368,8 +376,8 @@ describe('the knowledge field', () => {
   test('models.json: the model-level binding normalizes, a bad one is dropped (no version bump)', () => {
     const mk = (knowledge: unknown) => normalizeModels({ version: 1, models: [{ id: 'm', name: 'M', backend: 'llama-server', file: { dirId: 'd', rel: 'a.gguf' }, mmproj: null, draft: null, activeProfile: 'a', profiles: { a: { overrides: {}, extraArgs: '' } }, ...(knowledge === undefined ? {} : { knowledge }) }] } as ModelsDoc).models[0]!
     expect(mk(undefined).knowledge).toBeUndefined()
-    expect(mk({ enabled: true, all: true, kbs: ['x', 3], mode: 'tool', topK: 99 }).knowledge).toEqual({ enabled: true, all: true, kbs: ['x'], mode: 'tool', topK: 20 })
-    expect(mk({ enabled: true, kbs: ['x'] }).knowledge).toEqual({ enabled: true, all: false, kbs: ['x'], mode: 'inject', topK: 5 }) // old shape: no `all`
+    expect(mk({ enabled: true, all: true, kbs: ['x', 3], mode: 'tool', topK: 99 }).knowledge).toEqual({ enabled: true, all: true, kbs: ['x'], mode: 'tool', topK: 20, tags: [], minSimilarity: null })
+    expect(mk({ enabled: true, kbs: ['x'] }).knowledge).toEqual({ enabled: true, all: false, kbs: ['x'], mode: 'inject', topK: 5, tags: [], minSimilarity: null }) // old shape: no `all`
     expect(mk('junk').knowledge).toBeUndefined()
     expect(mk([]).knowledge).toBeUndefined()
   })
@@ -378,9 +386,9 @@ describe('the knowledge field', () => {
     const doc: ModelsDoc = { version: 1, models: [{ id: 'm', name: 'M', backend: 'llama-server', file: { dirId: 'd', rel: 'a.gguf' }, mmproj: null, draft: null, activeProfile: 'a', profiles: { a: { overrides: {}, extraArgs: '' } } }] }
     const ids = ['kb-aaaa1111']
     setModelKnowledge(doc, 'm', sanitizeKnowledge({ enabled: true, all: true, kbs: [], mode: 'inject', topK: 5 }), ids)
-    expect(doc.models[0]!.knowledge).toEqual({ enabled: true, all: true, kbs: [], mode: 'inject', topK: 5 })
+    expect(doc.models[0]!.knowledge).toEqual({ enabled: true, all: true, kbs: [], mode: 'inject', topK: 5, tags: [], minSimilarity: null })
     setModelKnowledge(doc, 'm', sanitizeKnowledge({ enabled: true, kbs: ['kb-aaaa1111'], mode: 'tool' }), ids)
-    expect(doc.models[0]!.knowledge).toEqual({ enabled: true, all: false, kbs: ['kb-aaaa1111'], mode: 'tool', topK: 5 })
+    expect(doc.models[0]!.knowledge).toEqual({ enabled: true, all: false, kbs: ['kb-aaaa1111'], mode: 'tool', topK: 5, tags: [], minSimilarity: null })
     const code = (fn: () => unknown) => { try { fn() } catch (e) { return (e as ProfileError).code } }
     expect(code(() => setModelKnowledge(doc, 'm', sanitizeKnowledge({ enabled: true, kbs: ['kb-zzzz'] }), ids))).toBe('kb-not-found')
     expect(code(() => sanitizeKnowledge('junk'))).toBe('bad-knowledge')
@@ -778,5 +786,91 @@ describe('tool mode (streaming)', () => {
     expect(s.leases).toHaveLength(0)
     expect(s.searches).toHaveLength(1)
     expect(text.trimEnd().endsWith('data: [DONE]')).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------------------
+// Tags and the similarity floor (decision 65 ⑭)
+
+describe('tags and minSimilarity', () => {
+  const counts = (n: number) => Array.from({ length: n }, (_, i) => ({ tag: `t${String(i).padStart(3, '0')}`, count: i + 1 }))
+
+  test("inject mode searches with the binding's tags and floor; the request field replaces them", async () => {
+    const s = setup({ rounds: [() => jsonAnswer('ok')], profile: bind({ tags: ['A', 'B'], minSimilarity: 0.5 }) })
+    await s.post(chat())
+    expect(s.filters[0]).toEqual({ tags: ['A', 'B'], minSimilarity: 0.5 })
+    await s.post(chat({ knowledge: { tags: ['C'], min_similarity: null } }))
+    expect(s.filters[1]).toEqual({ tags: ['C'], minSimilarity: null })
+    await s.post(chat({ knowledge: { tags: [] } }))
+    expect(s.filters[2]).toEqual({ tags: [], minSimilarity: 0.5 })
+    await s.post(chat({ knowledge: { top_k: 3 } }))
+    expect(s.filters[3]).toEqual({ tags: ['A', 'B'], minSimilarity: 0.5 })
+    for (const bad of [{ tags: 'A' }, { tags: [1] }, { min_similarity: 'x' }, { min_similarity: 2 }]) {
+      const res = await s.post(chat({ knowledge: bad }))
+      expect(res.status).toBe(400)
+      expect(((await res.json()) as any).error.code).toBe('invalid_knowledge')
+    }
+  })
+
+  test('tool mode: no tags known = no tags parameter; up to 50 tags are an enum', async () => {
+    const none = setup({ rounds: [() => jsonAnswer('ok')], profile: bind({ mode: 'tool' }) })
+    await none.post(chat())
+    expect(none.srv.seen[0].body.tools[0].function.parameters.properties).not.toHaveProperty('tags')
+
+    const few = setup({ rounds: [() => jsonAnswer('ok')], profile: bind({ mode: 'tool' }), tagCounts: counts(50) })
+    await few.post(chat())
+    const p = few.srv.seen[0].body.tools[0].function.parameters.properties.tags
+    expect(p.type).toBe('array')
+    expect(p.items.enum).toHaveLength(50)
+    expect(p.items.enum[0]).toBe('t000')
+  })
+
+  test('tool mode: more than 50 tags are a plain string array and the description lists the 50 biggest', async () => {
+    const many = setup({ rounds: [() => jsonAnswer('ok')], profile: bind({ mode: 'tool' }), tagCounts: counts(60) })
+    await many.post(chat())
+    const p = many.srv.seen[0].body.tools[0].function.parameters.properties.tags
+    expect(p.items).toEqual({ type: 'string' })
+    expect(p.items).not.toHaveProperty('enum')
+    expect(p.description).toContain('t059')
+    expect(p.description).toContain('t010')
+    expect(p.description).not.toContain('t009')
+  })
+
+  test("tool mode: the binding's tags narrow what the model is offered", async () => {
+    const s = setup({ rounds: [() => jsonAnswer('ok')], profile: bind({ mode: 'tool', tags: ['t001', 'zzz'] }), tagCounts: counts(5) })
+    await s.post(chat())
+    expect(s.srv.seen[0].body.tools[0].function.parameters.properties.tags.items.enum).toEqual(['t001'])
+  })
+
+  test("tool mode: the model's tags are used inside the allowed range; the binding is the ceiling", async () => {
+    // No binding tags: any known tag is allowed; unknown ones are dropped.
+    const free = setup({ rounds: [() => jsonCallWith({ query: 'q', tags: ['t001', 'nope'] }), () => jsonAnswer('ok')], profile: bind({ mode: 'tool', minSimilarity: 0.3 }), tagCounts: counts(3) })
+    await free.post(chat())
+    expect(free.filters[0]).toEqual({ tags: ['t001'], minSimilarity: 0.3 })
+
+    // A single string is accepted as one tag.
+    const single = setup({ rounds: [() => jsonCallWith({ query: 'q', tags: 't002' }), () => jsonAnswer('ok')], profile: bind({ mode: 'tool' }), tagCounts: counts(3) })
+    await single.post(chat())
+    expect(single.filters[0]!.tags).toEqual(['t002'])
+
+    // With binding tags the model can only narrow them.
+    const bound = setup({ rounds: [() => jsonCallWith({ query: 'q', tags: ['t001', 't002'] }), () => jsonAnswer('ok')], profile: bind({ mode: 'tool', tags: ['t000', 't001'] }), tagCounts: counts(3) })
+    await bound.post(chat())
+    expect(bound.filters[0]!.tags).toEqual(['t001'])
+
+    // Nothing valid left: as if none was given, so the binding's tags apply.
+    const outside = setup({ rounds: [() => jsonCallWith({ query: 'q', tags: ['t002', 'nope'] }), () => jsonAnswer('ok')], profile: bind({ mode: 'tool', tags: ['t000', 't001'] }), tagCounts: counts(3) })
+    await outside.post(chat())
+    expect(outside.filters[0]!.tags).toEqual(['t000', 't001'])
+
+    // No tags at all on the model's side: the binding's tags (here none = no filter).
+    const plain = setup({ rounds: [() => jsonCall('q'), () => jsonAnswer('ok')], profile: bind({ mode: 'tool' }), tagCounts: counts(3) })
+    await plain.post(chat())
+    expect(plain.filters[0]!.tags).toEqual([])
+
+    // The floor always comes from the binding, never from the model.
+    const floor = setup({ rounds: [() => jsonCallWith({ query: 'q', min_similarity: 0, minSimilarity: 0 }), () => jsonAnswer('ok')], profile: bind({ mode: 'tool', minSimilarity: 0.7 }) })
+    await floor.post(chat())
+    expect(floor.filters[0]!.minSimilarity).toBe(0.7)
   })
 })

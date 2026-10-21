@@ -1,5 +1,17 @@
 # 交接记录
 
+## 2026-10-21 · 15-6：块级标签过滤与相似度阈值（决定 65 ⑭）· 单会话
+- 起因：同一知识库里混放多套用标签区分的词池，检索只按相似度取前 N 条，召回了相近但不同类别的块（串味）。另一个原因是分块会把相邻的小段落合并到约 500 字，不同类别会混进同一块。用户确认方案：标签行 `[tag:a,b]`（txt / md 通用，作用到下一个标签行），文档存原文，旧文档重新上传，阈值只看向量相似度、默认关，工具 enum 上限 50，MCP / REST 预留参数。
+- 计划：决定 65 加 ⑭、新增工作包 15-6、变更记录一行。规格由 Opus 5.5 写（会话草稿 `15-6-spec.md`，不在仓库里），Sonnet 5.5 实现，Opus 审查。
+- 实现：`server/core/kb/tags.ts`（标签行解析与清洗）；`chunk.ts` 标签行作为硬边界、块带 `tags`；`kb-db.ts` schema 2（`chunk_tags`、`documents.raw`，v1 在一个事务里迁移），两路检索都在 limit 之前过滤；`manager.ts` 上传存原文，重建索引对有原文的文档重新分块，`search` 支持 `tags` / `minSimilarity`（融合前过滤），新增 `tags()`；`binding.ts` 绑定与 `knowledge` 字段加 `tags` / `min_similarity`（可选字段，配置版本不变）；`proxy.ts` 注入 / 工具模式传过滤，工具加 `tags` 参数（≤ 50 用 enum），模型选的标签和允许范围取交集，绑定的标签是上限；界面 `KbTagPicker.vue`、`KbDocs` / `KbSearch` / `KnowledgeBindingForm`；中英文案；测试 `kb-tags.test.ts` 和 `kb-store` / `proxy-knowledge` 新增用例（包括先过滤：60 个 A 块对 2 个 B 块，两路都测）。
+- 和规格不同（审查认可）：`clearVectors` 不清标签（标签属于块）；阈值超出 0..1 时管理接口和请求字段返回错误，存储与检索核心 clamp。
+- 实际运行：`bun test` 1814 pass / 8 skip / 0 fail（子代理与我各一次）；`bun run typecheck` exit 0（我复跑）；子代理 `bun run build` exit 0、`git diff --check` 通过。子代理用构建产物 + 临时数据目录在浏览器里：上传带 `[tag:A]` / `[tag:B]` 的 txt，文档行显示标签，检索测试选 B 只出 B；外部上游编辑的绑定表单在 375 宽没有横向滚动。
+- 没有运行：真实向量引擎下的向量路过滤与阈值（只有假向量单元测试）；模型编辑的「知识库」页签；浅色与英文界面。
+- 已知：旧文档没有原文，内容相同的文件再上传会被判重复，要先删掉旧文档再上传。重建索引仍然要求向量引擎开着（没有引擎时不能只重新分块）。
+- 用户验证步骤：`bun scripts/launch.ts web build` → http://127.0.0.1:5001 →「知识库」删掉旧的词池文档 → 上传按 `[tag:类别]` 分段的文件（标签行单独一行）→ 文档行看到标签 → 检索测试选一个标签，看结果只来自该类；再试相似度下限（如 0.5）；在模型或外部上游的知识库设置里限定标签，用工具模式问一次，看是否不再串类。
+- 下一步：用户真机验证；`/v1/kb/search` 与 MCP（15-3）实现时要接受 `tags` 与 `min_similarity`。
+- `src-tauri/Cargo.lock` 的改动在会话开始前就有，仍未提交。
+
 ## 2026-10-21 · 15-4 续：本机模型「使用知识库」开关 + 外部上游开关界面 · 同一会话续
 - 起因：上一条交接里用户指定的下一步。Opus 5.5 写规格（会话草稿 `15-4b-spec.md`，不在仓库里），Sonnet 5.5 实现，Opus 审查并复跑。
 - 实现：`KnowledgeBinding` 加 `all`（全部知识库，按请求时现有的算，新建的也算；受限 key 时静默去掉不允许的，请求里点名的仍 403）；`ModelConfig.knowledge?`（缺省 = 关，载入时规范化，models 版本不变）；`setModelKnowledge` + `POST /api/models/:id/knowledge`（null = 关，未知知识库拒绝，不重启模型）；本机请求用 `profile.knowledge ?? model.knowledge`（方案有绑定就算，包括关掉的）；`app/components/KnowledgeBindingForm.vue`（开关、全部 / 指定、注入 / 工具与说明、条数 1–20、没有知识库时的提示与链接、指定却没选时拦住保存）；模型编辑新增「知识库」页签（单独保存）；外部上游编辑新增知识库一节（随原保存发出）；中英文案；`tests/core/proxy-knowledge.test.ts` 新增用例。

@@ -16,7 +16,7 @@ const isNew = computed(() => !props.upstream)
 
 const form = reactive({ name: '', baseUrl: '', monitorUrl: '', apiKey: '', clearKey: false, manualModels: '', startCommand: '', startCwd: '' })
 // What "on" starts as: every knowledge base (including later ones), injected, 5 hits.
-const knowledge = ref<KnowledgeBinding>({ enabled: false, all: true, kbs: [], mode: 'inject', topK: 5 })
+const knowledge = ref<KnowledgeBinding>({ enabled: false, all: true, kbs: [], mode: 'inject', topK: 5, tags: [], minSimilarity: null })
 const knowledgeIncomplete = computed(() => bindingIncomplete(knowledge.value))
 const kb = t.kbBinding
 const ui = usePlatformUi()
@@ -37,7 +37,7 @@ watch(() => props.open, (o) => {
   form.startCommand = u?.startCommand ?? ''
   form.startCwd = u?.startCwd ?? ''
   const b = u?.knowledge
-  knowledge.value = b ? { ...b, kbs: [...b.kbs], all: b.enabled ? b.all : b.all || b.kbs.length === 0 } : { enabled: false, all: true, kbs: [], mode: 'inject', topK: 5 }
+  knowledge.value = b ? { ...b, kbs: [...b.kbs], tags: [...(b.tags ?? [])], all: b.enabled ? b.all : b.all || b.kbs.length === 0 } : { enabled: false, all: true, kbs: [], mode: 'inject', topK: 5, tags: [], minSimilarity: null }
   error.value = ''
 })
 

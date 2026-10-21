@@ -10,6 +10,9 @@ import { KbError } from './errors'
 import { applyKbEdit, createKnowledgeBase, SOFT_CHUNK_LIMIT, validKbId, type KbEdit, type KnowledgeBase, type KnowledgeDoc } from './registry'
 import type { Embedder } from './embed'
 import { fuseRrf } from './search'
+import { cleanSimilarity, dedupeTags, MAX_FILTER_TAGS, type TagCount } from './tags'
+
+export type { TagCount }
 
 export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 export const EMBED_BATCH = 32
@@ -45,6 +48,16 @@ export interface KbView extends KnowledgeBase {
   reindexNeeded: boolean
   /** A job (import or re-index) of this knowledge base is queued or running. */
   busy: boolean
+  /** Every tag of its chunks with the number of chunks, sorted by tag (decision 65 ⑭). */
+  tags: TagCount[]
+}
+
+export interface SearchOptions {
+  topK?: number
+  /** Only chunks that carry any of these tags (decision 65 ⑭); empty = no filter. */
+  tags?: readonly string[]
+  /** 0..1: knowledge bases searched by vector drop candidates below this cosine similarity; null / undefined = off. */
+  minSimilarity?: number | null
 }
 
 export interface DocView extends DocRow {
@@ -198,6 +211,7 @@ export class KbManager {
       oversize: chunkCount > SOFT_CHUNK_LIMIT,
       reindexNeeded: this.needsReindex(b, db),
       busy: this.queue.some(j => j.kbId === b.id) || this.current?.kbId === b.id,
+      tags: db.listTags(),
     }
   }
 
@@ -264,7 +278,7 @@ export class KbManager {
     const now = this.now()
     const docId = db.insertDocument({
       name, source: input.source?.trim() || name, size: input.bytes.length, sha256: sha,
-      mtime: Number.isFinite(input.mtime) ? Math.floor(input.mtime!) : now, addedAt: now,
+      mtime: Number.isFinite(input.mtime) ? Math.floor(input.mtime!) : now, addedAt: now, raw: text,
     }, chunks)
     this.enqueue({ kind: 'import', kbId: id, docId, name, total: chunks.length, run: j => this.runImport(j) })
     return this.docView(id, db.getDocument(docId)!)
@@ -282,10 +296,24 @@ export class KbManager {
 
   // ---- search ----
 
-  async search(kbIds: readonly string[] | null, query: string, opts: { topK?: number } = {}): Promise<SearchResponse> {
+  /** Tags with their chunk counts over these knowledge bases (null = all), sorted by tag. */
+  async tags(kbIds: readonly string[] | null): Promise<TagCount[]> {
+    const targets = kbIds ? [...new Set(kbIds)].map(id => this.base(id)) : this.bases()
+    const sum = new Map<string, number>()
+    for (const b of targets) for (const r of (await this.db(b.id)).listTags()) sum.set(r.tag, (sum.get(r.tag) ?? 0) + r.count)
+    return [...sum].map(([tag, count]) => ({ tag, count })).sort((a, b) => (a.tag < b.tag ? -1 : a.tag > b.tag ? 1 : 0))
+  }
+
+  /**
+   * Hybrid search. `tags` and `minSimilarity` (decision 65 ⑭) narrow it: tags are applied inside both searches before
+   * their candidate limit; the similarity threshold is applied to the candidates before fusion.
+   */
+  async search(kbIds: readonly string[] | null, query: string, opts: SearchOptions = {}): Promise<SearchResponse> {
     const q = String(query ?? '').trim().slice(0, MAX_QUERY_CHARS)
     if (!q) throw new KbError('empty-query')
     const topK = Number.isFinite(opts.topK) ? Math.min(MAX_TOP_K, Math.max(1, Math.floor(opts.topK!))) : DEFAULT_TOP_K
+    const tags = dedupeTags(Array.isArray(opts.tags) ? opts.tags.filter((x): x is string => typeof x === 'string') : [], MAX_FILTER_TAGS)
+    const minSim = cleanSimilarity(opts.minSimilarity)
     const targets = kbIds ? [...new Set(kbIds)].map(id => this.base(id)) : this.bases()
     const model = this.o.embedder.name()
     const dbs = new Map<string, KbDb>()
@@ -310,13 +338,27 @@ export class KbManager {
     const usedVector = new Set<string>()
     for (const b of targets) {
       const db = dbs.get(b.id)!
-      if (match) for (const r of db.keywordSearch(match, CANDIDATES)) kw.push({ key: `${b.id}:${r.chunkId}`, kbId: b.id, chunkId: r.chunkId, bm25: r.bm25 })
       const vectorsMatch = !!model && b.embedding.model === model
+      if (this.needsReindex(b, db) || (qvec && vectorsMatch && b.embedding.dims !== qvec.length && db.countChunks() > 0)) reindexKbIds.push(b.id)
+      // With tags a knowledge base without a matching chunk has nothing to give: neither search runs.
+      const allow = tags.length ? db.chunkIdsWithTags(tags) : undefined
+      if (allow && allow.size === 0) continue
+      const kbKw = match ? db.keywordSearch(match, CANDIDATES, tags) : []
       if (qvec && vectorsMatch && b.embedding.dims === qvec.length) {
         usedVector.add(b.id)
-        for (const r of db.vectorSearch(qvec, CANDIDATES)) vec.push({ key: `${b.id}:${r.chunkId}`, kbId: b.id, chunkId: r.chunkId, sim: r.sim })
+        let kbVec = db.vectorSearch(qvec, CANDIDATES, allow)
+        let kbKwKept = kbKw
+        if (minSim !== null) {
+          // Below the threshold is out; a keyword hit stays only when the vector search ranked it at or above it.
+          kbVec = kbVec.filter(r => r.sim >= minSim)
+          const ok = new Set(kbVec.map(r => r.chunkId))
+          kbKwKept = kbKw.filter(r => ok.has(r.chunkId))
+        }
+        for (const r of kbVec) vec.push({ key: `${b.id}:${r.chunkId}`, kbId: b.id, chunkId: r.chunkId, sim: r.sim })
+        for (const r of kbKwKept) kw.push({ key: `${b.id}:${r.chunkId}`, kbId: b.id, chunkId: r.chunkId, bm25: r.bm25 })
+      } else {
+        for (const r of kbKw) kw.push({ key: `${b.id}:${r.chunkId}`, kbId: b.id, chunkId: r.chunkId, bm25: r.bm25 })
       }
-      if (this.needsReindex(b, db) || (qvec && vectorsMatch && b.embedding.dims !== qvec.length && db.countChunks() > 0)) reindexKbIds.push(b.id)
     }
     kw.sort((a, b) => a.bm25 - b.bm25)
     vec.sort((a, b) => b.sim - a.sim)
@@ -352,7 +394,10 @@ export class KbManager {
 
   // ---- jobs ----
 
-  /** Re-embed every chunk of a knowledge base with the current engine, then record the engine's model and dimensions. */
+  /**
+   * Re-chunk the documents that have their text stored (with the knowledge base's current chunk settings, so tag lines
+   * are picked up), re-embed every chunk with the current engine, then record the engine's model and dimensions.
+   */
   async reindex(id: string): Promise<void> {
     const db = await this.dbOf(id)
     if (!this.o.embedder.name()) throw new KbError('engine-off')
@@ -486,6 +531,16 @@ export class KbManager {
     }
   }
 
+  /** Chunk the stored text of every document that has one again; documents without text keep their chunks. */
+  private rechunk(db: KbDb, base: KnowledgeBase) {
+    for (const d of db.listDocuments()) {
+      const kind = SUPPORTED[/\.[^./]+$/.exec(d.name)?.[0]?.toLowerCase() ?? '']
+      const raw = d.hasRaw ? db.getRaw(d.id) : null
+      if (raw === null || !kind) continue
+      db.replaceChunks(d.id, chunkText(raw, { kind, chunkSize: base.chunkSize, overlap: base.chunkOverlap }))
+    }
+  }
+
   private async runReindex(job: Job): Promise<void> {
     const db = await this.db(job.kbId)
     const model = this.o.embedder.name()
@@ -495,7 +550,11 @@ export class KbManager {
     db.clearVectors()
     db.setAllDocStatus('indexing')
     job.total = db.countChunks()
+    this.changed()
     try {
+      this.rechunk(db, this.base(job.kbId))
+      job.total = db.countChunks()
+      this.changed()
       const dims = await this.embedChunks(db, job, null, job.ac.signal)
       if (dims !== null) this.setModel(job.kbId, model, dims)
       db.setAllDocStatus('ready')

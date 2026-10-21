@@ -1,6 +1,7 @@
 // Putting knowledge into a chat request (decision 65 ⑩⑪): the retrieved block (inject mode), the `search_knowledge`
 // tool (tool mode). Pure functions over the parsed request body; texts come from the dictionary of the saved locale.
 import { fmt, t } from '../i18n'
+import { MAX_FILTER_TAGS, type TagCount } from './tags'
 
 export const TOOL_NAME = 'search_knowledge'
 /** Tool rounds the gateway answers itself; the request after that has no `search_knowledge` tool (decision 65 ⑪). */
@@ -79,7 +80,24 @@ export function hasToolNamed(json: any, name = TOOL_NAME): boolean {
   return Array.isArray(json?.tools) && json.tools.some((x: unknown) => nameOf(x) === name)
 }
 
-export function toolDefinition(kbNames: readonly string[]) {
+/**
+ * The `tags` parameter of the tool: the tags the model may pick from (most chunks first). Up to MAX_FILTER_TAGS they
+ * are an enum; beyond that the parameter is a plain string array and the description lists the first MAX_FILTER_TAGS.
+ */
+function tagsParameter(tags: readonly TagCount[]) {
+  if (tags.length <= MAX_FILTER_TAGS) {
+    return { type: 'array', items: { type: 'string', enum: tags.map(x => x.tag) }, description: t.kbPrompt.toolTags }
+  }
+  const first = [...tags].sort((a, b) => b.count - a.count).slice(0, MAX_FILTER_TAGS).map(x => x.tag)
+  return {
+    type: 'array',
+    items: { type: 'string' },
+    description: `${t.kbPrompt.toolTags} ${fmt(t.kbPrompt.toolTagsMore, { n: MAX_FILTER_TAGS, list: first.join('、') })}`,
+  }
+}
+
+/** `tags` = tags of the bound knowledge bases the model may filter by; none = no `tags` parameter. */
+export function toolDefinition(kbNames: readonly string[], tags: readonly TagCount[] = []) {
   return {
     type: 'function',
     function: {
@@ -90,6 +108,7 @@ export function toolDefinition(kbNames: readonly string[]) {
         properties: {
           query: { type: 'string', description: t.kbPrompt.toolQuery },
           top_k: { type: 'integer', minimum: 1, maximum: 20, description: t.kbPrompt.toolTopK },
+          ...(tags.length ? { tags: tagsParameter(tags) } : {}),
         },
         required: ['query'],
       },
@@ -98,9 +117,9 @@ export function toolDefinition(kbNames: readonly string[]) {
 }
 
 /** Add our tool (creating `tools` when absent). `tool_choice` is left alone. */
-export function addTool(json: any, kbNames: readonly string[]): void {
+export function addTool(json: any, kbNames: readonly string[], tags: readonly TagCount[] = []): void {
   if (!Array.isArray(json.tools)) json.tools = []
-  json.tools.push(toolDefinition(kbNames))
+  json.tools.push(toolDefinition(kbNames, tags))
 }
 
 /** Take our tool out again; `tools` goes away entirely when nothing else is left. */

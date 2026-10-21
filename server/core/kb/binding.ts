@@ -1,6 +1,7 @@
 // Knowledge for the chat models (decision 65 ⑨): what a profile / an external upstream is bound to, the optional
 // `knowledge` field of a request, and how the two are resolved into what one request uses. Pure module (no Nitro, no
 // SQLite): the list of existing knowledge bases and the permission list are passed in.
+import { cleanSimilarity, cleanTags } from './tags'
 
 export type KnowledgeMode = 'inject' | 'tool'
 
@@ -13,6 +14,10 @@ export interface KnowledgeBinding {
   mode: KnowledgeMode
   /** Hits per search, 1..20. */
   topK: number
+  /** Only chunks that carry any of these tags (decision 65 ⑭); empty = no filter. */
+  tags: string[]
+  /** 0..1 cosine similarity floor for vector-searched knowledge bases; null = off. */
+  minSimilarity: number | null
 }
 
 export const BINDING_DEFAULT_TOP_K = 5
@@ -21,7 +26,7 @@ export const BINDING_MAX_TOP_K = 20
 const MAX_BOUND = 50
 
 export function defaultBinding(): KnowledgeBinding {
-  return { enabled: false, all: false, kbs: [], mode: 'inject', topK: BINDING_DEFAULT_TOP_K }
+  return { enabled: false, all: false, kbs: [], mode: 'inject', topK: BINDING_DEFAULT_TOP_K, tags: [], minSimilarity: null }
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
@@ -47,8 +52,13 @@ export function normalizeBinding(raw: unknown): KnowledgeBinding {
   if (Array.isArray(raw.kbs)) out.kbs = [...new Set(raw.kbs.filter((x): x is string => typeof x === 'string' && x.length > 0))].slice(0, MAX_BOUND)
   if (isMode(raw.mode)) out.mode = raw.mode
   if (typeof raw.topK === 'number' && Number.isFinite(raw.topK)) out.topK = clampTopK(raw.topK)
+  out.tags = cleanTags(raw.tags)
+  out.minSimilarity = cleanSimilarity(raw.minSimilarity)
   return out
 }
+
+const isSimilarity = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1
+const isTagList = (v: unknown): v is string[] => Array.isArray(v) && v.every(x => typeof x === 'string')
 
 /** A binding from the management API: wrong types are refused (missing fields take the defaults). */
 export function parseBinding(raw: unknown): KnowledgeBinding {
@@ -74,6 +84,14 @@ export function parseBinding(raw: unknown): KnowledgeBinding {
     if (typeof raw.topK !== 'number' || !Number.isFinite(raw.topK)) throw new BindingError('bad-knowledge')
     out.topK = clampTopK(raw.topK)
   }
+  if (raw.tags !== undefined) {
+    if (!isTagList(raw.tags)) throw new BindingError('bad-knowledge')
+    out.tags = cleanTags(raw.tags)
+  }
+  if (raw.minSimilarity !== undefined && raw.minSimilarity !== null) {
+    if (!isSimilarity(raw.minSimilarity)) throw new BindingError('bad-knowledge')
+    out.minSimilarity = raw.minSimilarity
+  }
   return out
 }
 
@@ -96,6 +114,9 @@ export interface EffectiveKnowledge {
   /** Existing, permitted knowledge base ids (at least one). */
   kbs: string[]
   topK: number
+  /** Tag filter (empty = none) and similarity floor (null = off) of this request. */
+  tags: string[]
+  minSimilarity: number | null
 }
 
 export type ResolveResult =
@@ -112,7 +133,7 @@ export type ResolveResult =
  * The knowledge one request uses: the request's own `knowledge` field (`raw`, already read from the body; undefined /
  * null = absent) over the binding of the profile / upstream.
  *  - `false`: none.
- *  - `{ kbs?, mode?, top_k? }`: replaces the fields it carries; `kbs` present = use them even if the binding is off
+ *  - `{ kbs?, mode?, top_k?, tags?, min_similarity? }`: replaces the fields it carries; `kbs` present = use them even if the binding is off
  *    (an empty list means none). Names match case-insensitively, ids exactly.
  *  - anything else: 400 `invalid_knowledge`; a named knowledge base that does not exist: 400 `kb_not_found`.
  * A bound knowledge base that was deleted later is skipped. `allowed` = the ids the caller may use (null = all); asking
@@ -131,6 +152,8 @@ export function resolveKnowledge(args: {
 
   let mode: KnowledgeMode = binding?.mode ?? 'inject'
   let topK = binding?.topK ?? BINDING_DEFAULT_TOP_K
+  let tags = binding?.tags ?? []
+  let minSimilarity = binding?.minSimilarity ?? null
   // `all` = every knowledge base that exists now; the not-allowed ones are dropped silently (the caller did not name them).
   const bindAll = !!binding?.enabled && binding.all
   let explicit = false
@@ -145,6 +168,14 @@ export function resolveKnowledge(args: {
     if (raw.top_k !== undefined) {
       if (typeof raw.top_k !== 'number' || !Number.isFinite(raw.top_k)) return bad('invalid_knowledge')
       topK = clampTopK(raw.top_k)
+    }
+    if (raw.tags !== undefined) {
+      if (!isTagList(raw.tags)) return bad('invalid_knowledge')
+      tags = cleanTags(raw.tags)
+    }
+    if (raw.min_similarity !== undefined) {
+      if (raw.min_similarity !== null && !isSimilarity(raw.min_similarity)) return bad('invalid_knowledge')
+      minSimilarity = raw.min_similarity
     }
     if (raw.kbs !== undefined) {
       if (!Array.isArray(raw.kbs) || !raw.kbs.every(x => typeof x === 'string')) return bad('invalid_knowledge')
@@ -163,13 +194,14 @@ export function resolveKnowledge(args: {
   const existing = new Set(bases.map(b => b.id))
   const skipped = wanted.filter(id => !existing.has(id))
   const kbs = wanted.filter(id => existing.has(id))
+  const effective = (ids: string[]): EffectiveKnowledge => ({ mode, kbs: ids, topK, tags, minSimilarity })
   if (allowed && bindAll && !explicit) {
     const permitted = kbs.filter(id => allowed.includes(id))
-    return { ok: true, effective: permitted.length ? { mode, kbs: permitted, topK } : null, skipped }
+    return { ok: true, effective: permitted.length ? effective(permitted) : null, skipped }
   }
   if (allowed) {
     const denied = kbs.find(id => !allowed.includes(id))
     if (denied) return { ok: false, status: 403, code: 'kb_forbidden', name: bases.find(b => b.id === denied)?.name ?? denied }
   }
-  return { ok: true, effective: kbs.length ? { mode, kbs, topK } : null, skipped }
+  return { ok: true, effective: kbs.length ? effective(kbs) : null, skipped }
 }

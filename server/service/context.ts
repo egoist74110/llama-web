@@ -719,7 +719,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     jobs: new JobStore({ dataDir, onError: e => logError('async jobs (data/jobs.json):', (e as Error)?.message ?? e) }),
     embedding,
     // Decision 65 ⑨: knowledge for the chat models. Permission lists per API key come with 15-3 (null = every knowledge base).
-    knowledge: { search: (ids, q, o) => kb.search(ids, q, o), list: () => knowledgeRef.get().bases, allowedKbs: () => null },
+    knowledge: { search: (ids, q, o) => kb.search(ids, q, o), tags: ids => kb.tags(ids), list: () => knowledgeRef.get().bases, allowedKbs: () => null },
   })
   const publicEntry: PublicListener = new PublicListener((req, ip) => handlePublic(req, {
     authenticate: header => authenticate(secretsRef.get(), header),

@@ -14,6 +14,7 @@ const emit = defineEmits<{ changed: [] }>()
 const d = t.kb.page.docs
 const u = t.kb.page.upload
 const f = t.kb.page.flags
+const TAGS_SHOWN = 5
 const toast = useToast()
 
 const docs = ref<Doc[] | null>(null)
@@ -203,6 +204,11 @@ async function confirmRemove() {
             <span class="lw-num">{{ formatBytes(doc.size) }}</span>
             <span class="lw-num">{{ fmt(d.chunks, { n: doc.chunkCount }) }}</span>
             <span class="lw-num">{{ fmt(d.vectors, { done: doc.vectorCount, total: doc.chunkCount }) }}</span>
+            <span v-if="!doc.hasRaw" class="text-muted">{{ d.noRaw }}</span>
+          </div>
+          <div v-if="doc.tags.length" class="flex flex-wrap items-center gap-1">
+            <span v-for="tag in doc.tags.slice(0, TAGS_SHOWN)" :key="tag" class="lw-chip max-w-full"><span class="truncate">{{ tag }}</span></span>
+            <span v-if="doc.tags.length > TAGS_SHOWN" class="lw-chip">{{ fmt(d.tagsMore, { n: doc.tags.length - TAGS_SHOWN }) }}</span>
           </div>
           <template v-if="doc.status === 'indexing'">
             <span v-if="queued(doc)" class="text-xs text-muted">{{ d.queued }}</span>

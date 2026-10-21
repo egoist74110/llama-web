@@ -89,7 +89,7 @@ const anyUp = computed(() => !!detail.value?.up.length)
 // ---- Knowledge (model-level binding; applied per request, so saving never restarts the model) --------------
 const kb = t.kbBinding
 // What "on" starts as: every knowledge base (including later ones), injected, 5 hits.
-const knowledgeOff = (): KnowledgeBinding => ({ enabled: false, all: true, kbs: [], mode: 'inject', topK: 5 })
+const knowledgeOff = (): KnowledgeBinding => ({ enabled: false, all: true, kbs: [], mode: 'inject', topK: 5, tags: [], minSimilarity: null })
 const kn = ref<KnowledgeBinding>(knowledgeOff())
 const knSaving = ref(false)
 const savedKn = computed(() => JSON.stringify(model.value?.knowledge ?? null))
@@ -98,7 +98,7 @@ const knKey = (b: KnowledgeBinding) => JSON.stringify(b.enabled ? b : null)
 // Re-seed from the stored model only when the stored binding changes (not on every reload).
 watch(savedKn, () => {
   const b = model.value?.knowledge
-  kn.value = b ? { ...b, kbs: [...b.kbs], all: b.enabled ? b.all : b.all || b.kbs.length === 0 } : knowledgeOff()
+  kn.value = b ? { ...b, kbs: [...b.kbs], tags: [...(b.tags ?? [])], all: b.enabled ? b.all : b.all || b.kbs.length === 0 } : knowledgeOff()
 }, { immediate: true })
 const knDirty = computed(() => knKey(kn.value) !== savedKnKey.value)
 const knIncomplete = computed(() => bindingIncomplete(kn.value))

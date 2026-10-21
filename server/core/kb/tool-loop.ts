@@ -1,6 +1,7 @@
 // Pieces of the tool-mode loop (decision 65 ⑪) that need no network: SSE event splitting, reassembling streamed tool
 // calls, merging token usage, building the follow-up messages. The loop itself (rounds, lease, abort) is in proxy.ts.
 import { TOOL_NAME } from './inject'
+import { cleanTags } from './tags'
 
 export interface Usage {
   prompt_tokens: number
@@ -66,15 +67,19 @@ export function followUp(assistant: { content: string | null, extra?: Record<str
   ]
 }
 
-/** `{ query, top_k }` out of the arguments text of a `search_knowledge` call; null when they are not usable. */
-export function parseSearchArguments(text: string): { query: string, topK?: number } | null {
+/**
+ * `{ query, top_k, tags }` out of the arguments text of a `search_knowledge` call; null when they are not usable.
+ * `tags` is an array of strings or one string; anything else is ignored.
+ */
+export function parseSearchArguments(text: string): { query: string, topK?: number, tags?: string[] } | null {
   let v: unknown
   try { v = JSON.parse(text.trim() || '{}') } catch { return null }
   if (!v || typeof v !== 'object' || Array.isArray(v)) return null
   const o = v as Record<string, unknown>
   if (typeof o.query !== 'string' || !o.query.trim()) return null
   const topK = typeof o.top_k === 'number' && Number.isFinite(o.top_k) ? o.top_k : typeof o.top_k === 'string' && /^\d+$/.test(o.top_k) ? Number(o.top_k) : undefined
-  return { query: o.query.trim(), ...(topK === undefined ? {} : { topK }) }
+  const tags = cleanTags(typeof o.tags === 'string' ? [o.tags] : o.tags)
+  return { query: o.query.trim(), ...(topK === undefined ? {} : { topK }), ...(tags.length ? { tags } : {}) }
 }
 
 // ---------------------------------------------------------------------------------------

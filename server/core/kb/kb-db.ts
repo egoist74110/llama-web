@@ -8,7 +8,7 @@ import { openDatabase, type SqlDatabase, type SqlValue } from './sqlite'
 import { indexText } from './tokenize'
 import type { Chunk } from './chunk'
 
-export const KB_SCHEMA_VERSION = 1
+export const KB_SCHEMA_VERSION = 2
 
 export type DocStatus = 'indexing' | 'ready' | 'keyword-only' | 'failed'
 
@@ -26,7 +26,13 @@ export interface DocRow {
   errorDetail: string | null
   /** Chunks of this document that have a vector. */
   vectorCount: number
+  /** The decoded text is stored (schema 2): the document can be re-chunked and tags work. False for older documents. */
+  hasRaw: boolean
+  /** Tags that occur in the document's chunks, sorted, at most DOC_TAG_LIMIT. */
+  tags: string[]
 }
+
+const DOC_TAG_LIMIT = 20
 
 export interface NewDoc {
   name: string
@@ -35,6 +41,8 @@ export interface NewDoc {
   sha256: string
   mtime: number
   addedAt: number
+  /** The decoded text of the file. */
+  raw: string
 }
 
 export interface ChunkHit {
@@ -89,6 +97,7 @@ export class KbDb {
     const version = row ? Number(row.value) : 0
     if (version > KB_SCHEMA_VERSION) throw new Error(`knowledge base file has schema ${version}, newer than supported ${KB_SCHEMA_VERSION}`)
     if (version < 1) {
+      // A new file is created at the current schema directly.
       db.transaction(() => {
         db.exec(`
           CREATE TABLE documents (
@@ -102,7 +111,8 @@ export class KbDb {
             chunk_count INTEGER NOT NULL DEFAULT 0,
             status TEXT NOT NULL,
             error_code TEXT,
-            error_detail TEXT
+            error_detail TEXT,
+            raw TEXT
           );
           CREATE TABLE chunks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -117,6 +127,18 @@ export class KbDb {
           CREATE INDEX chunks_doc ON chunks (doc_id, ord);
           CREATE TABLE vectors (chunk_id INTEGER PRIMARY KEY, blob BLOB NOT NULL);
           CREATE VIRTUAL TABLE fts USING fts5(tokens, tokenize = 'unicode61 remove_diacritics 0');
+          CREATE TABLE chunk_tags (chunk_id INTEGER NOT NULL, tag TEXT NOT NULL, PRIMARY KEY (chunk_id, tag)) WITHOUT ROWID;
+          CREATE INDEX chunk_tags_tag ON chunk_tags (tag, chunk_id);
+        `)
+        db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('schema', ?)").run(String(KB_SCHEMA_VERSION))
+      })
+    } else if (version < 2) {
+      // 1 -> 2 (decision 65 ⑭): the decoded text of new documents (NULL = an older document, no text) and chunk tags.
+      db.transaction(() => {
+        db.exec(`
+          ALTER TABLE documents ADD COLUMN raw TEXT;
+          CREATE TABLE chunk_tags (chunk_id INTEGER NOT NULL, tag TEXT NOT NULL, PRIMARY KEY (chunk_id, tag)) WITHOUT ROWID;
+          CREATE INDEX chunk_tags_tag ON chunk_tags (tag, chunk_id);
         `)
         db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('schema', ?)").run(String(KB_SCHEMA_VERSION))
       })
@@ -132,44 +154,84 @@ export class KbDb {
 
   private docSelect = `SELECT d.id, d.name, d.source, d.size, d.sha256, d.mtime, d.added_at AS addedAt, d.chunk_count AS chunkCount,
     d.status, d.error_code AS errorCode, d.error_detail AS errorDetail,
-    (SELECT COUNT(*) FROM vectors v JOIN chunks c ON c.id = v.chunk_id WHERE c.doc_id = d.id) AS vectorCount
+    (SELECT COUNT(*) FROM vectors v JOIN chunks c ON c.id = v.chunk_id WHERE c.doc_id = d.id) AS vectorCount,
+    (d.raw IS NOT NULL) AS hasRaw
     FROM documents d`
 
-  /** Insert a document with its chunks and FTS rows in one transaction; the status is `indexing`. */
+  private docRow(r: Omit<DocRow, 'hasRaw' | 'tags'> & { hasRaw: number }): DocRow {
+    const tags = this.db.prepare(
+      'SELECT DISTINCT t.tag FROM chunk_tags t JOIN chunks c ON c.id = t.chunk_id WHERE c.doc_id = ? ORDER BY t.tag LIMIT ?',
+    ).all<{ tag: string }>(r.id, DOC_TAG_LIMIT).map(x => x.tag)
+    return { ...r, hasRaw: !!r.hasRaw, tags }
+  }
+
+  /** Chunk rows with their FTS rows and tags (inside a transaction). The FTS text is heading path + text, no tags. */
+  private insertChunks(docId: number, chunks: readonly Chunk[]) {
+    const insChunk = this.db.prepare('INSERT INTO chunks (doc_id, ord, text, start_char, end_char, start_line, heading_path) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    const insFts = this.db.prepare('INSERT INTO fts (rowid, tokens) VALUES (?, ?)')
+    const insTag = this.db.prepare('INSERT OR IGNORE INTO chunk_tags (chunk_id, tag) VALUES (?, ?)')
+    for (const c of chunks) {
+      const { lastInsertRowid } = insChunk.run(docId, c.ord, c.text, c.startChar, c.endChar, c.startLine, c.headingPath)
+      insFts.run(lastInsertRowid, indexText(c.headingPath ? `${c.headingPath}\n${c.text}` : c.text))
+      for (const tag of c.tags) insTag.run(lastInsertRowid, tag)
+    }
+  }
+
+  private deleteChunksOf(docId: number) {
+    this.db.prepare('DELETE FROM fts WHERE rowid IN (SELECT id FROM chunks WHERE doc_id = ?)').run(docId)
+    this.db.prepare('DELETE FROM vectors WHERE chunk_id IN (SELECT id FROM chunks WHERE doc_id = ?)').run(docId)
+    this.db.prepare('DELETE FROM chunk_tags WHERE chunk_id IN (SELECT id FROM chunks WHERE doc_id = ?)').run(docId)
+    this.db.prepare('DELETE FROM chunks WHERE doc_id = ?').run(docId)
+  }
+
+  /** Insert a document with its text, chunks, tags and FTS rows in one transaction; the status is `indexing`. */
   insertDocument(doc: NewDoc, chunks: readonly Chunk[]): number {
     return this.db.transaction(() => {
       const r = this.db.prepare(
-        "INSERT INTO documents (name, source, size, sha256, mtime, added_at, chunk_count, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'indexing')",
-      ).run(doc.name, doc.source, doc.size, doc.sha256, doc.mtime, doc.addedAt, chunks.length)
+        "INSERT INTO documents (name, source, size, sha256, mtime, added_at, chunk_count, status, raw) VALUES (?, ?, ?, ?, ?, ?, ?, 'indexing', ?)",
+      ).run(doc.name, doc.source, doc.size, doc.sha256, doc.mtime, doc.addedAt, chunks.length, doc.raw)
       const docId = r.lastInsertRowid
-      const insChunk = this.db.prepare('INSERT INTO chunks (doc_id, ord, text, start_char, end_char, start_line, heading_path) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      const insFts = this.db.prepare('INSERT INTO fts (rowid, tokens) VALUES (?, ?)')
-      for (const c of chunks) {
-        const { lastInsertRowid } = insChunk.run(docId, c.ord, c.text, c.startChar, c.endChar, c.startLine, c.headingPath)
-        insFts.run(lastInsertRowid, indexText(c.headingPath ? `${c.headingPath}\n${c.text}` : c.text))
-      }
+      this.insertChunks(docId, chunks)
       return docId
     })
   }
 
+  /** The stored text of a document; null for a document without one (added before schema 2). */
+  getRaw(docId: number): string | null {
+    return this.db.prepare('SELECT raw FROM documents WHERE id = ?').get<{ raw: string | null }>(docId)?.raw ?? null
+  }
+
+  /**
+   * Swap all chunks of a document for `chunks` (re-chunking): FTS rows, vectors and tags of the old ones go, and the
+   * document needs new vectors afterwards. One transaction.
+   */
+  replaceChunks(docId: number, chunks: readonly Chunk[]) {
+    this.db.transaction(() => {
+      this.deleteChunksOf(docId)
+      this.insertChunks(docId, chunks)
+      this.db.prepare('UPDATE documents SET chunk_count = ? WHERE id = ?').run(chunks.length, docId)
+    })
+    this.cache = null
+  }
+
   listDocuments(): DocRow[] {
-    return this.db.prepare(`${this.docSelect} ORDER BY d.id`).all<DocRow>()
+    return this.db.prepare(`${this.docSelect} ORDER BY d.id`).all<any>().map(r => this.docRow(r))
   }
 
   getDocument(id: number): DocRow | undefined {
-    return this.db.prepare(`${this.docSelect} WHERE d.id = ?`).get<DocRow>(id)
+    const r = this.db.prepare(`${this.docSelect} WHERE d.id = ?`).get<any>(id)
+    return r && this.docRow(r)
   }
 
   findBySha(sha256: string): DocRow | undefined {
-    return this.db.prepare(`${this.docSelect} WHERE d.sha256 = ? LIMIT 1`).get<DocRow>(sha256)
+    const r = this.db.prepare(`${this.docSelect} WHERE d.sha256 = ? LIMIT 1`).get<any>(sha256)
+    return r && this.docRow(r)
   }
 
-  /** Remove a document with its chunks, vectors and FTS rows in one transaction. */
+  /** Remove a document with its chunks, vectors, tags and FTS rows in one transaction. */
   deleteDocument(id: number): boolean {
     const removed = this.db.transaction(() => {
-      this.db.prepare('DELETE FROM fts WHERE rowid IN (SELECT id FROM chunks WHERE doc_id = ?)').run(id)
-      this.db.prepare('DELETE FROM vectors WHERE chunk_id IN (SELECT id FROM chunks WHERE doc_id = ?)').run(id)
-      this.db.prepare('DELETE FROM chunks WHERE doc_id = ?').run(id)
+      this.deleteChunksOf(id)
       return this.db.prepare('DELETE FROM documents WHERE id = ?').run(id).changes > 0
     })
     this.cache = null
@@ -265,12 +327,16 @@ export class KbDb {
     return (this.cache = { ids, dims, data })
   }
 
-  /** Top `limit` chunks by cosine similarity (vectors are stored normalized; `query` must be too). */
-  vectorSearch(query: Float32Array, limit: number): Array<{ chunkId: number, sim: number }> {
+  /**
+   * Top `limit` chunks by cosine similarity (vectors are stored normalized; `query` must be too). `allow` = only these
+   * chunk ids take part (checked before ranking, so the limit applies to the allowed ones); undefined = all.
+   */
+  vectorSearch(query: Float32Array, limit: number, allow?: ReadonlySet<number>): Array<{ chunkId: number, sim: number }> {
     const { ids, dims, data } = this.loadVectors()
     if (!ids.length || dims !== query.length) return []
     const top: Array<{ chunkId: number, sim: number }> = []
     for (let i = 0; i < ids.length; i++) {
+      if (allow && !allow.has(ids[i]!)) continue
       let dot = 0
       const base = i * dims
       for (let j = 0; j < dims; j++) dot += data[base + j]! * query[j]!
@@ -285,8 +351,29 @@ export class KbDb {
 
   // ---- keyword search ----
 
-  /** BM25 (more negative = better) over an FTS5 MATCH expression built by `ftsMatch`. */
-  keywordSearch(match: string, limit: number): Array<{ chunkId: number, bm25: number }> {
-    return this.db.prepare('SELECT rowid AS chunkId, bm25(fts) AS bm25 FROM fts WHERE fts MATCH ? ORDER BY bm25 LIMIT ?').all(match, limit)
+  /**
+   * BM25 (more negative = better) over an FTS5 MATCH expression built by `ftsMatch`. With `tags` only chunks that carry
+   * any of them are ranked: the filter is part of the query, so it applies before LIMIT.
+   */
+  keywordSearch(match: string, limit: number, tags?: readonly string[]): Array<{ chunkId: number, bm25: number }> {
+    if (!tags?.length) return this.db.prepare('SELECT rowid AS chunkId, bm25(fts) AS bm25 FROM fts WHERE fts MATCH ? ORDER BY bm25 LIMIT ?').all(match, limit)
+    const marks = tags.map(() => '?').join(',')
+    return this.db.prepare(
+      `SELECT rowid AS chunkId, bm25(fts) AS bm25 FROM fts WHERE fts MATCH ? AND rowid IN (SELECT chunk_id FROM chunk_tags WHERE tag IN (${marks})) ORDER BY bm25 LIMIT ?`,
+    ).all(match, ...tags, limit)
+  }
+
+  // ---- tags ----
+
+  /** Every tag with the number of chunks that carry it, sorted by tag. */
+  listTags(): Array<{ tag: string, count: number }> {
+    return this.db.prepare('SELECT tag, COUNT(*) AS count FROM chunk_tags GROUP BY tag ORDER BY tag').all()
+  }
+
+  /** Ids of the chunks that carry any of `tags`. */
+  chunkIdsWithTags(tags: readonly string[]): Set<number> {
+    if (!tags.length) return new Set()
+    const marks = tags.map(() => '?').join(',')
+    return new Set(this.db.prepare(`SELECT DISTINCT chunk_id AS id FROM chunk_tags WHERE tag IN (${marks})`).all<{ id: number }>(...tags).map(r => r.id))
   }
 }

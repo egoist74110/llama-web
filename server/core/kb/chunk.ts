@@ -8,6 +8,11 @@
 //   longer is cut hard, with `overlap` characters shared between the pieces.
 // - Between chunks of the same section the last whole units (paragraphs or sentences) that fit in `overlap` characters
 //   are repeated at the start of the next chunk.
+// - A tag line (`[tag:a,b]` alone on a line, decision 65 ⑭) is a hard boundary: it ends the paragraph and starts a new
+//   section whose chunks all carry those tags (`[tag:]` clears them). The line itself is in no chunk. Headings do not
+//   change the current tags. In Markdown a tag line inside a code fence is ordinary text.
+
+import { parseTagLine } from './tags'
 
 export interface Chunk {
   ord: number
@@ -18,6 +23,8 @@ export interface Chunk {
   /** 1-based line of startChar. */
   startLine: number
   headingPath: string
+  /** Tags in force where the chunk lies (same for every chunk of a section). */
+  tags: string[]
 }
 
 export interface ChunkOptions {
@@ -28,7 +35,7 @@ export interface ChunkOptions {
 
 interface Range { s: number, e: number }
 interface Unit extends Range { solo?: boolean }
-interface Section { headingPath: string, paras: Range[] }
+interface Section { headingPath: string, tags: string[], paras: Range[] }
 
 const HEADING = /^ {0,3}(#{1,6})[ \t]+(.*?)[ \t]*#*[ \t]*$/
 const FENCE = /^ {0,3}(```|~~~)/
@@ -39,10 +46,11 @@ const isHigh = (c: number) => c >= 0xd800 && c <= 0xdbff
 const isLow = (c: number) => c >= 0xdc00 && c <= 0xdfff
 
 function sections(text: string, kind: 'txt' | 'md'): Section[] {
-  const out: Section[] = [{ headingPath: '', paras: [] }]
+  const out: Section[] = [{ headingPath: '', tags: [], paras: [] }]
   const stack: Array<{ level: number, title: string }> = []
   let para: Range | null = null
   let inFence = false
+  let tags: string[] = []
   const endPara = () => {
     if (para) out[out.length - 1]!.paras.push(para)
     para = null
@@ -55,15 +63,22 @@ function sections(text: string, kind: 'txt' | 'md'): Section[] {
     const trimmed = line.trim()
     if (kind === 'md' && FENCE.test(line)) inFence = !inFence
     const heading = kind === 'md' && !inFence && !FENCE.test(line) ? HEADING.exec(line) : null
+    const tagLine = !trimmed || (kind === 'md' && inFence) || (kind === 'md' && FENCE.test(line)) ? null : parseTagLine(line)
     if (!trimmed) {
       endPara()
+    } else if (tagLine) {
+      endPara()
+      tags = tagLine
+      const last = out[out.length - 1]!
+      if (last.paras.length === 0) last.tags = tags
+      else out.push({ headingPath: stack.map(h => h.title).filter(Boolean).join(' > '), tags, paras: [] })
     } else if (heading) {
       endPara()
       const level = heading[1]!.length
       while (stack.length && stack[stack.length - 1]!.level >= level) stack.pop()
       stack.push({ level, title: heading[2]!.trim() })
       const last = out[out.length - 1]!
-      const sec: Section = last.paras.length === 0 && last.headingPath === '' ? last : { headingPath: '', paras: [] }
+      const sec: Section = last.paras.length === 0 && last.headingPath === '' ? last : { headingPath: '', tags, paras: [] }
       if (sec !== last) out.push(sec)
       sec.headingPath = stack.map(h => h.title).filter(Boolean).join(' > ')
       const lead = line.length - line.trimStart().length
@@ -158,7 +173,7 @@ export function chunkText(text: string, opts: ChunkOptions): Chunk[] {
   const chunks: Chunk[] = []
   for (const sec of sections(text, opts.kind)) {
     const emit = (s: number, e: number) => {
-      chunks.push({ ord: chunks.length, text: text.slice(s, e), startChar: s, endChar: e, startLine: lineOf(s), headingPath: sec.headingPath })
+      chunks.push({ ord: chunks.length, text: text.slice(s, e), startChar: s, endChar: e, startLine: lineOf(s), headingPath: sec.headingPath, tags: [...sec.tags] })
     }
     let cur: Unit[] = []
     let fresh = 0

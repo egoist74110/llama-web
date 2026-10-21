@@ -43,3 +43,19 @@ export function jobsKey(jobs: ReadonlyArray<{ kind: string, kbId: string, docId:
 export function bindingIncomplete(b: { enabled: boolean, all: boolean, kbs: readonly string[] }): boolean {
   return b.enabled && !b.all && b.kbs.length === 0
 }
+
+/** A similarity floor typed into an input: '' = off (null); a number from 0 to 1 is valid; anything else is not. */
+export function parseSimilarity(text: string | number | null | undefined): { ok: boolean, value: number | null } {
+  const s = String(text ?? '').trim()
+  if (!s) return { ok: true, value: null }
+  const n = Number(s)
+  return Number.isFinite(n) && n >= 0 && n <= 1 ? { ok: true, value: n } : { ok: false, value: null }
+}
+
+/** Tags of several knowledge bases merged (counts added), sorted by tag; `keep` tags are listed even when no base has them. */
+export function mergeTags(lists: ReadonlyArray<ReadonlyArray<{ tag: string, count: number }>>, keep: readonly string[] = []): Array<{ tag: string, count: number }> {
+  const sum = new Map<string, number>()
+  for (const list of lists) for (const x of list) sum.set(x.tag, (sum.get(x.tag) ?? 0) + x.count)
+  for (const tag of keep) if (!sum.has(tag)) sum.set(tag, 0)
+  return [...sum].map(([tag, count]) => ({ tag, count })).sort((a, b) => (a.tag < b.tag ? -1 : a.tag > b.tag ? 1 : 0))
+}

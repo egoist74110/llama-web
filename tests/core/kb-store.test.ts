@@ -8,6 +8,7 @@ import { JsonStore } from '../../server/core/store'
 import { KbError } from '../../server/core/kb/errors'
 import { KbManager, MAX_UPLOAD_BYTES } from '../../server/core/kb/manager'
 import { KbDb } from '../../server/core/kb/kb-db'
+import { openDatabase } from '../../server/core/kb/sqlite'
 import { normalizeVector, type Embedder } from '../../server/core/kb/embed'
 import { tokenize } from '../../server/core/kb/tokenize'
 import {
@@ -458,5 +459,218 @@ describe('restart safety', () => {
     writeFileSync(join(dir, 'knowledge.json'), '{ not json')
     const store = new JsonStore<KnowledgeDoc>({ dataDir: dir, name: 'knowledge.json', version: KNOWLEDGE_VERSION, defaults: defaultKnowledge, validate: normalizeKnowledge })
     expect(() => store.load()).toThrow()
+  })
+})
+
+// ---------------------------------------------------------------------------------------
+// Tags and the similarity floor (decision 65 ⑭)
+
+/** Paragraphs of ~57 characters: with chunkSize 100 each one is its own chunk. */
+const aPara = (i: number) => `alpha beta gamma alpha beta gamma alpha beta gamma pad${String(i).padStart(3, '0')}`
+const bPara = (i: number) => `alpha delta epsilon zeta eta theta iota kappa lambda mu nu xi${i}`
+const TAGGED = `[tag:A]\n${Array.from({ length: 60 }, (_, i) => aPara(i)).join('\n\n')}\n\n[tag:B]\n${bPara(1)}\n\n${bPara(2)}`
+
+describe('tags: filter before ranking', () => {
+  test('vector path: 60 close chunks of tag A cannot crowd out the 2 farther chunks of tag B', async () => {
+    const dir = tmp()
+    const { kb } = make(dir, fake())
+    const base = await kb.create({ name: 'tagged', chunkSize: 100, chunkOverlap: 10 })
+    await kb.addDocument(base.id, { name: 'pools.txt', bytes: enc(TAGGED) })
+    await kb.idle()
+    expect((await kb.get(base.id)).tags).toEqual([{ tag: 'A', count: 60 }, { tag: 'B', count: 2 }])
+
+    const all = await kb.search([base.id], 'alpha beta gamma')
+    expect(all.mode).toBe('hybrid')
+    expect(all.hits.every(h => h.text.startsWith('alpha beta gamma'))).toBe(true) // B is nowhere near the top 5
+
+    const b = await kb.search([base.id], 'alpha beta gamma', { tags: ['B'] })
+    expect(b.mode).toBe('hybrid')
+    expect(b.hits.map(h => h.text).sort()).toEqual([bPara(1), bPara(2)])
+    expect(b.hits.every(h => h.similarity !== null)).toBe(true)
+
+    const a = await kb.search([base.id], 'alpha beta gamma', { tags: ['A'], topK: 20 })
+    expect(a.hits).toHaveLength(20)
+    expect(a.hits.every(h => h.text.startsWith('alpha beta gamma'))).toBe(true)
+    // Any of the tags; a tag nobody has gives nothing, and is not a reason to fail.
+    expect((await kb.search([base.id], 'alpha', { tags: ['B', 'nope'] })).hits).toHaveLength(2)
+    expect((await kb.search([base.id], 'alpha beta gamma', { tags: ['nope'] })).hits).toEqual([])
+    expect((await kb.search([base.id], 'alpha beta gamma', { tags: [] })).hits).toHaveLength(5)
+  })
+
+  test('keyword path: 60 strong keyword matches of tag A cannot crowd out the weak ones of tag B', async () => {
+    const dir = tmp()
+    const { kb } = make(dir, fake(null))
+    const base = await kb.create({ name: 'kw', chunkSize: 100, chunkOverlap: 10 })
+    const strong = Array.from({ length: 60 }, (_, i) => `${'zeta '.repeat(10)}pad${String(i).padStart(3, '0')}`).join('\n\n')
+    const text = `[tag:A]\n${strong}\n\n[tag:B]\nzeta once among many other words here xxxxxxxxxx yyyyyyyyyy\n\nzeta again with some other words around it and more padding`
+    await kb.addDocument(base.id, { name: 'kw.txt', bytes: enc(text) })
+    await kb.idle()
+    const plain = await kb.search([base.id], 'zeta')
+    expect(plain.mode).toBe('keyword')
+    expect(plain.hits.every(h => h.text.startsWith('zeta zeta'))).toBe(true)
+    const b = await kb.search([base.id], 'zeta', { tags: ['B'] })
+    expect(b.hits).toHaveLength(2)
+    expect(b.hits.every(h => h.docName === 'kw.txt' && !h.text.startsWith('zeta zeta'))).toBe(true)
+    expect(b.hits.every(h => h.bm25 !== null && h.similarity === null)).toBe(true)
+  })
+
+  test('tags are applied per knowledge base; one without a matching chunk gives nothing', async () => {
+    const dir = tmp()
+    const { kb } = make(dir, fake())
+    const one = await kb.create({ name: 'one', chunkSize: 100, chunkOverlap: 10 })
+    const two = await kb.create({ name: 'two', chunkSize: 100, chunkOverlap: 10 })
+    await kb.addDocument(one.id, { name: 'a.txt', bytes: enc('[tag:X]\nthe cat sat on the mat today') })
+    await kb.addDocument(two.id, { name: 'b.txt', bytes: enc('[tag:Y]\nthe cat sat on the mat tonight') })
+    await kb.idle()
+    expect(await kb.tags(null)).toEqual([{ tag: 'X', count: 1 }, { tag: 'Y', count: 1 }])
+    expect(await kb.tags([one.id])).toEqual([{ tag: 'X', count: 1 }])
+    expect((await kb.search(null, 'cat', { tags: ['Y'] })).hits.map(h => h.kbName)).toEqual(['two'])
+    expect((await kb.search(null, 'cat', { tags: ['X', 'Y'] })).hits.map(h => h.kbName).sort()).toEqual(['one', 'two'])
+    await expect(kb.tags(['kb-missing0'])).rejects.toMatchObject({ code: 'not-found' })
+  })
+
+  test('tags in the request are cleaned: strings only, duplicates dropped, at most 50', async () => {
+    const dir = tmp()
+    const { kb } = make(dir, fake(null))
+    const base = await kb.create({ name: 'c', chunkSize: 100, chunkOverlap: 10 })
+    await kb.addDocument(base.id, { name: 'a.txt', bytes: enc('[tag:A]\nsome words about cats') })
+    await kb.idle()
+    const many = Array.from({ length: 60 }, (_, i) => `t${i}`)
+    expect((await kb.search([base.id], 'cats', { tags: [...many, 'A'] })).hits).toEqual([]) // A is the 61st: cut
+    expect((await kb.search([base.id], 'cats', { tags: ['A', 'A', 3 as unknown as string] })).hits).toHaveLength(1)
+  })
+})
+
+describe('minSimilarity', () => {
+  async function tagged(emb = fake()) {
+    const dir = tmp()
+    const { kb } = make(dir, emb)
+    const base = await kb.create({ name: 'sim', chunkSize: 100, chunkOverlap: 10 })
+    await kb.addDocument(base.id, { name: 'pools.txt', bytes: enc(TAGGED) })
+    await kb.idle()
+    return { kb, base }
+  }
+
+  test('candidates below the floor are dropped before fusion, keyword hits too; null / absent / junk mean off', async () => {
+    const { kb, base } = await tagged()
+    const q = 'alpha delta epsilon zeta'
+    const open = await kb.search([base.id], q, { topK: 20 })
+    const sims = open.hits.map(h => h.similarity).filter((x): x is number => x !== null).sort((x, y) => x - y)
+    expect(sims.length).toBeGreaterThan(2)
+    const floor = (sims[0]! + sims[sims.length - 1]!) / 2
+    const cut = await kb.search([base.id], q, { topK: 20, minSimilarity: floor })
+    expect(cut.hits.length).toBeGreaterThan(0)
+    expect(cut.hits.length).toBeLessThan(open.hits.length)
+    // Every hit is a vector candidate at or above the floor, whichever search found it.
+    expect(cut.hits.every(h => h.similarity !== null && h.similarity >= floor)).toBe(true)
+
+    expect((await kb.search([base.id], q, { minSimilarity: 1.01 })).hits).toEqual([]) // clamped to 1
+    for (const off of [null, undefined, Number.NaN, 'x' as unknown as number]) {
+      expect((await kb.search([base.id], q, { topK: 20, minSimilarity: off })).hits).toHaveLength(open.hits.length)
+    }
+  })
+
+  test('works together with tags', async () => {
+    const { kb, base } = await tagged()
+    const q = 'alpha delta epsilon zeta'
+    expect((await kb.search([base.id], q, { tags: ['B'], minSimilarity: 0.99 })).hits).toEqual([])
+    const ok = await kb.search([base.id], q, { tags: ['B'], minSimilarity: 0.5 })
+    expect(ok.hits.length).toBeGreaterThan(0)
+    expect(ok.hits.every(h => h.similarity! >= 0.5 && h.text.startsWith('alpha delta'))).toBe(true)
+  })
+
+  test('a knowledge base searched by keyword only is not affected', async () => {
+    const dir = tmp()
+    const { kb } = make(dir, fake(null))
+    const base = await kb.create({ name: 'kwonly', chunkSize: 100, chunkOverlap: 10 })
+    await kb.addDocument(base.id, { name: 'a.txt', bytes: enc(CATS) })
+    await kb.idle()
+    const r = await kb.search([base.id], '猫喜欢吃鱼', { minSimilarity: 0.99 })
+    expect(r.mode).toBe('keyword')
+    expect(r.hits.length).toBeGreaterThan(0)
+  })
+
+  test('next to a knowledge base without vectors, only the vector one is filtered', async () => {
+    const dir = tmp()
+    const emb = fake()
+    const { kb } = make(dir, emb)
+    const withVec = await kb.create({ name: 'withvec', chunkSize: 100, chunkOverlap: 10 })
+    await kb.addDocument(withVec.id, { name: 'a.txt', bytes: enc(SPACE) })
+    await kb.idle()
+    emb.model = null
+    const noVec = await kb.create({ name: 'novec', chunkSize: 100, chunkOverlap: 10 })
+    await kb.addDocument(noVec.id, { name: 'b.txt', bytes: enc('火星是红色的行星') })
+    await kb.idle()
+    emb.model = 'embed-a'
+    const r = await kb.search(null, '火星', { minSimilarity: 0.999 })
+    expect(r.hits.some(h => h.kbName === 'novec')).toBe(true)
+    expect(r.hits.every(h => h.kbName !== 'withvec')).toBe(true)
+  })
+})
+
+describe('raw text, re-chunking and re-index', () => {
+  test('documents keep their decoded text and report tags and hasRaw', async () => {
+    const dir = tmp()
+    const { kb } = make(dir, fake(null))
+    const base = await kb.create({ name: 'raw', chunkSize: 100, chunkOverlap: 10 })
+    const doc = await kb.addDocument(base.id, { name: 'a.txt', bytes: enc('[tag:数学,物理]\n一段内容。') })
+    await kb.idle()
+    expect(doc).toMatchObject({ hasRaw: true, tags: ['数学', '物理'] })
+    const [listed] = await kb.listDocuments(base.id)
+    expect(listed).toMatchObject({ hasRaw: true, tags: ['数学', '物理'], chunkCount: 1 })
+  })
+
+  test('re-index re-chunks documents that have text with the current settings; older documents only get vectors again', async () => {
+    const dir = tmp()
+    const emb = fake()
+    const first = make(dir, emb)
+    const base = await first.kb.create({ name: 'rechunk', chunkSize: 100, chunkOverlap: 10 })
+    const long = (c: string) => `${c.repeat(55)}。`
+    const old = await first.kb.addDocument(base.id, { name: 'old.txt', bytes: enc(`${long('旧')}\n\n${long('甲')}`) })
+    const fresh = await first.kb.addDocument(base.id, { name: 'new.txt', bytes: enc(`[tag:A]\n${long('一')}\n\n${long('二')}\n\n[tag:B]\n${long('三')}`) })
+    await first.kb.idle()
+    // Each paragraph is its own chunk at 100 characters.
+    expect(old.chunkCount).toBe(2)
+    expect(fresh.chunkCount).toBe(3)
+    await first.kb.close()
+
+    // Make `old.txt` a document without text (as if it came from a schema 1 file).
+    const raw = await openDatabase(join(dir, 'kb', `${base.id}.sqlite`))
+    raw.exec("UPDATE documents SET raw = NULL WHERE name = 'old.txt'")
+    raw.close()
+
+    const second = make(dir, emb)
+    await second.kb.update(base.id, { chunkSize: 4000, chunkOverlap: 10 })
+    const before = await second.kb.listDocuments(base.id)
+    expect(before.find(d => d.name === 'old.txt')).toMatchObject({ hasRaw: false, tags: [] })
+    await second.kb.reindex(base.id)
+    await second.kb.idle()
+
+    const after = await second.kb.listDocuments(base.id)
+    // No text: the old chunks stay, only the vectors are rebuilt.
+    expect(after.find(d => d.name === 'old.txt')).toMatchObject({ chunkCount: 2, hasRaw: false, status: 'ready', vectorCount: 2 })
+    // With text: re-chunked at 4000 characters, so the two A paragraphs merge, and the tag line still splits A from B.
+    expect(after.find(d => d.name === 'new.txt')).toMatchObject({ chunkCount: 2, hasRaw: true, tags: ['A', 'B'], status: 'ready', vectorCount: 2 })
+    expect((await second.kb.get(base.id)).tags).toEqual([{ tag: 'A', count: 1 }, { tag: 'B', count: 1 }])
+    expect((await second.kb.search([base.id], '三三三', { tags: ['B'] })).hits).toHaveLength(1)
+    expect((await second.kb.get(base.id)).embedding).toEqual({ model: 'embed-a', dims: DIMS })
+    expect(second.kb.liveView().jobs).toEqual([])
+  })
+
+  test('re-index still needs the engine, and a document cannot be deleted during it', async () => {
+    const dir = tmp()
+    const emb = fake()
+    const { kb } = make(dir, emb)
+    const base = await kb.create({ name: 'eng', chunkSize: 100, chunkOverlap: 10 })
+    const doc = await kb.addDocument(base.id, { name: 'a.txt', bytes: enc('[tag:A]\n内容。') })
+    await kb.idle()
+    emb.model = null
+    await expect(kb.reindex(base.id)).rejects.toMatchObject({ code: 'engine-off' })
+    emb.model = 'embed-a'
+    emb.gate = new Promise<void>(() => {})
+    await kb.reindex(base.id)
+    for (let i = 0; i < 100 && emb.calls < 2; i++) await new Promise(r => setTimeout(r, 10))
+    await expect(kb.removeDocument(base.id, doc.id)).rejects.toMatchObject({ code: 'busy' })
+    await kb.close()
   })
 })
