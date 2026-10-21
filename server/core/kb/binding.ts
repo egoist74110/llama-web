@@ -6,7 +6,9 @@ export type KnowledgeMode = 'inject' | 'tool'
 
 export interface KnowledgeBinding {
   enabled: boolean
-  /** Knowledge base ids. */
+  /** True = every knowledge base that exists at request time (later ones included); `kbs` is then ignored. */
+  all: boolean
+  /** Knowledge base ids (used when `all` is false). */
   kbs: string[]
   mode: KnowledgeMode
   /** Hits per search, 1..20. */
@@ -19,7 +21,7 @@ export const BINDING_MAX_TOP_K = 20
 const MAX_BOUND = 50
 
 export function defaultBinding(): KnowledgeBinding {
-  return { enabled: false, kbs: [], mode: 'inject', topK: BINDING_DEFAULT_TOP_K }
+  return { enabled: false, all: false, kbs: [], mode: 'inject', topK: BINDING_DEFAULT_TOP_K }
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
@@ -41,6 +43,7 @@ export function normalizeBinding(raw: unknown): KnowledgeBinding {
   const out = defaultBinding()
   if (!isObj(raw)) return out
   out.enabled = raw.enabled === true
+  out.all = raw.all === true
   if (Array.isArray(raw.kbs)) out.kbs = [...new Set(raw.kbs.filter((x): x is string => typeof x === 'string' && x.length > 0))].slice(0, MAX_BOUND)
   if (isMode(raw.mode)) out.mode = raw.mode
   if (typeof raw.topK === 'number' && Number.isFinite(raw.topK)) out.topK = clampTopK(raw.topK)
@@ -54,6 +57,10 @@ export function parseBinding(raw: unknown): KnowledgeBinding {
   if (raw.enabled !== undefined) {
     if (typeof raw.enabled !== 'boolean') throw new BindingError('bad-knowledge')
     out.enabled = raw.enabled
+  }
+  if (raw.all !== undefined) {
+    if (typeof raw.all !== 'boolean') throw new BindingError('bad-knowledge')
+    out.all = raw.all
   }
   if (raw.kbs !== undefined) {
     if (!Array.isArray(raw.kbs) || raw.kbs.length > MAX_BOUND || !raw.kbs.every(x => typeof x === 'string' && x.length > 0)) throw new BindingError('bad-knowledge')
@@ -72,6 +79,7 @@ export function parseBinding(raw: unknown): KnowledgeBinding {
 
 /** First knowledge base id of `binding` that is not in `existing`, or null. Used when a binding is saved. */
 export function unknownBoundKb(binding: KnowledgeBinding, existing: readonly string[]): string | null {
+  if (binding.all) return null
   return binding.kbs.find(id => !existing.includes(id)) ?? null
 }
 
@@ -123,7 +131,10 @@ export function resolveKnowledge(args: {
 
   let mode: KnowledgeMode = binding?.mode ?? 'inject'
   let topK = binding?.topK ?? BINDING_DEFAULT_TOP_K
-  let wanted: string[] = binding?.enabled ? binding.kbs : []
+  // `all` = every knowledge base that exists now; the not-allowed ones are dropped silently (the caller did not name them).
+  const bindAll = !!binding?.enabled && binding.all
+  let explicit = false
+  let wanted: string[] = binding?.enabled ? (binding.all ? bases.map(b => b.id) : binding.kbs) : []
 
   if (raw !== undefined && raw !== null) {
     if (!isObj(raw)) return bad('invalid_knowledge')
@@ -145,12 +156,17 @@ export function resolveKnowledge(args: {
         if (!ids.includes(hit.id)) ids.push(hit.id)
       }
       wanted = ids
+      explicit = true
     }
   }
 
   const existing = new Set(bases.map(b => b.id))
   const skipped = wanted.filter(id => !existing.has(id))
   const kbs = wanted.filter(id => existing.has(id))
+  if (allowed && bindAll && !explicit) {
+    const permitted = kbs.filter(id => allowed.includes(id))
+    return { ok: true, effective: permitted.length ? { mode, kbs: permitted, topK } : null, skipped }
+  }
   if (allowed) {
     const denied = kbs.find(id => !allowed.includes(id))
     if (denied) return { ok: false, status: 403, code: 'kb_forbidden', name: bases.find(b => b.id === denied)?.name ?? denied }

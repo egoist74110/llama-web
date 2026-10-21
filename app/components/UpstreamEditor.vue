@@ -2,6 +2,8 @@
 // Add / edit one external upstream in a slide-over. The API key is write-only: the list only says whether one is
 // saved, a blank box keeps it, "clear" removes it. Server messages (Chinese) are shown as they come.
 import { t } from '../composables/useLocale'
+import { bindingIncomplete } from '~/utils/kb'
+import type { KnowledgeBinding } from '~~/server/core/kb/binding'
 import type { ConnectionView } from '~~/server/core/upstreams'
 
 const props = defineProps<{ open: boolean, upstream: ConnectionView | null }>()
@@ -13,6 +15,10 @@ const open = computed({ get: () => props.open, set: v => emit('update:open', v) 
 const isNew = computed(() => !props.upstream)
 
 const form = reactive({ name: '', baseUrl: '', monitorUrl: '', apiKey: '', clearKey: false, manualModels: '', startCommand: '', startCwd: '' })
+// What "on" starts as: every knowledge base (including later ones), injected, 5 hits.
+const knowledge = ref<KnowledgeBinding>({ enabled: false, all: true, kbs: [], mode: 'inject', topK: 5 })
+const knowledgeIncomplete = computed(() => bindingIncomplete(knowledge.value))
+const kb = t.kbBinding
 const ui = usePlatformUi()
 const toast = useToast()
 const saving = ref(false)
@@ -30,6 +36,8 @@ watch(() => props.open, (o) => {
   form.manualModels = u?.manualModels.join('\n') ?? ''
   form.startCommand = u?.startCommand ?? ''
   form.startCwd = u?.startCwd ?? ''
+  const b = u?.knowledge
+  knowledge.value = b ? { ...b, kbs: [...b.kbs], all: b.enabled ? b.all : b.all || b.kbs.length === 0 } : { enabled: false, all: true, kbs: [], mode: 'inject', topK: 5 }
   error.value = ''
 })
 
@@ -37,7 +45,7 @@ const messageOf = (e: unknown) => {
   const err = e as { data?: { message?: string }, statusMessage?: string, message?: string }
   return err?.data?.message ?? err?.statusMessage ?? err?.message ?? String(e)
 }
-const ready = computed(() => !!form.name.trim() && !!form.baseUrl.trim())
+const ready = computed(() => !!form.name.trim() && !!form.baseUrl.trim() && !knowledgeIncomplete.value)
 
 async function copyPrompt() {
   try {
@@ -59,6 +67,7 @@ async function save() {
     manualModels: form.manualModels.split('\n').map(x => x.trim()).filter(Boolean),
     startCommand: form.startCommand.trim(),
     startCwd: form.startCwd.trim(),
+    knowledge: knowledge.value,
   }
   if (form.clearKey) body.apiKey = ''
   else if (form.apiKey.trim()) body.apiKey = form.apiKey.trim()
@@ -146,6 +155,12 @@ async function save() {
             {{ f.startCwdHint }}
           </p>
         </UFormField>
+        <section class="rounded-[10px] border border-default px-3.5 py-3">
+          <p class="m-0 mb-2.5 text-xs text-dimmed">
+            {{ kb.upstreamHint }}
+          </p>
+          <KnowledgeBindingForm v-model="knowledge" />
+        </section>
         <details class="rounded-[10px] border border-default px-3.5 py-2.5 text-[13px]">
           <summary class="cursor-pointer font-medium">
             {{ f.guide.title }}

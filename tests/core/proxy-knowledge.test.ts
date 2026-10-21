@@ -3,9 +3,9 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { defaultSettings, normalizeModels, type ModelsDoc } from '../../server/core/config'
 import { setLocale, t } from '../../server/core/i18n'
-import { normalizeBinding, parseBinding, resolveKnowledge, type KnowledgeBinding } from '../../server/core/kb/binding'
+import { normalizeBinding, parseBinding, resolveKnowledge, unknownBoundKb, type KnowledgeBinding } from '../../server/core/kb/binding'
 import { createProxy, type KnowledgeDeps, type ProxyEvent } from '../../server/core/proxy'
-import { ProfileError, sanitizeForm, saveProfile } from '../../server/core/models-admin'
+import { ProfileError, sanitizeForm, sanitizeKnowledge, saveProfile, setModelKnowledge } from '../../server/core/models-admin'
 import type { RequestRecord } from '../../server/core/request-log'
 import type { Lease, Target } from '../../server/core/scheduler'
 import { cleanKnowledge, createUpstream, defaultUpstreams, normalizeUpstreams, UPSTREAMS_MIGRATIONS, UPSTREAMS_VERSION, updateUpstream, UpstreamError, type UpstreamsDoc } from '../../server/core/upstreams'
@@ -14,7 +14,7 @@ setLocale('zh-CN')
 
 const BASES = [{ id: 'kb-aaaa1111', name: 'Manual' }, { id: 'kb-bbbb2222', name: '手册' }]
 const HIT = { docName: '手册.txt', startLine: 12, headingPath: '第一章 > 安装', text: '步骤一：先装驱动。' }
-const bind = (over: Partial<KnowledgeBinding> = {}): KnowledgeBinding => ({ enabled: true, kbs: ['kb-aaaa1111'], mode: 'inject', topK: 5, ...over })
+const bind = (over: Partial<KnowledgeBinding> = {}): KnowledgeBinding => ({ enabled: true, all: false, kbs: ['kb-aaaa1111'], mode: 'inject', topK: 5, ...over })
 const UPSTREAM_KEY = 'sk-upstream-own-key-0123456789' // pre-commit:allow fake test key
 
 const closers: Array<() => unknown> = []
@@ -58,6 +58,31 @@ describe('resolveKnowledge', () => {
     expect(resolve(undefined, bind(), [])).toMatchObject({ ok: false, code: 'kb_forbidden' })
   })
 
+  test('all: every knowledge base that exists now, also ones created later; kbs is ignored', () => {
+    const all = bind({ all: true, kbs: ['kb-aaaa1111'] })
+    expect(resolve(undefined, all)).toEqual({ ok: true, effective: { mode: 'inject', kbs: ['kb-aaaa1111', 'kb-bbbb2222'], topK: 5 }, skipped: [] })
+    const later = [...BASES, { id: 'kb-cccc3333', name: 'Later' }]
+    expect(resolve(undefined, all, null, later)).toMatchObject({ effective: { kbs: ['kb-aaaa1111', 'kb-bbbb2222', 'kb-cccc3333'] } })
+    expect(resolve(undefined, bind({ all: true, enabled: false }))).toMatchObject({ ok: true, effective: null })
+    expect(resolve(undefined, bind({ all: true, kbs: [] }), null, [])).toMatchObject({ ok: true, effective: null, skipped: [] })
+  })
+
+  test('all with an allowed list drops the not-allowed ones silently (no 403)', () => {
+    const all = bind({ all: true })
+    expect(resolve(undefined, all, ['kb-bbbb2222'])).toEqual({ ok: true, effective: { mode: 'inject', kbs: ['kb-bbbb2222'], topK: 5 }, skipped: [] })
+    expect(resolve(undefined, all, [])).toEqual({ ok: true, effective: null, skipped: [] })
+    // Named knowledge bases in the binding keep the 403.
+    expect(resolve(undefined, bind(), ['kb-bbbb2222'])).toMatchObject({ ok: false, status: 403 })
+  })
+
+  test('with all, the request field still wins: kbs replaces, false disables, mode / top_k override', () => {
+    const all = bind({ all: true })
+    expect(resolve({ kbs: ['manual'] }, all)).toMatchObject({ effective: { kbs: ['kb-aaaa1111'] } })
+    expect(resolve({ kbs: ['manual'] }, all, ['kb-bbbb2222'])).toMatchObject({ ok: false, status: 403 }) // named in the request
+    expect(resolve(false, all)).toMatchObject({ ok: true, effective: null })
+    expect(resolve({ mode: 'tool', top_k: 3 }, all)).toMatchObject({ effective: { mode: 'tool', topK: 3, kbs: ['kb-aaaa1111', 'kb-bbbb2222'] } })
+  })
+
   test('a bound knowledge base that was deleted is skipped', () => {
     expect(resolve(undefined, bind({ kbs: ['kb-gone0000', 'kb-aaaa1111'] }))).toMatchObject({ effective: { kbs: ['kb-aaaa1111'] }, skipped: ['kb-gone0000'] })
     expect(resolve(undefined, bind({ kbs: ['kb-gone0000'] }))).toEqual({ ok: true, effective: null, skipped: ['kb-gone0000'] })
@@ -66,9 +91,15 @@ describe('resolveKnowledge', () => {
 
 describe('configuration', () => {
   test('normalizeBinding repairs hand edits; parseBinding refuses wrong types', () => {
-    expect(normalizeBinding({ enabled: 'yes', kbs: ['a', 3, 'a'], mode: 'x', topK: 99 })).toEqual({ enabled: false, kbs: ['a'], mode: 'inject', topK: 20 })
-    expect(normalizeBinding(null)).toEqual({ enabled: false, kbs: [], mode: 'inject', topK: 5 })
-    expect(parseBinding({ enabled: true, kbs: ['a'] })).toEqual({ enabled: true, kbs: ['a'], mode: 'inject', topK: 5 })
+    expect(normalizeBinding({ enabled: 'yes', kbs: ['a', 3, 'a'], mode: 'x', topK: 99 })).toEqual({ enabled: false, all: false, kbs: ['a'], mode: 'inject', topK: 20 })
+    expect(normalizeBinding(null)).toEqual({ enabled: false, all: false, kbs: [], mode: 'inject', topK: 5 })
+    expect(parseBinding({ enabled: true, kbs: ['a'] })).toEqual({ enabled: true, all: false, kbs: ['a'], mode: 'inject', topK: 5 })
+    expect(normalizeBinding({ enabled: true, all: true })).toMatchObject({ all: true })
+    expect(normalizeBinding({ enabled: true, all: 'yes' })).toMatchObject({ all: false })
+    expect(parseBinding({ enabled: true, all: true })).toMatchObject({ all: true, kbs: [] })
+    expect(() => parseBinding({ all: 'yes' })).toThrow()
+    expect(unknownBoundKb(bind({ all: true, kbs: ['kb-gone'] }), ['kb-aaaa1111'])).toBeNull()
+    expect(unknownBoundKb(bind({ kbs: ['kb-gone'] }), ['kb-aaaa1111'])).toBe('kb-gone')
     for (const bad of [null, 'x', { enabled: 1 }, { kbs: 'a' }, { mode: 'rag' }, { topK: 'x' }]) expect(() => parseBinding(bad)).toThrow()
   })
 
@@ -81,7 +112,7 @@ describe('configuration', () => {
       }],
     } as ModelsDoc)
     expect(doc.models[0]!.profiles.a!.knowledge).toBeUndefined()
-    expect(doc.models[0]!.profiles.b!.knowledge).toEqual({ enabled: true, kbs: ['x'], mode: 'tool', topK: 3 })
+    expect(doc.models[0]!.profiles.b!.knowledge).toEqual({ enabled: true, all: false, kbs: ['x'], mode: 'tool', topK: 3 })
     expect(doc.models[0]!.profiles.c!.knowledge).toBeUndefined()
   })
 
@@ -101,9 +132,9 @@ describe('configuration', () => {
   test('upstreams.json v1 -> v2 adds the default binding; new upstreams carry it; edits validate it', () => {
     expect(UPSTREAMS_VERSION).toBe(2)
     const migrated = UPSTREAMS_MIGRATIONS[1]!({ version: 1, upstreams: [{ id: 'u-1', name: 'A', baseUrl: 'http://x/v1' }, { id: 'u-2', name: 'B', baseUrl: 'http://x/v1', knowledge: bind() }] })
-    expect(migrated.upstreams[0].knowledge).toEqual({ enabled: false, kbs: [], mode: 'inject', topK: 5 })
+    expect(migrated.upstreams[0].knowledge).toEqual({ enabled: false, all: false, kbs: [], mode: 'inject', topK: 5 })
     expect(migrated.upstreams[1].knowledge).toEqual(bind())
-    expect(normalizeUpstreams({ version: 1, upstreams: [{ id: 'u1', name: 'A', baseUrl: 'http://x/v1' } as any] }).upstreams[0]!.knowledge).toEqual({ enabled: false, kbs: [], mode: 'inject', topK: 5 })
+    expect(normalizeUpstreams({ version: 1, upstreams: [{ id: 'u1', name: 'A', baseUrl: 'http://x/v1' } as any] }).upstreams[0]!.knowledge).toEqual({ enabled: false, all: false, kbs: [], mode: 'inject', topK: 5 })
 
     const ctx = { localNames: [], selfPorts: [], kbIds: ['kb-aaaa1111'] }
     const doc: UpstreamsDoc = defaultUpstreams()
@@ -114,6 +145,9 @@ describe('configuration', () => {
     updateUpstream(doc, u.id, { name: 'Strata2' }, ctx)
     expect(u.knowledge.enabled).toBe(false) // untouched when absent
     const code = (fn: () => unknown) => { try { fn() } catch (e) { return (e as UpstreamError).code } }
+    updateUpstream(doc, u.id, { knowledge: { enabled: true, all: true, mode: 'tool', topK: 7 } }, ctx)
+    expect(u.knowledge).toEqual({ enabled: true, all: true, kbs: [], mode: 'tool', topK: 7 })
+    expect(createUpstream(doc, { name: 'Other', baseUrl: 'http://x/v1', knowledge: { enabled: true, all: true, kbs: ['kb-gone'] } }, ctx).knowledge).toMatchObject({ all: true }) // `all` needs no existing id
     expect(code(() => cleanKnowledge(bind({ kbs: ['kb-zzzz'] }), ctx))).toBe('kb-not-found')
     expect(code(() => cleanKnowledge('x', ctx))).toBe('bad-knowledge')
   })
@@ -184,6 +218,8 @@ interface LeaseRec { released: number, acquired: Target | null, ac: AbortControl
 function setup(opts: {
   rounds: Round[]
   profile?: KnowledgeBinding
+  /** The model-level binding (`ModelConfig.knowledge`). */
+  model?: KnowledgeBinding
   upstream?: KnowledgeBinding
   hits?: Array<typeof HIT> | ((q: string) => Array<typeof HIT>)
   searchError?: boolean
@@ -194,7 +230,7 @@ function setup(opts: {
   const srv = scriptedServer(opts.rounds)
   const models: ModelsDoc = {
     version: 1,
-    models: [{ id: 'a', name: 'Alpha', backend: 'llama-server', file: { dirId: 'd', rel: 'a.gguf' }, mmproj: null, draft: null, activeProfile: 'default',
+    models: [{ id: 'a', name: 'Alpha', backend: 'llama-server', file: { dirId: 'd', rel: 'a.gguf' }, mmproj: null, draft: null, activeProfile: 'default', ...(opts.model ? { knowledge: opts.model } : {}),
       profiles: { default: { overrides: {}, extraArgs: '' }, KB: { overrides: {}, extraArgs: '', ...(opts.profile ? { knowledge: opts.profile } : {}) } } }],
   }
   const upstreams: UpstreamsDoc = defaultUpstreams()
@@ -305,6 +341,54 @@ describe('the knowledge field', () => {
     expect(s.searches).toHaveLength(0)
     await s.post(chat({ model: 'Alpha:KB' }))
     expect(s.searches).toHaveLength(1)
+  })
+
+  test('the model-level binding applies to the plain name and to profiles without their own', async () => {
+    const s = setup({ rounds: [() => jsonAnswer('ok')], model: bind({ all: true }) })
+    await s.post(chat({ model: 'Alpha' }))
+    expect(s.searches).toHaveLength(1)
+    expect(s.searches[0]!.ids).toEqual(['kb-aaaa1111', 'kb-bbbb2222'])
+    await s.post(chat({ model: 'Alpha:default' }))
+    expect(s.searches).toHaveLength(2)
+    await s.post(chat({ model: 'Alpha:KB' })) // the KB profile has no binding of its own either
+    expect(s.searches).toHaveLength(3)
+  })
+
+  test('a profile binding replaces the model binding, a disabled one switches it off', async () => {
+    const s = setup({ rounds: [() => jsonAnswer('ok')], model: bind({ all: true }), profile: bind({ kbs: ['kb-bbbb2222'], mode: 'inject', topK: 2 }) })
+    await s.post(chat({ model: 'Alpha:KB' }))
+    expect(s.searches).toEqual([{ ids: ['kb-bbbb2222'], q: '怎么安装？', topK: 2 }])
+    const off = setup({ rounds: [() => jsonAnswer('ok')], model: bind({ all: true }), profile: bind({ enabled: false }) })
+    await off.post(chat({ model: 'Alpha:KB' }))
+    expect(off.searches).toHaveLength(0)
+    await off.post(chat({ model: 'Alpha:default' })) // other profiles still follow the model
+    expect(off.searches).toHaveLength(1)
+  })
+
+  test('models.json: the model-level binding normalizes, a bad one is dropped (no version bump)', () => {
+    const mk = (knowledge: unknown) => normalizeModels({ version: 1, models: [{ id: 'm', name: 'M', backend: 'llama-server', file: { dirId: 'd', rel: 'a.gguf' }, mmproj: null, draft: null, activeProfile: 'a', profiles: { a: { overrides: {}, extraArgs: '' } }, ...(knowledge === undefined ? {} : { knowledge }) }] } as ModelsDoc).models[0]!
+    expect(mk(undefined).knowledge).toBeUndefined()
+    expect(mk({ enabled: true, all: true, kbs: ['x', 3], mode: 'tool', topK: 99 }).knowledge).toEqual({ enabled: true, all: true, kbs: ['x'], mode: 'tool', topK: 20 })
+    expect(mk({ enabled: true, kbs: ['x'] }).knowledge).toEqual({ enabled: true, all: false, kbs: ['x'], mode: 'inject', topK: 5 }) // old shape: no `all`
+    expect(mk('junk').knowledge).toBeUndefined()
+    expect(mk([]).knowledge).toBeUndefined()
+  })
+
+  test('setModelKnowledge saves, clears and refuses unknown knowledge bases; it never touches the profiles', () => {
+    const doc: ModelsDoc = { version: 1, models: [{ id: 'm', name: 'M', backend: 'llama-server', file: { dirId: 'd', rel: 'a.gguf' }, mmproj: null, draft: null, activeProfile: 'a', profiles: { a: { overrides: {}, extraArgs: '' } } }] }
+    const ids = ['kb-aaaa1111']
+    setModelKnowledge(doc, 'm', sanitizeKnowledge({ enabled: true, all: true, kbs: [], mode: 'inject', topK: 5 }), ids)
+    expect(doc.models[0]!.knowledge).toEqual({ enabled: true, all: true, kbs: [], mode: 'inject', topK: 5 })
+    setModelKnowledge(doc, 'm', sanitizeKnowledge({ enabled: true, kbs: ['kb-aaaa1111'], mode: 'tool' }), ids)
+    expect(doc.models[0]!.knowledge).toEqual({ enabled: true, all: false, kbs: ['kb-aaaa1111'], mode: 'tool', topK: 5 })
+    const code = (fn: () => unknown) => { try { fn() } catch (e) { return (e as ProfileError).code } }
+    expect(code(() => setModelKnowledge(doc, 'm', sanitizeKnowledge({ enabled: true, kbs: ['kb-zzzz'] }), ids))).toBe('kb-not-found')
+    expect(code(() => sanitizeKnowledge('junk'))).toBe('bad-knowledge')
+    expect(code(() => setModelKnowledge(doc, 'nope', null, ids))).toBe('model-not-found')
+    expect(doc.models[0]!.knowledge!.kbs).toEqual(['kb-aaaa1111']) // the refused save changed nothing
+    setModelKnowledge(doc, 'm', sanitizeKnowledge(null), ids)
+    expect(doc.models[0]!.knowledge).toBeUndefined()
+    expect(doc.models[0]!.profiles.a!.knowledge).toBeUndefined()
   })
 
   test('a bound knowledge base that was deleted is skipped and an event says so', async () => {

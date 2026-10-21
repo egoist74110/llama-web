@@ -393,6 +393,18 @@ export function saveProfile(doc: ModelsDoc, modelId: string, name: string, form:
   return profile
 }
 
+/**
+ * The model's knowledge binding (decision 65 ⑨); null clears it (= off). A binding to a named knowledge base needs
+ * the base to exist now (`all` needs none). Applied per request, so nothing restarts.
+ */
+export function setModelKnowledge(doc: ModelsDoc, modelId: string, binding: KnowledgeBinding | null, kbIds?: readonly string[]): void {
+  const model = findModel(doc, modelId)
+  const missing = binding && kbIds ? unknownBoundKb(binding, kbIds) : null
+  if (missing) throw new ProfileError('kb-not-found', 'kb-not-found', missing)
+  if (binding) model.knowledge = binding
+  else delete model.knowledge
+}
+
 /** The model's own llama.cpp build (profiles can still choose their own); null follows the global version. */
 export function setModelRuntime(doc: ModelsDoc, modelId: string, ref: string | null, runtimeOk?: (ref: string) => boolean): void {
   const model = findModel(doc, modelId)

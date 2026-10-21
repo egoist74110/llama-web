@@ -5,10 +5,12 @@ import { t } from '../composables/useLocale'
 import { profileLabel } from '~/utils/profile-label'
 import type { LaunchDefaults } from '~~/server/core/args'
 import type { ModelConfig } from '~~/server/core/config'
+import { bindingIncomplete } from '~/utils/kb'
+import type { KnowledgeBinding } from '~~/server/core/kb/binding'
 import type { ScanEntry } from '~~/server/core/scanner'
 import type { FileRef } from '~~/server/core/types'
 
-const props = defineProps<{ modelId: string, initialProfile?: string, initialTab?: 'files' | 'profiles' | 'params' }>()
+const props = defineProps<{ modelId: string, initialProfile?: string, initialTab?: 'files' | 'profiles' | 'params' | 'knowledge' }>()
 const open = defineModel<boolean>('open', { default: false })
 
 type Detail = { model: ModelConfig, defaults: LaunchDefaults, templates: string[], up: string[], inUse: string[] }
@@ -24,13 +26,14 @@ const scanFailed = ref(false)
 const loadError = ref('')
 const selected = ref('')
 const removing = ref(false)
-type EditTab = 'files' | 'profiles' | 'params'
+type EditTab = 'files' | 'profiles' | 'params' | 'knowledge'
 const editTab = ref<EditTab>('files')
 // Computeds: the labels are read again when the interface language changes.
 const editTabs = computed<Array<{ value: EditTab, label: string }>>(() => [
   { value: 'files', label: edit.tabs.files },
   { value: 'profiles', label: edit.tabs.profiles },
   { value: 'params', label: edit.tabs.params },
+  { value: 'knowledge', label: edit.tabs.knowledge },
 ])
 
 const url = computed(() => `/api/models/${encodeURIComponent(props.modelId)}`)
@@ -82,6 +85,38 @@ const profileNames = computed(() => Object.keys(model.value?.profiles ?? {}))
 const isUp = (name: string) => !!detail.value?.up.includes(name)
 const isInUse = (name: string) => isUp(name) || !!detail.value?.inUse.includes(name)
 const anyUp = computed(() => !!detail.value?.up.length)
+
+// ---- Knowledge (model-level binding; applied per request, so saving never restarts the model) --------------
+const kb = t.kbBinding
+// What "on" starts as: every knowledge base (including later ones), injected, 5 hits.
+const knowledgeOff = (): KnowledgeBinding => ({ enabled: false, all: true, kbs: [], mode: 'inject', topK: 5 })
+const kn = ref<KnowledgeBinding>(knowledgeOff())
+const knSaving = ref(false)
+const savedKn = computed(() => JSON.stringify(model.value?.knowledge ?? null))
+const savedKnKey = computed(() => (model.value?.knowledge?.enabled ? savedKn.value : 'null'))
+const knKey = (b: KnowledgeBinding) => JSON.stringify(b.enabled ? b : null)
+// Re-seed from the stored model only when the stored binding changes (not on every reload).
+watch(savedKn, () => {
+  const b = model.value?.knowledge
+  kn.value = b ? { ...b, kbs: [...b.kbs], all: b.enabled ? b.all : b.all || b.kbs.length === 0 } : knowledgeOff()
+}, { immediate: true })
+const knDirty = computed(() => knKey(kn.value) !== savedKnKey.value)
+const knIncomplete = computed(() => bindingIncomplete(kn.value))
+
+async function saveKnowledge() {
+  if (knSaving.value || knIncomplete.value || !knDirty.value) return
+  knSaving.value = true
+  try {
+    await $fetch(`${url.value}/knowledge`, { method: 'POST', body: { knowledge: kn.value.enabled ? kn.value : null } })
+    toast.add({ title: kb.saved, color: 'success', icon: 'i-lucide-check' })
+    await loadDetail()
+  } catch (e) {
+    const err = e as { data?: { message?: string }, message?: string }
+    toast.add({ title: kb.saveFailed, description: err.data?.message ?? err.message, color: 'error', icon: 'i-lucide-circle-alert' })
+  } finally {
+    knSaving.value = false
+  }
+}
 
 // ---- Files -----------------------------------------------------------------------------------
 const refKey = (r: FileRef | null) => (r ? JSON.stringify([r.dirId, r.rel]) : '')
@@ -236,6 +271,7 @@ const pendingTitle = computed(() => {
             {{ x.label }}
             <span v-if="x.value === 'files' && filesDirty" class="text-warning">*</span>
             <span v-if="x.value === 'params' && anyDirty" class="text-warning">*</span>
+            <span v-if="x.value === 'knowledge' && knDirty" class="text-warning">*</span>
           </button>
         </div>
 
@@ -382,6 +418,22 @@ const pendingTitle = computed(() => {
             @dirty="(d: boolean) => { dirty[name] = d }"
             @save="(form: object, restart: boolean) => saveForm(name, form, restart)"
           />
+        </div>
+
+        <div v-show="editTab === 'knowledge'" class="flex flex-col gap-4">
+          <p class="m-0 text-xs text-dimmed">
+            {{ kb.modelHint }}
+          </p>
+          <KnowledgeBindingForm v-model="kn" />
+          <p class="m-0 text-xs text-dimmed">
+            {{ kb.profileNote }}
+          </p>
+          <div class="flex flex-wrap items-center gap-2">
+            <UButton size="sm" icon="i-lucide-save" :disabled="!knDirty || knIncomplete" :loading="knSaving" @click="saveKnowledge">
+              {{ kb.save }}
+            </UButton>
+            <span v-if="knDirty" class="text-xs text-warning">{{ kb.dirty }}</span>
+          </div>
         </div>
       </template>
     </template>

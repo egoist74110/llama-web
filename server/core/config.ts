@@ -126,7 +126,10 @@ export interface Profile extends Pick<GpuChoice, 'devices' | 'splitMode' | 'tens
    * A GPU group (`devices`, two or more ids, with `splitMode` / `tensorSplit` / `mainGpu`) replaces it, see gpu-group.ts.
    */
   device?: string | null
-  /** Knowledge this profile uses (decision 65 ⑨); absent = none. Applies to every request this profile serves (`model:profile`, or the plain name while it is the current profile). */
+  /**
+   * Knowledge this profile uses (decision 65 ⑨). Absent = follow the model's own binding (`ModelConfig.knowledge`);
+   * present (even `enabled: false`) replaces it. Applies to every request this profile serves (`model:profile`, or the plain name while it is the current profile).
+   */
   knowledge?: KnowledgeBinding
 }
 
@@ -149,6 +152,8 @@ export interface ModelConfig extends Pick<GpuChoice, 'devices' | 'splitMode' | '
   runtime?: string | null
   /** Device for this model (see Profile.device); a profile's own choice wins. Empty = follow the global default. */
   device?: string | null
+  /** Knowledge for every request this model serves (decision 65 ⑨); absent = off. A profile's own binding wins. */
+  knowledge?: KnowledgeBinding
   /** Placeholder, not used yet. */
   reserved?: { pinned: boolean, idleUnloadMin: number }
 }
@@ -454,6 +459,7 @@ export function normalizeModels(doc: ModelsDoc): ModelsDoc {
     cleanStoredChoice(m)
     for (const p of Object.values(m.profiles)) if (isObj(p)) cleanStoredChoice(p)
     // Knowledge binding (decision 65 ⑨): optional, so no version bump; a malformed one is cleaned, a non-object dropped.
+    if (m.knowledge !== undefined) { if (isObj(m.knowledge)) m.knowledge = normalizeBinding(m.knowledge); else delete m.knowledge }
     for (const p of Object.values(m.profiles)) if (isObj(p) && p.knowledge !== undefined) { if (isObj(p.knowledge)) p.knowledge = normalizeBinding(p.knowledge); else delete p.knowledge }
   }
   return doc

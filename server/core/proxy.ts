@@ -1145,8 +1145,8 @@ export function createProxy(deps: ProxyDeps) {
       if (hasImages(json) && !model.mmproj) {
         return errorResponse(400, 'image_without_mmproj', fmt(t.api.imageWithoutMmproj, { model: model.name }))
       }
-      // Knowledge (decision 65 ⑨): the profile's binding and the request's own field; the field is removed from the body.
-      const kn = await applyKnowledge(req, trace, json, path, profile.knowledge, meta)
+      // Knowledge (decision 65 ⑨): the profile's binding (when it has one, even a disabled one) over the model's, and the request's own field; the field is removed from the body.
+      const kn = await applyKnowledge(req, trace, json, path, profile.knowledge ?? model.knowledge, meta)
       if ('error' in kn) return kn.error
       tool = kn.tool
       try {

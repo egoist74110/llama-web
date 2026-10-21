@@ -38,3 +38,8 @@ export function fileToBase64(file: Blob): Promise<string> {
 export function jobsKey(jobs: ReadonlyArray<{ kind: string, kbId: string, docId: number | null, state: string }>): string {
   return jobs.map(j => `${j.kind}:${j.kbId}:${j.docId ?? ''}:${j.state}`).join('|')
 }
+
+/** A knowledge binding that cannot be saved: on, choosing named knowledge bases, but none picked. */
+export function bindingIncomplete(b: { enabled: boolean, all: boolean, kbs: readonly string[] }): boolean {
+  return b.enabled && !b.all && b.kbs.length === 0
+}

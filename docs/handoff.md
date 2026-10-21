@@ -1,5 +1,14 @@
 # 交接记录
 
+## 2026-10-21 · 15-4 续：本机模型「使用知识库」开关 + 外部上游开关界面 · 同一会话续
+- 起因：上一条交接里用户指定的下一步。Opus 5.5 写规格（会话草稿 `15-4b-spec.md`，不在仓库里），Sonnet 5.5 实现，Opus 审查并复跑。
+- 实现：`KnowledgeBinding` 加 `all`（全部知识库，按请求时现有的算，新建的也算；受限 key 时静默去掉不允许的，请求里点名的仍 403）；`ModelConfig.knowledge?`（缺省 = 关，载入时规范化，models 版本不变）；`setModelKnowledge` + `POST /api/models/:id/knowledge`（null = 关，未知知识库拒绝，不重启模型）；本机请求用 `profile.knowledge ?? model.knowledge`（方案有绑定就算，包括关掉的）；`app/components/KnowledgeBindingForm.vue`（开关、全部 / 指定、注入 / 工具与说明、条数 1–20、没有知识库时的提示与链接、指定却没选时拦住保存）；模型编辑新增「知识库」页签（单独保存）；外部上游编辑新增知识库一节（随原保存发出）；中英文案；`tests/core/proxy-knowledge.test.ts` 新增用例。
+- 实际运行：`bun test` 1772 pass / 8 skip / 0 fail（子代理与我各一次）；`bun run typecheck` exit 0（我复跑）；`git diff --check` 只有 CRLF 提示；子代理 `bun run build` exit 0。子代理用构建产物 + 临时数据目录（`LLAMA_WEB_DATA`）在内置浏览器里：模型「知识库」页签开关、指定一个库 + 工具模式保存并刷新后仍在；外部上游打开开关保存为 `all:true`；深色 375 宽中英文都无横向滚动；未知知识库返回 400。
+- 没有运行：浅色 375 宽；真实 llama-server / 外部上游经界面配置后的注入与工具模式；方案编辑里的绑定界面（留在 15-5）。
+- 用户验证步骤：`bun scripts/launch.ts web build` → http://127.0.0.1:5001 →「模型」打开某个模型的编辑 →「知识库」页签打开开关（默认全部 / 注入 / 5）保存 → 用对话页或任意客户端问知识库里的内容，看回答是否用到片段、「请求记录」里有知识库摘要；再切到工具模式试一次；外部上游同理在服务编辑里打开。
+- 下一步：用户真机验证注入 / 工具模式（15-4 剩下的一项）；之后按计划做 15-2 / 15-3 / 15-5 余项。
+- `src-tauri/Cargo.lock` 的改动在会话开始前就有，仍未提交。
+
 ## 2026-10-21 · 15-4 后端：本机模型与外部上游用知识库（注入 / 工具）· 同一会话续
 - 起因：用户验证 15-1 + 知识库页能拿到需要的内容；要求本机模型接上知识库，外部上游也要，但每个服务要有开关。之后又补充：本机模型也要开关，默认关，打开后选知识库（默认全部）和方式，由人自己选——列为下一个任务。规格写在会话共享笔记 `15-4-spec.md`（不在仓库里），要点已进决定 65 ⑨⑩⑪。
 - 实现（Sonnet 5.5）：`server/core/kb/binding.ts`（绑定类型、请求字段 `knowledge` 解析与合并）、`inject.ts`（取最后一条用户消息、编号出处片段、system 注入、`search_knowledge` 工具增删）、`tool-loop.ts`（SSE 拆分、流式工具调用拼装、用量合并）；`proxy.ts` 接入（无知识库的请求仍走原 `forward()`）；`Profile.knowledge`（可选字段，models 版本不变）；`upstreams.json` v2 迁移加 `knowledge`（默认关）；保存时校验知识库存在；请求记录加 `knowledge` 摘要；新事件 `kb-error` / `kb-skipped`；`tests/core/proxy-knowledge.test.ts` 43 条。

@@ -1158,7 +1158,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
     <li class="task" data-done="true"><span class="t">注入模式：最后一条用户消息检索、带编号与出处的 system 片段（决定 65 ⑩）</span><span class="when">2026-10-21</span></li>
     <li class="task" data-done="true"><span class="t">工具模式：加入 <code>search_knowledge</code>、网关执行并续写，最多 3 轮，非流式与流式（同一个 SSE 响应）；混合客户端工具时整轮原样交给客户端（决定 65 ⑪）</span><span class="when">2026-10-21</span></li>
     <li class="task" data-done="false"><span class="t">请求记录记命中知识库与条数（决定 65 ⑫）；真机用本机模型分别跑注入与工具模式</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t"><b>下一个做</b>（用户 2026-10-21 要求）：本机模型的「使用知识库」开关（每个模型，默认关）；打开后选知识库（默认「全部」，新建的知识库也算进去）和模式（注入 / 工具）、条数；方案绑定可覆盖它；界面放在模型编辑里，后端在 <code>models.json</code> 加字段与校验</span><span class="when"></span></li>
+    <li class="task" data-done="true"><span class="t">本机模型的「使用知识库」开关（每个模型，默认关；用户 2026-10-21 要求）；打开后选知识库（默认「全部」，绑定里的 <code>all</code>，新建的知识库也算进去；受限的 key 静默去掉不允许的）和模式（注入 / 工具）、条数；方案绑定（有就算，包括关掉的）覆盖它；模型编辑里新增「知识库」页签，<code>POST /api/models/:id/knowledge</code>，不重启模型。外部上游编辑里的知识库开关界面一并完成（同一个组件 <code>KnowledgeBindingForm</code>）</span><span class="when">2026-10-21</span></li>
   </ul>
 
   <h3>15-5 · 界面（Sonnet 5.5）</h3>
@@ -1172,6 +1172,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 <section id="changelog">
   <h2>变更记录</h2>
   <table>
+    <tr><td>2026-10-21</td><td>15-4 续（Sonnet 5.5）：本机模型每个模型的「使用知识库」开关与界面、外部上游的知识库开关界面；绑定加 <code>all</code>（全部知识库，按请求时现有的算）；本机请求用方案绑定，没有时用模型绑定（决定 65 ⑨）</td></tr>
     <tr><td>2026-10-21</td><td>15-4 后端完成（Sonnet 5.5，只有假上游测试）：方案 / 外部上游（<code>upstreams.json</code> v2）绑定知识库、请求字段 <code>knowledge</code>、注入模式、工具模式（非流式与流式、最多 3 轮）、请求记录的知识库摘要。决定 65 ⑨ 补：本机模型每个模型一个知识库开关（默认关，打开后选知识库默认全部与模式），列为下一个任务；外部上游按服务开关；只作用于 chat/completions 等细则</td></tr>
     <tr><td>2026-10-20</td><td>新增关键决定 65（用户 2026-10-20 确认：注入与工具两种方式都要并可切换、MCP 放在 <code>/v1/mcp</code>、API key 可限制知识库且默认全部、第一版不做 rerank、对话页选择器进第一版、扩展决定 57 的定位）：知识库（SQLite + FTS5 + 向量暴力余弦的混合检索，REST 与 MCP 给外部 AI，方案绑定的注入 / 工具模式给自己的模型）。新增阶段 15（15-1 至 15-5，用户指定 Opus 5.5 规划、Sonnet 5.5 实现）。15-1 完成（真机导入未做）：<code>server/core/kb/</code>、<code>/api/kb</code>、<code>data/knowledge.json</code>；上传暂用 JSON + base64（管理接口只收 JSON）。用户要求提前做 15-5 的「知识库」页（上传、文档、检索测试），已实现</td></tr>
     <tr><td>2026-10-20</td><td>新增关键决定 64（用户 2026-10-20 确认：独立常驻引擎、同一运行库切 CPU / GPU）并完成 14-1：向量引擎（<code>data/embedding.json</code>、按 <code>model</code> 名路由到单独的 <code>--embedding</code> llama-server，不计入同时在线上限、不与对话模型互相卸载）、「模型」页「向量引擎」标签；请求记录的 token 数也从响应开头读取。新增阶段 14</td></tr>
