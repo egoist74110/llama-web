@@ -1,7 +1,10 @@
 // Shared by the /api/upstreams routes: the list the page shows, the edit context and error mapping.
+import { basename, join } from 'node:path'
 import { fmt, t } from '../core/i18n'
 import { StoreError } from '../core/store'
 import { LaunchError } from '../core/upstream-launcher'
+import { forceStopPort, ForceStopError, inspectPort, isLocalHost, localPortOf, type PortOwnerDeps } from '../core/port-owner'
+import { PidRegistry } from '../core/runner'
 import type { SecretsDoc } from '../core/keys'
 import { saveUpstreamsAndKeys as saveBoth, selfPortsOf, UpstreamError, viewUpstreams, type ConnectionView, type EditContext, type UpstreamsDoc } from '../core/upstreams'
 import { getContext } from './context'
@@ -10,7 +13,7 @@ export function describeUpstreams(): { upstreams: ConnectionView[], exclusiveHol
   const ctx = getContext()
   const upstreams = viewUpstreams(ctx.getUpstreams(), ctx.getSecrets().upstreamKeys).map(u => ({
     ...u, up: ctx.health.isUp(u.id), checkedAt: ctx.health.state(u.id)?.checkedAt ?? null, launch: ctx.launcher.state(u.id), canStop: ctx.launcher.canStop(u.id),
-  }))
+  })).map(u => ({ ...u, canForceStop: u.up && !u.canStop && isLocalHost(u.baseUrl) }))
   return { upstreams, exclusiveHolder: ctx.health.holder() }
 }
 
@@ -54,4 +57,55 @@ export function launchError(e: unknown): never {
     throw createError({ statusCode: status, message: fmt(errors[e.code] ?? e.code, { detail: e.detail }) })
   }
   return upstreamsError(e)
+}
+
+/** Turn a force-stop refusal into an HTTP error with a Chinese message; other errors pass through. */
+export function forceStopError(e: unknown): never {
+  if (e instanceof ForceStopError) {
+    const errors = t.upstreams.forceStop.errors as Record<string, string>
+    const status = e.code === 'not-found' ? 404 : e.code === 'not-local' || e.code === 'bad-body' ? 400 : 409
+    throw createError({ statusCode: status, message: errors[e.code] ?? e.code, data: { code: e.code } })
+  }
+  throw e
+}
+
+/** The port of a local upstream; throws `not-found` / `not-local` otherwise. */
+function localPort(id: string | undefined): number {
+  const u = getContext().getUpstreams().upstreams.find(x => x.id === id)
+  if (!u) throw new ForceStopError('not-found')
+  const port = localPortOf(u.baseUrl)
+  if (port === null) throw new ForceStopError('not-local')
+  return port
+}
+
+function portDeps(): PortOwnerDeps {
+  const dataDir = getContext().dataDir
+  return {
+    managedPids: () => new PidRegistry(join(dataDir, 'run', 'pids.json')).list().map(r => r.pid),
+    runtimeDir: join(dataDir, 'runtime'),
+  }
+}
+
+export interface ForceStopInfo { pid: number, name: string, exe: string, birth: string, listenerPid: number, children: number, port: number }
+
+/** What a force stop of this upstream would end (the page shows it before asking). */
+export async function inspectForceStop(id: string | undefined): Promise<ForceStopInfo> {
+  const port = localPort(id)
+  const r = await inspectPort(port, portDeps())
+  if (!r.ok) throw new ForceStopError(r.code)
+  return { pid: r.target.pid, name: r.target.name, exe: r.target.exe, birth: r.target.birth, listenerPid: r.listener.pid, children: r.children, port }
+}
+
+/** End the process the user saw, if it is still the same one; then forget it and probe again. */
+export async function forceStop(id: string | undefined, body: unknown): Promise<ReturnType<typeof describeUpstreams>> {
+  const { pid, birth } = (body ?? {}) as { pid?: unknown, birth?: unknown }
+  if (!Number.isInteger(pid) || typeof birth !== 'string' || !birth) throw new ForceStopError('bad-body')
+  const port = localPort(id)
+  const ctx = getContext()
+  const u = ctx.getUpstreams().upstreams.find(x => x.id === id)!
+  const target = await forceStopPort(port, { pid: pid as number, birth }, portDeps())
+  ctx.launcher.forget(u.id)
+  console.info('[llama-web]', `upstream ${u.name}: force-stopped pid ${target.pid} (${basename(target.exe)})`)
+  ctx.health.tick().catch(() => {})
+  return describeUpstreams()
 }

@@ -9,6 +9,7 @@ export default defineEventHandler((event) => {
   try {
     ctx.refresh()
     saveUpstreamsAndKeys((draft) => { removeUpstream(draft, id) }, (s) => { delete s.upstreamKeys[id!] })
+    ctx.launcher.forget(id!) // the service itself keeps running; llama-web just stops remembering it
     return describeUpstreams()
   } catch (e) {
     upstreamsError(e)

@@ -54,6 +54,8 @@ import { Hold } from '../core/write-pair'
 import { cloudflareHooks } from './cloudflare-hooks'
 import { acquireDataLock, type DataLock } from '../core/data-lock'
 import { defaultUpstreams, normalizeUpstreams, recordTest, UPSTREAMS_MIGRATIONS, UPSTREAMS_VERSION, viewUpstreams, type UpstreamsDoc } from '../core/upstreams'
+import { fileLaunchedStore } from '../core/launched-store'
+import { isLocalHost } from '../core/port-owner'
 import { UpstreamLauncher } from '../core/upstream-launcher'
 import { defaultEmbedding, EMBEDDING_VERSION, EmbeddingEngine, normalizeEmbedding, planEmbedding, type EmbeddingDoc } from '../core/embedding'
 import { defaultKnowledge, KNOWLEDGE_VERSION, normalizeKnowledge, type KnowledgeDoc } from '../core/kb/registry'
@@ -452,7 +454,10 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
       locale: getSettings().ui.locale,
       settingsRev: settingsRef.rev(),
       ...(settingsBoot !== null ? { settingsBoot } : {}),
-      connections: viewUpstreams(upstreamsRef.get(), secretsRef.get().upstreamKeys).map(u => ({ ...u, up: health.isUp(u.id), checkedAt: health.state(u.id)?.checkedAt ?? null, launch: launcher.state(u.id), canStop: launcher.canStop(u.id) })),
+      connections: viewUpstreams(upstreamsRef.get(), secretsRef.get().upstreamKeys).map((u) => {
+        const up = health.isUp(u.id), canStop = launcher.canStop(u.id)
+        return { ...u, up, checkedAt: health.state(u.id)?.checkedAt ?? null, launch: launcher.state(u.id), canStop, canForceStop: up && !canStop && isLocalHost(u.baseUrl) }
+      }),
       exclusiveHolder: health.holder(),
       embedding: embedding.view(),
       kb: kb.liveView(),
@@ -648,9 +653,12 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     },
     onChange: () => live.notify(),
     onStopped: () => { void health.tick() },
+    // The services it started stay stoppable after llama-web restarts (decision 66).
+    store: fileLaunchedStore(join(dataDir, 'run', 'upstreams-launched.json')),
     log,
   })
   startupClose.push(() => launcher.close())
+  void launcher.restore().then((n) => { if (n) void health.tick() })
   // Native spawn for a service that must outlive the Windows desktop app (decision 60); a no-op anywhere else.
   void loadWinSpawn()
   // Reads free memory every two seconds, but only has work while several models may be online and one is loading or ready.

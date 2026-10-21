@@ -1,5 +1,14 @@
 # 交接记录
 
+## 2026-10-21 · 决定 66：外部服务停不掉的修复（记住启动过的进程 + 强制停止）· 单会话
+- 起因：用户真机发现从「接入」页启动的服务（监听 `127.0.0.1:8080`）在 llama-web 重启后界面上没有停止按钮，只能去任务管理器结束。原因是启动器只在内存里记得自己启动的进程；Windows 上启动用的根进程先退出（`.bat` / 启动器）时也一样停不了。用户确认两部分都做。
+- 计划：新增决定 66（改决定 56「不停在别处启动的服务」与决定 60 ③）、阶段 10 新增任务（未打勾，等真机验证）、变更记录一行；AGENTS.md「进程与端口」例外条与目录同步。规格由 Opus 5.5 写（会话草稿 `66-spec.md`，不在仓库里），Sonnet 5.5 实现，Opus 审查。
+- 实现：`server/core/launched-store.ts`（`data/run/upstreams-launched.json`，原子写入，不是 `pids.json`）；`upstream-launcher.ts` 记根进程与就绪后监听端口的进程（pid + 路径 + 创建时间），`restore()` 启动时核对恢复，`canStop` 认恢复的进程，`stop` / `shutdown` 结束前再核对（对不上不结束），`forget()`（删除上游时调用）；`server/core/port-owner.ts`（本机地址判断、按端口找监听进程、沿同一程序的父进程向上、排除 llama-web 自己的进程链 / `pids.json` / `data/runtime/`、macOS 逐个信号结束进程树）；接口 `POST /api/upstreams/:id/force-stop/inspect` 与 `/force-stop`（带 pid + 创建时间，变了返回 409 `changed`）；视图字段 `canForceStop`；「接入」页「强制停止」按钮与确认框；中英文案；测试 `tests/core/port-owner.test.ts`（含真实进程一条）与 `upstream-launcher.test.ts` 新增用例。审查时修了一处：强制停止日志原来在 Windows 上会打印完整路径，改成只打印程序名。
+- 实际运行：`bun test` 1843 pass / 8 skip / 0 fail（子代理与我各一次）；`bun run typecheck` exit 0、`bun run build` exit 0、`git diff --check` 通过（我复跑）。只读检查：对本机 :8080 上的真实服务跑 `inspectPort`，目标是监听端口的 python（子进程 1 个）；它的父进程是 venv 的 `python.exe` 启动器（路径不同，所以不往上走），子进程结束后启动器会自己退出。没有结束任何进程。
+- 没有运行：浏览器里看「接入」页的按钮与确认框（包括 375 宽）；真机点「强制停止」；重启 llama-web 后恢复「关闭」按钮；macOS 上的任何一项。
+- 用户验证步骤：`bun scripts/launch.ts web build` → http://127.0.0.1:5001 →「接入」：① 现在那个停不掉的服务卡片上应出现「强制停止」→ 点开看程序 / PID / 路径 / 端口 → 确认 → 卡片几秒内变离线，任务管理器里 python 与 strata-vision 都没了。② 再点「启动」把它拉起来 → 等上线 → 退出并重启 llama-web → 卡片上仍是「关闭」按钮 → 点「关闭」能停掉。
+- `src-tauri/Cargo.lock` 的改动在会话开始前就有，仍未提交。
+
 ## 2026-10-21 · 15-6：块级标签过滤与相似度阈值（决定 65 ⑭）· 单会话
 - 起因：同一知识库里混放多套用标签区分的词池，检索只按相似度取前 N 条，召回了相近但不同类别的块（串味）。另一个原因是分块会把相邻的小段落合并到约 500 字，不同类别会混进同一块。用户确认方案：标签行 `[tag:a,b]`（txt / md 通用，作用到下一个标签行），文档存原文，旧文档重新上传，阈值只看向量相似度、默认关，工具 enum 上限 50，MCP / REST 预留参数。
 - 计划：决定 65 加 ⑭、新增工作包 15-6、变更记录一行。规格由 Opus 5.5 写（会话草稿 `15-6-spec.md`，不在仓库里），Sonnet 5.5 实现，Opus 审查。

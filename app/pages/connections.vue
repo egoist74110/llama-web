@@ -136,6 +136,48 @@ function stop(u: ConnectionView) {
   })
 }
 
+// Force stop (decision 66): a local service llama-web does not remember. The page shows what would be ended first;
+// the kill only goes ahead while pid + start time still match.
+interface ForceStopInfo { pid: number, name: string, exe: string, birth: string, listenerPid: number, children: number, port: number }
+const forcing = ref<{ u: ConnectionView, info: ForceStopInfo, changed: boolean } | null>(null)
+const forceOpen = computed({
+  get: () => forcing.value !== null,
+  set: (v: boolean) => { if (!v) forcing.value = null },
+})
+
+function inspectForceStop(u: ConnectionView, changed = false) {
+  return run(`inspect:${u.id}`, async () => {
+    try {
+      const info = await $fetch<ForceStopInfo>(url(u, '/force-stop/inspect'), { method: 'POST' })
+      forcing.value = { u, info, changed }
+    } catch (e) {
+      forcing.value = null
+      fail(p.forceStop.inspectFailed, e)
+    }
+  })
+}
+
+function forceStop() {
+  const f = forcing.value
+  if (!f) return
+  return run(`force:${f.u.id}`, async () => {
+    try {
+      await $fetch(url(f.u, '/force-stop'), { method: 'POST', body: { pid: f.info.pid, birth: f.info.birth } })
+      toast.add({ title: fmt(p.forceStop.done, { name: f.u.name }), color: 'success', icon: 'i-lucide-check' })
+      forcing.value = null
+    } catch (e) {
+      // The process behind the port changed since it was shown: look again instead of killing something else.
+      if ((e as { data?: { data?: { code?: string } } })?.data?.data?.code === 'changed') {
+        forcing.value = null
+        await inspectForceStop(f.u, true)
+        return
+      }
+      forcing.value = null
+      fail(p.forceStop.failed, e)
+    }
+  })
+}
+
 const canStart = (u: ConnectionView) => u.checkedAt !== null && !u.up
 const waited = (u: ConnectionView) => (u.launch.state === 'starting' ? formatDuration(Math.max(0, serverNow.value - u.launch.since)) : '')
 const launchFailure = (u: ConnectionView) => {
@@ -202,7 +244,7 @@ const example = (u: ConnectionView) => `${u.name}-${allModels(u)[0] ?? 'model-id
           </a>
         </div>
 
-        <div v-if="canStart(u) || u.launch.state !== 'idle' || (u.up && u.canStop)" class="flex flex-col gap-2 rounded-[10px] bg-[var(--lw-sunken)] px-3.5 py-3">
+        <div v-if="canStart(u) || u.launch.state !== 'idle' || (u.up && u.canStop) || (u.up && u.canForceStop)" class="flex flex-col gap-2 rounded-[10px] bg-[var(--lw-sunken)] px-3.5 py-3">
           <div v-if="u.launch.state === 'starting'" class="flex flex-wrap items-center justify-between gap-2">
             <span class="flex items-center gap-2 text-[13px]">
               <UIcon name="i-lucide-loader-circle" class="size-4 shrink-0 animate-spin lw-dot-warn" />{{ fmt(p.start.waiting, { time: waited(u) }) }}
@@ -215,6 +257,12 @@ const example = (u: ConnectionView) => `${u.name}-${allModels(u)[0] ?? 'model-id
             <span class="text-xs text-muted">{{ p.start.running }}</span>
             <UButton size="sm" color="neutral" variant="outline" icon="i-lucide-square" :title="p.start.stopHint" :loading="!!busy[`stop:${u.id}`]" @click="stop(u)">
               {{ p.start.stop }}
+            </UButton>
+          </div>
+          <div v-else-if="u.up && u.canForceStop" class="flex flex-wrap items-center justify-between gap-2">
+            <span class="min-w-0 text-xs text-muted">{{ p.forceStop.hint }}</span>
+            <UButton size="sm" color="error" variant="outline" icon="i-lucide-octagon-x" :loading="!!busy[`inspect:${u.id}`]" @click="inspectForceStop(u)">
+              {{ p.forceStop.button }}
             </UButton>
           </div>
           <div v-else-if="u.startCommand" class="flex flex-wrap items-center justify-between gap-2">
@@ -350,6 +398,38 @@ const example = (u: ConnectionView) => `${u.name}-${allModels(u)[0] ?? 'model-id
           </UButton>
           <UButton icon="i-lucide-play" :loading="!!starting && !!busy[`start:${starting.id}`]" @click="start">
             {{ p.start.confirm }}
+          </UButton>
+        </div>
+      </template>
+    </UModal>
+
+    <UModal v-model:open="forceOpen" :title="forcing ? fmt(p.forceStop.title, { name: forcing.u.name }) : ''" :description="p.forceStop.body">
+      <template #body>
+        <div v-if="forcing" class="flex flex-col gap-2.5">
+          <p v-if="forcing.changed" role="alert" class="m-0 text-xs lw-dot-warn">
+            {{ p.forceStop.changed }}
+          </p>
+          <dl class="m-0 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5 rounded-lg bg-[var(--lw-sunken)] p-3 text-[13px]">
+            <dt class="text-muted">{{ p.forceStop.program }}</dt>
+            <dd class="m-0 break-all font-mono text-xs">{{ forcing.info.name }}</dd>
+            <dt class="text-muted">{{ p.forceStop.pid }}</dt>
+            <dd class="lw-num m-0 font-mono text-xs">{{ forcing.info.pid }}</dd>
+            <dt class="text-muted">{{ p.forceStop.path }}</dt>
+            <dd class="m-0 break-all font-mono text-xs">{{ forcing.info.exe }}</dd>
+            <dt class="text-muted">{{ p.forceStop.children }}</dt>
+            <dd class="lw-num m-0 text-xs">{{ fmt(p.forceStop.childrenValue, { n: forcing.info.children }) }}</dd>
+            <dt class="text-muted">{{ p.forceStop.port }}</dt>
+            <dd class="lw-num m-0 font-mono text-xs">{{ forcing.info.port }}</dd>
+          </dl>
+        </div>
+      </template>
+      <template #footer>
+        <div class="flex w-full justify-end gap-2">
+          <UButton color="neutral" variant="ghost" @click="forcing = null">
+            {{ t.upstreams.form.cancel }}
+          </UButton>
+          <UButton color="error" icon="i-lucide-octagon-x" :loading="!!forcing && !!busy[`force:${forcing.u.id}`]" @click="forceStop">
+            {{ p.forceStop.confirm }}
           </UButton>
         </div>
       </template>

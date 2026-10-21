@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createUpstream, defaultUpstreams, type UpstreamsDoc } from '../../server/core/upstreams'
 import { LaunchError, launchArgv, needsOutsideJob, UpstreamLauncher, realSpawn, type CheckResult, type LaunchedProcess, type SpawnSpec } from '../../server/core/upstream-launcher'
+import { fileLaunchedStore, type Ident, type LaunchedEntry } from '../../server/core/launched-store'
 import { quoteWindowsArg, windowsCommandLine } from '../../server/core/win-spawn'
 
 const closers: Array<() => void> = []
@@ -359,5 +360,215 @@ describe('a real process at exit (decision 60)', () => {
     expect(await answers(pb)).toBe(true)
     writeFileSync(stop, '')
     await Bun.sleep(300)
+  })
+})
+
+// Remembering what was started (decision 66)
+type World = Map<number, { exe: string, birth: string }>
+
+function remembering(d: UpstreamsDoc, seed: LaunchedEntry[] = []) {
+  const world: World = new Map()
+  let saved: LaunchedEntry[] = seed
+  let saves = 0
+  const killed: number[] = []
+  let listeners: number[] = []
+  let result: CheckResult = { ok: false, models: [] }
+  const procs: FakeProc[] = []
+  const logs: string[] = []
+  const launcher = new UpstreamLauncher({
+    upstreams: () => d.upstreams,
+    check: async () => result,
+    onReady: () => {},
+    onChange: () => {},
+    log: m => logs.push(m),
+    spawn: () => { const p = new FakeProc(); procs.push(p); return p },
+    kill: async (pid) => { killed.push(pid); world.delete(pid) },
+    dirExists: () => true,
+    store: { load: () => saved, save: (e) => { saved = JSON.parse(JSON.stringify(e)); saves++ } },
+    identity: async pid => world.get(pid) ?? null,
+    isAlive: pid => world.has(pid),
+    findListener: async () => listeners,
+    pollMs: 5, timeoutMs: 5000, platform: 'linux',
+  })
+  closers.push(() => launcher.close())
+  const id = d.upstreams[0]!.id
+  const until = async (pred: () => boolean) => { for (let i = 0; i < 400 && !pred(); i++) await Bun.sleep(5); expect(pred()).toBe(true) }
+  return { launcher, id, world, killed, procs, logs, saved: () => saved, saves: () => saves, until, setListeners: (p: number[]) => { listeners = p }, setResult: (r: CheckResult) => { result = r } }
+}
+
+const ident = (pid: number, exe = 'X:\\apps\\svc.exe', birth = `b${pid}`): Ident => ({ pid, exe, birth })
+
+describe('remembering the started service (decision 66)', () => {
+  test('an entry is saved on start with the identity of the process', async () => {
+    const s = remembering(doc())
+    s.world.set(4242, { exe: 'X:\\apps\\start.exe', birth: 'b1' })
+    s.launcher.start(s.id, false)
+    await s.until(() => s.saved()[0]?.root !== null && s.saved().length === 1)
+    expect(s.saved()[0]).toMatchObject({ upstream: s.id, root: { pid: 4242, exe: 'X:\\apps\\start.exe', birth: 'b1' }, listener: null })
+  })
+
+  test('an unreadable root still leaves an entry', async () => {
+    const s = remembering(doc())
+    s.launcher.start(s.id, false)
+    await Bun.sleep(30)
+    expect(s.saved()).toHaveLength(1)
+    expect(s.saved()[0]!.root).toBeNull()
+  })
+
+  test('the listener of a local upstream is recorded once it is up; a remote one is never probed', async () => {
+    const s = remembering(doc())
+    s.world.set(4242, { exe: 'X:\\apps\\start.exe', birth: 'b1' })
+    s.world.set(777, { exe: 'X:\\apps\\py.exe', birth: 'b7' })
+    s.setListeners([777])
+    s.launcher.start(s.id, false)
+    s.setResult({ ok: true, models: ['m'] })
+    await s.until(() => s.launcher.state(s.id).state === 'idle')
+    expect(s.saved()[0]!.listener).toEqual({ pid: 777, exe: 'X:\\apps\\py.exe', birth: 'b7' })
+
+    const remote = remembering(doc({ baseUrl: 'https://example.com/v1' }))
+    remote.world.set(777, { exe: 'X:\\apps\\py.exe', birth: 'b7' })
+    remote.setListeners([777])
+    remote.launcher.start(remote.id, false)
+    remote.setResult({ ok: true, models: ['m'] })
+    await remote.until(() => remote.launcher.state(remote.id).state === 'idle')
+    expect(remote.saved()[0]!.listener).toBeNull()
+  })
+
+  test('restore keeps matching identities and drops dead, reused and removed ones', async () => {
+    const d = doc()
+    createUpstream(d, { name: 'Two', baseUrl: 'http://127.0.0.1:7/v1' }, { localNames: [], selfPorts: [] })
+    createUpstream(d, { name: 'Three', baseUrl: 'http://127.0.0.1:6/v1' }, { localNames: [], selfPorts: [] })
+    const [a, b, c] = d.upstreams.map(u => u.id)
+    const seed: LaunchedEntry[] = [
+      { upstream: a!, root: ident(10), listener: ident(11), startedAt: 1 },
+      { upstream: b!, root: ident(20), listener: ident(21), startedAt: 2 }, // 20 is a reused pid (other start time), 21 is dead
+      { upstream: c!, root: ident(30), listener: null, startedAt: 3 },
+      { upstream: 'u-removed', root: ident(40), listener: null, startedAt: 4 },
+    ]
+    const s = remembering(d, seed)
+    s.world.set(10, { exe: 'X:\\apps\\svc.exe', birth: 'b10' })
+    s.world.set(11, { exe: 'X:\\apps\\svc.exe', birth: 'b11' })
+    s.world.set(20, { exe: 'X:\\apps\\svc.exe', birth: 'other' })
+    s.world.set(30, { exe: 'X:\\apps\\other.exe', birth: 'b30' }) // same pid and start time, different program
+    s.world.set(40, { exe: 'X:\\apps\\svc.exe', birth: 'b40' })
+    await s.launcher.restore()
+    expect(s.saved().map(e => e.upstream)).toEqual([a!])
+    expect(s.saved()[0]).toMatchObject({ root: { pid: 10 }, listener: { pid: 11 } })
+    expect(s.launcher.canStop(a!)).toBe(true)
+    expect(s.launcher.canStop(b!)).toBe(false)
+    expect(s.launcher.canStop(c!)).toBe(false)
+    expect(s.killed).toEqual([])
+  })
+
+  test('exe paths compare case-insensitively on Windows only', async () => {
+    const make = async (platform: NodeJS.Platform) => {
+      const d = doc()
+      const s = remembering(d, [{ upstream: d.upstreams[0]!.id, root: ident(10, 'X:\\Apps\\Svc.exe'), listener: null, startedAt: 1 }])
+      s.world.set(10, { exe: 'x:\\apps\\svc.exe', birth: 'b10' })
+      const l = new UpstreamLauncher({
+        upstreams: () => d.upstreams, check: async () => ({ ok: false, models: [] }), onReady: () => {}, onChange: () => {},
+        store: { load: () => s.saved(), save: () => {} }, identity: async pid => s.world.get(pid) ?? null, isAlive: pid => s.world.has(pid), platform,
+      })
+      await l.restore()
+      return l.canStop(s.id)
+    }
+    expect(await make('win32')).toBe(true)
+    expect(await make('linux')).toBe(false)
+  })
+
+  test('after a restart the service is stoppable while only its listener lives (root gone)', async () => {
+    const d = doc()
+    const s = remembering(d, [{ upstream: d.upstreams[0]!.id, root: ident(10), listener: ident(11), startedAt: 1 }])
+    s.world.set(11, { exe: 'X:\\apps\\svc.exe', birth: 'b11' })
+    await s.launcher.restore()
+    expect(s.launcher.canStop(s.id)).toBe(true)
+    await s.launcher.stop(s.id)
+    expect(s.killed).toEqual([11])
+    expect(s.saved()).toEqual([])
+    expect(s.launcher.canStop(s.id)).toBe(false)
+  })
+
+  test('stop only ends identity-verified processes: a pid reused since the last check is left alone', async () => {
+    const d = doc()
+    const s = remembering(d, [{ upstream: d.upstreams[0]!.id, root: ident(10), listener: ident(11), startedAt: 1 }])
+    s.world.set(10, { exe: 'X:\\apps\\svc.exe', birth: 'b10' })
+    s.world.set(11, { exe: 'X:\\apps\\svc.exe', birth: 'b11' })
+    await s.launcher.restore()
+    s.world.set(10, { exe: 'X:\\other\\thing.exe', birth: 'new' }) // reused after the restore
+    await s.launcher.stop(s.id)
+    expect(s.killed).toEqual([11])
+    expect(s.world.has(10)).toBe(true)
+  })
+
+  test('stop with nothing verified kills nothing and says it is not ours', async () => {
+    const d = doc()
+    const s = remembering(d, [{ upstream: d.upstreams[0]!.id, root: ident(10), listener: null, startedAt: 1 }])
+    s.world.set(10, { exe: 'X:\\apps\\svc.exe', birth: 'b10' })
+    await s.launcher.restore()
+    s.world.set(10, { exe: 'X:\\apps\\svc.exe', birth: 'new' })
+    await expect(s.launcher.stop(s.id)).rejects.toThrow(LaunchError)
+    expect(s.killed).toEqual([])
+    expect(s.saved()).toEqual([])
+  })
+
+  test('shutdown with stopOnExit ends a remembered service too; the others stay and stay remembered', async () => {
+    const d = doc({ stopOnExit: true })
+    createUpstream(d, { name: 'Stays', baseUrl: 'http://127.0.0.1:8/v1' }, { localNames: [], selfPorts: [] })
+    const [a, b] = d.upstreams.map(u => u.id)
+    const s = remembering(d, [
+      { upstream: a!, root: null, listener: ident(11), startedAt: 1 },
+      { upstream: b!, root: null, listener: ident(12), startedAt: 2 },
+    ])
+    s.world.set(11, { exe: 'X:\\apps\\svc.exe', birth: 'b11' })
+    s.world.set(12, { exe: 'X:\\apps\\svc.exe', birth: 'b12' })
+    await s.launcher.restore()
+    await s.launcher.shutdown()
+    expect(s.killed).toEqual([11])
+    expect(s.saved().map(e => e.upstream)).toEqual([b!])
+  })
+
+  test('close keeps the file; cancel and a failed start remove the entry', async () => {
+    const s = remembering(doc())
+    s.world.set(4242, { exe: 'X:\\apps\\start.exe', birth: 'b1' })
+    s.launcher.start(s.id, false)
+    await s.until(() => s.saved()[0]?.root !== null && s.saved().length === 1)
+    const before = s.saves()
+    s.launcher.close()
+    expect(s.saves()).toBe(before)
+    expect(s.saved()).toHaveLength(1)
+
+    const c = remembering(doc())
+    c.launcher.start(c.id, false)
+    await c.launcher.cancel(c.id)
+    expect(c.saved()).toEqual([])
+
+    const f = remembering(doc())
+    f.launcher.start(f.id, false)
+    f.procs[0]!.exitCb(2)
+    expect(f.saved()).toEqual([])
+  })
+
+  test('forget drops the entry without touching the process', async () => {
+    const d = doc()
+    const s = remembering(d, [{ upstream: d.upstreams[0]!.id, root: null, listener: ident(11), startedAt: 1 }])
+    s.world.set(11, { exe: 'X:\\apps\\svc.exe', birth: 'b11' })
+    await s.launcher.restore()
+    s.launcher.forget(s.id)
+    expect(s.saved()).toEqual([])
+    expect(s.killed).toEqual([])
+    expect(s.world.has(11)).toBe(true)
+  })
+
+  test('the file store round-trips, and a torn file reads as nothing', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'lw-launched-'))
+    closers.push(() => rmSync(dir, { recursive: true, force: true }))
+    const file = join(dir, 'run', 'upstreams-launched.json')
+    const store = fileLaunchedStore(file)
+    expect(store.load()).toEqual([])
+    const e: LaunchedEntry = { upstream: 'u-1', root: ident(5), listener: { ...ident(6), pgid: 6 }, startedAt: 9 }
+    store.save([e])
+    expect(store.load()).toEqual([e])
+    writeFileSync(file, '{ torn')
+    expect(store.load()).toEqual([])
   })
 })

@@ -50,7 +50,7 @@ start.bat            # 用户实际使用的启动方式（1-5 实现）
 - `server/entry.ts`：自定义 Bun 入口（关键决定 25，只在构建产物里生效）：`/v1/*`、`/upstream/*`、`GET /api/stream` 原生处理，其余交给 Nitro
 - `server/service/`：进程级接线（`context.ts`：配置、runner、scheduler、转发的单例）
 - `server/routes/v1/`、`server/routes/upstream/`：只在 `nuxt dev` 下起作用，调用和入口相同的 `core/proxy.ts`
-- `server/core/`：scheduler、model-ops（管理操作，路由里不要直接调 scheduler 的 start/stop）、runner、args、scanner、gguf、preprocess、proxy、routing、config、launch、logs（`data/logs` 落盘与保留）、request-log（请求记录：只存白名单参数、token 数，不存对话内容）、live、errors、updater（llama.cpp）、app-update / app-info（llama-web 自身更新与版本，版本号只在 `package.json`）、desktop-channel（桌面壳私有管道）、gpu、store、backends、admission（加载前内存检查的纯函数）、watchdog（多开时的运行期看门狗）、disk-space（下载前剩余空间）、upstreams / upstream-health / upstream-launcher / win-spawn（外部上游、健康探测与独占本机、手动启动，关键决定 56 / 60）、async-jobs（异步任务 id → 外部上游的映射 `data/jobs.json`，关键决定 59）
+- `server/core/`：scheduler、model-ops（管理操作，路由里不要直接调 scheduler 的 start/stop）、runner、args、scanner、gguf、preprocess、proxy、routing、config、launch、logs（`data/logs` 落盘与保留）、request-log（请求记录：只存白名单参数、token 数，不存对话内容）、live、errors、updater（llama.cpp）、app-update / app-info（llama-web 自身更新与版本，版本号只在 `package.json`）、desktop-channel（桌面壳私有管道）、gpu、store、backends、admission（加载前内存检查的纯函数）、watchdog（多开时的运行期看门狗）、disk-space（下载前剩余空间）、upstreams / upstream-health / upstream-launcher / win-spawn / port-owner（外部上游、健康探测与独占本机、手动启动、强制停止，关键决定 56 / 60 / 66）、async-jobs（异步任务 id → 外部上游的映射 `data/jobs.json`，关键决定 59）
 - `server/plugins/`：启动时执行的逻辑
 - `tests/`：单元测试
 - `src-tauri/`、`desktop/`：Windows / macOS 桌面壳（Rust，Mac 配置在 `tauri.macos.conf.json`）、打包脚本与包内容检查（`desktop/check-package.ts`）
@@ -72,7 +72,7 @@ start.bat            # 用户实际使用的启动方式（1-5 实现）
 - 启动 llama-server 时必须传**参数数组**，不能拼接成字符串后交给 shell。
 - `--host` / `--port` 由 llama-web 分配，用户配置不能覆盖。
 - 子进程记录到 `data/run/pids.json`；停止时要结束整个进程树。清理残留时只结束可执行文件位于 `data/runtime/` 下的进程，不能误杀用户自己手动启动的 llama-server。
-- 例外：上游「启动命令」（`upstream-launcher`）启动的是用户自己的外部服务：同样用参数数组、不经 shell；但它分离运行、**不记入 `pids.json`、默认 llama-web 退出时不结束它**（Windows 桌面版要在壳的 Job 之外启动，见 `server/core/win-spawn.ts`），清理残留也不碰它；只有该服务打开「关闭 llama-web 时一起停止」（`stopOnExit`，关键决定 60）时，退出时才结束这次启动的进程。
+- 例外：上游「启动命令」（`upstream-launcher`）启动的是用户自己的外部服务：同样用参数数组、不经 shell；但它分离运行、**不记入 `pids.json`、默认 llama-web 退出时不结束它**（Windows 桌面版要在壳的 Job 之外启动，见 `server/core/win-spawn.ts`），清理残留也不碰它；只有该服务打开「关闭 llama-web 时一起停止」（`stopOnExit`，关键决定 60）时，退出时才结束这次启动的进程。启动过的进程另记在 `data/run/upstreams-launched.json`（带路径与创建时间，重启后核对通过才可停止，关键决定 66）。「强制停止」（`port-owner`）按端口找进程，只对本机地址、用户逐次确认后执行，必须排除 llama-web 自己及其父进程链、`pids.json` 里的进程和 `data/runtime/` 下的程序；改这部分代码必须补测试。
 - 公网入口 `:8080` 只能绑定 `127.0.0.1`，只允许 `/v1/*`。修改鉴权或来源识别相关代码时必须补充测试。
 
 ### 行为约定

@@ -408,6 +408,8 @@ export interface ConnectionView extends UpstreamView {
   launch: LaunchState
   /** The service was started from here and can be stopped from here. */
   canStop: boolean
+  /** Online on a loopback address but not ours to stop normally: it can only be force-stopped (decision 66). */
+  canForceStop: boolean
 }
 
 export function viewUpstreams(doc: UpstreamsDoc, keys: Record<string, string>): UpstreamView[] {
