@@ -12,7 +12,7 @@ export interface KnowledgeBinding {
   /** Knowledge base ids (used when `all` is false). */
   kbs: string[]
   mode: KnowledgeMode
-  /** Hits per search, 1..20. */
+  /** Hits per search, 1..1000. */
   topK: number
   /** Only chunks that carry any of these tags (decision 65 ⑭); empty = no filter. */
   tags: string[]
@@ -21,7 +21,7 @@ export interface KnowledgeBinding {
 }
 
 export const BINDING_DEFAULT_TOP_K = 5
-export const BINDING_MAX_TOP_K = 20
+export const BINDING_MAX_TOP_K = 1000
 /** More than this in one binding is a hand-edit gone wrong; the extra ones are dropped. */
 const MAX_BOUND = 50
 

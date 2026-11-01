@@ -40,7 +40,7 @@ describe('resolveKnowledge', () => {
   test('the request overrides the fields it carries; kbs given are used even when the binding is off; names are case-insensitive', () => {
     expect(resolve({ mode: 'tool', top_k: 9 })).toMatchObject({ effective: { mode: 'tool', kbs: ['kb-aaaa1111'], topK: 9 } })
     expect(resolve({ kbs: ['manual', 'kb-bbbb2222'] }, bind({ enabled: false }))).toMatchObject({ effective: { kbs: ['kb-aaaa1111', 'kb-bbbb2222'] } })
-    expect(resolve({ top_k: 99 })).toMatchObject({ effective: { topK: 20 } })
+    expect(resolve({ top_k: 5000 })).toMatchObject({ effective: { topK: 1000 } })
     expect(resolve({ mode: 'tool' }, bind({ enabled: false }))).toMatchObject({ effective: null }) // options without knowledge bases
     expect(resolve({ kbs: [] })).toMatchObject({ effective: null })
   })
@@ -91,7 +91,7 @@ describe('resolveKnowledge', () => {
 
 describe('configuration', () => {
   test('normalizeBinding repairs hand edits; parseBinding refuses wrong types', () => {
-    expect(normalizeBinding({ enabled: 'yes', kbs: ['a', 3, 'a'], mode: 'x', topK: 99 })).toEqual({ enabled: false, all: false, kbs: ['a'], mode: 'inject', topK: 20, tags: [], minSimilarity: null })
+    expect(normalizeBinding({ enabled: 'yes', kbs: ['a', 3, 'a'], mode: 'x', topK: 5000 })).toEqual({ enabled: false, all: false, kbs: ['a'], mode: 'inject', topK: 1000, tags: [], minSimilarity: null })
     expect(normalizeBinding(null)).toEqual({ enabled: false, all: false, kbs: [], mode: 'inject', topK: 5, tags: [], minSimilarity: null })
     expect(parseBinding({ enabled: true, kbs: ['a'] })).toEqual({ enabled: true, all: false, kbs: ['a'], mode: 'inject', topK: 5, tags: [], minSimilarity: null })
     expect(normalizeBinding({ enabled: true, all: true })).toMatchObject({ all: true })
@@ -130,7 +130,7 @@ describe('configuration', () => {
   })
 
   test('upstreams.json v1 -> v2 adds the default binding; new upstreams carry it; edits validate it', () => {
-    expect(UPSTREAMS_VERSION).toBe(2)
+    expect(UPSTREAMS_VERSION).toBe(3)
     const migrated = UPSTREAMS_MIGRATIONS[1]!({ version: 1, upstreams: [{ id: 'u-1', name: 'A', baseUrl: 'http://x/v1' }, { id: 'u-2', name: 'B', baseUrl: 'http://x/v1', knowledge: bind() }] })
     expect(migrated.upstreams[0].knowledge).toEqual({ enabled: false, all: false, kbs: [], mode: 'inject', topK: 5, tags: [], minSimilarity: null })
     expect(migrated.upstreams[1].knowledge).toEqual(bind())
@@ -376,7 +376,7 @@ describe('the knowledge field', () => {
   test('models.json: the model-level binding normalizes, a bad one is dropped (no version bump)', () => {
     const mk = (knowledge: unknown) => normalizeModels({ version: 1, models: [{ id: 'm', name: 'M', backend: 'llama-server', file: { dirId: 'd', rel: 'a.gguf' }, mmproj: null, draft: null, activeProfile: 'a', profiles: { a: { overrides: {}, extraArgs: '' } }, ...(knowledge === undefined ? {} : { knowledge }) }] } as ModelsDoc).models[0]!
     expect(mk(undefined).knowledge).toBeUndefined()
-    expect(mk({ enabled: true, all: true, kbs: ['x', 3], mode: 'tool', topK: 99 }).knowledge).toEqual({ enabled: true, all: true, kbs: ['x'], mode: 'tool', topK: 20, tags: [], minSimilarity: null })
+    expect(mk({ enabled: true, all: true, kbs: ['x', 3], mode: 'tool', topK: 5000 }).knowledge).toEqual({ enabled: true, all: true, kbs: ['x'], mode: 'tool', topK: 1000, tags: [], minSimilarity: null })
     expect(mk({ enabled: true, kbs: ['x'] }).knowledge).toEqual({ enabled: true, all: false, kbs: ['x'], mode: 'inject', topK: 5, tags: [], minSimilarity: null }) // old shape: no `all`
     expect(mk('junk').knowledge).toBeUndefined()
     expect(mk([]).knowledge).toBeUndefined()
@@ -511,7 +511,7 @@ describe('tool mode (buffered)', () => {
     const def = first.tools[1].function
     expect(def.description).toContain('Manual')
     expect(def.parameters.required).toEqual(['query'])
-    expect(def.parameters.properties.top_k).toMatchObject({ type: 'integer', minimum: 1, maximum: 20 })
+    expect(def.parameters.properties.top_k).toMatchObject({ type: 'integer', minimum: 1, maximum: 1000 })
 
     const second = s.srv.seen[1].body.messages
     expect(second).toHaveLength(3)
@@ -539,10 +539,10 @@ describe('tool mode (buffered)', () => {
   })
 
   test('top_k of the call is used (clamped); the model can search several times', async () => {
-    const withTopK = () => Response.json({ choices: [{ message: { role: 'assistant', content: null, tool_calls: [{ id: 'x', type: 'function', function: { name: 'search_knowledge', arguments: '{"query":"q","top_k":99}' } }] } }] })
+    const withTopK = () => Response.json({ choices: [{ message: { role: 'assistant', content: null, tool_calls: [{ id: 'x', type: 'function', function: { name: 'search_knowledge', arguments: '{"query":"q","top_k":5000}' } }] } }] })
     const s = setup({ rounds: [withTopK, () => jsonCall('second'), () => jsonAnswer('done')], profile: tool })
     await s.post(chat())
-    expect(s.searches.map(x => x.topK)).toEqual([20, 5])
+    expect(s.searches.map(x => x.topK)).toEqual([1000, 5])
     await recordsSettled(s.records)
     expect(s.records[0]!.knowledge).toMatchObject({ rounds: 2, hits: 2 })
   })

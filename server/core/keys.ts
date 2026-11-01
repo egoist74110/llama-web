@@ -25,9 +25,11 @@ export interface SecretsDoc {
   cloudflareToken: string
   /** API keys of the external upstreams (decision 56), by upstream id. Same rules as `tunnelToken`: never in logs, events or API responses. */
   upstreamKeys: Record<string, string>
+  /** API keys of the keyed web search backends (decision 67), by backend id ('tavily', 'brave'). Same rules as `tunnelToken`. */
+  searchKeys: Record<string, string>
 }
 
-export const SECRETS_VERSION = 4
+export const SECRETS_VERSION = 5
 
 /** `migrations[n]` turns a version-n secrets.json into version n + 1. */
 export const SECRETS_MIGRATIONS: Record<number, (old: any) => any> = {
@@ -37,10 +39,12 @@ export const SECRETS_MIGRATIONS: Record<number, (old: any) => any> = {
   2: old => ({ ...old, cloudflareToken: '' }),
   // 4: API keys of external upstreams.
   3: old => ({ ...old, upstreamKeys: {} }),
+  // 5: keys of the web search backends (decision 67).
+  4: old => ({ ...old, searchKeys: {} }),
 }
 
 export function defaultSecrets(): SecretsDoc {
-  return { version: SECRETS_VERSION, apiKeys: [], tunnelToken: '', cloudflareToken: '', upstreamKeys: {} }
+  return { version: SECRETS_VERSION, apiKeys: [], tunnelToken: '', cloudflareToken: '', upstreamKeys: {}, searchKeys: {} }
 }
 
 const isObj = (v: unknown): v is Record<string, any> => !!v && typeof v === 'object' && !Array.isArray(v)
@@ -57,6 +61,9 @@ export function normalizeSecrets(doc: SecretsDoc): SecretsDoc {
   if (doc.upstreamKeys === undefined || doc.upstreamKeys === null) doc.upstreamKeys = {}
   if (!isObj(doc.upstreamKeys)) throw new Error('"upstreamKeys" must be an object')
   for (const [id, v] of Object.entries(doc.upstreamKeys)) if (typeof v !== 'string') throw new Error(`upstream key "${id}" must be a string`)
+  if (doc.searchKeys === undefined || doc.searchKeys === null) doc.searchKeys = {}
+  if (!isObj(doc.searchKeys)) throw new Error('"searchKeys" must be an object')
+  for (const [id, v] of Object.entries(doc.searchKeys)) if (typeof v !== 'string') throw new Error(`search key "${id}" must be a string`)
   const ids = new Set<string>()
   for (const k of doc.apiKeys) {
     if (!isObj(k) || typeof k.id !== 'string' || !k.id) throw new Error('every API key needs a string "id"')

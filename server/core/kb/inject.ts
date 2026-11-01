@@ -107,7 +107,7 @@ export function toolDefinition(kbNames: readonly string[], tags: readonly TagCou
         type: 'object',
         properties: {
           query: { type: 'string', description: t.kbPrompt.toolQuery },
-          top_k: { type: 'integer', minimum: 1, maximum: 20, description: t.kbPrompt.toolTopK },
+          top_k: { type: 'integer', minimum: 1, maximum: 1000, description: t.kbPrompt.toolTopK },
           ...(tags.length ? { tags: tagsParameter(tags) } : {}),
         },
         required: ['query'],

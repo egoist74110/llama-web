@@ -18,6 +18,9 @@ const form = reactive({ name: '', baseUrl: '', monitorUrl: '', apiKey: '', clear
 // What "on" starts as: every knowledge base (including later ones), injected, 5 hits.
 const knowledge = ref<KnowledgeBinding>({ enabled: false, all: true, kbs: [], mode: 'inject', topK: 5, tags: [], minSimilarity: null })
 const knowledgeIncomplete = computed(() => bindingIncomplete(knowledge.value))
+// Gateway web search for this upstream (decision 67): on by default.
+const webSearch = ref(true)
+const ws = t.webSearch
 const kb = t.kbBinding
 const ui = usePlatformUi()
 const toast = useToast()
@@ -38,6 +41,7 @@ watch(() => props.open, (o) => {
   form.startCwd = u?.startCwd ?? ''
   const b = u?.knowledge
   knowledge.value = b ? { ...b, kbs: [...b.kbs], tags: [...(b.tags ?? [])], all: b.enabled ? b.all : b.all || b.kbs.length === 0 } : { enabled: false, all: true, kbs: [], mode: 'inject', topK: 5, tags: [], minSimilarity: null }
+  webSearch.value = u?.webSearch !== false
   error.value = ''
 })
 
@@ -68,6 +72,7 @@ async function save() {
     startCommand: form.startCommand.trim(),
     startCwd: form.startCwd.trim(),
     knowledge: knowledge.value,
+    webSearch: webSearch.value,
   }
   if (form.clearKey) body.apiKey = ''
   else if (form.apiKey.trim()) body.apiKey = form.apiKey.trim()
@@ -160,6 +165,17 @@ async function save() {
             {{ kb.upstreamHint }}
           </p>
           <KnowledgeBindingForm v-model="knowledge" />
+        </section>
+        <section class="flex items-center justify-between gap-3 rounded-[10px] border border-default px-3.5 py-3">
+          <div class="min-w-0">
+            <p class="m-0 text-sm text-default">
+              {{ ws.upstreamLabel }}
+            </p>
+            <p class="m-0 mt-0.5 text-xs text-dimmed">
+              {{ ws.upstreamHint }}
+            </p>
+          </div>
+          <USwitch v-model="webSearch" :aria-label="ws.upstreamLabel" />
         </section>
         <details class="rounded-[10px] border border-default px-3.5 py-2.5 text-[13px]">
           <summary class="cursor-pointer font-medium">

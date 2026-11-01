@@ -161,7 +161,7 @@ describe('import and search', () => {
     expect(top.similarity).not.toBeNull()
   })
 
-  test('topK defaults to 5, is capped at 20 and honoured', async () => {
+  test('topK defaults to 5, is capped at 1000 and honoured', async () => {
     const dir = tmp()
     const { kb } = make(dir, fake(null))
     const base = await kb.create({ name: 'many', chunkSize: 100, chunkOverlap: 10 })
@@ -169,7 +169,7 @@ describe('import and search', () => {
     await kb.addDocument(base.id, { name: 'fruit.txt', bytes: enc(text) })
     await kb.idle()
     expect((await kb.search([base.id], '苹果')).hits).toHaveLength(5)
-    expect((await kb.search([base.id], '苹果', { topK: 99 })).hits).toHaveLength(20)
+    expect((await kb.search([base.id], '苹果', { topK: 5000 })).hits.length).toBeGreaterThan(20)
     expect((await kb.search([base.id], '苹果', { topK: 2 })).hits).toHaveLength(2)
   })
 

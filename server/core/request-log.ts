@@ -45,6 +45,17 @@ export interface RequestRecord {
    * model and how many search rounds ran. Never the query or any hit text. Missing / null = none.
    */
   knowledge?: KnowledgeSummary | null
+  /** Web searches the gateway ran for this request (decision 67 ④): how many and which backends answered; never the queries. */
+  webSearch?: WebSearchSummary | null
+}
+
+export interface WebSearchSummary {
+  searches: number
+  /** Pages read with `fetch_url`. */
+  fetches: number
+  /** Searches a paid backend answered (the model asked for it by name). */
+  paid: number
+  backends: string[]
 }
 
 export interface KnowledgeSummary {

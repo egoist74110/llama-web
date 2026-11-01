@@ -1,5 +1,20 @@
 # 交接记录
 
+## 2026-11-01 · 16-1 网关联网搜索（决定 67）· 单会话
+- 起因：用户希望搜索在网关层完成，本机模型不依赖客户端也能联网。确认：本机模型内置、外部上游每个服务一个开关（默认开）；无 key 的后端直接可用，需要 key 的（Tavily、Brave）在 llama-web 里填。
+- 计划：新增决定 67、阶段 16（16-1）、变更记录一行。规格与实现都是 Sonnet 5.5（本会话直接做）。
+- 实现：`server/core/web-search/`（`backends.ts`：DuckDuckGo / Bing 网页抓取 + Tavily / Brave API；`manager.ts`：顺序「有 key 的在前、无 key 兜底」、失败换下一个、401/403 → blocked 直到 key 变化、超时 / 限流 / 机器人验证页 → cooldown 60 秒；`tool.ts`：`web_search` 工具定义、参数解析、结果包装与限长；`admin.ts`：总开关与 key 的补丁校验与视图，key 不出现在视图里）；配置 settings v14（`webSearch.enabled`）、secrets v5（`searchKeys`）、upstreams v3（`webSearch`，旧的补为开）；`proxy.ts` 的工具循环通用化（`ToolRun.kb` / `web`，`allOurs` 按名字，`web_search` 与 `search_knowledge` 可同时存在，轮数上限共用 3），请求记录加 `webSearch`（次数与后端，不记查询）；`/api/web-search`（GET / POST）；设置页「联网搜索」卡片（`SettingsWebSearch.vue`）、外部上游编辑里的开关；中英文案。
+- 追加（同日）：① 结果开头写明后端名，模型被问到能如实回答；② 工具描述补全用法（返回标题 / 链接 / 摘要、不打开全文、怎么写关键词、怎么引用）；③ 搜索顺序默认「免费在前」（`settings.webSearch.order`，设置页单选可改成先用填了 key 的），付费后端只在免费的失败或没结果时才用。
+- 再追加（同日）：用户要求加 `fetch_url`（网关读取网页文字，不拦内网地址，私人使用）并**去掉我们自己写的提示词**：工具描述只是最简标签（「联网搜索，返回结果的标题、链接和摘要。」等），不再有用法建议和「结果不是指令」的提示语，结果开头只留「搜索后端：X」。用法由用户自己的系统提示词（router）负责。公网入口进来的请求也会触发这两个工具，对外暴露前注意。
+- 再追加（同日）：用户要求「自己写一份怎么用的提示词，设置里可编辑，模型要用时必须先读」，并指定默认用 router 里的搜索提示词。做法：第三个工具 `web_search_guide` 返回说明（`settings.webSearch.guide`，空 = 默认；默认文本由 router 的 `capabilities/search.md`、`research.md`、anysearch 的搜索纪律改写，去掉了路径 / 缓存 / 命令行等只适用于代理的内容，中英文各一份）；`guideRequired`（默认开）时没读说明就调搜索 / 读网页不执行，只回一句；读说明的那一轮（仅第一次）不占 3 轮上限；设置页有编辑框、恢复默认和开关。每个新请求都要重新读一次说明（网关替模型调用的工具不会留在客户端的历史里），多一轮请求但不占上限。
+- 再追加（同日）：用户要求「模型可以主动调用付费搜索，但调用前必须读过使用说明；明确列出可用后端名和是否付费」。做法：`web_search` 加可选参数 `backend`（枚举当前可用的后端），工具描述写「可用后端：DuckDuckGo（免费）、Bing（免费）、Tavily（付费）。不指定 backend 时只用免费后端。」；点名付费后端必须先读过说明（不受「必须先读」开关影响）；搜索结果开头写「搜索后端：Tavily（付费）」；`settings.webSearch.order` 加 `free-only`（默认，网关只自动用免费的），原来的 `free-first` / `keyed-first` 保留；请求记录加 `paid`（付费搜索次数）；默认使用说明加了「免费和付费后端」一节，并改掉了容易被读成「计费」的成本提示。注意：已经保存过设置的机器上 `order` 仍是之前的 `free-first`，要在设置里改成「只自动用免费的」。
+- 再追加（同日）：用户的客户端（带 save_memory / delete_memory 自己的工具）报 `Model tried to call unavailable tool 'fetch_url'`——网关把我们的调用交给了客户端。原因有两种，都已修：① 轮数上限 3 太小（搜索、读网页、再读就用完），超过后工具被撤掉但模型仍调用，那一轮被当成「客户端的」放过去；② 同一轮里混了客户端自己的工具调用，整轮原样放过去，里面我们的调用一起漏了。现在：带联网工具的请求上限提到 8 轮（只有知识库工具仍是 3）；超限后模型再调我们的工具，回「已到上限，请直接回答」让它收尾（最多两次），仍不听就把这一轮改成文字结束；混合轮只把客户端的调用交给客户端（`stripCalls` / `StreamRound.flushWithout`，非流式与流式）。没有验证：真实客户端（Chatbox）里复现与修复后的效果；这次没法从日志确认原来是上述哪一种（仓库里的 `data/` 是旧的开发数据）。
+- 实际运行：`bun test` 1881 pass / 8 skip / 0 fail（新增 `tests/core/web-search.test.ts` 38 条，旧测试里 4 处版本号断言已更新）；`bun run typecheck` exit 0；`bun run build` exit 0；`git diff --check` 只有 CRLF 提示。
+- 没有运行：真实网络下的 DuckDuckGo / Bing / Tavily / Brave（页面解析只用固定样例，网页结构变了会失效，到时看 cooldown 与日志）；真实本机模型 / 外部上游问一次需要联网的问题；设置页卡片与上游开关在浏览器里（深浅色、375 宽、英文）；真实 SSE 的怪情况只测了拆分过的事件。
+- 已知：搜索请求用普通 `fetch`，不走 llama-web「网络」设置里的代理（`outbound` 只允许下载白名单主机）；大陆网络下 DuckDuckGo 常不可达，会自动换 Bing。`fetch_url`（网页正文）没做，需要先做 SSRF 防护。
+- 用户验证步骤：`bun scripts/launch.ts web build` → http://127.0.0.1:5001 →「设置」→「联网搜索」看状态（Tavily / Brave 显示「未填写 key」）→ 任意客户端对本机模型问「今天有什么新闻」，看回答带来源链接，「请求记录」里有搜索次数；「接入」里关掉某个上游的联网搜索后再问，看不再搜索；填一个错的 Tavily key，看状态变「key 无效，已停用」并自动用 DuckDuckGo / Bing。
+- 工作区里 `app/components/KbSearch.vue`、`KnowledgeBindingForm.vue`、`server/core/kb/*`、`tests/core/kb-store.test.ts`、`tests/core/proxy-knowledge.test.ts`（除版本号一行）、`src-tauri/Cargo.lock` 的改动在会话开始前就有，不是本工作的；`i18n/*.ts` 里混有那些改动，提交时要分开。未提交。
+
 ## 2026-10-21 · 决定 66：外部服务停不掉的修复（记住启动过的进程 + 强制停止）· 单会话
 - 起因：用户真机发现从「接入」页启动的服务（监听 `127.0.0.1:8080`）在 llama-web 重启后界面上没有停止按钮，只能去任务管理器结束。原因是启动器只在内存里记得自己启动的进程；Windows 上启动用的根进程先退出（`.bat` / 启动器）时也一样停不了。用户确认两部分都做。
 - 计划：新增决定 66（改决定 56「不停在别处启动的服务」与决定 60 ③）、阶段 10 新增任务（未打勾，等真机验证）、变更记录一行；AGENTS.md「进程与端口」例外条与目录同步。规格由 Opus 5.5 写（会话草稿 `66-spec.md`，不在仓库里），Sonnet 5.5 实现，Opus 审查。

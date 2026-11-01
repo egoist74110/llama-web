@@ -42,6 +42,8 @@ export interface Upstream {
   testedAt: string
   /** Knowledge for every model of this upstream (decision 65 ⑨); off by default. */
   knowledge: KnowledgeBinding
+  /** Gateway web search for every model of this upstream (decision 67); on by default. */
+  webSearch: boolean
 }
 
 export interface UpstreamsDoc {
@@ -49,7 +51,7 @@ export interface UpstreamsDoc {
   upstreams: Upstream[]
 }
 
-export const UPSTREAMS_VERSION = 2
+export const UPSTREAMS_VERSION = 3
 export const MAX_UPSTREAMS = 20
 export const MAX_NAME_LENGTH = 24
 export const MAX_MODELS = 500
@@ -64,6 +66,13 @@ export const UPSTREAMS_MIGRATIONS: Record<number, (old: any) => any> = {
   1: (old) => {
     if (Array.isArray(old?.upstreams)) {
       for (const u of old.upstreams) if (u && typeof u === 'object' && u.knowledge === undefined) u.knowledge = defaultBinding()
+    }
+    return old
+  },
+  // 3: gateway web search per upstream (decision 67): on, which is the default for a new upstream too.
+  2: (old) => {
+    if (Array.isArray(old?.upstreams)) {
+      for (const u of old.upstreams) if (u && typeof u === 'object' && u.webSearch === undefined) u.webSearch = true
     }
     return old
   },
@@ -220,6 +229,7 @@ export function normalizeUpstreams(doc: UpstreamsDoc): UpstreamsDoc {
       u.startCommand = cleanStartCommand(u.startCommand)
       u.startCwd = cleanStartCwd(u.startCwd)
       u.knowledge = normalizeBinding(u.knowledge)
+      u.webSearch = u.webSearch !== false
     } catch (e) {
       throw new Error(`upstream "${u.id}": ${(e as Error).message}`)
     }
@@ -295,6 +305,7 @@ export interface UpstreamForm {
   startCwd?: unknown
   stopOnExit?: unknown
   knowledge?: unknown
+  webSearch?: unknown
 }
 
 /**
@@ -346,6 +357,7 @@ export function createUpstream(draft: UpstreamsDoc, form: UpstreamForm, ctx: Edi
     startCommand: cleanStartCommand(form.startCommand), startCwd: cleanStartCwd(form.startCwd), stopOnExit: form.stopOnExit === true,
     models: [], manualModels: cleanModelIds(form.manualModels), testedAt: '',
     knowledge: form.knowledge === undefined ? defaultBinding() : cleanKnowledge(form.knowledge, ctx),
+    webSearch: form.webSearch !== false,
   }
   draft.upstreams.push(u)
   return u
@@ -373,6 +385,7 @@ export function updateUpstream(draft: UpstreamsDoc, id: unknown, form: UpstreamF
   if (form.startCwd !== undefined) u.startCwd = cleanStartCwd(form.startCwd)
   if (form.stopOnExit !== undefined) u.stopOnExit = form.stopOnExit === true
   if (form.knowledge !== undefined) u.knowledge = cleanKnowledge(form.knowledge, ctx)
+  if (form.webSearch !== undefined) u.webSearch = form.webSearch !== false
   return u
 }
 

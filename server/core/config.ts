@@ -1,6 +1,7 @@
 // settings.json / models.json schemas, defaults and light normalisation (see plan「配置与数据」).
 // Hand-edited files may omit sections; missing values are filled from the defaults.
 import { DEFAULT_LAUNCH_DEFAULTS, type LaunchDefaults, type ParamOverrides } from './args'
+import { MAX_GUIDE, SEARCH_ORDERS, type SearchOrder } from './web-search/backends'
 import { cleanStoredChoice, type GpuChoice } from './gpu-group'
 import type { FileRef, ModelDir } from './types'
 import type { Acceleration, PlatformInfo, RuntimeTarget } from './platform'
@@ -104,6 +105,15 @@ export interface Settings {
   /** Launch defaults for a CPU build on Windows (decision 36); chosen by the runtime a launch ends up using. */
   defaultsCpu: LaunchDefaults
   preprocess: { image: ImagePreprocess }
+  /** Gateway web search (decision 67): the global switch; local models follow it alone, upstreams also have their own. Keys are in secrets.json. */
+  webSearch: {
+    enabled: boolean
+    order: SearchOrder
+    /** The usage guide the model reads through `web_search_guide`; '' = the built-in default of the saved language. */
+    guide: string
+    /** The model must read the guide before `web_search` / `fetch_url` do anything. */
+    guideRequired: boolean
+  }
   logs: { keepRunsPerModel: number, keepDays: number, usageKeepDays: number }
   gpu: { sampleSec: number }
   /** Interface language (decision 18): what the pages show and what the server answers in. */
@@ -167,7 +177,7 @@ export type NoRoomPolicy = 'unload' | 'error'
 export const NO_ROOM_POLICIES: readonly NoRoomPolicy[] = ['unload', 'error']
 export const MAX_LOADED_LIMIT = 99
 
-export const SETTINGS_VERSION = 13
+export const SETTINGS_VERSION = 14
 export const MODELS_VERSION = 1
 
 /**
@@ -271,6 +281,7 @@ export function defaultSettings(platform?: PlatformInfo): Settings {
     },
     defaultsCpu: { ...DEFAULT_CPU_DEFAULTS },
     preprocess: { image: { enabled: true, maxEdge: 896, format: 'jpeg', quality: 90 } },
+    webSearch: { enabled: true, order: 'free-only', guide: '', guideRequired: true },
     logs: { keepRunsPerModel: 20, keepDays: 14, usageKeepDays: 30 },
     gpu: { sampleSec: 2 },
     ui: { locale: DEFAULT_LOCALE },
@@ -366,6 +377,11 @@ export const SETTINGS_MIGRATIONS: Record<number, (old: any) => any> = {
     old.network.mirror ??= ''
     return old
   },
+  // 14: gateway web search (decision 67): on.
+  13: (old) => {
+    old.webSearch = { enabled: true, order: 'free-only', guide: '', guideRequired: true, ...(isObj(old.webSearch) ? old.webSearch : {}) }
+    return old
+  },
 }
 
 /** The online limit that is in force: 1 unless `multiLoad` is on, never more than there are ports for the processes. */
@@ -394,6 +410,10 @@ export function normalizeSettings(doc: Settings): Settings {
     }
   }
   out.preprocess.image = { ...def.preprocess.image, ...(isObj(doc.preprocess?.image) ? doc.preprocess.image : {}) }
+  if (typeof out.webSearch.enabled !== 'boolean') out.webSearch.enabled = true
+  if (!SEARCH_ORDERS.includes(out.webSearch.order)) out.webSearch.order = 'free-only'
+  if (typeof out.webSearch.guide !== 'string' || out.webSearch.guide.length > MAX_GUIDE) out.webSearch.guide = ''
+  if (typeof out.webSearch.guideRequired !== 'boolean') out.webSearch.guideRequired = true
   if (!Array.isArray(out.modelDirs)) throw new Error('"modelDirs" must be an array')
   const pr = out.scheduler.portRange
   if (!Array.isArray(pr) || pr.length !== 2 || !pr.every((p: unknown) => Number.isInteger(p)) || pr[0] > pr[1]) {

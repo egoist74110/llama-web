@@ -41,7 +41,7 @@ async function run() {
   if (!q || searching.value || !similarity.value.ok) return
   searching.value = true
   try {
-    const k = Math.min(20, Math.max(1, Math.floor(Number(topK.value)) || 5))
+    const k = Math.min(1000, Math.max(1, Math.floor(Number(topK.value)) || 5))
     result.value = await $fetch<SearchResponse>('/api/kb/search', {
       method: 'POST',
       body: {
@@ -80,7 +80,7 @@ const showKb = computed(() => effective.value === 'all')
         </div>
         <label class="flex items-center gap-2 text-sm">
           <span class="text-muted">{{ s.topK }}</span>
-          <UInput v-model="topK" type="number" size="sm" class="w-20" min="1" max="20" />
+          <UInput v-model="topK" type="number" size="sm" class="w-20" min="1" max="1000" />
         </label>
         <label class="flex items-center gap-2 text-sm">
           <span class="text-muted">{{ s.minSimilarity }}</span>

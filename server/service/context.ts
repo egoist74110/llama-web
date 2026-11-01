@@ -28,6 +28,8 @@ import { detectLanAddress, getLanAddress } from '../core/network'
 import { LoadProgress, trackWeightLoad } from '../core/load-progress'
 import { ModelOps } from '../core/model-ops'
 import { createProxy, type Proxy, type ProxyEvent } from '../core/proxy'
+import { fetchPage } from '../core/web-search/fetch'
+import { createWebSearch, type WebSearch } from '../core/web-search/manager'
 import { JobStore } from '../core/async-jobs'
 import { loadWinSpawn } from '../core/win-spawn'
 import { handlePublic, PublicListener } from '../core/public-entry'
@@ -92,6 +94,8 @@ export interface AppContext {
   /** data/secrets.json (API keys). Never send `key` values anywhere except the reveal / create responses. */
   getSecrets(): SecretsDoc
   updateSecrets(fn: (draft: SecretsDoc) => SecretsDoc | void): SecretsDoc
+  /** Gateway web search (decision 67): backend order and health. */
+  webSearch: WebSearch
   /** data/upstreams.json (external OpenAI-compatible services, decision 56); their keys are in secrets.json. */
   getUpstreams(): UpstreamsDoc
   updateUpstreams(fn: (draft: UpstreamsDoc) => UpstreamsDoc | void): UpstreamsDoc
@@ -247,6 +251,8 @@ function logProxyEvent(e: ProxyEvent) {
     }
   } else if (e.type === 'kb-error') {
     logError('knowledge:', (e.error as Error)?.message ?? e.error)
+  } else if (e.type === 'web-search-error') {
+    logError('web search:', (e.error as Error)?.message ?? e.error)
   } else if (e.type === 'kb-skipped') {
     log(`knowledge: skipped knowledge bases that no longer exist (${e.ids.join(', ')})`)
   } else if (e.type === 'upstream-error') {
@@ -717,6 +723,8 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     onChange: () => live.notify(), log,
   })
   void kb.recover().catch(e => logError('knowledge base recovery failed:', (e as Error)?.message ?? e))
+  // Gateway web search (decision 67): keys from secrets.json, the switch from settings.
+  const webSearch = createWebSearch({ getKeys: () => secretsRef.get().searchKeys, getOrder: () => getSettings().webSearch.order })
   const proxy = createProxy({
     scheduler, getModels, getSettings, onEvent: logProxyEvent,
     onRequest: (r) => { logs.appendRequest(r); usage.record(r); live.onRequest(r) },
@@ -728,6 +736,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     embedding,
     // Decision 65 ⑨: knowledge for the chat models. Permission lists per API key come with 15-3 (null = every knowledge base).
     knowledge: { search: (ids, q, o) => kb.search(ids, q, o), tags: ids => kb.tags(ids), list: () => knowledgeRef.get().bases, allowedKbs: () => null },
+    webSearch: { enabled: () => getSettings().webSearch.enabled, guide: () => ({ custom: getSettings().webSearch.guide, required: getSettings().webSearch.guideRequired }), offer: () => ({ backends: webSearch.available(), autoPaid: getSettings().webSearch.order !== 'free-only' }), search: (q, n, signal, only) => webSearch.search(q, n, signal, only), fetchPage: (url, maxChars, signal) => fetchPage(url, { maxChars, signal }) },
   })
   const publicEntry: PublicListener = new PublicListener((req, ip) => handlePublic(req, {
     authenticate: header => authenticate(secretsRef.get(), header),
@@ -818,7 +827,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
   return {
     dataDir, outbound, bootPort: getSettings().server.port, getSettings, getSettingsRev: settingsRef.rev, getSettingsBoot: () => settingsBoot, getModels, updateSettings: settingsRef.update, updateModels: modelsRef.update,
     platform, runtimeTarget: selectedTarget, runtimeSelection,
-    getSecrets: secretsRef.get, updateSecrets: secretsRef.update, getUpstreams: upstreamsRef.get, updateUpstreams: upstreamsRef.update, health, launcher, tunnel, applyTunnel, cloudflare,
+    getSecrets: secretsRef.get, updateSecrets: secretsRef.update, webSearch, getUpstreams: upstreamsRef.get, updateUpstreams: upstreamsRef.update, health, launcher, tunnel, applyTunnel, cloudflare,
     refresh: () => { settingsRef.refresh(); modelsRef.refresh(); upstreamsRef.refresh(); embeddingRef.refresh(); knowledgeRef.refresh() },
     getEmbedding: embeddingRef.get, updateEmbedding: embeddingRef.update, embedding, kb, getKnowledge: knowledgeRef.get,
     getRuntimeStatus: () => updater.getStatus(), updater, secondary,

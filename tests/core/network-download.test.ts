@@ -29,7 +29,7 @@ test('v12 -> v13 fills only missing defaults and preserves explicit network sett
   const old: any = { version: 12, llamacpp: { current: 'custom:r1' }, mirror: { custom: 'https://mirror.example.com/' } }
   const migrated = SETTINGS_MIGRATIONS[12]!(structuredClone(old))
   expect(migrated).toEqual({ ...old, network: DEFAULT_NETWORK })
-  expect(SETTINGS_VERSION).toBe(13)
+  expect(SETTINGS_VERSION).toBe(14)
   const saved = { ...old, network: { proxy: { mode: 'off', url: '' }, downloadSource: 'mirror', mirror: 'gh-proxy' } }
   expect(SETTINGS_MIGRATIONS[12]!(structuredClone(saved))).toEqual(saved)
   expect(normalizeSettings(migrated).llamacpp.current).toBe('custom:r1')
@@ -303,7 +303,7 @@ test('settings v13 is saved with an unchanged v12 backup by the atomic store mig
   const store = new JsonStore({ dataDir: dir, name: 'settings.json', version: SETTINGS_VERSION, defaults: defaultSettings, migrations: SETTINGS_MIGRATIONS, validate: normalizeSettings })
   try {
     expect(store.load().network).toEqual(DEFAULT_NETWORK)
-    expect(JSON.parse(readFileSync(join(dir, 'settings.json'), 'utf8')).version).toBe(13)
+    expect(JSON.parse(readFileSync(join(dir, 'settings.json'), 'utf8')).version).toBe(14)
     const { readdirSync } = await import('node:fs')
     expect(readFileSync(join(dir, 'backups', readdirSync(join(dir, 'backups'))[0]!), 'utf8')).toBe(bytes)
   } finally { store.close() }

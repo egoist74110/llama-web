@@ -17,9 +17,9 @@ export type { TagCount }
 export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 export const EMBED_BATCH = 32
 export const DEFAULT_TOP_K = 5
-export const MAX_TOP_K = 20
+export const MAX_TOP_K = 1000
 /** Candidates taken from each of the two searches before fusion. */
-const CANDIDATES = 50
+const MIN_CANDIDATES = 50
 const MAX_QUERY_CHARS = 2000
 
 export interface KbStore {
@@ -312,6 +312,8 @@ export class KbManager {
     const q = String(query ?? '').trim().slice(0, MAX_QUERY_CHARS)
     if (!q) throw new KbError('empty-query')
     const topK = Number.isFinite(opts.topK) ? Math.min(MAX_TOP_K, Math.max(1, Math.floor(opts.topK!))) : DEFAULT_TOP_K
+    // Each search must be able to supply topK hits, so the candidate pool grows with it.
+    const candidates = Math.max(MIN_CANDIDATES, topK)
     const tags = dedupeTags(Array.isArray(opts.tags) ? opts.tags.filter((x): x is string => typeof x === 'string') : [], MAX_FILTER_TAGS)
     const minSim = cleanSimilarity(opts.minSimilarity)
     const targets = kbIds ? [...new Set(kbIds)].map(id => this.base(id)) : this.bases()
@@ -343,10 +345,10 @@ export class KbManager {
       // With tags a knowledge base without a matching chunk has nothing to give: neither search runs.
       const allow = tags.length ? db.chunkIdsWithTags(tags) : undefined
       if (allow && allow.size === 0) continue
-      const kbKw = match ? db.keywordSearch(match, CANDIDATES, tags) : []
+      const kbKw = match ? db.keywordSearch(match, candidates, tags) : []
       if (qvec && vectorsMatch && b.embedding.dims === qvec.length) {
         usedVector.add(b.id)
-        let kbVec = db.vectorSearch(qvec, CANDIDATES, allow)
+        let kbVec = db.vectorSearch(qvec, candidates, allow)
         let kbKwKept = kbKw
         if (minSim !== null) {
           // Below the threshold is out; a keyword hit stays only when the vector search ranked it at or above it.
@@ -362,8 +364,8 @@ export class KbManager {
     }
     kw.sort((a, b) => a.bm25 - b.bm25)
     vec.sort((a, b) => b.sim - a.sim)
-    const kwTop = kw.slice(0, CANDIDATES)
-    const vecTop = vec.slice(0, CANDIDATES)
+    const kwTop = kw.slice(0, candidates)
+    const vecTop = vec.slice(0, candidates)
     const fused = fuseRrf([kwTop.map(x => x.key), vecTop.map(x => x.key)]).slice(0, topK)
     const bm25 = new Map(kwTop.map(x => [x.key, x.bm25]))
     const sim = new Map(vecTop.map(x => [x.key, x.sim]))

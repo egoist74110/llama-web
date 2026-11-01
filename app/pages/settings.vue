@@ -13,6 +13,7 @@ const all = computed(() => [
   { id: 's-llama', label: t.llamacpp.title, needsDoc: true },
   { id: 's-defaults', label: t.settings.defaults.title, needsDoc: true },
   { id: 's-image', label: t.settings.image.title, needsDoc: true },
+  { id: 's-web', label: t.webSearch.title, needsDoc: true },
   { id: 's-server', label: t.settings.server.title, needsDoc: true },
   { id: 's-public', label: t.publicAccess.title, needsDoc: true },
   { id: 's-network', label: t.settings.network.title, needsDoc: true },
@@ -98,6 +99,7 @@ watch(() => route.hash, async () => { await nextTick(); goToHash() })
           <SettingsLlamacpp id="s-llama" />
           <SettingsDefaults id="s-defaults" />
           <SettingsImage id="s-image" />
+          <SettingsWebSearch id="s-web" />
           <SettingsServer id="s-server" />
           <SettingsPublicAccess id="s-public" />
           <SettingsNetwork id="s-network" />

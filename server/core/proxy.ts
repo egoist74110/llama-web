@@ -11,7 +11,7 @@
 import type { ModelsDoc, Settings } from './config'
 import { fmt, t } from './i18n'
 import { resolvePreprocessOptions, runPreprocess, type PreprocessResult } from './preprocess'
-import { sourceOf, summarizeImages, summarizeParams, UsageTap, type KnowledgeSummary, type RequestMeta, type RequestRecord } from './request-log'
+import { sourceOf, summarizeImages, summarizeParams, UsageTap, type KnowledgeSummary, type RequestMeta, type RequestRecord, type WebSearchSummary } from './request-log'
 import { findModel, hasImages, listModelNames, resolveTarget, type RouteResult } from './routing'
 import { findExternal, listExternalNames, type ExternalRoute, type Upstream, type UpstreamsDoc } from './upstreams'
 import { isJobId, jobOwnerOf, matchJobCreate, matchJobFollowUp, sameOwner, type AsyncJobApi, type JobRegistry } from './async-jobs'
@@ -23,8 +23,12 @@ import type { SpeedMeter } from './speed'
 import { SchedulerError, type Lease, type NoRoomDetail, type Scheduler, type Target } from './scheduler'
 import { clampTopK, resolveKnowledge, type KbRef, type KnowledgeBinding } from './kb/binding'
 import type { TagCount } from './kb/tags'
-import { addTool, formatHits, hasToolNamed, injectBlock, injectIntoSystem, MAX_TOOL_ROUNDS, messagesOf, queryOf, removeTool, type HitText } from './kb/inject'
-import { addUsage, allOurs, callsOfMessage, followUp, hasUsage, noUsage, parseSearchArguments, SseSplitter, StreamRound, type ToolCall, type Usage } from './kb/tool-loop'
+import { addTool, formatHits, hasToolNamed, injectBlock, injectIntoSystem, MAX_TOOL_ROUNDS, messagesOf, queryOf, removeTool, TOOL_NAME, type HitText } from './kb/inject'
+import { BACKENDS, type BackendId } from './web-search/backends'
+import { AllBackendsFailed, type BackendOption, type SearchOutcome } from './web-search/manager'
+import { fetchFailureText, parseFetchArguments, type Page } from './web-search/fetch'
+import { addWebTools, backendLabel, backendList, FETCH_TOOL_NAME, formatPage, formatWebResults, GUIDE_TOOL_NAME, guideText, hasWebTool, MAX_LIMIT_ROUNDS, MAX_WEB_ROUNDS, offerableBackends, parseWebArguments, removeWebTool, WEB_TOOL_NAME } from './web-search/tool'
+import { addUsage, allOurs, callsOfMessage, followUp, hasUsage, noUsage, parseSearchArguments, SseSplitter, StreamRound, stripCalls, type ToolCall, type Usage } from './kb/tool-loop'
 
 /** Request body limit for /v1 and /upstream (bytes). */
 export const MAX_BODY_BYTES = 100 * 1024 * 1024
@@ -41,6 +45,8 @@ export type ProxyEvent =
   | { type: 'kb-error', error: unknown }
   /** Bound knowledge bases that do not exist any more were left out of a request. */
   | { type: 'kb-skipped', ids: string[] }
+  /** A web search failed in an unexpected way (decision 67); the model was told it is unavailable. */
+  | { type: 'web-search-error', error: unknown }
 
 /**
  * `p`, rejected early when `signal` aborts (or after `ms`). The abort listener lives only
@@ -86,6 +92,20 @@ export interface KnowledgeDeps {
   allowedKbs?(meta: RequestMeta | undefined): string[] | null
 }
 
+/** What the proxy needs of the web search (decision 67); `createWebSearch` provides `search`, tests use a fake. */
+export interface WebSearchDeps {
+  /** The global switch (settings); false = no request gets the tool. */
+  enabled(): boolean
+  /** The usage guide setting: the user's own text ('' = the default) and whether it must be read first. */
+  guide(): { custom: string, required: boolean }
+  /** `only` = the backend the model named. */
+  search(query: string, count: number, signal: AbortSignal, only?: BackendId): Promise<SearchOutcome>
+  /** Backends the model may name now and whether the gateway may pick a paid one by itself (order setting is not free-only). */
+  offer(): { backends: BackendOption[], autoPaid: boolean }
+  /** Read one page as text for `fetch_url`; rejects with a PageFetchError. */
+  fetchPage(url: string, maxChars: number, signal: AbortSignal): Promise<Page>
+}
+
 export interface ProxyDeps {
   scheduler: Pick<Scheduler, 'acquire' | 'snapshot' | 'stateOf'>
   getModels(): ModelsDoc
@@ -114,6 +134,8 @@ export interface ProxyDeps {
   jobs?: JobRegistry
   /** Knowledge for the chat models (decision 65 ⑨); absent = none (the request field is still removed). */
   knowledge?: KnowledgeDeps
+  /** Gateway web search (decision 67); absent = none. */
+  webSearch?: WebSearchDeps
   /** Embedding engine (decision 64); absent = none. */
   embedding?: {
     /** The name clients send, or null while the engine is off. */
@@ -157,6 +179,7 @@ class RequestTrace {
   images: RequestRecord['images'] = null
   /** Knowledge used (decision 65 ⑫); the tool loop keeps counting into it. */
   knowledge: KnowledgeSummary | null = null
+  webSearch: WebSearchSummary | null = null
   /** Set when a streaming path owns the end of the exchange and will call finish() itself. */
   deferred = false
   private done = false
@@ -201,7 +224,7 @@ class RequestTrace {
         id: this.id, at: this.at, source, keyName, method: this.req.method, path: new URL(this.req.url).pathname,
         modelId: this.modelId, modelName: this.modelName, profile: this.profile, stream: this.stream,
         status, outcome, error, durationMs: Date.now() - this.at,
-        promptTokens, completionTokens, images: this.images, params: this.params, knowledge: this.knowledge,
+        promptTokens, completionTokens, images: this.images, params: this.params, knowledge: this.knowledge, webSearch: this.webSearch,
       })
     } catch { /* a broken listener must not affect the request */ }
   }
@@ -313,6 +336,21 @@ interface RoundTarget {
 /** A request that goes through the tool loop: the body (mutated between rounds) and the counters of the request record. */
 interface ToolRun {
   json: any
+  /** The knowledge tool (`search_knowledge`) is part of this run (decision 65 ⑪); false for a run with only the web tool. */
+  kb: boolean
+  /** The web tool (`web_search`) is part of this run: its counters (decision 67). */
+  web?: WebSearchSummary
+  /** Which of the gateway's web tools were added to this body (`fetch_url` is left out when the client has its own). */
+  webNames?: string[]
+  /** The backends the model was allowed to name in this request. */
+  webBackends?: BackendOption[]
+  /** The guide must be read before the web tools work; `guideRead` flips when the model has read it in this request. */
+  guideRequired?: boolean
+  guideRead?: boolean
+  /** The round that read the guide does not count toward the cap (once). */
+  freeRound?: boolean
+  /** How many times a call of ours after the cap was answered with the limit text (then the turn is closed as text). */
+  limitRounds?: number
   kbs: string[]
   topK: number
   /** The binding's tag filter (the ceiling for the model) and similarity floor. */
@@ -633,7 +671,7 @@ export function createProxy(deps: ProxyDeps) {
       addTool(json, eff.kbs.map(id => bases.find(b => b.id === id)?.name ?? id), counts)
       const summary: KnowledgeSummary = { mode: 'tool', kbs: eff.kbs, hits: 0, rounds: 0 }
       trace.knowledge = summary
-      return { changed: true, tool: { json, kbs: eff.kbs, topK: eff.topK, tags: eff.tags, minSimilarity: eff.minSimilarity, available: counts.map(x => x.tag), summary } }
+      return { changed: true, tool: { json, kb: true, kbs: eff.kbs, topK: eff.topK, tags: eff.tags, minSimilarity: eff.minSimilarity, available: counts.map(x => x.tag), summary } }
     }
 
     const summary: KnowledgeSummary = { mode: 'inject', kbs: eff.kbs, hits: 0, rounds: 0 }
@@ -665,10 +703,107 @@ export function createProxy(deps: ProxyDeps) {
     return picked.length ? picked : run.tags
   }
 
+  /** Names of the tools this run answers itself. */
+  function toolNames(run: ToolRun): string[] {
+    return [...(run.kb ? [TOOL_NAME] : []), ...(run.web ? run.webNames ?? [WEB_TOOL_NAME] : [])]
+  }
+
+  /** Both gateway tools out of the body (the rounds are used up). */
+  function removeGatewayTools(json: any): void {
+    removeTool(json)
+    removeWebTool(json)
+  }
+
+  /**
+   * Add `web_search` (decision 67) when the switch that applies to this request is on, after the knowledge step: the tool
+   * joins the run knowledge tool mode made, or starts a run of its own. Only POST /v1/chat/completions with a JSON object
+   * body that has messages; a client's own `web_search` wins and the request passes through.
+   */
+  function applyWebSearch(req: Request, trace: RequestTrace, json: any, path: string, enabled: boolean, tool: ToolRun | null): { changed: boolean, tool: ToolRun | null } {
+    const same = { changed: false, tool }
+    if (!enabled || !deps.webSearch?.enabled()) return same
+    if (req.method !== 'POST' || !CHAT_PATH.test(path) || !json || typeof json !== 'object' || Array.isArray(json) || !messagesOf(json)) return same
+    if (hasWebTool(json)) return same
+    const guide = deps.webSearch.guide()
+    const offer = deps.webSearch.offer()
+    const backends = offerableBackends(json, offer.backends)
+    const names = addWebTools(json, { needsGuide: guide.required, backends, autoPaid: offer.autoPaid })
+    const web: WebSearchSummary = { searches: 0, fetches: 0, paid: 0, backends: [] }
+    trace.webSearch = web
+    const run: ToolRun = tool ?? { json, kb: false, kbs: [], topK: 0, tags: [], minSimilarity: null, available: [], summary: { mode: 'tool', kbs: [], hits: 0, rounds: 0 } }
+    run.web = web
+    run.webNames = names
+    run.webBackends = backends
+    run.guideRequired = guide.required && names.includes(GUIDE_TOOL_NAME)
+    return { changed: true, tool: run }
+  }
+
+  /** Tool rounds that count toward the cap: the one round that only read the usage guide is free. */
+  const usedRounds = (run: ToolRun): number => run.summary.rounds - (run.freeRound ? 1 : 0)
+
+  /** The cap: 3 for knowledge alone (decision 65 ⑪), more when the web tools are part of the request (decision 67). */
+  const maxRounds = (run: ToolRun): number => (run.web ? MAX_WEB_ROUNDS : MAX_TOOL_ROUNDS)
+
+  /** Names of our web tools in this run: calls to them are never handed to the client, which would answer "unavailable tool". */
+  const webNamesOf = (run: ToolRun): string[] => (run.web ? run.webNames ?? [] : [])
+
+  /** True when the model has to read the usage guide before this call may run. */
+  const mustReadGuide = (run: ToolRun): boolean => !!run.guideRequired && !run.guideRead
+
+  /** The tool result of one `web_search` call; a failed search becomes text for the model, never an error. */
+  async function runWebSearch(run: ToolRun, call: ToolCall, signal: AbortSignal): Promise<string> {
+    const args = parseWebArguments(call.arguments)
+    if (!args) return t.webPrompt.invalidArguments
+    // A named backend must be one that was offered; a paid one needs the usage guide read first, whatever the guide setting says.
+    let only: BackendId | undefined
+    if (args.backend) {
+      const option = run.webBackends?.find(b => b.id === args.backend)
+      if (!option) return fmt(t.webPrompt.backendUnknown, { list: backendList(run.webBackends ?? []) })
+      if (option.paid && !run.guideRead) return t.webPrompt.guideFirst
+      only = option.id
+    }
+    try {
+      const found = await bounded(deps.webSearch!.search(args.query, args.count, signal, only), signal)
+      const web = run.web!
+      web.searches++
+      if (BACKENDS[found.backend].needsKey) web.paid++
+      if (!web.backends.includes(found.backend)) web.backends.push(found.backend)
+      return found.hits.length ? formatWebResults(found.hits, found.backend) : t.webPrompt.noResults
+    } catch (e) {
+      if (signal.aborted) throw e
+      if (!(e instanceof AllBackendsFailed)) deps.onEvent?.({ type: 'web-search-error', error: e })
+      run.web!.searches++
+      return only ? fmt(t.webPrompt.backendFailed, { backend: backendLabel(only) }) : t.webPrompt.searchFailed
+    }
+  }
+
+  /** The tool result of one `fetch_url` call; a failed read becomes text for the model, never an error. */
+  async function runFetch(run: ToolRun, call: ToolCall, signal: AbortSignal): Promise<string> {
+    const args = parseFetchArguments(call.arguments)
+    if (!args) return t.webPrompt.invalidFetchArguments
+    run.web!.fetches++
+    try {
+      return formatPage(await bounded(deps.webSearch!.fetchPage(args.url, args.maxChars, signal), signal))
+    } catch (e) {
+      if (signal.aborted) throw e
+      return fetchFailureText(e)
+    }
+  }
+
   /** The tool results for our calls (one text each); a failed search becomes text for the model, never an error. */
   async function runSearches(run: ToolRun, calls: readonly ToolCall[], signal: AbortSignal): Promise<string[]> {
     const out: string[] = []
     for (const call of calls) {
+      if (call.name === GUIDE_TOOL_NAME) {
+        run.guideRead = true
+        out.push(guideText(deps.webSearch!.guide().custom))
+        continue
+      }
+      if (call.name === WEB_TOOL_NAME || call.name === FETCH_TOOL_NAME) {
+        if (mustReadGuide(run)) { out.push(t.webPrompt.guideFirst); continue }
+        out.push(call.name === WEB_TOOL_NAME ? await runWebSearch(run, call, signal) : await runFetch(run, call, signal))
+        continue
+      }
       const args = parseSearchArguments(call.arguments)
       if (!args) { out.push(t.kbPrompt.invalidArguments); continue }
       try {
@@ -685,6 +820,8 @@ export function createProxy(deps: ProxyDeps) {
         out.push(t.kbPrompt.searchFailed)
       }
     }
+    // A round of nothing but guide reads is free (once), so the guide does not eat into the searches the model may do.
+    if (!run.freeRound && calls.length > 0 && calls.every(c => c.name === GUIDE_TOOL_NAME)) run.freeRound = true
     return out
   }
 
@@ -710,7 +847,7 @@ export function createProxy(deps: ProxyDeps) {
     let prior: Usage = noUsage()
     try {
       for (;;) {
-        if (run.summary.rounds >= MAX_TOOL_ROUNDS) removeTool(json)
+        if (usedRounds(run) >= maxRounds(run)) removeGatewayTools(json)
         let res: Response
         let text: string
         try {
@@ -727,7 +864,7 @@ export function createProxy(deps: ProxyDeps) {
         if (res.ok) { try { obj = JSON.parse(text) } catch { /* not JSON: relayed as it is */ } }
         const message = obj?.choices?.[0]?.message
         const calls = callsOfMessage(message)
-        if (obj && run.summary.rounds < MAX_TOOL_ROUNDS && allOurs(calls)) {
+        if (obj && usedRounds(run) < maxRounds(run) && allOurs(calls, toolNames(run))) {
           prior = addUsage(prior, obj.usage)
           run.summary.rounds++
           let results: string[]
@@ -740,11 +877,26 @@ export function createProxy(deps: ProxyDeps) {
           json.messages.push(...followUp({ content: typeof message.content === 'string' ? message.content : null, extra: typeof message.reasoning_content === 'string' ? { reasoning_content: message.reasoning_content } : {} }, calls, results))
           continue
         }
+        // A call of our web tools never goes to the client. Past the cap the model is told so (twice at most) and has to answer;
+        // otherwise (a turn that also has the client's own tools, or a model that ignores the limit) our calls are cut out.
+        const dropNames = webNamesOf(run)
+        let stripped = false
+        if (obj && calls.some(c => dropNames.includes(c.name))) {
+          if (allOurs(calls, toolNames(run)) && (run.limitRounds ?? 0) < MAX_LIMIT_ROUNDS) {
+            prior = addUsage(prior, obj.usage)
+            run.limitRounds = (run.limitRounds ?? 0) + 1
+            run.summary.rounds++
+            json.messages.push(...followUp({ content: typeof message.content === 'string' ? message.content : null, extra: typeof message.reasoning_content === 'string' ? { reasoning_content: message.reasoning_content } : {} }, calls, calls.map(() => t.webPrompt.limitReached)))
+            continue
+          }
+          stripCalls(obj, dropNames, t.webPrompt.limitReached)
+          stripped = true
+        }
         let out = text
         if (obj && hasUsage(prior)) {
           obj.usage = { ...(obj.usage && typeof obj.usage === 'object' ? obj.usage : {}), ...addUsage(prior, obj.usage) }
           out = JSON.stringify(obj)
-        }
+        } else if (stripped) out = JSON.stringify(obj)
         trace.chunk(enc.encode(out))
         const secret = target.secret ?? ''
         const headers = redactHeaders(forwardResponseHeaders(res.headers), secret)
@@ -812,7 +964,7 @@ export function createProxy(deps: ProxyDeps) {
     let first = true
     try {
       for (;;) {
-        if (run.summary.rounds >= MAX_TOOL_ROUNDS) removeTool(json)
+        if (usedRounds(run) >= maxRounds(run)) removeGatewayTools(json)
         let up: Awaited<ReturnType<typeof callUpstream>>
         try {
           up = await callUpstream({ lease, req: fakeReq, path: target.path, body: enc.encode(JSON.stringify(json)), headers: target.headers, url: target.url, failure: target.failure, secret: target.secret })
@@ -860,7 +1012,7 @@ export function createProxy(deps: ProxyDeps) {
           cleanup()
         }
         const calls = round.calls()
-        if (run.summary.rounds < MAX_TOOL_ROUNDS && allOurs(calls)) {
+        if (usedRounds(run) < maxRounds(run) && allOurs(calls, toolNames(run))) {
           // Ours: what was held is dropped, the client never sees these calls.
           prior = addUsage(prior, round.usage)
           run.summary.rounds++
@@ -869,7 +1021,19 @@ export function createProxy(deps: ProxyDeps) {
           json.messages.push(...followUp({ content: round.content || null, extra: round.reasoning ? { reasoning_content: round.reasoning } : {} }, calls, results))
           continue
         }
-        await emit(round.flush(prior), gone.signal)
+        // Same as in toolBuffered: our web calls are never flushed to the client.
+        const dropNames = webNamesOf(run)
+        if (calls.some(c => dropNames.includes(c.name))) {
+          if (allOurs(calls, toolNames(run)) && (run.limitRounds ?? 0) < MAX_LIMIT_ROUNDS) {
+            prior = addUsage(prior, round.usage)
+            run.limitRounds = (run.limitRounds ?? 0) + 1
+            run.summary.rounds++
+            await emit(': web search limit\n\n', gone.signal)
+            json.messages.push(...followUp({ content: round.content || null, extra: round.reasoning ? { reasoning_content: round.reasoning } : {} }, calls, calls.map(() => t.webPrompt.limitReached)))
+            continue
+          }
+          await emit(round.flushWithout(prior, dropNames, t.webPrompt.limitReached), gone.signal)
+        } else await emit(round.flush(prior), gone.signal)
         // The request record reads the token counts from the last bytes sent; a round without a usage chunk of its own gets the sum.
         if (hasUsage(prior) && !round.usage) trace.tap.push(enc.encode(JSON.stringify({ usage: addUsage(prior, null) })))
         ok = true
@@ -991,6 +1155,8 @@ export function createProxy(deps: ProxyDeps) {
       const kn = await applyKnowledge(req, trace, json, url.pathname, u.knowledge, meta)
       if ('error' in kn) return kn.error
       tool = kn.tool
+      const web = applyWebSearch(req, trace, json, url.pathname, u.webSearch !== false, tool)
+      tool = web.tool
       const global = deps.getSettings().preprocess
       const image = { ...global.image, ...(u.imageCompress === 'inherit' ? {} : { enabled: u.imageCompress === 'on' }) }
       try {
@@ -1177,13 +1343,16 @@ export function createProxy(deps: ProxyDeps) {
       const kn = await applyKnowledge(req, trace, json, path, profile.knowledge ?? model.knowledge, meta)
       if ('error' in kn) return kn.error
       tool = kn.tool
+      // Gateway web search (decision 67): local models only follow the global switch.
+      const web = applyWebSearch(req, trace, json, path, true, tool)
+      tool = web.tool
       try {
         const result = await runPreprocess(json, { options: resolvePreprocessOptions(deps.getSettings().preprocess, profile) })
         if (Object.keys(result.reports).length) deps.onEvent?.({ type: 'preprocess', target, result })
         trace.images = summarizeImages(result.reports.image)
         // A profile with thinking off is a hard rule: the request cannot switch it back on.
         const thinkingForced = effectiveReasoning(deps.getSettings(), profile) === 'off' && forceThinkingOff(json)
-        if (result.changed || thinkingForced || kn.changed) body = new TextEncoder().encode(JSON.stringify(json))
+        if (result.changed || thinkingForced || kn.changed || web.changed) body = new TextEncoder().encode(JSON.stringify(json))
       } catch (e) {
         deps.onEvent?.({ type: 'internal-error', target, error: e })
         return errorResponse(500, 'preprocess_failed', t.api.preprocessFailed)

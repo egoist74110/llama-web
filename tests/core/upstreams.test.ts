@@ -157,7 +157,7 @@ describe('upstreams.json and secrets.json', () => {
   })
 
   test('secrets version 4 adds upstreamKeys; version 3 files migrate without losing anything', () => {
-    expect(SECRETS_VERSION).toBe(4)
+    expect(SECRETS_VERSION).toBe(5)
     expect(defaultSecrets().upstreamKeys).toEqual({})
     const migrated = SECRETS_MIGRATIONS[3]!({ version: 3, apiKeys: [], tunnelToken: 't', cloudflareToken: 'c' })
     expect(migrated).toMatchObject({ tunnelToken: 't', cloudflareToken: 'c', upstreamKeys: {} })

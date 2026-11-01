@@ -36,7 +36,7 @@ const toggle = (id: string, on: boolean) => {
 }
 const setTopK = (v: string | number) => {
   const n = Math.floor(Number(v))
-  patch({ topK: Number.isFinite(n) ? Math.min(20, Math.max(1, n)) : model.value.topK })
+  patch({ topK: Number.isFinite(n) ? Math.min(1000, Math.max(1, n)) : model.value.topK })
 }
 const incomplete = computed(() => bindingIncomplete(model.value))
 
@@ -124,7 +124,7 @@ watch(() => model.value.minSimilarity, (v) => {
 
       <div class="flex flex-col gap-1.5">
         <label class="text-xs font-medium text-muted">{{ k.topK }}</label>
-        <UInput :model-value="model.topK" type="number" :min="1" :max="20" class="w-28" :aria-label="k.topK" @update:model-value="setTopK" />
+        <UInput :model-value="model.topK" type="number" :min="1" :max="1000" class="w-28" :aria-label="k.topK" @update:model-value="setTopK" />
         <p class="m-0 text-xs text-dimmed">
           {{ k.topKHint }}
         </p>

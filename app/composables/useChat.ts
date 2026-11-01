@@ -3,6 +3,7 @@
 import { t } from './useLocale'
 import { profileLabel } from '~/utils/profile-label'
 import { newMessage, newId, streamChat, titleFrom, toRequestMessages, type ChatSession } from '~/utils/chat'
+import { isTextModelId } from '~/utils/text-model'
 import { idbBackend, memoryBackend, withTombstones, type ChatBackend } from '~/utils/chat-db'
 
 export interface ChatModelOption { value: string, label: string, hasMmproj: boolean }
@@ -11,12 +12,16 @@ export function useChat() {
   const { state } = useLive()
 
   // ---- models: only instances that are ready; the chat page never starts one ----
-  const options = computed<ChatModelOption[]>(() => (state.value?.models ?? []).flatMap(m =>
+  const local = computed<ChatModelOption[]>(() => (state.value?.models ?? []).flatMap(m =>
     m.instances.filter(i => i.state === 'ready').map(i => ({
       value: `${m.name}:${i.profile}`,
       label: m.profiles.length > 1 ? `${m.name} · ${profileLabel(i.profile)}` : m.name,
       hasMmproj: m.hasMmproj,
     }))))
+  // Connected upstreams (decision 56): text models of the ones that are online, addressed as `<name>-<id>`.
+  const external = computed<ChatModelOption[]>(() => (state.value?.connections ?? []).filter(c => c.up).flatMap(c =>
+    [...new Set([...c.models, ...c.manualModels])].filter(isTextModelId).map(id => ({ value: `${c.name}-${id}`, label: `${c.name}-${id}`, hasMmproj: false }))))
+  const options = computed<ChatModelOption[]>(() => [...local.value, ...external.value])
   const selected = ref('')
   const option = computed(() => options.value.find(o => o.value === selected.value) ?? null)
 

@@ -40,8 +40,26 @@ export interface ToolCall {
   arguments: string
 }
 
-/** True when there is at least one call and every one is `search_knowledge`. */
-export const allOurs = (calls: readonly ToolCall[]) => calls.length > 0 && calls.every(c => c.name === TOOL_NAME)
+/** True when there is at least one call and every one is one of `names` (default: `search_knowledge`). */
+export const allOurs = (calls: readonly ToolCall[], names: readonly string[] = [TOOL_NAME]) => calls.length > 0 && calls.every(c => names.includes(c.name))
+
+/**
+ * Take the calls named in `names` out of a non-streamed response that goes to the client. Calls of other tools stay; when
+ * none are left the turn becomes plain text (`fallback` unless the model wrote some) and finishes with `stop`.
+ */
+export function stripCalls(obj: any, names: readonly string[], fallback: string): void {
+  const choice = obj?.choices?.[0]
+  const message = choice?.message
+  if (!choice || !message || !Array.isArray(message.tool_calls)) return
+  const keep = message.tool_calls.filter((c: any) => !names.includes(c?.function?.name))
+  if (keep.length) {
+    message.tool_calls = keep
+    return
+  }
+  delete message.tool_calls
+  if (!message.content) message.content = fallback
+  choice.finish_reason = 'stop'
+}
 
 /** Tool calls of a non-streamed assistant message. */
 export function callsOfMessage(message: any): ToolCall[] {
@@ -143,6 +161,8 @@ export class StreamRound {
   reasoning = ''
   /** `usage` of the round, when it sent one. */
   usage: unknown = null
+  /** id / object / created / model of the chunks, reused for the chunks made up when calls are stripped. */
+  private base: Record<string, unknown> = {}
 
   /** `later`: a round after the first one; its bare `role` delta is dropped (the client has seen one). */
   constructor(private readonly later = false) {}
@@ -157,6 +177,9 @@ export class StreamRound {
     }
     let obj: any
     try { obj = JSON.parse(data) } catch { return raw }
+    if (obj && typeof obj === 'object' && !Object.keys(this.base).length) {
+      for (const k of ['id', 'object', 'created', 'model']) if (obj[k] !== undefined) this.base[k] = obj[k]
+    }
     const choice = obj?.choices?.[0]
     const delta = choice?.delta
     if (delta && Array.isArray(delta.tool_calls)) {
@@ -197,6 +220,28 @@ export class StreamRound {
   /** The tool calls the round made, in index order. */
   calls(): ToolCall[] {
     return [...this.pending.entries()].sort((a, b) => a[0] - b[0]).map(([, e], i) => ({ id: e.id || `call_kb_${i}`, name: e.name, arguments: e.args }))
+  }
+
+  /**
+   * The end of a round whose calls named in `names` must not reach the client: the held events are replaced by new ones that
+   * carry only the other calls (none left: `fallback` as text when the model wrote none), the finish reason, the usage
+   * (with `prior` added) and `[DONE]`.
+   */
+  flushWithout(prior: Usage, names: readonly string[], fallback: string): string {
+    const keep = this.calls().filter(c => !names.includes(c.name))
+    const ev = (o: unknown) => `data: ${JSON.stringify(o)}\n\n`
+    const chunk = (delta: object, finish: string | null) => ev({ object: 'chat.completion.chunk', ...this.base, choices: [{ index: 0, delta, finish_reason: finish }] })
+    let out = ''
+    if (keep.length) {
+      out += chunk({ tool_calls: keep.map((c, i) => ({ index: i, id: c.id, type: 'function', function: { name: c.name, arguments: c.arguments } })) }, null)
+      out += chunk({}, 'tool_calls')
+    } else {
+      if (!this.content) out += chunk({ content: fallback }, null)
+      out += chunk({}, 'stop')
+    }
+    const usage = addUsage(prior, this.usage)
+    if (hasUsage(usage)) out += ev({ object: 'chat.completion.chunk', ...this.base, choices: [], usage })
+    return `${out}data: [DONE]\n\n`
   }
 
   /** The held events as they came; `prior` = usage of the earlier rounds, added to this round's usage chunk. */
