@@ -14,10 +14,10 @@ import { type Ident, type LaunchedEntry, type LaunchedStore } from './launched-s
 import { findListener, forceKill, localPortOf } from './port-owner'
 import { processIdentityAsync, type ProcessIdentity } from './process-identity'
 import { isAlive, killTree } from './runner'
-import type { Upstream } from './upstreams'
+import { runnableCommands, type Upstream } from './upstreams'
 import { spawnOutsideJob, winSpawnAvailable } from './win-spawn'
 
-export type LaunchErrorCode = 'not-found' | 'no-command' | 'already-up' | 'already-starting' | 'bad-cwd' | 'bad-command' | 'not-ours'
+export type LaunchErrorCode = 'not-found' | 'no-command' | 'already-up' | 'already-starting' | 'bad-cwd' | 'bad-command' | 'not-ours' | 'command-required' | 'unknown-command'
 
 export class LaunchError extends Error {
   constructor(public code: LaunchErrorCode, public detail = '') {
@@ -160,15 +160,19 @@ export class UpstreamLauncher {
   }
 
   /** Run the saved command; resolves once the process has been started (not once the service is up). */
-  start(id: string, isUp: boolean): void {
+  start(id: string, isUp: boolean, commandId?: string): void {
     const u = this.deps.upstreams().find(x => x.id === id)
     if (!u) throw new LaunchError('not-found')
-    if (!u.startCommand) throw new LaunchError('no-command')
+    const runnable = runnableCommands(u)
+    if (runnable.length === 0) throw new LaunchError('no-command')
+    // Which one runs is never guessed when there is a choice (decision 68).
+    const chosen = commandId === undefined ? (runnable.length === 1 ? runnable[0] : undefined) : runnable.find(c => c.id === commandId)
+    if (!chosen) throw new LaunchError(commandId === undefined ? 'command-required' : 'unknown-command')
     if (this.runs.has(id)) throw new LaunchError('already-starting')
     if (isUp) throw new LaunchError('already-up')
     let argv: string[]
     try {
-      argv = splitArgs(u.startCommand)
+      argv = splitArgs(chosen.command)
     } catch (e) {
       throw new LaunchError('bad-command', (e as Error).message)
     }

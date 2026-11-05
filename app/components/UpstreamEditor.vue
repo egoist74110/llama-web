@@ -14,7 +14,25 @@ const p = t.upstreams.page
 const open = computed({ get: () => props.open, set: v => emit('update:open', v) })
 const isNew = computed(() => !props.upstream)
 
-const form = reactive({ name: '', baseUrl: '', monitorUrl: '', apiKey: '', clearKey: false, manualModels: '', startCommand: '', startCwd: '' })
+const form = reactive({ name: '', baseUrl: '', monitorUrl: '', apiKey: '', clearKey: false, manualModels: '', startCwd: '' })
+// Start commands (decision 68): the first is the default entry (renamable, never removable). New ones have no id yet.
+const DEFAULT_ID = 'default'
+const MAX_COMMANDS = 10
+const cmds = ref<Array<{ id: string, name: string, command: string }>>([{ id: DEFAULT_ID, name: '', command: '' }])
+const sel = ref(0)
+const cmdLabel = (c: { id: string, name: string }) => c.name.trim() || (c.id === DEFAULT_ID ? f.startCommandDefaultName : f.startCommandNew)
+const cmdItems = computed(() => cmds.value.map((c, i) => ({ label: cmdLabel(c), value: i })))
+const current = computed(() => cmds.value[sel.value] ?? cmds.value[0]!)
+function addCommand() {
+  if (cmds.value.length >= MAX_COMMANDS) return
+  cmds.value.push({ id: '', name: '', command: '' })
+  sel.value = cmds.value.length - 1
+}
+function removeCommand() {
+  if (current.value.id === DEFAULT_ID) return
+  cmds.value.splice(sel.value, 1)
+  sel.value = 0
+}
 // What "on" starts as: every knowledge base (including later ones), injected, 5 hits.
 const knowledge = ref<KnowledgeBinding>({ enabled: false, all: true, kbs: [], mode: 'inject', topK: 5, tags: [], minSimilarity: null })
 const knowledgeIncomplete = computed(() => bindingIncomplete(knowledge.value))
@@ -37,7 +55,8 @@ watch(() => props.open, (o) => {
   form.apiKey = ''
   form.clearKey = false
   form.manualModels = u?.manualModels.join('\n') ?? ''
-  form.startCommand = u?.startCommand ?? ''
+  cmds.value = u?.startCommands.length ? u.startCommands.map(c => ({ ...c })) : [{ id: DEFAULT_ID, name: '', command: '' }]
+  sel.value = 0
   form.startCwd = u?.startCwd ?? ''
   const b = u?.knowledge
   knowledge.value = b ? { ...b, kbs: [...b.kbs], tags: [...(b.tags ?? [])], all: b.enabled ? b.all : b.all || b.kbs.length === 0 } : { enabled: false, all: true, kbs: [], mode: 'inject', topK: 5, tags: [], minSimilarity: null }
@@ -69,7 +88,10 @@ async function save() {
     baseUrl: form.baseUrl.trim(),
     monitorUrl: form.monitorUrl.trim(),
     manualModels: form.manualModels.split('\n').map(x => x.trim()).filter(Boolean),
-    startCommand: form.startCommand.trim(),
+    // Empty extra entries are dropped; the default entry always stays.
+    startCommands: cmds.value
+      .filter(c => c.id === DEFAULT_ID || c.name.trim() || c.command.trim())
+      .map(c => ({ ...(c.id ? { id: c.id } : {}), name: c.name.trim(), command: c.command.trim() })),
     startCwd: form.startCwd.trim(),
     knowledge: knowledge.value,
     webSearch: webSearch.value,
@@ -143,13 +165,26 @@ async function save() {
           </p>
         </UFormField>
         <UFormField :label="f.startCommand">
-          <UInput
-            v-model="form.startCommand"
-            class="w-full"
-            autocomplete="off"
-            :placeholder="ui.isMac ? f.startCommandPlaceholderMac : f.startCommandPlaceholderWin"
-            :ui="{ base: 'font-mono text-xs' }"
-          />
+          <div class="flex flex-col gap-2">
+            <div class="flex items-center gap-2">
+              <USelect v-model="sel" :items="cmdItems" class="min-w-0 flex-1" :aria-label="f.startCommandPick" />
+              <UButton type="button" size="sm" color="neutral" variant="outline" icon="i-lucide-plus" :disabled="cmds.length >= MAX_COMMANDS" @click="addCommand">
+                {{ f.startCommandAdd }}
+              </UButton>
+              <UButton v-if="current.id !== DEFAULT_ID" type="button" size="sm" color="error" variant="ghost" icon="i-lucide-trash-2" :aria-label="f.startCommandRemove" :title="f.startCommandRemove" @click="removeCommand" />
+            </div>
+            <UInput v-model="current.name" class="w-full" maxlength="24" autocomplete="off" :aria-label="f.startCommandName" :placeholder="current.id === DEFAULT_ID ? f.startCommandDefaultName : f.startCommandNamePlaceholder" />
+            <UInput
+              v-model="current.command"
+              class="w-full"
+              autocomplete="off"
+              :placeholder="ui.isMac ? f.startCommandPlaceholderMac : f.startCommandPlaceholderWin"
+              :ui="{ base: 'font-mono text-xs' }"
+            />
+          </div>
+          <p class="mt-1 text-xs text-dimmed">
+            {{ f.startCommandNameHint }}
+          </p>
           <p class="mt-1 text-xs text-dimmed">
             {{ f.startCommandHint }}
           </p>

@@ -102,12 +102,58 @@ watch(rows, (list) => {
   }
 })
 
+// Several start commands (decision 68): the dialog asks which one by name; adding one here saves it into the upstream.
+const hasCommand = (u: ConnectionView) => u.startCommands.some(c => c.command)
+const runnable = computed(() => starting.value?.startCommands.filter(c => c.command) ?? [])
+const commandName = (c: { id: string, name: string }) => c.name.trim() || (c.id === 'default' ? p.start.defaultName : '')
+const pickItems = computed(() => runnable.value.map(c => ({ label: commandName(c), value: c.id })))
+const pickId = ref('')
+const picked = computed(() => runnable.value.find(c => c.id === pickId.value) ?? null)
+const addOpen = ref(false)
+const addName = ref('')
+const addText = ref('')
+// The last command run for an upstream is preselected next time (still asked: the dialog always shows). Per browser.
+const lastKey = (id: string) => `lw.startCommand.${id}`
+const rememberPick = (id: string, commandId: string) => { try { localStorage.setItem(lastKey(id), commandId) } catch { /* no storage: nothing remembered */ } }
+const recallPick = (id: string) => { try { return localStorage.getItem(lastKey(id)) } catch { return null } }
+watch(starting, (u, old) => {
+  if (!u || u.id === old?.id) return
+  const last = recallPick(u.id)
+  pickId.value = u.startCommands.find(c => c.command && c.id === last)?.id ?? u.startCommands.find(c => c.command)?.id ?? ''
+  addOpen.value = false
+  addName.value = ''
+  addText.value = ''
+})
+
+function addCommand() {
+  const u = starting.value
+  if (!u || !addName.value.trim() || !addText.value.trim()) return
+  return run(`addcmd:${u.id}`, async () => {
+    try {
+      const name = addName.value.trim()
+      const startCommands = [...u.startCommands.map(c => ({ id: c.id, name: c.name, command: c.command })), { name, command: addText.value.trim() }]
+      const r = await $fetch<{ upstreams: ConnectionView[] }>(url(u), { method: 'POST', body: { startCommands } })
+      const fresh = r.upstreams.find(x => x.id === u.id)
+      if (fresh) {
+        starting.value = fresh
+        pickId.value = fresh.startCommands.find(c => c.name === name)?.id ?? pickId.value
+      }
+      addName.value = ''
+      addText.value = ''
+      addOpen.value = false
+    } catch (e) {
+      fail(p.start.addFailed, e)
+    }
+  })
+}
+
 function start() {
   const u = starting.value
-  if (!u) return
+  if (!u || !pickId.value) return
   return run(`start:${u.id}`, async () => {
     try {
-      await $fetch(url(u, '/start'), { method: 'POST' })
+      await $fetch(url(u, '/start'), { method: 'POST', body: { commandId: pickId.value } })
+      rememberPick(u.id, pickId.value)
       starting.value = null
     } catch (e) {
       fail(p.start.startFailed, e)
@@ -265,7 +311,7 @@ const example = (u: ConnectionView) => `${u.name}-${allModels(u)[0] ?? 'model-id
               {{ p.forceStop.button }}
             </UButton>
           </div>
-          <div v-else-if="u.startCommand" class="flex flex-wrap items-center justify-between gap-2">
+          <div v-else-if="hasCommand(u)" class="flex flex-wrap items-center justify-between gap-2">
             <span class="text-xs text-muted">{{ p.start.hint }}</span>
             <UButton size="sm" icon="i-lucide-play" @click="starting = u">
               {{ p.start.button }}
@@ -320,7 +366,7 @@ const example = (u: ConnectionView) => `${u.name}-${allModels(u)[0] ?? 'model-id
             <USwitch :model-value="u.exclusive" :disabled="!!busy[`edit:${u.id}`]" :aria-label="p.exclusive" @update:model-value="(v: boolean) => change(u, { exclusive: v })" />
           </div>
 
-          <div v-if="u.startCommand" class="flex items-start justify-between gap-3">
+          <div v-if="hasCommand(u)" class="flex items-start justify-between gap-3">
             <div class="min-w-0">
               <p class="m-0 text-[13px] font-medium">
                 {{ p.stopOnExit }}
@@ -382,13 +428,36 @@ const example = (u: ConnectionView) => `${u.name}-${allModels(u)[0] ?? 'model-id
     <UModal v-model:open="startOpen" :title="starting ? fmt(p.start.confirmTitle, { name: starting.name }) : ''" :description="p.start.confirmBody">
       <template #body>
         <div v-if="starting" class="flex flex-col gap-2">
-          <pre class="m-0 whitespace-pre-wrap break-all rounded-lg bg-[var(--lw-sunken)] p-3 font-mono text-xs">{{ starting.startCommand }}</pre>
+          <template v-if="runnable.length > 1">
+            <p class="m-0 text-[13px]">
+              {{ p.start.pick }}
+            </p>
+            <URadioGroup v-model="pickId" :items="pickItems" />
+          </template>
+          <pre v-if="picked" class="m-0 whitespace-pre-wrap break-all rounded-lg bg-[var(--lw-sunken)] p-3 font-mono text-xs">{{ picked.command }}</pre>
           <p v-if="starting.startCwd" class="m-0 break-all text-xs text-muted">
             {{ fmt(p.start.confirmCwd, { cwd: starting.startCwd }) }}
           </p>
           <p v-if="starting.local && starting.exclusive" class="m-0 text-xs lw-dot-warn">
             {{ p.start.confirmExclusive }}
           </p>
+          <div class="flex flex-col gap-2 border-t border-default pt-2.5">
+            <UButton v-if="!addOpen" class="self-start" size="xs" color="neutral" variant="ghost" icon="i-lucide-plus" @click="addOpen = true">
+              {{ p.start.addCommand }}
+            </UButton>
+            <template v-else>
+              <UInput v-model="addName" maxlength="24" autocomplete="off" :placeholder="p.start.addName" />
+              <UInput v-model="addText" autocomplete="off" :placeholder="p.start.addCommandText" :ui="{ base: 'font-mono text-xs' }" />
+              <div class="flex justify-end gap-2">
+                <UButton size="xs" color="neutral" variant="ghost" @click="addOpen = false">
+                  {{ t.upstreams.form.cancel }}
+                </UButton>
+                <UButton size="xs" icon="i-lucide-check" :disabled="!addName.trim() || !addText.trim()" :loading="!!busy[`addcmd:${starting.id}`]" @click="addCommand">
+                  {{ p.start.addSave }}
+                </UButton>
+              </div>
+            </template>
+          </div>
         </div>
       </template>
       <template #footer>
@@ -396,7 +465,7 @@ const example = (u: ConnectionView) => `${u.name}-${allModels(u)[0] ?? 'model-id
           <UButton color="neutral" variant="ghost" @click="starting = null">
             {{ t.upstreams.form.cancel }}
           </UButton>
-          <UButton icon="i-lucide-play" :loading="!!starting && !!busy[`start:${starting.id}`]" @click="start">
+          <UButton icon="i-lucide-play" :disabled="!pickId" :loading="!!starting && !!busy[`start:${starting.id}`]" @click="start">
             {{ p.start.confirm }}
           </UButton>
         </div>

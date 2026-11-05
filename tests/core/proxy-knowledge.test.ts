@@ -130,7 +130,7 @@ describe('configuration', () => {
   })
 
   test('upstreams.json v1 -> v2 adds the default binding; new upstreams carry it; edits validate it', () => {
-    expect(UPSTREAMS_VERSION).toBe(3)
+    expect(UPSTREAMS_VERSION).toBe(4)
     const migrated = UPSTREAMS_MIGRATIONS[1]!({ version: 1, upstreams: [{ id: 'u-1', name: 'A', baseUrl: 'http://x/v1' }, { id: 'u-2', name: 'B', baseUrl: 'http://x/v1', knowledge: bind() }] })
     expect(migrated.upstreams[0].knowledge).toEqual({ enabled: false, all: false, kbs: [], mode: 'inject', topK: 5, tags: [], minSimilarity: null })
     expect(migrated.upstreams[1].knowledge).toEqual(bind())

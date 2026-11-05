@@ -9,6 +9,18 @@ import { BindingError, defaultBinding, normalizeBinding, parseBinding, unknownBo
 
 export type ImageCompressMode = 'inherit' | 'on' | 'off'
 
+export interface StartCommand {
+  id: string
+  /** Shown instead of the command. '' only on the default entry = the page's own default label. */
+  name: string
+  command: string
+}
+
+/** Id of the entry that always exists and is always first. */
+export const DEFAULT_COMMAND_ID = 'default'
+export const MAX_START_COMMANDS = 10
+export const MAX_COMMAND_NAME_LENGTH = 24
+
 export interface Upstream {
   id: string
   /** Also the model prefix: clients call `<name>-<upstream model id>`. */
@@ -23,10 +35,11 @@ export interface Upstream {
   /** While it runs, llama-web's own llama-servers are unloaded and none may load (default true; only used when `local`). */
   exclusive: boolean
   /**
-   * How to start the service by hand when it is not up (decision 56 ⑩): one command line, split into an argument array
-   * (never run through a shell); '' = none. Only the management API sets it.
+   * How to start the service by hand when it is not up (decision 56 ⑩, decision 68): named command lines, each split into an
+   * argument array (never run through a shell). The first one is always the default entry (id `default`, can be renamed,
+   * cannot be removed); its command may be '' (= none). Nothing that stops or force-stops the service looks at these.
    */
-  startCommand: string
+  startCommands: StartCommand[]
   /** Working directory of the start command; '' = llama-web's own. */
   startCwd: string
   /**
@@ -51,7 +64,7 @@ export interface UpstreamsDoc {
   upstreams: Upstream[]
 }
 
-export const UPSTREAMS_VERSION = 3
+export const UPSTREAMS_VERSION = 4
 export const MAX_UPSTREAMS = 20
 export const MAX_NAME_LENGTH = 24
 export const MAX_MODELS = 500
@@ -76,6 +89,17 @@ export const UPSTREAMS_MIGRATIONS: Record<number, (old: any) => any> = {
     }
     return old
   },
+  // 4: several named start commands (decision 68): the old single command becomes the default entry.
+  3: (old) => {
+    if (Array.isArray(old?.upstreams)) {
+      for (const u of old.upstreams) {
+        if (!u || typeof u !== 'object') continue
+        if (u.startCommands === undefined) u.startCommands = [{ id: DEFAULT_COMMAND_ID, name: '', command: typeof u.startCommand === 'string' ? u.startCommand : '' }]
+        delete u.startCommand
+      }
+    }
+    return old
+  },
 }
 
 const isObj = (v: unknown): v is Record<string, any> => !!v && typeof v === 'object' && !Array.isArray(v)
@@ -85,6 +109,7 @@ export type UpstreamErrorCode =
   | 'bad-name' | 'name-taken' | 'name-local-conflict' | 'bad-url' | 'url-self' | 'bad-monitor-url'
   | 'rollback-failed'
   | 'bad-model' | 'not-found' | 'too-many' | 'bad-mode' | 'bad-start-command' | 'bad-start-cwd' | 'bad-knowledge' | 'kb-not-found'
+  | 'bad-command-name' | 'command-name-taken' | 'too-many-commands' | 'command-needed'
 
 export class UpstreamError extends Error {
   constructor(public code: UpstreamErrorCode, public detail = '') {
@@ -180,6 +205,52 @@ export function cleanStartCommand(raw: unknown): string {
   return text
 }
 
+function cleanCommandName(raw: unknown, allowEmpty: boolean): string {
+  const name = raw === undefined || raw === null ? '' : typeof raw === 'string' ? raw.trim() : null
+  if (name === null || name.length > MAX_COMMAND_NAME_LENGTH || /[\u0000-\u001f\u007f]/.test(name) || (!name && !allowEmpty)) throw new UpstreamError('bad-command-name')
+  return name
+}
+
+/**
+ * The list of start commands from a form or a hand-edited file. The default entry always exists and comes first (its
+ * name may be changed, its command may be empty); the others need a name (unique) and a command. Entries keep their id
+ * when it is a usable one, else get a new one.
+ */
+export function cleanStartCommands(raw: unknown, rand: (n: number) => Buffer = randomBytes): StartCommand[] {
+  if (raw !== undefined && raw !== null && !Array.isArray(raw)) throw new UpstreamError('bad-start-command')
+  const list = (raw ?? []) as unknown[]
+  if (list.length > MAX_START_COMMANDS + 1) throw new UpstreamError('too-many-commands')
+  const ids = new Set<string>([DEFAULT_COMMAND_ID])
+  let def: StartCommand = { id: DEFAULT_COMMAND_ID, name: '', command: '' }
+  const rest: StartCommand[] = []
+  for (const item of list) {
+    if (!isObj(item)) throw new UpstreamError('bad-start-command')
+    const isDefault = item.id === DEFAULT_COMMAND_ID
+    if (isDefault) {
+      def = { id: DEFAULT_COMMAND_ID, name: cleanCommandName(item.name, true), command: cleanStartCommand(item.command) }
+      continue
+    }
+    const command = cleanStartCommand(item.command)
+    if (!command) throw new UpstreamError('command-needed')
+    let id = typeof item.id === 'string' && /^[A-Za-z0-9_-]{1,32}$/.test(item.id) && !ids.has(item.id) ? item.id : ''
+    while (!id || ids.has(id)) id = `c-${rand(3).toString('hex')}`
+    ids.add(id)
+    rest.push({ id, name: cleanCommandName(item.name, false), command })
+  }
+  if (rest.length > MAX_START_COMMANDS - 1) throw new UpstreamError('too-many-commands')
+  const seen = new Set<string>()
+  for (const c of [def, ...rest]) {
+    if (!c.name) continue
+    const k = c.name.toLowerCase()
+    if (seen.has(k)) throw new UpstreamError('command-name-taken', c.name)
+    seen.add(k)
+  }
+  return [def, ...rest]
+}
+
+/** Commands that can be run (the default entry may be empty). */
+export const runnableCommands = (u: Pick<Upstream, 'startCommands'>): StartCommand[] => u.startCommands.filter(c => c.command)
+
 export function cleanStartCwd(raw: unknown): string {
   if (raw === undefined || raw === null) return ''
   if (typeof raw !== 'string') throw new UpstreamError('bad-start-cwd')
@@ -226,7 +297,8 @@ export function normalizeUpstreams(doc: UpstreamsDoc): UpstreamsDoc {
       u.imageCompress = cleanMode(u.imageCompress)
       u.models = cleanModelIds(u.models)
       u.manualModels = cleanModelIds(u.manualModels)
-      u.startCommand = cleanStartCommand(u.startCommand)
+      u.startCommands = cleanStartCommands(u.startCommands)
+      delete (u as { startCommand?: unknown }).startCommand
       u.startCwd = cleanStartCwd(u.startCwd)
       u.knowledge = normalizeBinding(u.knowledge)
       u.webSearch = u.webSearch !== false
@@ -301,6 +373,9 @@ export interface UpstreamForm {
   local?: unknown
   exclusive?: unknown
   manualModels?: unknown
+  /** The whole list of start commands (replaces the old one). */
+  startCommands?: unknown
+  /** Shortcut: set only the command of the default entry (ignored when `startCommands` is given). */
   startCommand?: unknown
   startCwd?: unknown
   stopOnExit?: unknown
@@ -336,6 +411,14 @@ export function cleanKnowledge(raw: unknown, ctx: EditContext): KnowledgeBinding
   return binding
 }
 
+/** The start commands a form asks for: the full list, or only the default entry's command (on top of the old list). */
+function formCommands(form: UpstreamForm, old: Upstream | null, ctx: EditContext): StartCommand[] {
+  if (form.startCommands !== undefined) return cleanStartCommands(form.startCommands, ctx.rand)
+  const list = (old?.startCommands ?? [{ id: DEFAULT_COMMAND_ID, name: '', command: '' }]).map(c => ({ ...c }))
+  if (form.startCommand !== undefined) list[0] = { ...list[0]!, command: cleanStartCommand(form.startCommand) }
+  return cleanStartCommands(list, ctx.rand)
+}
+
 function checkName(draft: UpstreamsDoc, name: string, exceptId: string | null, ctx: EditContext) {
   if (draft.upstreams.some(u => u.id !== exceptId && u.name.toLowerCase() === name.toLowerCase())) throw new UpstreamError('name-taken', name)
   const clash = localConflict(name, ctx.localNames)
@@ -354,7 +437,7 @@ export function createUpstream(draft: UpstreamsDoc, form: UpstreamForm, ctx: Edi
   const u: Upstream = {
     id, name, baseUrl: cleanBaseUrl(form.baseUrl, ctx.selfPorts), monitorUrl: cleanMonitorUrl(form.monitorUrl),
     imageCompress: cleanMode(form.imageCompress), local: form.local !== false, exclusive: form.exclusive !== false,
-    startCommand: cleanStartCommand(form.startCommand), startCwd: cleanStartCwd(form.startCwd), stopOnExit: form.stopOnExit === true,
+    startCommands: formCommands(form, null, ctx), startCwd: cleanStartCwd(form.startCwd), stopOnExit: form.stopOnExit === true,
     models: [], manualModels: cleanModelIds(form.manualModels), testedAt: '',
     knowledge: form.knowledge === undefined ? defaultBinding() : cleanKnowledge(form.knowledge, ctx),
     webSearch: form.webSearch !== false,
@@ -381,7 +464,7 @@ export function updateUpstream(draft: UpstreamsDoc, id: unknown, form: UpstreamF
   if (form.local !== undefined) u.local = form.local === true
   if (form.exclusive !== undefined) u.exclusive = form.exclusive === true
   if (form.manualModels !== undefined) u.manualModels = cleanModelIds(form.manualModels)
-  if (form.startCommand !== undefined) u.startCommand = cleanStartCommand(form.startCommand)
+  if (form.startCommands !== undefined || form.startCommand !== undefined) u.startCommands = formCommands(form, u, ctx)
   if (form.startCwd !== undefined) u.startCwd = cleanStartCwd(form.startCwd)
   if (form.stopOnExit !== undefined) u.stopOnExit = form.stopOnExit === true
   if (form.knowledge !== undefined) u.knowledge = cleanKnowledge(form.knowledge, ctx)
@@ -426,7 +509,7 @@ export interface ConnectionView extends UpstreamView {
 }
 
 export function viewUpstreams(doc: UpstreamsDoc, keys: Record<string, string>): UpstreamView[] {
-  return doc.upstreams.map(u => ({ ...u, models: [...u.models], manualModels: [...u.manualModels], knowledge: { ...u.knowledge, kbs: [...u.knowledge.kbs] }, hasKey: !!keys[u.id] }))
+  return doc.upstreams.map(u => ({ ...u, startCommands: u.startCommands.map(c => ({ ...c })), models: [...u.models], manualModels: [...u.manualModels], knowledge: { ...u.knowledge, kbs: [...u.knowledge.kbs] }, hasKey: !!keys[u.id] }))
 }
 
 /** Model ids out of an OpenAI-style `/models` answer; anything else is an empty list. */

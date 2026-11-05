@@ -50,6 +50,41 @@ function setup(d: UpstreamsDoc, opts: { timeoutMs?: number, dirExists?: boolean 
   return { launcher, id, spawned, procs, logs, ready, killed, setResult: (r: CheckResult) => { result = r }, until }
 }
 
+describe('several start commands (decision 68)', () => {
+  const two = () => doc({ startCommands: [{ id: 'default', name: '', command: 'plain-start' }, { id: 'web', name: 'Web', command: 'web-start --web' }] })
+  const code = (fn: () => void) => {
+    try { fn() } catch (e) { return e instanceof LaunchError ? e.code : 'other' }
+    return 'none'
+  }
+
+  test('with a choice the command is never guessed; the chosen one runs', () => {
+    const s = setup(two())
+    expect(code(() => s.launcher.start(s.id, false))).toBe('command-required')
+    expect(code(() => s.launcher.start(s.id, false, 'gone'))).toBe('unknown-command')
+    expect(s.spawned).toEqual([])
+    s.launcher.start(s.id, false, 'web')
+    expect(s.spawned.map(x => [x.file, x.args])).toEqual([['web-start', ['--web']]])
+  })
+
+  test('an empty default entry is not a choice: the one runnable command runs without an id', () => {
+    const s = setup(doc({ startCommands: [{ id: 'default', name: '', command: '' }, { id: 'web', name: 'Web', command: 'web-start' }] }))
+    s.launcher.start(s.id, false)
+    expect(s.spawned.map(x => x.file)).toEqual(['web-start'])
+  })
+
+  test('stopping does not depend on which command was run, or on edits made afterwards', async () => {
+    const d = two()
+    const s = setup(d)
+    s.launcher.start(s.id, false, 'web')
+    // the command list is rewritten (renamed / removed) while the service runs
+    d.upstreams[0]!.startCommands = [{ id: 'default', name: 'Renamed', command: '' }]
+    expect(s.launcher.canStop(s.id)).toBe(true)
+    await s.launcher.stop(s.id)
+    expect(s.killed).toEqual([4242])
+    expect(s.launcher.canStop(s.id)).toBe(false)
+  })
+})
+
 describe('start command line', () => {
   test('is split into an argument array (quotes understood), never given to a shell', () => {
     const s = setup(doc())

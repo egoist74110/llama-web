@@ -1,4 +1,4 @@
-// Add an external upstream: { name, baseUrl, apiKey?, monitorUrl?, imageCompress?, local?, exclusive?, manualModels?, startCommand?, startCwd?, stopOnExit? }.
+// Add an external upstream: { name, baseUrl, apiKey?, monitorUrl?, imageCompress?, local?, exclusive?, manualModels?, startCommands? ([{ id?, name, command }], the first is the default entry), startCwd?, stopOnExit? }.
 import { createUpstream, type Upstream } from '../../core/upstreams'
 import { getContext } from '../../service/context'
 import { cleanKey, describeUpstreams, editContext, saveUpstreamsAndKeys, upstreamsError } from '../../service/upstreams-api'

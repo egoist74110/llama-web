@@ -367,7 +367,7 @@ describe('configuration migrations', () => {
   })
 
   test('upstreams v2 -> v3 turns it on; new upstreams default on; edits can turn it off', () => {
-    expect(UPSTREAMS_VERSION).toBe(3)
+    expect(UPSTREAMS_VERSION).toBe(4)
     const old = { version: 2, upstreams: [{ id: 'u-1' }] }
     expect(UPSTREAMS_MIGRATIONS[2]!(old).upstreams[0].webSearch).toBe(true)
     const doc = defaultUpstreams()

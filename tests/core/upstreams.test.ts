@@ -2,7 +2,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
   cleanBaseUrl, createUpstream, defaultUpstreams, findExternal, listExternalNames, cleanStartCommand, cleanStartCwd, localConflict, selfPortsOf, upstreamPrefixClash, modelIdsOf, normalizeUpstreams,
-  parseModelList, recordTest, removeUpstream, updateUpstream, UpstreamError, viewUpstreams, type EditContext, type UpstreamsDoc,
+  parseModelList, recordTest, removeUpstream, updateUpstream, UpstreamError, viewUpstreams, UPSTREAMS_MIGRATIONS, UPSTREAMS_VERSION, type EditContext, type UpstreamsDoc,
 } from '../../server/core/upstreams'
 import { defaultSecrets, normalizeSecrets, SECRETS_MIGRATIONS, SECRETS_VERSION } from '../../server/core/keys'
 
@@ -63,12 +63,49 @@ describe('names and routing', () => {
     expect(codeOf(() => cleanStartCwd('a\u0000b'))).toBe('bad-start-cwd')
     const d = doc()
     const u = createUpstream(d, { name: 'Cmd', baseUrl: 'http://x/v1', startCommand: 'run it', startCwd: 'X:\\w' }, ctx)
-    expect([u.startCommand, u.startCwd]).toEqual(['run it', 'X:\\w'])
+    expect([u.startCommands, u.startCwd]).toEqual([[{ id: 'default', name: '', command: 'run it' }], 'X:\\w'])
     updateUpstream(d, u.id, { startCommand: '', startCwd: '' }, ctx)
-    expect([u.startCommand, u.startCwd]).toEqual(['', ''])
-    // An old upstreams.json without the fields gets empty ones.
+    expect([u.startCommands[0]!.command, u.startCwd]).toEqual(['', ''])
+    // An old upstreams.json without the fields gets an empty default entry.
     const old = normalizeUpstreams({ version: 1, upstreams: [{ id: 'u-1', name: 'Old', baseUrl: 'http://x/v1', monitorUrl: '', imageCompress: 'inherit', models: [], manualModels: [], testedAt: '' } as any] })
-    expect([old.upstreams[0]!.startCommand, old.upstreams[0]!.startCwd]).toEqual(['', ''])
+    expect([old.upstreams[0]!.startCommands, old.upstreams[0]!.startCwd]).toEqual([[{ id: 'default', name: '', command: '' }], ''])
+  })
+
+  test('several named start commands: the default entry stays first, can be renamed, cannot be removed', () => {
+    const d = doc()
+    const u = createUpstream(d, { name: 'Multi', baseUrl: 'http://x/v1', startCommand: 'base' }, ctx)
+    updateUpstream(d, u.id, { startCommands: [
+      { id: 'default', name: 'Plain', command: 'base' },
+      { name: 'Web', command: 'base --web' },
+      { id: 'mine', name: 'Fast', command: 'base --fast' },
+    ] }, ctx)
+    expect(u.startCommands.map(c => [c.name, c.command])).toEqual([['Plain', 'base'], ['Web', 'base --web'], ['Fast', 'base --fast']])
+    expect(u.startCommands[0]!.id).toBe('default')
+    expect(u.startCommands[1]!.id).toMatch(/^c-[0-9a-f]{6}$/)
+    expect(u.startCommands[2]!.id).toBe('mine')
+    // A list without the default entry gets one back, first, with its old command lost (the client always sends it).
+    updateUpstream(d, u.id, { startCommands: [{ name: 'Only', command: 'x' }] }, ctx)
+    expect(u.startCommands.map(c => c.id)).toEqual(['default', expect.any(String)])
+    expect(u.startCommands[0]).toEqual({ id: 'default', name: '', command: '' })
+    // Checks
+    const bad = (cmds: unknown) => codeOf(() => updateUpstream(d, u.id, { startCommands: cmds }, ctx))
+    expect(bad([{ name: '', command: 'x' }])).toBe('bad-command-name')
+    expect(bad([{ name: 'a', command: '' }])).toBe('command-needed')
+    expect(bad([{ name: 'a', command: 'x' }, { name: 'A', command: 'y' }])).toBe('command-name-taken')
+    expect(bad([{ id: 'default', name: 'a', command: '' }, { name: 'A', command: 'y' }])).toBe('command-name-taken')
+    expect(bad(Array.from({ length: 10 }, (_, i) => ({ name: `n${i}`, command: 'x' })))).toBe('too-many-commands')
+    expect(bad([{ name: 'a', command: 'unterminated "' }])).toBe('bad-start-command')
+    // a rejected edit leaves the old list alone
+    expect(u.startCommands).toHaveLength(2)
+  })
+
+  test('the single start command of an old upstreams.json becomes the default entry (migration 3 → 4)', () => {
+    expect(UPSTREAMS_VERSION).toBe(4)
+    const m = UPSTREAMS_MIGRATIONS[3]!({ version: 3, upstreams: [{ id: 'a', startCommand: 'run it' }, { id: 'b', startCommand: '' }, { id: 'c' }] })
+    expect(m.upstreams.map((x: any) => x.startCommands)).toEqual([
+      [{ id: 'default', name: '', command: 'run it' }], [{ id: 'default', name: '', command: '' }], [{ id: 'default', name: '', command: '' }],
+    ])
+    expect(m.upstreams.every((x: any) => x.startCommand === undefined)).toBe(true)
   })
 
   test('a local model name is checked against the prefixes the other way round', () => {
