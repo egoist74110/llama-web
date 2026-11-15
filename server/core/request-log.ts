@@ -12,6 +12,8 @@ export interface RequestMeta {
   ip?: string | null
   /** Name of the API key that authenticated the request (set by the public entry; makes the source `public`). */
   keyName?: string | null
+  /** Id of that API key (set by the public entry); the knowledge base permissions are looked up by it on every request. */
+  keyId?: string | null
 }
 
 export interface RequestRecord {

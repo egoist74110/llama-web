@@ -1,5 +1,16 @@
 # 交接记录
 
+## 2026-11-16 · 15-3：知识库外部接入 REST + MCP（含写接口，决定 65 ⑦⑧、69 ④⑤⑦⑧）· 单会话
+- 计划：规格 Opus 5.5 写（会话草稿 `15-3-spec.md`，不在仓库里），Sonnet 5.5 实现，Opus 审查并复跑。
+- 实现：`server/core/kb/external.ts`（12 个操作的唯一实现，snake_case 输出，`KbApiError`；权限顺序：白名单外 403 `kb_forbidden` → 不存在 404 `kb_not_found` → 只读 403 `kb_read_only` → `guide_rev` 不对 412 `guide_required` → 管理器错误，`version_conflict` 409 带 `current`）；`mcp.ts`（JSON-RPC：`initialize` 协商版本、通知 202、`ping`、`tools/list`、`tools/call`、批量；只读 key 不列写工具；操作错误用 `isError`）；`http.ts`（`/v1/kb` 路由表、404 / 405、非 GET 用 `checkAdminRequest` 拒绝跨站并要求 JSON、64 MB 上限）；`access.ts`（`kbAccessOf`：没有 keyId = 本机 / 局域网不受限，actor `local`；key → `key:<名称>`，撤销或不存在的 key 什么都没有）；`messages.ts`（错误状态码与文案从 `service/kb-api.ts` 移到 core）。`secrets.json` v6：key 加 `kbs`（null = 全部）与 `kbWrite`（默认关），`setKeyKnowledge` + `POST /api/keys/:id/knowledge`；`RequestMeta.keyId` 由公网入口传入；`proxy.handleV1` 在建请求记录之前分派 `/v1/kb`、`/v1/mcp`；聊天的注入 / 工具模式的 `allowedKbs` 改为按 key 白名单。中英文案 `t.kbApi`。
+- 规格以外（审查认可）：新建条目 / 原文返回 201；时间输出 ISO 字符串；可选参数传 `null` 当作没传；对只读 key 调写工具直接回 `kb_read_only`；`read_source` 只认原文 id。
+- 实际运行：`bun test` 1989 pass / 8 skip / 0 fail（新增 `tests/core/kb-external.test.ts` 27 条、`kb-public.test.ts` 8 条；旧测试 4 处期望因 `keyId` 与 `SECRETS_VERSION` 6 更新）；`bun run typecheck` exit 0；`git diff --check` 只有 CRLF 提示（以上我复跑）。子代理：`bun run build` exit 0；用构建产物 + 临时数据目录跑了 curl：列表、说明、没带 `guide_rev` 412、带了 201、检索、跨站 403、text/plain 415、MCP initialize / 通知 202 / GET 405 / `add_entry`、管理接口设置权限 200 与未知知识库 400；之后停了服务并删了临时目录。
+- 没有运行：真实 MCP 客户端（Claude Code / Cursor / Cherry Studio）连接与写入（计划里那一项未打勾）；真实公网入口 :8080 / 隧道（只在进程内测了 `handlePublic`）；向量检索路径（没有向量引擎）；`nuxt dev` 下的 `/v1/kb`（同一个 `handleV1`，未启动）。
+- 已知：key 的白名单与可写开关暂时只有接口，没有界面（15-8）；`/v1/kb`、`/v1/mcp` 的调用不进「请求记录」，写操作在知识库的变更记录里。默认使用说明随界面语言变化，切换语言后 `guide_rev` 会变，agent 要重读。
+- 用户验证步骤：`bun scripts/launch.ts web build` → 在任意终端 `claude mcp add --transport http llama-web http://127.0.0.1:5001/v1/mcp`（或在 Cursor / Cherry Studio 里加同一个地址的 Streamable HTTP MCP）→ 让它列出知识库、读 `kb_guide`、加一条条目 → 在 `GET /api/kb/<id>/changes` 里看到操作者 `local`。公网：给某个 key 调 `POST /api/keys/<keyId>/knowledge` 设 `{"kbs":["<id>"],"kbWrite":false}`，经隧道用这个 key 调 `GET /v1/kb` 只看到那个库，写入返回 `kb_read_only`。
+- 下一步：15-8（界面：条目、版本、回收站、说明、key 的知识库权限、「接入」里的 MCP 地址与示例提示词）。
+- `src-tauri/Cargo.lock` 的改动在会话开始前就有，仍未提交。
+
 ## 2026-11-15 · 15-7：知识库条目、版本与回收站（决定 69）· 单会话
 - 起因：用户觉得知识库「干巴巴」，加新内容时不知道怎么加、旧的又不想丢；后来明确主要是给外部 agent 留接口和说明，让 agent 直接整理（例如把参考小说整理进文风库），llama-web 不做提炼和合并。
 - 计划：新增决定 69（原文 + 可编辑条目、版本、回收站、`baseVersion` 冲突、每库使用说明与 `guideRev` 写门禁、写接口、key 的「可写知识库」开关），决定 65 ⑥⑦⑧ 标注扩展；阶段 15 新增 15-7、15-8，15-3 加入写接口；顺序 15-7 → 15-3 → 15-8。规格 Opus 5.5 写（会话草稿 `15-7-spec.md`，不在仓库里），Sonnet 5.5 实现，Opus 审查。

@@ -88,7 +88,7 @@ export interface KnowledgeDeps {
   tags?(kbIds: string[]): Promise<TagCount[]>
   /** The knowledge bases that exist now. */
   list(): readonly KbRef[]
-  /** Knowledge base ids the caller may use; null = all (API key lists arrive with 15-3). */
+  /** Knowledge base ids the caller may use; null = all (an API key's own list, decision 65 ⑧). */
   allowedKbs?(meta: RequestMeta | undefined): string[] | null
 }
 
@@ -136,6 +136,8 @@ export interface ProxyDeps {
   knowledge?: KnowledgeDeps
   /** Gateway web search (decision 67); absent = none. */
   webSearch?: WebSearchDeps
+  /** External knowledge base API: REST under /v1/kb and MCP at /v1/mcp (decisions 65 ⑦ / 69 ⑦); absent = those paths are not special. */
+  kbApi?: { handle(req: Request, meta: RequestMeta | undefined): Promise<Response> }
   /** Embedding engine (decision 64); absent = none. */
   embedding?: {
     /** The name clients send, or null while the engine is off. */
@@ -258,7 +260,7 @@ export function noRoomText(d: NoRoomDetail | undefined, model: string): string {
 // ---------------------------------------------------------------------------------------
 // Body / headers
 
-class BodyTooLarge extends Error {}
+export class BodyTooLarge extends Error {}
 
 export async function readBodyLimited(req: Request, limit: number): Promise<Uint8Array<ArrayBuffer> | null> {
   const declared = Number(req.headers.get('content-length'))
@@ -1090,6 +1092,15 @@ export function createProxy(deps: ProxyDeps) {
 
   async function handleV1(req: Request, meta?: RequestMeta): Promise<Response> {
     const url = new URL(req.url)
+    // The knowledge base API answers before a request record is made: its calls are not model requests.
+    if (deps.kbApi && (url.pathname === '/v1/mcp' || url.pathname === '/v1/kb' || url.pathname.startsWith('/v1/kb/'))) {
+      try {
+        return await deps.kbApi.handle(req, meta)
+      } catch (e) {
+        deps.onEvent?.({ type: 'internal-error', target: { modelId: '-', profile: '-' }, error: e })
+        return errorResponse(500, 'internal_error', t.api.internalError)
+      }
+    }
     const quiet = req.method === 'GET' && url.pathname.startsWith('/v1/models')
     const trace = new RequestTrace(req, meta, quiet ? null : deps.onRequest ?? null, ++requestSeq, quiet ? null : deps.speed ?? null)
     let res: Response

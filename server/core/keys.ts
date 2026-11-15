@@ -2,6 +2,7 @@
 // revoke, and check an Authorization header. Pure module (no Nitro). Keys are stored in plain
 // text by decision; they never appear in logs, request records or list responses.
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
+import { validKbId } from './kb/registry'
 
 export interface ApiKey {
   id: string
@@ -14,6 +15,10 @@ export interface ApiKey {
   revokedAt?: string | null
   /** Placeholder (plan 坑位): stored, not enforced. */
   allowSwitch: boolean
+  /** Knowledge bases this key may use (decision 65 ⑧); null = all. Ids of deleted knowledge bases may stay (they match nothing). */
+  kbs: string[] | null
+  /** May write knowledge bases through /v1/kb and MCP (decision 69 ⑧); default off. */
+  kbWrite: boolean
 }
 
 export interface SecretsDoc {
@@ -29,7 +34,7 @@ export interface SecretsDoc {
   searchKeys: Record<string, string>
 }
 
-export const SECRETS_VERSION = 5
+export const SECRETS_VERSION = 6
 
 /** `migrations[n]` turns a version-n secrets.json into version n + 1. */
 export const SECRETS_MIGRATIONS: Record<number, (old: any) => any> = {
@@ -41,6 +46,8 @@ export const SECRETS_MIGRATIONS: Record<number, (old: any) => any> = {
   3: old => ({ ...old, upstreamKeys: {} }),
   // 5: keys of the web search backends (decision 67).
   4: old => ({ ...old, searchKeys: {} }),
+  // 6: per-key knowledge base allowlist and write switch (decisions 65 ⑧ / 69 ⑧).
+  5: old => ({ ...old, apiKeys: (Array.isArray(old.apiKeys) ? old.apiKeys : []).map((k: any) => ({ ...k, kbs: null, kbWrite: false })) }),
 }
 
 export function defaultSecrets(): SecretsDoc {
@@ -74,6 +81,10 @@ export function normalizeSecrets(doc: SecretsDoc): SecretsDoc {
     k.revoked = k.revoked === true
     k.allowSwitch = k.allowSwitch !== false
     if (typeof k.createdAt !== 'string') k.createdAt = ''
+    if (k.kbs === undefined || k.kbs === null) k.kbs = null
+    else if (Array.isArray(k.kbs)) k.kbs = [...new Set(k.kbs.filter(validKbId))]
+    else throw new Error(`API key "${k.id}": "kbs" must be null or an array`)
+    k.kbWrite = k.kbWrite === true
   }
   return doc
 }
@@ -83,7 +94,7 @@ export const MIN_KEY_LENGTH = 16
 export const MAX_KEYS = 100
 export const MAX_NAME_LENGTH = 40
 
-export type KeyErrorCode = 'bad-name' | 'name-taken' | 'not-found' | 'too-many'
+export type KeyErrorCode = 'bad-name' | 'name-taken' | 'not-found' | 'too-many' | 'bad-kbs' | 'kb-not-found'
 
 export class KeyError extends Error {
   constructor(public code: KeyErrorCode, public detail = '') {
@@ -118,7 +129,7 @@ export function createKey(draft: SecretsDoc, rawName: unknown, opts: { now?: Dat
   while (ids.has(id))
   const key: ApiKey = {
     id, name, key: generateKey(rand), createdAt: (opts.now ?? new Date()).toISOString(),
-    revoked: false, revokedAt: null, allowSwitch: true,
+    revoked: false, revokedAt: null, allowSwitch: true, kbs: null, kbWrite: false,
   }
   draft.apiKeys.push(key)
   return key
@@ -132,6 +143,29 @@ export function revokeKey(draft: SecretsDoc, id: unknown, now = new Date()): Api
     key.revoked = true
     key.revokedAt = now.toISOString()
   }
+  return key
+}
+
+export const MAX_KEY_KBS = 100
+
+/**
+ * Set the knowledge base allowlist (null = all) and the write switch of a key (decisions 65 ⑧ / 69 ⑧). Ids must exist
+ * now (`existingKbIds`); more than MAX_KEY_KBS ids or a wrong shape is `bad-kbs`. A revoked key may be edited (it is
+ * harmless: it can no longer authenticate).
+ */
+export function setKeyKnowledge(draft: SecretsDoc, id: unknown, input: unknown, existingKbIds: readonly string[]): ApiKey {
+  const key = draft.apiKeys.find(k => k.id === id)
+  if (!key) throw new KeyError('not-found')
+  if (!isObj(input) || typeof input.kbWrite !== 'boolean') throw new KeyError('bad-kbs')
+  let kbs: string[] | null = null
+  if (input.kbs !== null && input.kbs !== undefined) {
+    if (!Array.isArray(input.kbs) || input.kbs.length > MAX_KEY_KBS || !input.kbs.every(x => typeof x === 'string')) throw new KeyError('bad-kbs')
+    kbs = [...new Set(input.kbs as string[])]
+    const unknown = kbs.find(x => !existingKbIds.includes(x))
+    if (unknown !== undefined) throw new KeyError('kb-not-found', unknown)
+  }
+  key.kbs = kbs
+  key.kbWrite = input.kbWrite
   return key
 }
 
@@ -156,10 +190,12 @@ export interface KeyView {
   createdAt: string
   revoked: boolean
   revokedAt: string | null
+  kbs: string[] | null
+  kbWrite: boolean
 }
 
 export function viewKey(k: ApiKey): KeyView {
-  return { id: k.id, name: k.name, masked: maskKey(k.key), createdAt: k.createdAt, revoked: k.revoked, revokedAt: k.revokedAt ?? null }
+  return { id: k.id, name: k.name, masked: maskKey(k.key), createdAt: k.createdAt, revoked: k.revoked, revokedAt: k.revokedAt ?? null, kbs: k.kbs ? [...k.kbs] : null, kbWrite: k.kbWrite }
 }
 
 /** Newest first. */

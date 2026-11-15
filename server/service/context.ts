@@ -62,6 +62,8 @@ import { UpstreamLauncher } from '../core/upstream-launcher'
 import { defaultEmbedding, EMBEDDING_VERSION, EmbeddingEngine, normalizeEmbedding, planEmbedding, type EmbeddingDoc } from '../core/embedding'
 import { defaultKnowledge, KNOWLEDGE_MIGRATIONS, KNOWLEDGE_VERSION, normalizeKnowledge, type KnowledgeDoc } from '../core/kb/registry'
 import { KbManager } from '../core/kb/manager'
+import { kbAccessOf } from '../core/kb/access'
+import { createKbApi } from '../core/kb/http'
 import { engineEmbedder } from '../core/kb/embed'
 import { testConnection } from '../core/upstream-test'
 import { httpProbe, UpstreamHealth } from '../core/upstream-health'
@@ -734,8 +736,10 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
     getUpstreamKey: id => secretsRef.get().upstreamKeys[id] ?? '',
     jobs: new JobStore({ dataDir, onError: e => logError('async jobs (data/jobs.json):', (e as Error)?.message ?? e) }),
     embedding,
-    // Decision 65 ⑨: knowledge for the chat models. Permission lists per API key come with 15-3 (null = every knowledge base).
-    knowledge: { search: (ids, q, o) => kb.search(ids, q, o), tags: ids => kb.tags(ids), list: () => knowledgeRef.get().bases, allowedKbs: () => null },
+    // Decision 65 ⑨: knowledge for the chat models. The knowledge base list of the API key (public entry) limits them too; local / LAN = all.
+    knowledge: { search: (ids, q, o) => kb.search(ids, q, o), tags: ids => kb.tags(ids), list: () => knowledgeRef.get().bases, allowedKbs: meta => kbAccessOf(meta, secretsRef.get()).allowed },
+    // Decisions 65 ⑦ / 69 ⑦: REST (/v1/kb) and MCP (/v1/mcp) over the same operations.
+    kbApi: createKbApi({ deps: { kb, bases: () => knowledgeRef.get().bases }, secrets: secretsRef.get }),
     webSearch: { enabled: () => getSettings().webSearch.enabled, guide: () => ({ custom: getSettings().webSearch.guide, required: getSettings().webSearch.guideRequired }), offer: () => ({ backends: webSearch.available(), autoPaid: getSettings().webSearch.order !== 'free-only' }), search: (q, n, signal, only) => webSearch.search(q, n, signal, only), fetchPage: (url, maxChars, signal) => fetchPage(url, { maxChars, signal }) },
   })
   const publicEntry: PublicListener = new PublicListener((req, ip) => handlePublic(req, {

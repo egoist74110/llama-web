@@ -358,7 +358,7 @@ describe('configuration migrations', () => {
   })
 
   test('secrets v4 -> v5 adds searchKeys; a wrong shape is refused', () => {
-    expect(SECRETS_VERSION).toBe(5)
+    expect(SECRETS_VERSION).toBe(6)
     expect(SECRETS_MIGRATIONS[4]!({ version: 4 })).toMatchObject({ searchKeys: {} })
     expect(defaultSecrets().searchKeys).toEqual({})
     expect(normalizeSecrets({ version: 4, apiKeys: [] } as any).searchKeys).toEqual({})

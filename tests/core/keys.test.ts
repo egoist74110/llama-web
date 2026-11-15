@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
   authenticate, createKey, defaultSecrets, findKey, generateKey, KeyError, listKeys, maskKey, MAX_KEYS, normalizeSecrets,
-  revokeKey, SECRETS_MIGRATIONS, type SecretsDoc,
+  revokeKey, SECRETS_MIGRATIONS, SECRETS_VERSION, type SecretsDoc,
 } from '../../server/core/keys'
 
 function codeOf(fn: () => unknown): string {
@@ -222,5 +222,44 @@ describe('secrets.json version 3 (Cloudflare API token)', () => {
     const d = defaultSecrets()
     d.cloudflareToken = 'cf-api-token-value-0123456789abcdef'
     expect(authenticate(d, `Bearer ${d.cloudflareToken}`).ok).toBe(false)
+  })
+})
+
+describe('knowledge permissions (secrets v6, decisions 65 ⑧ / 69 ⑧)', () => {
+  test('migration 5 -> 6 gives every key kbs null and no write switch, keeps the rest', () => {
+    const old = { version: 5, apiKeys: [{ id: 'k1', name: 'a', key: 'sk-0123456789abcdef', revoked: true }, { id: 'k2', key: 'sk-fedcba9876543210' }], tunnelToken: 'x' }
+    const next = SECRETS_MIGRATIONS[5]!(old)
+    expect(next.apiKeys).toEqual([
+      { id: 'k1', name: 'a', key: 'sk-0123456789abcdef', revoked: true, kbs: null, kbWrite: false },
+      { id: 'k2', key: 'sk-fedcba9876543210', kbs: null, kbWrite: false },
+    ])
+    expect(next.tunnelToken).toBe('x')
+    expect(SECRETS_MIGRATIONS[5]!({ version: 5 }).apiKeys).toEqual([])
+    expect(SECRETS_VERSION).toBe(6)
+  })
+
+  test('new keys are unrestricted and read-only; the list view shows both fields', () => {
+    const d = docWith('a')
+    expect(d.apiKeys[0]).toMatchObject({ kbs: null, kbWrite: false })
+    expect(listKeys(d)[0]).toMatchObject({ kbs: null, kbWrite: false })
+    expect(JSON.stringify(listKeys(d))).not.toContain(d.apiKeys[0]!.key)
+  })
+
+  test('normalize: missing fields take the defaults, bad ids are dropped, duplicates removed, stale ids kept', () => {
+    const doc = normalizeSecrets({
+      version: 6, tunnelToken: '', cloudflareToken: '', upstreamKeys: {}, searchKeys: {},
+      apiKeys: [
+        { id: 'k1', key: 'sk-0123456789abcdef' },
+        { id: 'k2', key: 'sk-0123456789abcdee', kbs: ['kb-aaaaaaaa', 'kb-aaaaaaaa', '../x', 7, 'kb-gone0000'], kbWrite: 'yes' },
+        { id: 'k3', key: 'sk-0123456789abcded', kbs: [], kbWrite: true },
+      ],
+    } as unknown as SecretsDoc)
+    expect(doc.apiKeys[0]).toMatchObject({ kbs: null, kbWrite: false })
+    expect(doc.apiKeys[1]).toMatchObject({ kbs: ['kb-aaaaaaaa', 'kb-gone0000'], kbWrite: false })
+    expect(doc.apiKeys[2]).toMatchObject({ kbs: [], kbWrite: true })
+  })
+
+  test('normalize refuses a kbs that is neither null nor an array', () => {
+    expect(() => normalizeSecrets({ version: 6, apiKeys: [{ id: 'k1', key: 'sk-0123456789abcdef', kbs: 'kb-aaaaaaaa' }] } as unknown as SecretsDoc)).toThrow('kbs')
   })
 })

@@ -47,7 +47,7 @@ export async function handlePublic(req: Request, deps: PublicHandlerDeps, ip?: s
   const auth = deps.authenticate(req.headers.get('authorization'))
   if (!auth.ok) return unauthorized()
   try {
-    return await deps.handleV1(req, { ip: ip ?? null, keyName: auth.key.name })
+    return await deps.handleV1(req, { ip: ip ?? null, keyName: auth.key.name, keyId: auth.key.id })
   } catch {
     // Never let a runtime error page (stack, paths) reach the internet.
     return Response.json({ error: { message: t.api.internalError, type: 'server_error', code: 'internal_error' } }, { status: 500 })

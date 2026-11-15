@@ -101,7 +101,7 @@ describe('handlePublic: API key', () => {
     const s = stubbed()
     const res = await s.send('/v1/chat/completions', bearer(s.phone), '127.0.0.1')
     expect(res.status).toBe(200)
-    expect(s.calls).toEqual([{ path: '/v1/chat/completions', meta: { ip: '127.0.0.1', keyName: '手机' } }])
+    expect(s.calls).toEqual([{ path: '/v1/chat/completions', meta: { ip: '127.0.0.1', keyName: '手机', keyId: s.doc.apiKeys[0]!.id } }])
   })
 
   test('/v1/models also needs a key', async () => {
@@ -114,7 +114,7 @@ describe('handlePublic: API key', () => {
     await s.send('/v1/chat/completions', {
       ...bearer(s.phone), 'x-llama-web-key': 'admin', 'x-llama-web-source': 'local', 'x-forwarded-for': '192.168.1.5',
     }, null)
-    expect(s.calls[0]!.meta).toEqual({ ip: null, keyName: '手机' })
+    expect(s.calls[0]!.meta).toEqual({ ip: null, keyName: '手机', keyId: s.doc.apiKeys[0]!.id })
   })
 
   test('revoking takes effect on the next request', async () => {

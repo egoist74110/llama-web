@@ -1153,10 +1153,10 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 
   <h3>15-3 · 外部接入：REST 与 MCP，含写接口（Sonnet 5.5，规格由 Opus 5.5 先写；2026-11-15 按决定 69 扩大范围，在 15-7 之后做）</h3>
   <ul class="tasks">
-    <li class="task" data-done="false"><span class="t"><code>GET /v1/kb</code>、<code>POST /v1/kb/search</code>（接受 <code>tags</code>、<code>min_similarity</code>）；入口与 <code>nuxt dev</code> 路由共用同一实现（决定 65 ⑦）</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">写接口与读条目 / 原文的 REST（<code>/v1/kb/:id/guide</code>、<code>entries</code>、<code>sources</code>）；写操作校验 <code>guide_rev</code>（<code>guide_required</code>）与 <code>baseVersion</code>（409 <code>version_conflict</code>），操作者记「本机」或 key 名称（决定 69 ④⑤⑦）</span><span class="when"></span></li>
+    <li class="task" data-done="true"><span class="t"><code>GET /v1/kb</code>、<code>POST /v1/kb/search</code>（接受 <code>tags</code>、<code>min_similarity</code>）；入口与 <code>nuxt dev</code> 路由共用同一实现（决定 65 ⑦）</span><span class="when">2026-11-16</span></li>
+    <li class="task" data-done="true"><span class="t">写接口与读条目 / 原文的 REST（<code>/v1/kb/:id/guide</code>、<code>entries</code>、<code>sources</code>）；写操作校验 <code>guide_rev</code>（<code>guide_required</code>）与 <code>baseVersion</code>（409 <code>version_conflict</code>），操作者记「本机」或 key 名称（决定 69 ④⑤⑦）</span><span class="when">2026-11-16</span></li>
     <li class="task" data-done="false"><span class="t">MCP Streamable HTTP <code>/v1/mcp</code>：<code>initialize</code>、<code>tools/list</code>、<code>tools/call</code>，工具见决定 69 ⑦；用 Claude Code / Cursor / Cherry Studio 之一实测连接与一次写入</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">API key 知识库白名单与「可写知识库」开关（<code>secrets.json</code> 升版本与迁移）、403 <code>kb_forbidden</code> / <code>kb_read_only</code>；公网入口鉴权测试（决定 65 ⑧、69 ⑧，AGENTS.md 要求改鉴权必须补测试）</span><span class="when"></span></li>
+    <li class="task" data-done="true"><span class="t">API key 知识库白名单与「可写知识库」开关（<code>secrets.json</code> 升版本与迁移）、403 <code>kb_forbidden</code> / <code>kb_read_only</code>；公网入口鉴权测试（决定 65 ⑧、69 ⑧，AGENTS.md 要求改鉴权必须补测试）</span><span class="when">2026-11-16</span></li>
   </ul>
 
   <h3>15-4 · 本机模型与外部上游：注入与工具模式（Sonnet 5.5，规格由 Opus 5.5 先写；用户 2026-10-20 要求在 15-2 / 15-3 之前做）</h3>
@@ -1221,6 +1221,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 <section id="changelog">
   <h2>变更记录</h2>
   <table>
+    <tr><td>2026-11-16</td><td>15-3 完成（Sonnet 5.5 实现，Opus 5.5 审查）：<code>/v1/kb</code> REST（列表、检索、说明、条目、原文，写操作要 <code>guide_rev</code>，412 <code>guide_required</code>、409 <code>version_conflict</code>）与 MCP <code>/v1/mcp</code>（Streamable HTTP、无状态、JSON 响应，12 个工具，只读 key 看不到写工具），REST 与 MCP 共用 <code>server/core/kb/external.ts</code>；<code>secrets.json</code> v6（每个 key 的 <code>kbs</code> 白名单与 <code>kbWrite</code>），<code>POST /api/keys/:id/knowledge</code>；注入 / 工具模式也按 key 白名单。补充：<code>/v1/kb</code> 与 <code>/v1/mcp</code> 的非 GET 请求拒绝跨站来源、必须是 JSON（主端口不要 key，防止网页跨站写入）；这两类调用不进请求记录。用真实 MCP 客户端连接与写入未做（等用户验证）</td></tr>
     <tr><td>2026-11-15</td><td>15-7 完成（Sonnet 5.5 实现，Opus 5.5 审查）：库文件 schema 3（条目、版本表、回收站、变更记录）、<code>knowledge.json</code> v2（<code>guide</code>）、条目 / 版本 / 回收站 / 说明 / 原文分段读取的管理接口；条目标题放在块的标题路径最前面，可被关键词检索。只有单元测试，界面在 15-8</td></tr>
     <tr><td>2026-11-15</td><td>新增关键决定 69（用户 2026-11-15 确认）：知识库分「原文」和可编辑的「条目」，条目有版本、删除进回收站、修改带版本号防覆盖；每个知识库一段使用说明，外部写操作必须带说明的 <code>guideRev</code>；REST / MCP 加写接口，API key 加「可写知识库」开关。修改决定 65 ⑥⑦⑧。阶段 15 新增 15-7（条目与版本核心）、15-8（界面），15-3 的范围加入写接口；顺序 15-7 → 15-3 → 15-8</td></tr>
     <tr><td>2026-11-05</td><td>新增关键决定 68（用户 2026-11-05 确认）：外部服务可存多条命名的启动命令，第一条「默认」可改名不可删；启动时多条要按名称选；<code>upstreams.json</code> 升到 v4</td></tr>
