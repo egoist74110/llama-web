@@ -5,9 +5,10 @@ import { basename, join } from 'node:path'
 import { chunkText } from './chunk'
 import { decodeText } from './text'
 import { ftsMatch } from './tokenize'
-import { KbDb, sha256Hex, type ChunkHit, type DocRow, type DocStatus } from './kb-db'
+import { KbDb, sha256Hex, type ChangeRow, type ChunkHit, type DocKind, type DocRow, type DocStatus, type VersionRow } from './kb-db'
 import { KbError } from './errors'
-import { applyKbEdit, createKnowledgeBase, SOFT_CHUNK_LIMIT, validKbId, type KbEdit, type KnowledgeBase, type KnowledgeDoc } from './registry'
+import { applyKbEdit, createKnowledgeBase, guideRev, SOFT_CHUNK_LIMIT, validKbId, type KbEdit, type KnowledgeBase, type KnowledgeDoc } from './registry'
+import { t } from '../i18n'
 import type { Embedder } from './embed'
 import { fuseRrf } from './search'
 import { cleanSimilarity, dedupeTags, MAX_FILTER_TAGS, type TagCount } from './tags'
@@ -18,6 +19,14 @@ export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 export const EMBED_BATCH = 32
 export const DEFAULT_TOP_K = 5
 export const MAX_TOP_K = 1000
+/** Entries (decision 69). */
+export const MAX_ENTRY_TITLE = 200
+export const MAX_ENTRY_BODY = 20_000
+export const MAX_ENTRY_TAGS = 20
+/** One `readSource` call returns at most this many characters. */
+export const MAX_READ_LENGTH = 20_000
+const MAX_ACTOR_LENGTH = 80
+const MAX_SOURCE_NAME = 200
 /** Candidates taken from each of the two searches before fusion. */
 const MIN_CANDIDATES = 50
 const MAX_QUERY_CHARS = 2000
@@ -40,7 +49,12 @@ export interface KbManagerOptions {
 }
 
 export interface KbView extends KnowledgeBase {
+  /** Live sources (uploaded / added texts). */
   docCount: number
+  /** Live entries (decision 69). */
+  entryCount: number
+  /** Documents of both kinds in the trash. */
+  trashCount: number
   chunkCount: number
   /** More chunks than SOFT_CHUNK_LIMIT: brute-force vector search gets slow. */
   oversize: boolean
@@ -79,11 +93,68 @@ export interface KbLiveState {
   jobs: KbJobView[]
 }
 
+export interface EntryView {
+  id: number
+  title: string
+  body: string
+  tags: string[]
+  version: number
+  createdAt: number
+  updatedAt: number
+  status: DocStatus
+}
+
+export interface EntryListItem {
+  id: number
+  title: string
+  tags: string[]
+  version: number
+  updatedAt: number
+  status: DocStatus
+  /** The first 200 characters of the body. */
+  preview: string
+}
+
+export interface TrashItem {
+  id: number
+  kind: DocKind
+  name: string
+  deletedAt: number
+  /** Entries: the version the trash move created; sources: null. */
+  version: number | null
+  size: number
+}
+
+export interface GuideView {
+  /** The effective text: the custom one, or the default of the interface language. */
+  guide: string
+  /** The stored text; '' = the default is in use. */
+  custom: string
+  isDefault: boolean
+  /** Revision of the effective text (see `guideRev`). */
+  rev: string
+}
+
+export interface SourceText {
+  docId: number
+  name: string
+  totalChars: number
+  offset: number
+  text: string
+  /** Offset of the next page, null at the end. */
+  nextOffset: number | null
+}
+
 export interface SearchHit {
   kbId: string
   kbName: string
+  /** The entry id for an entry, the document id for a source. */
   docId: number
+  /** The title for an entry. */
   docName: string
+  kind: DocKind
+  /** Entries: the current version; sources: null. */
+  entryVersion: number | null
   chunkId: number
   text: string
   startLine: number
@@ -121,6 +192,36 @@ export interface AddDocumentInput {
 }
 
 const SUPPORTED: Record<string, 'txt' | 'md'> = { '.txt': 'txt', '.md': 'md', '.markdown': 'md' }
+const extOf = (name: string) => /\.[^./]+$/.exec(name)?.[0]?.toLowerCase() ?? ''
+
+const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
+
+/** Who wrote: 'admin', 'local' or 'key:<name>'; cut to MAX_ACTOR_LENGTH. */
+const actorOf = (a: unknown) => (typeof a === 'string' ? a : '').slice(0, MAX_ACTOR_LENGTH) || 'unknown'
+
+function cleanTitle(v: unknown): string {
+  const title = typeof v === 'string' ? v.trim() : ''
+  if (!title || title.length > MAX_ENTRY_TITLE) throw new KbError('bad-title')
+  return title
+}
+
+/** The body is stored as written; it only must not be blank. */
+function cleanBody(v: unknown): string {
+  if (typeof v !== 'string' || v.trim() === '' || v.length > MAX_ENTRY_BODY) throw new KbError('bad-entry-body')
+  return v
+}
+
+function cleanEntryTags(v: unknown): string[] {
+  if (!Array.isArray(v) || v.some(x => typeof x !== 'string')) throw new KbError('bad-tags')
+  const tags = dedupeTags(v as string[], MAX_ENTRY_TAGS + 1)
+  if (tags.length > MAX_ENTRY_TAGS) throw new KbError('bad-tags')
+  return tags
+}
+
+function baseVersionOf(v: unknown): number {
+  if (typeof v !== 'number' || !Number.isInteger(v)) throw new KbError('bad-base-version')
+  return v
+}
 
 interface Job {
   kind: 'import' | 'reindex'
@@ -207,6 +308,8 @@ export class KbManager {
     return {
       ...b,
       docCount: db.countDocuments(),
+      entryCount: db.countEntries(),
+      trashCount: db.countTrash(),
       chunkCount,
       oversize: chunkCount > SOFT_CHUNK_LIMIT,
       reindexNeeded: this.needsReindex(b, db),
@@ -220,7 +323,7 @@ export class KbManager {
     return this.view(doc.bases[doc.bases.length - 1]!)
   }
 
-  /** Name, description and chunking (the chunk settings apply to documents added afterwards). */
+  /** Name, description, guide and chunking (the chunk settings apply to documents added afterwards). */
   async update(id: string, edit: KbEdit): Promise<KbView> {
     this.base(id)
     const doc = this.o.store.update((draft) => {
@@ -260,10 +363,10 @@ export class KbManager {
    * Decode, chunk and store a document (status `indexing`), then queue its embedding. Resolves when the document is
    * stored, not when it is embedded: follow `status` and the live `jobs`.
    */
-  async addDocument(id: string, input: AddDocumentInput): Promise<DocView> {
+  async addDocument(id: string, input: AddDocumentInput, actor: string = 'admin'): Promise<DocView> {
     const base = this.base(id)
     const name = basename(String(input.name ?? '').replace(/\\/g, '/')).trim()
-    const ext = /\.[^./]+$/.exec(name)?.[0]?.toLowerCase() ?? ''
+    const ext = extOf(name)
     const kind = SUPPORTED[ext]
     if (!name || !kind) throw new KbError('unsupported-type', ext || name)
     if (!(input.bytes instanceof Uint8Array)) throw new KbError('bad-body')
@@ -276,22 +379,367 @@ export class KbManager {
     const chunks = chunkText(text, { kind, chunkSize: base.chunkSize, overlap: base.chunkOverlap })
     if (!chunks.length) throw new KbError('no-text')
     const now = this.now()
-    const docId = db.insertDocument({
-      name, source: input.source?.trim() || name, size: input.bytes.length, sha256: sha,
-      mtime: Number.isFinite(input.mtime) ? Math.floor(input.mtime!) : now, addedAt: now, raw: text,
-    }, chunks)
-    this.enqueue({ kind: 'import', kbId: id, docId, name, total: chunks.length, run: j => this.runImport(j) })
+    const who = actorOf(actor)
+    const docId = db.transaction(() => {
+      const docId = db.insertDocument({
+        name, source: input.source?.trim() || name, size: input.bytes.length, sha256: sha,
+        mtime: Number.isFinite(input.mtime) ? Math.floor(input.mtime!) : now, addedAt: now, raw: text,
+      }, chunks)
+      db.insertChange({ at: now, actor: who, op: 'add', kind: 'source', docId, version: null, name })
+      return docId
+    })
+    this.queueImport(db, id, docId, name)
     return this.docView(id, db.getDocument(docId)!)
   }
 
-  async removeDocument(id: string, docId: number): Promise<void> {
+  /**
+   * Add a text as a source (decision 69), the same as uploading a .txt / .md file. `name` without a supported extension
+   * gets `.txt`. `tags` become a tag line `[tag:a,b]` in front of the stored text, so the chunker applies them to the
+   * whole text like any tag line (the line is in no chunk but is part of the stored raw text and its character offsets).
+   */
+  async addSourceText(id: string, input: { name: unknown, text: unknown, tags?: unknown }, actor: string): Promise<DocView> {
+    this.base(id)
+    if (!isObj(input)) throw new KbError('bad-body')
+    // A re-index rewrites every vector: nothing is added to the content while it runs.
+    if (this.hasReindex(id)) throw new KbError('busy')
+    const given = basename(String(typeof input.name === 'string' ? input.name : '').replace(/\\/g, '/')).trim()
+    if (!given || given.length > MAX_SOURCE_NAME) throw new KbError('bad-doc-name')
+    const name = SUPPORTED[extOf(given)] ? given : `${given}.txt`
+    if (typeof input.text !== 'string') throw new KbError('bad-body')
+    if (input.text.trim() === '') throw new KbError('empty-file')
+    let tagLine = ''
+    if (input.tags !== undefined) {
+      if (!Array.isArray(input.tags) || input.tags.some(x => typeof x !== 'string')) throw new KbError('bad-tags')
+      // A tag may not contain what ends or splits a tag line.
+      const tags = dedupeTags((input.tags as string[]).map(x => x.replace(/[,，[\]\r\n]/g, ' ')), MAX_ENTRY_TAGS)
+      if (tags.length) tagLine = `[tag:${tags.join(',')}]\n`
+    }
+    const bytes = new TextEncoder().encode(tagLine + input.text)
+    if (bytes.length > MAX_UPLOAD_BYTES) throw new KbError('too-large')
+    return this.addDocument(id, { name, bytes, source: name }, actor)
+  }
+
+  /**
+   * Move a source to the trash (its chunks go, its text stays so it can be restored). A source without stored text
+   * (added before schema 2) cannot be restored, so it is deleted for good: `trashed` is false then.
+   */
+  async removeDocument(id: string, docId: number, actor: string = 'admin'): Promise<{ trashed: boolean }> {
     const db = await this.dbOf(id)
-    if (!db.getDocument(docId)) throw new KbError('doc-not-found')
+    const live = (): DocRow => {
+      const d = db.getDocument(docId)
+      if (!d || d.kind !== 'source' || d.deletedAt !== null) throw new KbError('doc-not-found')
+      return d
+    }
+    live()
     // A re-index rewrites every vector: a document cannot go while it runs (it would leave vectors without chunks).
     if (this.hasReindex(id)) throw new KbError('busy')
     await this.cancelJobs(j => j.kbId === id && j.docId === docId)
-    db.deleteDocument(docId)
+    const d = live()
+    const now = this.now()
+    const who = actorOf(actor)
+    db.transaction(() => {
+      if (d.hasRaw) {
+        db.trashDocument(docId, now)
+        db.insertChange({ at: now, actor: who, op: 'delete', kind: 'source', docId, version: null, name: d.name })
+      } else {
+        db.deleteDocument(docId)
+        db.insertChange({ at: now, actor: who, op: 'purge', kind: 'source', docId, version: null, name: d.name })
+      }
+    })
     this.changed()
+    return { trashed: d.hasRaw }
+  }
+
+  /** A page of the stored text of a source (or the body of an entry). `offset` / `length` count UTF-16 code units. */
+  async readSource(id: string, docId: number, o: { offset?: number, length?: number } = {}): Promise<SourceText> {
+    const db = await this.dbOf(id)
+    const d = db.getDocument(docId)
+    if (!d || d.deletedAt !== null) throw new KbError('doc-not-found')
+    const raw = db.getRaw(docId)
+    if (raw === null) throw new KbError('no-raw')
+    const offset = Number.isFinite(o.offset) ? Math.min(raw.length, Math.max(0, Math.floor(o.offset!))) : 0
+    const length = Number.isFinite(o.length) ? Math.min(MAX_READ_LENGTH, Math.max(1, Math.floor(o.length!))) : MAX_READ_LENGTH
+    let end = Math.min(raw.length, offset + length)
+    // Do not cut a surrogate pair in two.
+    const last = raw.charCodeAt(end - 1)
+    if (end < raw.length && end - offset > 1 && last >= 0xd800 && last <= 0xdbff) end--
+    return { docId, name: d.name, totalChars: raw.length, offset, text: raw.slice(offset, end), nextOffset: end < raw.length ? end : null }
+  }
+
+  // ---- entries (decision 69) ----
+
+  private async writable(id: string): Promise<KbDb> {
+    const db = await this.dbOf(id)
+    // A re-index rewrites every vector: nothing is written to the content while it runs.
+    if (this.hasReindex(id)) throw new KbError('busy')
+    return db
+  }
+
+  /** The live entry `docId`; a source, a trashed entry and a missing one are all `entry-not-found`. */
+  private liveEntry(db: KbDb, docId: number): DocRow {
+    const d = Number.isInteger(docId) ? db.getDocument(docId) : undefined
+    if (!d || d.kind !== 'entry' || d.deletedAt !== null) throw new KbError('entry-not-found')
+    return d
+  }
+
+  private entryView(db: KbDb, d: DocRow): EntryView {
+    return {
+      id: d.id, title: d.name, body: db.getRaw(d.id) ?? '', tags: d.entryTags ?? [], version: d.version,
+      createdAt: d.addedAt, updatedAt: d.updatedAt ?? d.addedAt, status: d.status,
+    }
+  }
+
+  private checkBase(db: KbDb, d: DocRow, baseVersion: number) {
+    if (baseVersion !== d.version) throw new KbError('version-conflict', `${baseVersion} / ${d.version}`, { code: 'version_conflict', current: this.entryView(db, d) })
+  }
+
+  private entryChunks(base: KnowledgeBase, title: string, body: string, tags: readonly string[]) {
+    // Every chunk carries the entry's tags in addition to the tag lines of the body, and the title leads its heading
+    // path, so the title is found by keyword search (the FTS text is heading path + text) and shown as provenance.
+    return chunkText(body, { kind: 'md', chunkSize: base.chunkSize, overlap: base.chunkOverlap })
+      .map(c => ({ ...c, headingPath: c.headingPath ? `${title} > ${c.headingPath}` : title, tags: dedupeTags([...tags, ...c.tags], 2 * MAX_ENTRY_TAGS) }))
+  }
+
+  private hasJob(id: string, docId: number) {
+    return [...this.queue, ...(this.current ? [this.current] : [])].some(j => j.kbId === id && j.docId === docId)
+  }
+
+  private queueImport(db: KbDb, id: string, docId: number, name: string) {
+    this.enqueue({ kind: 'import', kbId: id, docId, name, total: db.countChunks(docId), run: j => this.runImport(j) })
+  }
+
+  /** A write was refused after its import job had been cancelled: the document still needs its vectors. */
+  private requeue(db: KbDb, id: string, docId: number) {
+    const d = db.getDocument(docId)
+    if (d && d.deletedAt === null && d.status === 'indexing' && !this.hasJob(id, docId)) this.queueImport(db, id, docId, d.name)
+  }
+
+  /**
+   * Run a write on a live entry: check the version, cancel the import job of the entry, check again (the wait may have
+   * let another write in), then run `fn` synchronously. A refusal re-queues the cancelled import.
+   */
+  private async guarded<T>(id: string, docId: number, baseVersion: unknown, fn: (db: KbDb, row: DocRow) => T): Promise<T> {
+    const bv = baseVersionOf(baseVersion)
+    const db = await this.writable(id)
+    this.checkBase(db, this.liveEntry(db, docId), bv)
+    await this.cancelJobs(j => j.kbId === id && j.docId === docId)
+    try {
+      if (this.hasReindex(id)) throw new KbError('busy')
+      const row = this.liveEntry(db, docId)
+      this.checkBase(db, row, bv)
+      return fn(db, row)
+    } catch (e) {
+      this.requeue(db, id, docId)
+      throw e
+    }
+  }
+
+  async listEntries(id: string, o: { tag?: string, query?: string, offset?: number, limit?: number } = {}): Promise<{ total: number, items: EntryListItem[] }> {
+    const db = await this.dbOf(id)
+    const limit = Number.isFinite(o.limit) ? Math.min(200, Math.max(1, Math.floor(o.limit!))) : 50
+    const offset = Number.isFinite(o.offset) ? Math.max(0, Math.floor(o.offset!)) : 0
+    const tag = typeof o.tag === 'string' ? o.tag.trim() : ''
+    const query = typeof o.query === 'string' ? o.query.trim().slice(0, 200) : ''
+    const { total, rows } = db.listEntries({ tag: tag || undefined, query: query || undefined, offset, limit })
+    return { total, items: rows }
+  }
+
+  async getEntry(id: string, docId: number): Promise<EntryView> {
+    const db = await this.dbOf(id)
+    return this.entryView(db, this.liveEntry(db, docId))
+  }
+
+  async addEntry(id: string, input: { title?: unknown, body?: unknown, tags?: unknown }, actor: string): Promise<EntryView> {
+    const base = this.base(id)
+    if (!isObj(input)) throw new KbError('bad-body')
+    const title = cleanTitle(input.title)
+    const body = cleanBody(input.body)
+    const tags = input.tags === undefined ? [] : cleanEntryTags(input.tags)
+    const db = await this.writable(id)
+    const chunks = this.entryChunks(base, title, body, tags)
+    if (!chunks.length) throw new KbError('no-text')
+    const now = this.now()
+    const who = actorOf(actor)
+    const docId = db.transaction(() => {
+      const docId = db.insertDocument({
+        name: title, source: 'entry', size: Buffer.byteLength(body, 'utf8'), sha256: sha256Hex(new TextEncoder().encode(body)),
+        mtime: now, addedAt: now, raw: body, kind: 'entry', entryTags: tags, updatedAt: now,
+      }, chunks)
+      db.insertVersion(docId, { version: 1, op: 'create', title, body, tags, actor: who, at: now })
+      db.insertChange({ at: now, actor: who, op: 'create', kind: 'entry', docId, version: 1, name: title })
+      return docId
+    })
+    this.queueImport(db, id, docId, title)
+    return this.entryView(db, db.getDocument(docId)!)
+  }
+
+  async updateEntry(id: string, docId: number, input: { baseVersion?: unknown, title?: unknown, body?: unknown, tags?: unknown }, actor: string): Promise<EntryView> {
+    const base = this.base(id)
+    if (!isObj(input)) throw new KbError('bad-body')
+    const bv = baseVersionOf(input.baseVersion)
+    if (input.title === undefined && input.body === undefined && input.tags === undefined) throw new KbError('bad-body')
+    const title = input.title === undefined ? undefined : cleanTitle(input.title)
+    const body = input.body === undefined ? undefined : cleanBody(input.body)
+    const tags = input.tags === undefined ? undefined : cleanEntryTags(input.tags)
+    const who = actorOf(actor)
+    const view = await this.guarded(id, docId, bv, (db, row) => {
+      const next = { title: title ?? row.name, body: body ?? db.getRaw(docId) ?? '', tags: tags ?? row.entryTags ?? [] }
+      const chunks = this.entryChunks(base, next.title, next.body, next.tags)
+      if (!chunks.length) throw new KbError('no-text')
+      const now = this.now()
+      const version = row.version + 1
+      db.transaction(() => {
+        db.setEntryContent(docId, { ...next, version, now })
+        db.replaceChunks(docId, chunks)
+        db.insertVersion(docId, { version, op: 'update', ...next, actor: who, at: now })
+        db.insertChange({ at: now, actor: who, op: 'update', kind: 'entry', docId, version, name: next.title })
+      })
+      return this.entryView(db, db.getDocument(docId)!)
+    })
+    this.queueImport(await this.db(id), id, docId, view.title)
+    return view
+  }
+
+  /** Move an entry to the trash (a new version with the content unchanged and op `delete`). */
+  async deleteEntry(id: string, docId: number, input: { baseVersion?: unknown }, actor: string): Promise<void> {
+    if (!isObj(input)) throw new KbError('bad-body')
+    const who = actorOf(actor)
+    await this.guarded(id, docId, input.baseVersion, (db, row) => {
+      const now = this.now()
+      const version = row.version + 1
+      db.transaction(() => {
+        db.setEntryVersion(docId, version, now)
+        db.insertVersion(docId, { version, op: 'delete', title: row.name, body: db.getRaw(docId) ?? '', tags: row.entryTags ?? [], actor: who, at: now })
+        db.trashDocument(docId, now)
+        db.insertChange({ at: now, actor: who, op: 'delete', kind: 'entry', docId, version, name: row.name })
+      })
+    })
+    this.changed()
+  }
+
+  /** A new version with the content of `toVersion` (the history is kept). */
+  async revertEntry(id: string, docId: number, input: { baseVersion?: unknown, toVersion?: unknown }, actor: string): Promise<EntryView> {
+    const base = this.base(id)
+    if (!isObj(input)) throw new KbError('bad-body')
+    if (typeof input.toVersion !== 'number' || !Number.isInteger(input.toVersion)) throw new KbError('version-not-found')
+    const toVersion = input.toVersion
+    const who = actorOf(actor)
+    const view = await this.guarded(id, docId, input.baseVersion, (db, row) => {
+      const old = db.getVersion(docId, toVersion)
+      if (!old) throw new KbError('version-not-found', String(toVersion))
+      const chunks = this.entryChunks(base, old.title, old.body, old.tags)
+      if (!chunks.length) throw new KbError('no-text')
+      const now = this.now()
+      const version = row.version + 1
+      db.transaction(() => {
+        db.setEntryContent(docId, { title: old.title, body: old.body, tags: old.tags, version, now })
+        db.replaceChunks(docId, chunks)
+        db.insertVersion(docId, { version, op: 'revert', title: old.title, body: old.body, tags: old.tags, actor: who, at: now })
+        db.insertChange({ at: now, actor: who, op: 'revert', kind: 'entry', docId, version, name: old.title })
+      })
+      return this.entryView(db, db.getDocument(docId)!)
+    })
+    this.queueImport(await this.db(id), id, docId, view.title)
+    return view
+  }
+
+  private anyEntry(db: KbDb, docId: number): DocRow {
+    const d = Number.isInteger(docId) ? db.getDocument(docId) : undefined
+    if (!d || d.kind !== 'entry') throw new KbError('entry-not-found')
+    return d
+  }
+
+  /** Newest first. An entry in the trash still has its history. */
+  async entryHistory(id: string, docId: number): Promise<Array<Omit<VersionRow, 'body'> & { bodyLength: number }>> {
+    const db = await this.dbOf(id)
+    this.anyEntry(db, docId)
+    return db.listVersions(docId)
+  }
+
+  async entryVersion(id: string, docId: number, version: number): Promise<VersionRow> {
+    const db = await this.dbOf(id)
+    this.anyEntry(db, docId)
+    const v = Number.isInteger(version) ? db.getVersion(docId, version) : undefined
+    if (!v) throw new KbError('version-not-found', String(version))
+    return v
+  }
+
+  // ---- trash and change log (decision 69) ----
+
+  async listTrash(id: string): Promise<TrashItem[]> {
+    const db = await this.dbOf(id)
+    return db.listTrash().map(d => ({
+      id: d.id, kind: d.kind, name: d.name, deletedAt: d.deletedAt!, version: d.kind === 'entry' ? d.version : null, size: d.size,
+    }))
+  }
+
+  /** Take a document out of the trash: it is chunked again from its stored text and embedded in the background. */
+  async restore(id: string, docId: number, actor: string): Promise<void> {
+    const base = this.base(id)
+    const db = await this.writable(id)
+    const trashed = (): DocRow => {
+      const d = Number.isInteger(docId) ? db.getDocument(docId) : undefined
+      if (!d) throw new KbError('doc-not-found')
+      if (d.deletedAt === null) throw new KbError('not-in-trash')
+      return d
+    }
+    trashed()
+    await this.cancelJobs(j => j.kbId === id && j.docId === docId)
+    if (this.hasReindex(id)) throw new KbError('busy')
+    const d = trashed()
+    const raw = db.getRaw(docId)
+    if (raw === null) throw new KbError('no-raw')
+    // A source whose twin was uploaded meanwhile would be a duplicate.
+    if (d.kind === 'source' && db.findBySha(d.sha256)) throw new KbError('duplicate')
+    const kind = SUPPORTED[extOf(d.name)] ?? 'txt'
+    const chunks = d.kind === 'entry'
+      ? this.entryChunks(base, d.name, raw, d.entryTags ?? [])
+      : chunkText(raw, { kind, chunkSize: base.chunkSize, overlap: base.chunkOverlap })
+    const now = this.now()
+    const who = actorOf(actor)
+    db.transaction(() => {
+      db.untrashDocument(docId, chunks)
+      if (d.kind === 'entry') {
+        const version = d.version + 1
+        db.setEntryVersion(docId, version, now)
+        db.insertVersion(docId, { version, op: 'restore', title: d.name, body: raw, tags: d.entryTags ?? [], actor: who, at: now })
+        db.insertChange({ at: now, actor: who, op: 'restore', kind: 'entry', docId, version, name: d.name })
+      } else {
+        db.insertChange({ at: now, actor: who, op: 'restore', kind: 'source', docId, version: null, name: d.name })
+      }
+    })
+    this.queueImport(db, id, docId, d.name)
+  }
+
+  /** Delete a document in the trash for good (with the history of an entry). */
+  async purge(id: string, docId: number, actor: string): Promise<void> {
+    const db = await this.writable(id)
+    const d = Number.isInteger(docId) ? db.getDocument(docId) : undefined
+    if (!d) throw new KbError('doc-not-found')
+    if (d.deletedAt === null) throw new KbError('not-in-trash')
+    const now = this.now()
+    db.transaction(() => {
+      db.deleteDocument(docId)
+      db.insertChange({ at: now, actor: actorOf(actor), op: 'purge', kind: d.kind, docId, version: d.kind === 'entry' ? d.version : null, name: d.name })
+    })
+    this.changed()
+  }
+
+  /** The change log, newest first; `before` = a change id (only older ones). */
+  async changes(id: string, o: { limit?: number, before?: number } = {}): Promise<ChangeRow[]> {
+    const db = await this.dbOf(id)
+    const limit = Number.isFinite(o.limit) ? Math.min(500, Math.max(1, Math.floor(o.limit!))) : 100
+    const before = Number.isFinite(o.before) ? Math.floor(o.before!) : undefined
+    return db.listChanges(limit, before)
+  }
+
+  // ---- usage guide (decision 69) ----
+
+  /** The text the model is told how to use this knowledge base: the custom one, or the default of the interface language. */
+  guide(id: string): GuideView {
+    const custom = this.base(id).guide
+    const guide = custom === '' ? t.kb.defaultGuide : custom
+    return { guide, custom, isDefault: custom === '', rev: guideRev(guide) }
   }
 
   // ---- search ----
@@ -385,7 +833,7 @@ export class KbManager {
       if (!c) continue // removed meanwhile
       const kbId = f.key.slice(0, f.key.lastIndexOf(':'))
       hits.push({
-        kbId, kbName: names.get(kbId) ?? kbId, docId: c.docId, docName: c.docName, chunkId: c.chunkId, text: c.text,
+        kbId, kbName: names.get(kbId) ?? kbId, docId: c.docId, docName: c.docName, kind: c.kind, entryVersion: c.entryVersion, chunkId: c.chunkId, text: c.text,
         startLine: c.startLine, startChar: c.startChar, endChar: c.endChar, headingPath: c.headingPath,
         score: f.score, bm25: bm25.get(f.key) ?? null, similarity: sim.get(f.key) ?? null,
         mode: usedVector.has(kbId) ? 'hybrid' : 'keyword',
@@ -533,12 +981,20 @@ export class KbManager {
     }
   }
 
-  /** Chunk the stored text of every document that has one again; documents without text keep their chunks. */
+  /**
+   * Chunk the stored text of every live document that has one again (trashed ones have no chunks); documents without
+   * text keep their chunks. An entry is always Markdown (it has no file extension) and carries its entry tags.
+   */
   private rechunk(db: KbDb, base: KnowledgeBase) {
-    for (const d of db.listDocuments()) {
-      const kind = SUPPORTED[/\.[^./]+$/.exec(d.name)?.[0]?.toLowerCase() ?? '']
+    for (const d of db.listLiveDocuments()) {
       const raw = d.hasRaw ? db.getRaw(d.id) : null
-      if (raw === null || !kind) continue
+      if (raw === null) continue
+      if (d.kind === 'entry') {
+        db.replaceChunks(d.id, this.entryChunks(base, d.name, raw, d.entryTags ?? []))
+        continue
+      }
+      const kind = SUPPORTED[extOf(d.name)]
+      if (!kind) continue
       db.replaceChunks(d.id, chunkText(raw, { kind, chunkSize: base.chunkSize, overlap: base.chunkOverlap }))
     }
   }

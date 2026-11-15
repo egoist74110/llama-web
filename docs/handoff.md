@@ -1,5 +1,18 @@
 # 交接记录
 
+## 2026-11-15 · 15-7：知识库条目、版本与回收站（决定 69）· 单会话
+- 起因：用户觉得知识库「干巴巴」，加新内容时不知道怎么加、旧的又不想丢；后来明确主要是给外部 agent 留接口和说明，让 agent 直接整理（例如把参考小说整理进文风库），llama-web 不做提炼和合并。
+- 计划：新增决定 69（原文 + 可编辑条目、版本、回收站、`baseVersion` 冲突、每库使用说明与 `guideRev` 写门禁、写接口、key 的「可写知识库」开关），决定 65 ⑥⑦⑧ 标注扩展；阶段 15 新增 15-7、15-8，15-3 加入写接口；顺序 15-7 → 15-3 → 15-8。规格 Opus 5.5 写（会话草稿 `15-7-spec.md`，不在仓库里），Sonnet 5.5 实现，Opus 审查。
+- 实现：`kb-db.ts` schema 3（`documents` 加 kind / version / tags / updated_at / deleted_at，新表 `entry_versions`、`changes`，1→2→3 迁移）；`manager.ts` 条目增删改查、版本、回退、回收站（恢复 / 永久删除）、`addSourceText`、`readSource` 分段、`guide()`、变更记录，写操作带 actor（管理接口传 `admin`）；`registry.ts` `knowledge.json` v2 加 `guide`（迁移接在 `context.ts`）与 `guideRev`；`/api/kb/:id/{guide,entries,trash,changes,docs/:docId/text}`；默认使用说明与新错误文案（中英）；检索结果加 `kind`、`entryVersion`。
+- 审查时改了一处：条目标题原来不进索引，改为放在每块标题路径最前面（关键词能搜到标题，出处也显示），补了测试。
+- 和规格不同（审查认可）：`addDocument` / `removeDocument` 的 actor 默认 `admin`；上传文件仍不受重建索引阻挡（原行为），条目写入与 `addSourceText` 会返回 busy；回收站里的原文在同样内容已重新上传后恢复返回 `duplicate`；超过 20 个标签报错而不是截断。
+- 实际运行：`bun test` 1950 pass / 8 skip / 0 fail（新增 `tests/core/kb-entries.test.ts` 21 条）；`bun run typecheck` exit 0；`bun run build` exit 0；`git diff --check` 通过。子代理也各跑过一次。
+- 没有运行：任何界面（本包没有界面）；真实向量引擎；旧数据目录里的库文件实际升级到 schema 3（只有单元测试里的 v1 / v2 迁移）。
+- 已知：「知识库」页的文档删除现在进回收站，但回收站界面要到 15-8 才有（暂时只能通过 `/api/kb/:id/trash` 恢复）。
+- 下一步：15-3（REST + MCP，含写接口、`guide_rev` 门禁、key 白名单与可写开关），规格由 Opus 5.5 先写，Sonnet 5.5 实现。
+- 用户验证步骤（可选，没有界面）：`bun scripts/launch.ts web build` 启动后，知识库原有文档仍能检索；在「知识库」页删一个文档，再用 `GET /api/kb/<id>/trash` 能看到它。
+- `src-tauri/Cargo.lock` 的改动在会话开始前就有，仍未提交。
+
 ## 2026-11-01 · 16-1 网关联网搜索（决定 67）· 单会话
 - 起因：用户希望搜索在网关层完成，本机模型不依赖客户端也能联网。确认：本机模型内置、外部上游每个服务一个开关（默认开）；无 key 的后端直接可用，需要 key 的（Tavily、Brave）在 llama-web 里填。
 - 计划：新增决定 67、阶段 16（16-1）、变更记录一行。规格与实现都是 Sonnet 5.5（本会话直接做）。

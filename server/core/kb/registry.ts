@@ -1,15 +1,17 @@
 // data/knowledge.json (decision 65 ②): the list of knowledge bases. The content of each one lives in its own SQLite
 // file (`data/kb/<id>.sqlite`); this file only says what exists and how it was built.
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { KbError } from './errors'
 
-export const KNOWLEDGE_VERSION = 1
+export const KNOWLEDGE_VERSION = 2
 export const DEFAULT_CHUNK_SIZE = 500
 export const DEFAULT_CHUNK_OVERLAP = 80
 export const MIN_CHUNK_SIZE = 100
 export const MAX_CHUNK_SIZE = 4000
 export const MAX_NAME_LENGTH = 80
 export const MAX_DESCRIPTION_LENGTH = 500
+/** The usage guide of a knowledge base (decision 69): custom text, at most this many characters; '' = the default text. */
+export const MAX_GUIDE_LENGTH = 20_000
 /** Soft limit: above this the interface warns (brute-force vector search is sized for it). */
 export const SOFT_CHUNK_LIMIT = 50_000
 
@@ -29,6 +31,8 @@ export interface KnowledgeBase {
   /** Characters repeated between neighbouring chunks; applies to documents added later. */
   chunkOverlap: number
   embedding: KbEmbedding
+  /** Custom usage guide for the model (decision 69); '' = use the default text of the interface language. */
+  guide: string
 }
 
 export interface KnowledgeDoc {
@@ -39,6 +43,15 @@ export interface KnowledgeDoc {
 export function defaultKnowledge(): KnowledgeDoc {
   return { version: KNOWLEDGE_VERSION, bases: [] }
 }
+
+/** knowledge.json migrations: `[n]` converts a version-n document into version n + 1. */
+export const KNOWLEDGE_MIGRATIONS: Record<number, (old: any) => any> = {
+  // 1 -> 2 (decision 69): every knowledge base gets a guide ('' = default).
+  1: old => ({ ...old, version: 2, bases: (Array.isArray(old?.bases) ? old.bases : []).map((b: any) => ({ ...b, guide: '' })) }),
+}
+
+/** Short revision of a guide text (first 12 hex characters of its SHA-256), so a client can tell when it changed. */
+export const guideRev = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex').slice(0, 12)
 
 /** Safe to use as a file name: lowercase letters, digits, dash, underscore. */
 const ID_RE = /^[a-z0-9][a-z0-9_-]{2,39}$/
@@ -79,6 +92,7 @@ function normalizeBase(raw: unknown): KnowledgeBase {
     chunkOverlap: overlapOk ? raw.chunkOverlap : fallbackOverlap(chunkSize),
     // A model without dimensions cannot be matched: treat it as "no vectors yet" so the knowledge base is flagged for a re-index.
     embedding: model !== null && dims !== null ? { model, dims } : { model: null, dims: null },
+    guide: typeof raw.guide === 'string' ? raw.guide.slice(0, MAX_GUIDE_LENGTH) : '',
   }
 }
 
@@ -102,6 +116,7 @@ export interface KbEdit {
   description?: unknown
   chunkSize?: unknown
   chunkOverlap?: unknown
+  guide?: unknown
 }
 
 /** Apply an edit to `base` (mutates it). `others` are the other knowledge bases (names must stay unique). Throws KbError. */
@@ -127,6 +142,10 @@ export function applyKbEdit(base: KnowledgeBase, edit: KbEdit, others: readonly 
     if (!Number.isInteger(n) || n < 0) throw new KbError('bad-overlap')
     base.chunkOverlap = n
   }
+  if (edit.guide !== undefined) {
+    if (typeof edit.guide !== 'string' || edit.guide.length > MAX_GUIDE_LENGTH) throw new KbError('bad-guide')
+    base.guide = edit.guide
+  }
   if (base.chunkOverlap >= base.chunkSize) throw new KbError('bad-overlap')
   return base
 }
@@ -136,7 +155,7 @@ export function createKnowledgeBase(input: KbEdit, existing: readonly KnowledgeB
   if (!isObj(input)) throw new KbError('bad-body')
   const base: KnowledgeBase = {
     id: newKbId(existing.map(b => b.id)), name: '', description: '', createdAt: now,
-    chunkSize: DEFAULT_CHUNK_SIZE, chunkOverlap: DEFAULT_CHUNK_OVERLAP, embedding: { model: null, dims: null },
+    chunkSize: DEFAULT_CHUNK_SIZE, chunkOverlap: DEFAULT_CHUNK_OVERLAP, embedding: { model: null, dims: null }, guide: '',
   }
   if (input.name === undefined) throw new KbError('bad-name')
   return applyKbEdit(base, input, existing)

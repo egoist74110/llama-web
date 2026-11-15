@@ -1784,13 +1784,39 @@ export const enSkeleton: PartialMessages = {
       'bad-similarity': 'minSimilarity must be a number from 0 to 1 (omit it or use null for no limit).',
       'engine-off': 'The embedding engine is not enabled, so the vector index cannot be rebuilt. Enable it on the Models page first.',
       'embed-failed': 'The embedding engine failed: {detail}',
-      'busy': 'This knowledge base is being re-indexed; delete the document afterwards.',
+      'busy': 'This knowledge base is being re-indexed; change its content afterwards.',
       'interrupted': 'Indexing was interrupted (llama-web stopped); only keyword search works, re-index to fix it.',
       'no-engine': 'The embedding engine was off at import time, so only keyword search works. Re-index after enabling it.',
       'model-mismatch': 'The embedding model differs from the one this knowledge base was built with ({detail}); only keyword search works. Re-index it.',
       'dims-mismatch': 'The vector dimensions differ from this knowledge base ({detail}); only keyword search works. Re-index it.',
       'store': 'The file knowledge.json cannot be read ({detail}); fix it first.',
+      'bad-title': 'The entry title cannot be empty and is at most 200 characters.',
+      'bad-entry-body': 'The entry body cannot be empty and is at most 20000 characters.',
+      'bad-base-version': 'baseVersion is required: the version number (an integer) you read.',
+      'bad-doc-name': 'The document name cannot be empty and is at most 200 characters.',
+      'bad-guide': 'The usage guide is at most 20000 characters.',
+      'entry-not-found': 'Entry not found.',
+      'version-not-found': 'Version not found.',
+      'version-conflict': 'Version conflict: this entry has been changed ({detail}); read the latest content first.',
+      'not-in-trash': 'This item is not in the trash.',
+      'no-raw': 'The original text of this document was not stored (it was imported by an older version), so this is not possible.',
     },
+    defaultGuide: `This knowledge base is maintained by the user. Read and write it by the rules below.
+
+There are two kinds of content:
+- Entries: one piece of knowledge, a title plus a body, and they can be edited. Write the rules, key points and examples you distill as entries.
+- Sources: complete reference material (an article, a whole novel, ...). They can only be added and deleted, never edited. Read them section by section when needed.
+
+Before adding content:
+1. First search, or list the entries by tag, to see whether the same or a similar one exists.
+2. If a similar one exists, edit that entry (merge into it) instead of creating a duplicate.
+3. Only create a new entry when the content is really new.
+
+Tags: use the same tag for the same kind of content; look at which tags the knowledge base already has and reuse them.
+
+Editing and deleting: send the version number you read; on a version conflict, read the latest content again before editing. Deleted content goes to the trash and the user can restore it.
+
+The user may edit this guide; the rules written here are the ones that count.`,
     page: {
       title: 'Knowledge',
       subtitle: 'Import .txt / .md documents into a knowledge base, then retrieve relevant passages by keyword and meaning.',
@@ -1856,7 +1882,7 @@ export const enSkeleton: PartialMessages = {
         status: { indexing: 'Indexing', ready: 'Ready', 'keyword-only': 'Keyword only', failed: 'Failed' },
         remove: 'Delete document',
         removeTitle: 'Delete document "{name}"',
-        removeBody: 'Its chunks and vectors are deleted. This cannot be undone.',
+        removeBody: 'The document moves to the trash and is no longer searched; it can be restored from the trash.',
         removeConfirm: 'Delete',
         removed: 'Deleted document "{name}"',
         removeFailed: 'Could not delete the document',

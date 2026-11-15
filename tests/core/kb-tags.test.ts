@@ -170,7 +170,7 @@ describe('schema 2', () => {
     `)
     raw.close()
 
-    expect(KB_SCHEMA_VERSION).toBe(2)
+    expect(KB_SCHEMA_VERSION).toBe(3)
     const db = await KbDb.open(file)
     try {
       expect(db.listDocuments()).toEqual([expect.objectContaining({ name: 'old.txt', hasRaw: false, tags: [], chunkCount: 1 })])
@@ -193,7 +193,7 @@ describe('schema 2', () => {
     }
   })
 
-  test('a new file is created at schema 2; replaceChunks and deleteDocument keep tags in step', async () => {
+  test('a new file is created at the current schema; replaceChunks and deleteDocument keep tags in step', async () => {
     const dir = tmp()
     const db = await KbDb.open(join(dir, 'new.sqlite'))
     try {

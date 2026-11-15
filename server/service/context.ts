@@ -60,7 +60,7 @@ import { fileLaunchedStore } from '../core/launched-store'
 import { isLocalHost } from '../core/port-owner'
 import { UpstreamLauncher } from '../core/upstream-launcher'
 import { defaultEmbedding, EMBEDDING_VERSION, EmbeddingEngine, normalizeEmbedding, planEmbedding, type EmbeddingDoc } from '../core/embedding'
-import { defaultKnowledge, KNOWLEDGE_VERSION, normalizeKnowledge, type KnowledgeDoc } from '../core/kb/registry'
+import { defaultKnowledge, KNOWLEDGE_MIGRATIONS, KNOWLEDGE_VERSION, normalizeKnowledge, type KnowledgeDoc } from '../core/kb/registry'
 import { KbManager } from '../core/kb/manager'
 import { engineEmbedder } from '../core/kb/embed'
 import { testConnection } from '../core/upstream-test'
@@ -309,7 +309,7 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
   })
   startupClose.push(() => embeddingStore.close())
   const knowledgeStore = new JsonStore<KnowledgeDoc>({
-    dataDir, name: 'knowledge.json', version: KNOWLEDGE_VERSION, defaults: defaultKnowledge, validate: normalizeKnowledge,
+    dataDir, name: 'knowledge.json', version: KNOWLEDGE_VERSION, defaults: defaultKnowledge, validate: normalizeKnowledge, migrations: KNOWLEDGE_MIGRATIONS,
   })
   startupClose.push(() => knowledgeStore.close())
   const changed = () => live.notify()

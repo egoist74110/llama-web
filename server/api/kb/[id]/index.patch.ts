@@ -1,4 +1,4 @@
-// Change a knowledge base: { name?, description?, chunkSize?, chunkOverlap? }. Chunk settings apply to documents added afterwards.
+// Change a knowledge base: { name?, description?, chunkSize?, chunkOverlap?, guide? } ('' as guide = the default text). Chunk settings apply to documents added afterwards.
 import { getContext } from '../../../service/context'
 import { kbError } from '../../../service/kb-api'
 

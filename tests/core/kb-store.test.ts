@@ -85,7 +85,7 @@ const ENGLISH = 'The embedding engine turns text into vectors.\n\nSQLite FTS5 pr
 
 describe('registry', () => {
   test('defaults and normalisation', () => {
-    expect(defaultKnowledge()).toEqual({ version: 1, bases: [] })
+    expect(defaultKnowledge()).toEqual({ version: 2, bases: [] })
     const n = normalizeKnowledge({ version: 1, bases: [{ id: 'kb-1234abcd', name: ' 笔记 ', chunkSize: 5, chunkOverlap: 999, embedding: { model: 'm' } }] } as unknown as KnowledgeDoc)
     expect(n.bases[0]).toMatchObject({
       id: 'kb-1234abcd', name: '笔记', description: '', chunkSize: 500, chunkOverlap: 80, embedding: { model: null, dims: null },
@@ -119,12 +119,12 @@ describe('registry', () => {
     expect(code(() => applyKbEdit(b, { chunkOverlap: 100 }, []))).toBe('bad-overlap')
   })
 
-  test('the store writes version 1 atomically with a backup on change', () => {
+  test('the store writes version 2 atomically with a backup on change', () => {
     const dir = tmp()
     const { kb } = make(dir, fake())
     return kb.create({ name: 'A' }).then(async () => {
       await kb.create({ name: 'B' })
-      expect(JSON.parse(readFileSync(join(dir, 'knowledge.json'), 'utf8')).version).toBe(1)
+      expect(JSON.parse(readFileSync(join(dir, 'knowledge.json'), 'utf8')).version).toBe(2)
       expect(readdirSync(join(dir, 'backups')).some(f => f.startsWith('knowledge.'))).toBe(true)
     })
   })

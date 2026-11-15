@@ -1741,13 +1741,40 @@ export default {
       'bad-similarity': 'minSimilarity 必须是 0 到 1 之间的数字（不填或 null 表示不限制）。',
       'engine-off': '向量引擎没有启用，不能重建向量索引。请先到「模型」页的「向量引擎」启用。',
       'embed-failed': '向量引擎出错：{detail}',
-      'busy': '这个知识库正在重建索引，请稍后再删除文档。',
+      'busy': '这个知识库正在重建索引，请稍后再修改内容。',
       'interrupted': '索引被中断（llama-web 退出了），只能用关键词检索，请重建索引。',
       'no-engine': '导入时向量引擎没有启用，只能用关键词检索。启用引擎后请重建索引。',
       'model-mismatch': '向量模型与这个知识库建库时的不同（{detail}），只能用关键词检索。请重建索引。',
       'dims-mismatch': '向量维度与这个知识库不一致（{detail}），只能用关键词检索。请重建索引。',
       'store': '配置文件 knowledge.json 无法读取（{detail}），请先修复它。',
+      'bad-title': '条目标题不能为空，最长 200 个字符。',
+      'bad-entry-body': '条目正文不能为空，最长 20000 个字符。',
+      'bad-base-version': '需要带上 baseVersion：你读到的版本号（整数）。',
+      'bad-doc-name': '文档名不能为空，最长 200 个字符。',
+      'bad-guide': '使用说明最长 20000 个字符。',
+      'entry-not-found': '找不到这条条目。',
+      'version-not-found': '找不到这个版本。',
+      'version-conflict': '版本冲突：这条条目已经被改过了（{detail}），请先重新读取最新内容。',
+      'not-in-trash': '这项内容不在回收站里。',
+      'no-raw': '这份文档没有保存原文（是旧版本导入的），不能这样操作。',
     },
+    // The default usage guide of a knowledge base (decision 69): what the model is told about reading and writing it.
+    defaultGuide: `这个知识库由用户维护，你可以按下面的规矩读写。
+
+内容分两种：
+- 条目：一条知识，标题加正文，可以修改。整理出来的规则、要点、范例都写成条目。
+- 原文：完整的参考材料（文章、整部小说等），只能新增和删除，不能修改。需要时按段读取。
+
+加内容之前：
+1. 先用检索或按标签列出条目，看有没有相同或相近的。
+2. 有相近的就修改那一条（合并进去），不要再新建一条重复的。
+3. 确实是新的才新建条目。
+
+标签：同一类内容用同一个标签；先看库里已有哪些标签，尽量沿用。
+
+修改和删除：要带上你读到的版本号；提示版本冲突时，先重新读取最新内容再改。删除的内容会进回收站，用户可以恢复。
+
+用户可以修改这份说明，规矩以这里写的为准。`,
     page: {
       title: '知识库',
       subtitle: '把 .txt / .md 文档导入知识库，在检索里按关键词和语义找回相关片段。',
@@ -1813,7 +1840,7 @@ export default {
         status: { indexing: '索引中', ready: '已就绪', 'keyword-only': '仅关键词', failed: '失败' },
         remove: '删除文档',
         removeTitle: '删除文档「{name}」',
-        removeBody: '会删除这份文档的分块和向量，不能恢复。',
+        removeBody: '这份文档会移到回收站，不再被检索；可以在回收站里恢复。',
         removeConfirm: '删除',
         removed: '已删除文档「{name}」',
         removeFailed: '删除文档失败',
