@@ -24,6 +24,11 @@ export function formatClock(ms: number): string {
   return new Date(ms).toLocaleTimeString(getUiLocale(), { hour12: false })
 }
 
+/** Date and time in the language the interface is showing (24-hour clock). */
+export function formatDateTime(ms: number): string {
+  return new Date(ms).toLocaleString(getUiLocale(), { hour12: false })
+}
+
 /** Memory in MiB as MiB / GiB text. */
 export function formatMiB(mib: number): string {
   return mib >= 1024 ? `${(mib / 1024).toFixed(1)} GiB` : `${Math.round(mib)} MiB`

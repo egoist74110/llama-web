@@ -1,8 +1,10 @@
 <script setup lang="ts">
-// A small "are you sure" dialog for the knowledge base page (delete a base / a document).
-defineProps<{ title: string, body: string, confirmLabel: string, cancelLabel: string, busy?: boolean }>()
+// A small "are you sure" dialog for the knowledge base page (delete a base / a document / an entry). `tone` 'neutral' is
+// for actions that lose nothing for good (revert, restore the default guide, discard a draft): primary button.
+const props = defineProps<{ title: string, body: string, confirmLabel: string, cancelLabel: string, busy?: boolean, tone?: 'danger' | 'neutral' }>()
 const open = defineModel<boolean>('open', { default: false })
 const emit = defineEmits<{ confirm: [] }>()
+const neutral = computed(() => props.tone === 'neutral')
 </script>
 
 <template>
@@ -12,7 +14,7 @@ const emit = defineEmits<{ confirm: [] }>()
         <UButton size="sm" color="neutral" variant="ghost" :disabled="busy" @click="open = false">
           {{ cancelLabel }}
         </UButton>
-        <UButton size="sm" color="error" icon="i-lucide-trash-2" :loading="busy" @click="emit('confirm')">
+        <UButton size="sm" :color="neutral ? 'primary' : 'error'" :icon="neutral ? 'i-lucide-check' : 'i-lucide-trash-2'" :loading="busy" @click="emit('confirm')">
           {{ confirmLabel }}
         </UButton>
       </div>

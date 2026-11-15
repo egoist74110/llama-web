@@ -534,14 +534,15 @@ export class KbManager {
     }
   }
 
-  async listEntries(id: string, o: { tag?: string, query?: string, offset?: number, limit?: number } = {}): Promise<{ total: number, items: EntryListItem[] }> {
+  async listEntries(id: string, o: { tag?: string, query?: string, offset?: number, limit?: number } = {}): Promise<{ total: number, items: EntryListItem[], tags: TagCount[] }> {
     const db = await this.dbOf(id)
     const limit = Number.isFinite(o.limit) ? Math.min(200, Math.max(1, Math.floor(o.limit!))) : 50
     const offset = Number.isFinite(o.offset) ? Math.max(0, Math.floor(o.offset!)) : 0
     const tag = typeof o.tag === 'string' ? o.tag.trim() : ''
     const query = typeof o.query === 'string' ? o.query.trim().slice(0, 200) : ''
     const { total, rows } = db.listEntries({ tag: tag || undefined, query: query || undefined, offset, limit })
-    return { total, items: rows }
+    // `tags` = entry-level tags of all live entries (not narrowed by tag / query), for the filter of the entry list.
+    return { total, items: rows, tags: db.entryTagCounts() }
   }
 
   async getEntry(id: string, docId: number): Promise<EntryView> {

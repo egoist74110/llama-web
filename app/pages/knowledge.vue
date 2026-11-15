@@ -35,12 +35,12 @@ async function load() {
 }
 onMounted(() => load())
 
-const docsPanel = ref<{ reload: () => Promise<void> } | null>(null)
+const detail = ref<{ reload: () => Promise<void> } | null>(null)
 // The one live-driven refresh: job identity (not progress) or the engine changed.
 watch(() => `${jobsKey(jobs.value)}#${state.value?.embedding?.enabled ? state.value.embedding.name : ''}`, () => {
   if (!bases.value) return
   void load()
-  void docsPanel.value?.reload()
+  void detail.value?.reload()
 })
 
 // ---- create / edit ----
@@ -135,7 +135,9 @@ async function confirmRemove() {
               <span class="mt-0.5 block break-words text-xs text-muted">{{ kb.description || p.list.noDescription }}</span>
               <span class="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-dimmed">
                 <span class="lw-num">{{ fmt(p.list.docs, { n: kb.docCount }) }}</span>
+                <span class="lw-num">{{ fmt(p.list.entries, { n: kb.entryCount }) }}</span>
                 <span class="lw-num">{{ fmt(p.list.chunks, { n: kb.chunkCount }) }}</span>
+                <span v-if="kb.trashCount" class="lw-num">{{ fmt(p.list.trash, { n: kb.trashCount }) }}</span>
                 <span v-if="kb.busy" class="lw-st lw-st-loading">{{ p.flags.busy }}</span>
               </span>
             </button>
@@ -157,7 +159,7 @@ async function confirmRemove() {
       </ul>
     </AppCard>
 
-    <KbDocs v-if="selected" ref="docsPanel" :key="selected.id" :kb="selected" :jobs="jobs" @changed="load" />
+    <KbDetail v-if="selected" ref="detail" :kb="selected" :jobs="jobs" @changed="load" />
     <AppCard v-else-if="bases?.length" :title="p.docs.title">
       <p class="m-0 text-sm text-muted">
         {{ p.docs.pick }}

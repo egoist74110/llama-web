@@ -399,6 +399,13 @@ export class KbDb {
     return { total, rows }
   }
 
+  /** Entry-level tags of the live entries with the number of entries that carry each, sorted by tag (trash excluded). */
+  entryTagCounts(): Array<{ tag: string, count: number }> {
+    return this.db.prepare(
+      "SELECT j.value AS tag, COUNT(*) AS count FROM documents d, json_each(d.tags) j WHERE d.kind = 'entry' AND d.deleted_at IS NULL GROUP BY j.value ORDER BY j.value",
+    ).all()
+  }
+
   /** Overwrite the content of an entry; it needs new chunks and vectors afterwards (status `indexing`). */
   setEntryContent(id: number, c: { title: string, body: string, tags: readonly string[], version: number, now: number }) {
     this.db.prepare(

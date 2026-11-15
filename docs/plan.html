@@ -1188,8 +1188,8 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 
   <h3>15-8 · 界面：条目、版本、回收站与说明（Sonnet 5.5，在 15-3 之后做）</h3>
   <ul class="tasks">
-    <li class="task" data-done="false"><span class="t">「知识库」页：条目列表（按标签筛选、搜索）、新建与编辑、版本历史与对比、回退；回收站（恢复、永久删除并确认）；变更记录；使用说明编辑与恢复默认（中 / 英，深浅色，375 宽）（决定 69）</span><span class="when"></span></li>
-    <li class="task" data-done="false"><span class="t">API key 的知识库白名单与「可写知识库」开关；「接入」说明给出 MCP 地址、REST 示例和一段给 agent 的示例提示词（决定 69 ⑧）</span><span class="when"></span></li>
+    <li class="task" data-done="true"><span class="t">「知识库」页：条目列表（按标签筛选、搜索）、新建与编辑、版本历史与对比、回退；回收站（恢复、永久删除并确认）；变更记录；使用说明编辑与恢复默认（中 / 英，深浅色，375 宽）（决定 69）</span><span class="when">2026-11-16</span></li>
+    <li class="task" data-done="true"><span class="t">API key 的知识库白名单与「可写知识库」开关；「接入」说明给出 MCP 地址、REST 示例和一段给 agent 的示例提示词（决定 69 ⑧）</span><span class="when">2026-11-16</span></li>
   </ul>
 
   <h3>15-5 · 界面（Sonnet 5.5）</h3>
@@ -1221,6 +1221,7 @@ ready ──进程意外退出──▶ crashed ──下一个请求──▶ l
 <section id="changelog">
   <h2>变更记录</h2>
   <table>
+    <tr><td>2026-11-16</td><td>15-8 完成（Sonnet 5.5 实现，Opus 5.5 审查并在浏览器里检查）：「知识库」页分「条目 / 原文 / 回收站 / 变更记录 / 使用说明」；条目新建与编辑（版本冲突时保留草稿、可对比）、历史与逐行对比、回退；回收站恢复与永久删除确认；变更记录的操作者显示为「管理界面 / 本机 / API key：名称」；使用说明编辑与恢复默认；API key 的知识库权限弹窗；「接入」页的 MCP 地址、REST 示例与给 agent 的示例提示词。<code>GET /api/kb/:id/entries</code> 多返回条目级标签统计</td></tr>
     <tr><td>2026-11-16</td><td>15-3 完成（Sonnet 5.5 实现，Opus 5.5 审查）：<code>/v1/kb</code> REST（列表、检索、说明、条目、原文，写操作要 <code>guide_rev</code>，412 <code>guide_required</code>、409 <code>version_conflict</code>）与 MCP <code>/v1/mcp</code>（Streamable HTTP、无状态、JSON 响应，12 个工具，只读 key 看不到写工具），REST 与 MCP 共用 <code>server/core/kb/external.ts</code>；<code>secrets.json</code> v6（每个 key 的 <code>kbs</code> 白名单与 <code>kbWrite</code>），<code>POST /api/keys/:id/knowledge</code>；注入 / 工具模式也按 key 白名单。补充：<code>/v1/kb</code> 与 <code>/v1/mcp</code> 的非 GET 请求拒绝跨站来源、必须是 JSON（主端口不要 key，防止网页跨站写入）；这两类调用不进请求记录。用真实 MCP 客户端连接与写入未做（等用户验证）</td></tr>
     <tr><td>2026-11-15</td><td>15-7 完成（Sonnet 5.5 实现，Opus 5.5 审查）：库文件 schema 3（条目、版本表、回收站、变更记录）、<code>knowledge.json</code> v2（<code>guide</code>）、条目 / 版本 / 回收站 / 说明 / 原文分段读取的管理接口；条目标题放在块的标题路径最前面，可被关键词检索。只有单元测试，界面在 15-8</td></tr>
     <tr><td>2026-11-15</td><td>新增关键决定 69（用户 2026-11-15 确认）：知识库分「原文」和可编辑的「条目」，条目有版本、删除进回收站、修改带版本号防覆盖；每个知识库一段使用说明，外部写操作必须带说明的 <code>guideRev</code>；REST / MCP 加写接口，API key 加「可写知识库」开关。修改决定 65 ⑥⑦⑧。阶段 15 新增 15-7（条目与版本核心）、15-8（界面），15-3 的范围加入写接口；顺序 15-7 → 15-3 → 15-8</td></tr>

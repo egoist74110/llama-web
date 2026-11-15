@@ -214,6 +214,18 @@ describe('entries', () => {
     expect((await kb.search([id], 'heron')).hits).toHaveLength(1)
   })
 
+  test('listEntries returns entry tags with counts, not counting the trash or narrowed by the filter', async () => {
+    const { kb, id } = await setup()
+    await kb.addEntry(id, { title: 'First', body: 'one', tags: ['a'] }, 'admin')
+    await kb.addEntry(id, { title: 'Second', body: 'two', tags: ['b', 'a'] }, 'admin')
+    const gone = await kb.addEntry(id, { title: 'Third', body: 'three', tags: ['c', 'a'] }, 'admin')
+    await kb.idle()
+    expect((await kb.listEntries(id)).tags).toEqual([{ tag: 'a', count: 3 }, { tag: 'b', count: 1 }, { tag: 'c', count: 1 }])
+    await kb.deleteEntry(id, gone.id, { baseVersion: 1 }, 'admin')
+    expect((await kb.listEntries(id)).tags).toEqual([{ tag: 'a', count: 2 }, { tag: 'b', count: 1 }])
+    expect((await kb.listEntries(id, { tag: 'b' })).tags).toEqual([{ tag: 'a', count: 2 }, { tag: 'b', count: 1 }])
+  })
+
   test('listEntries filters by tag and substring (wildcards are literal), pages and previews', async () => {
     const { kb, id } = await setup()
     await kb.addEntry(id, { title: 'First', body: 'about 100% cats', tags: ['a'] }, 'admin')

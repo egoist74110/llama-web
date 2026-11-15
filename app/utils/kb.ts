@@ -59,3 +59,60 @@ export function mergeTags(lists: ReadonlyArray<ReadonlyArray<{ tag: string, coun
   for (const tag of keep) if (!sum.has(tag)) sum.set(tag, 0)
   return [...sum].map(([tag, count]) => ({ tag, count })).sort((a, b) => (a.tag < b.tag ? -1 : a.tag > b.tag ? 1 : 0))
 }
+
+// ---- entries (decision 69); mirrors server/core/kb/{manager,tags}.ts, kept in step by tests/app/kb-page.test.ts ----
+
+export const KB_MAX_ENTRY_TITLE = 200
+export const KB_MAX_ENTRY_BODY = 20_000
+export const KB_MAX_ENTRY_TAGS = 20
+export const KB_MAX_TAG_LEN = 64
+/** Same limit as the server's guide text. */
+export const KB_MAX_GUIDE = 20_000
+
+/** Wording for `actorLabel` (`t.kb.page.actor`): `key` holds `{name}`. */
+export interface ActorLabels { admin: string, local: string, key: string }
+
+/** Who wrote a change: `admin`, `local`, `key:<name>` read as words; anything else as it is. */
+export function actorLabel(actor: string, labels: ActorLabels): string {
+  if (actor === 'admin') return labels.admin
+  if (actor === 'local') return labels.local
+  if (actor.startsWith('key:')) return labels.key.replace('{name}', actor.slice(4))
+  return actor
+}
+
+/**
+ * Add the tags typed into a tag input (split at `,` `，` and line breaks) to `current`: trimmed, cut to
+ * KB_MAX_TAG_LEN, no duplicates, at most KB_MAX_ENTRY_TAGS. `full` = something was left out because of the limit.
+ */
+export function addTagsFromInput(current: readonly string[], input: string, max = KB_MAX_ENTRY_TAGS): { tags: string[], full: boolean } {
+  const tags = [...current]
+  let full = false
+  for (const raw of input.split(/[,，\r\n]/)) {
+    const tag = raw.trim().slice(0, KB_MAX_TAG_LEN)
+    if (!tag || tags.includes(tag)) continue
+    if (tags.length >= max) { full = true; continue }
+    tags.push(tag)
+  }
+  return { tags, full }
+}
+
+/** Tags in `to` that are not in `from` (added) and the other way round (removed). */
+export function diffTags(from: readonly string[], to: readonly string[]): { added: string[], removed: string[] } {
+  return { added: to.filter(x => !from.includes(x)), removed: from.filter(x => !to.includes(x)) }
+}
+
+/** Whether two tag lists hold the same tags in the same order. */
+export const sameTags = (a: readonly string[], b: readonly string[]): boolean => a.length === b.length && a.every((x, i) => x === b[i])
+
+/**
+ * The current entry a PATCH / revert answered with after a stale `baseVersion` (HTTP 409): the server puts
+ * `{ code: 'version_conflict', current }` in the error's `data`, which `$fetch` nests one level in its body.
+ */
+export function conflictOf<T>(e: unknown): T | null {
+  const body = (e as { data?: { data?: unknown } & Record<string, unknown> } | null)?.data
+  for (const d of [body?.data, body]) {
+    const x = d as { code?: unknown, current?: T } | undefined
+    if (x && x.code === 'version_conflict' && x.current) return x.current
+  }
+  return null
+}

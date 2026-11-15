@@ -227,7 +227,7 @@ async function confirmRemove() {
     <KbConfirm
       v-model:open="removeOpen"
       :title="fmt(d.removeTitle, { name: removing?.name ?? '' })"
-      :body="d.removeBody"
+      :body="removing?.hasRaw === false ? d.removeBodyNoRaw : d.removeBody"
       :confirm-label="d.removeConfirm"
       :cancel-label="t.kb.page.remove.cancel"
       :busy="removeBusy"

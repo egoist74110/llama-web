@@ -104,6 +104,20 @@ async function revoke() {
   }
 }
 
+// One line about what the key may use of the knowledge bases (decisions 65 ⑧ / 69 ⑧).
+function kbSummary(k: KeyView): string {
+  const kn = s.knowledge
+  if (k.kbs !== null && !k.kbs.length) return fmt(kn.summary, { scope: kn.scopeNone })
+  const scope = k.kbs === null ? kn.scopeAll : fmt(kn.scopeSome, { n: k.kbs.length })
+  return fmt(kn.summaryMode, { scope, mode: k.kbWrite ? kn.write : kn.read })
+}
+const kbEditing = ref<KeyView | null>(null)
+const kbOpen = computed({
+  get: () => kbEditing.value !== null,
+  set: (v: boolean) => { if (!v) kbEditing.value = null },
+})
+const onKbSaved = (list: KeyView[]) => { keys.value = list }
+
 const when = (iso: string | null) => iso ? new Date(iso).toLocaleString('zh-CN', { hour12: false }) : '-'
 </script>
 
@@ -129,18 +143,24 @@ const when = (iso: string | null) => iso ? new Date(iso).toLocaleString('zh-CN',
             <p class="mt-1 break-all font-mono text-xs text-muted">
               {{ shown[k.id] ?? k.masked }}
             </p>
+            <p v-if="!k.revoked" class="mt-0.5 text-xs text-muted">
+              {{ kbSummary(k) }}
+            </p>
             <p class="mt-0.5 text-xs text-dimmed">
               {{ s.createdAt }} {{ when(k.createdAt) }}<template v-if="k.revoked && k.revokedAt">
                 · {{ fmt(s.revokedAt, { time: when(k.revokedAt) }) }}
               </template>
             </p>
           </div>
-          <div v-if="!k.revoked" class="flex items-center gap-1">
+          <div v-if="!k.revoked" class="flex flex-wrap items-center gap-1">
             <UButton size="xs" color="neutral" variant="ghost" :icon="shown[k.id] ? 'i-lucide-eye-off' : 'i-lucide-eye'" @click="toggle(k)">
               {{ shown[k.id] ? s.hide : s.show }}
             </UButton>
             <UButton size="xs" color="neutral" variant="ghost" icon="i-lucide-copy" @click="copy(k)">
               {{ s.copy }}
+            </UButton>
+            <UButton size="xs" color="neutral" variant="ghost" icon="i-lucide-library" @click="kbEditing = k">
+              {{ s.knowledge.button }}
             </UButton>
             <UButton size="xs" color="error" variant="ghost" icon="i-lucide-ban" :loading="busy === `revoke:${k.id}`" @click="confirming = k">
               {{ s.revoke }}
@@ -155,6 +175,8 @@ const when = (iso: string | null) => iso ? new Date(iso).toLocaleString('zh-CN',
         </UButton>
       </form>
     </template>
+
+    <KeyKnowledgeModal v-model:open="kbOpen" :key-view="kbEditing" @saved="onKbSaved" />
 
     <UModal v-model:open="confirmOpen" :title="confirming ? fmt(s.revokeTitle, { name: confirming.name }) : ''" :description="s.revokeBody">
       <template #footer>

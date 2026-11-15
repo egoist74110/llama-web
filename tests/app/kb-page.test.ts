@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
-import { checkKbFile, jobsKey, mergeTags, parseSimilarity, KB_ACCEPT, KB_DEFAULT_CHUNK_OVERLAP, KB_DEFAULT_CHUNK_SIZE, KB_EXTENSIONS, KB_MAX_UPLOAD_BYTES, KB_SOFT_CHUNK_LIMIT } from '../../app/utils/kb'
-import { MAX_UPLOAD_BYTES } from '../../server/core/kb/manager'
+import { actorLabel, addTagsFromInput, conflictOf, checkKbFile, diffTags, jobsKey, mergeTags, parseSimilarity, sameTags, KB_ACCEPT, KB_MAX_ENTRY_BODY, KB_MAX_ENTRY_TAGS, KB_MAX_ENTRY_TITLE, KB_MAX_GUIDE, KB_MAX_TAG_LEN, KB_DEFAULT_CHUNK_OVERLAP, KB_DEFAULT_CHUNK_SIZE, KB_EXTENSIONS, KB_MAX_UPLOAD_BYTES, KB_SOFT_CHUNK_LIMIT } from '../../app/utils/kb'
+import { MAX_ENTRY_BODY, MAX_ENTRY_TAGS, MAX_ENTRY_TITLE, MAX_UPLOAD_BYTES } from '../../server/core/kb/manager'
+import { MAX_TAG_LEN } from '../../server/core/kb/tags'
 import { DEFAULT_CHUNK_OVERLAP, DEFAULT_CHUNK_SIZE, SOFT_CHUNK_LIMIT } from '../../server/core/kb/registry'
 
 test('the page limits mirror the server ones', () => {
@@ -44,4 +45,44 @@ test('mergeTags adds counts across knowledge bases, sorts by tag and lists kept 
   expect(mergeTags([[{ tag: 'b', count: 2 }, { tag: 'a', count: 1 }], [{ tag: 'b', count: 3 }]])).toEqual([{ tag: 'a', count: 1 }, { tag: 'b', count: 5 }])
   expect(mergeTags([[{ tag: 'a', count: 1 }]], ['a', 'gone'])).toEqual([{ tag: 'a', count: 1 }, { tag: 'gone', count: 0 }])
   expect(mergeTags([])).toEqual([])
+})
+
+test('the entry limits mirror the server ones', () => {
+  expect(KB_MAX_ENTRY_TITLE).toBe(MAX_ENTRY_TITLE)
+  expect(KB_MAX_ENTRY_BODY).toBe(MAX_ENTRY_BODY)
+  expect(KB_MAX_ENTRY_TAGS).toBe(MAX_ENTRY_TAGS)
+  expect(KB_MAX_TAG_LEN).toBe(MAX_TAG_LEN)
+  expect(KB_MAX_GUIDE).toBe(20_000)
+})
+
+test('actorLabel reads admin / local / key:<name> as words and leaves the rest', () => {
+  const labels = { admin: 'Admin page', local: 'Local / LAN', key: 'API key: {name}' }
+  expect(actorLabel('admin', labels)).toBe('Admin page')
+  expect(actorLabel('local', labels)).toBe('Local / LAN')
+  expect(actorLabel('key:phone', labels)).toBe('API key: phone')
+  expect(actorLabel('key:a:b', labels)).toBe('API key: a:b')
+  expect(actorLabel('unknown', labels)).toBe('unknown')
+  expect(actorLabel('', labels)).toBe('')
+})
+
+test('addTagsFromInput splits at commas and line breaks, drops duplicates and keeps within the limit', () => {
+  expect(addTagsFromInput(['a'], ' b, a，c\n,d ')).toEqual({ tags: ['a', 'b', 'c', 'd'], full: false })
+  expect(addTagsFromInput([], '   ')).toEqual({ tags: [], full: false })
+  expect(addTagsFromInput([], 'x'.repeat(100)).tags[0]).toHaveLength(KB_MAX_TAG_LEN)
+  expect(addTagsFromInput(['a', 'b'], 'c,d', 3)).toEqual({ tags: ['a', 'b', 'c'], full: true })
+})
+
+test('diffTags and sameTags', () => {
+  expect(diffTags(['a', 'b'], ['b', 'c'])).toEqual({ added: ['c'], removed: ['a'] })
+  expect(sameTags(['a', 'b'], ['a', 'b'])).toBe(true)
+  expect(sameTags(['a', 'b'], ['b', 'a'])).toBe(false)
+})
+
+test('conflictOf finds the current entry of a version conflict in a fetch error', () => {
+  const current = { id: 1, version: 4 }
+  expect(conflictOf({ data: { statusCode: 409, data: { code: 'version_conflict', current } } })).toBe(current)
+  expect(conflictOf({ data: { code: 'version_conflict', current } })).toBe(current)
+  expect(conflictOf({ data: { statusCode: 409, message: 'x' } })).toBeNull()
+  expect(conflictOf(new Error('boom'))).toBeNull()
+  expect(conflictOf(null)).toBeNull()
 })

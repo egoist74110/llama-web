@@ -423,6 +423,8 @@ const example = (u: ConnectionView) => `${u.name}-${allModels(u)[0] ?? 'model-id
       </div>
     </AppCard>
 
+    <KbAccessGuide />
+
     <UpstreamEditor v-model:open="editorOpen" :upstream="editing" @saved="onSaved" />
 
     <UModal v-model:open="startOpen" :title="starting ? fmt(p.start.confirmTitle, { name: starting.name }) : ''" :description="p.start.confirmBody">
