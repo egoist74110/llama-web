@@ -8,6 +8,7 @@ export const sha = (b: string) => createHash('sha256').update(b).digest('hex')
 
 export interface FakeOpts {
   tag?: string
+  latestTag?: string
   bodies?: Record<string, string>
   digests?: Record<string, string | null>
   omit?: string[]
@@ -31,7 +32,7 @@ export function fakeGithub(o: FakeOpts = {}) {
   const fetchFn = async (url: string) => {
     calls.push(url)
     if (o.fail && url.includes(o.fail)) throw new Error('offline')
-    if (url.endsWith('/releases/latest')) return Response.json({ assets: [{ name: 'nightly-tag.txt', browser_download_url: 'https://dl.test/nightly-tag.txt' }] })
+    if (url.endsWith('/releases/latest')) return Response.json({ tag_name: o.latestTag, assets: [{ name: 'nightly-tag.txt', browser_download_url: 'https://dl.test/nightly-tag.txt' }] })
     if (url === 'https://dl.test/nightly-tag.txt') return new Response(`${tag}\n`)
     if (url.endsWith(`/releases/tags/${tag}`)) return Response.json({ assets: [binName, dllName].filter(n => !o.omit?.includes(n)).map(asset) })
     const name = url.replace('https://dl.test/', '')

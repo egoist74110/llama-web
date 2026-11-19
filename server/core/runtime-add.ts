@@ -113,7 +113,7 @@ export interface InstallerOptions {
 /** Where the build number appears in `llama-server --version`: `version: 0.5.0-dev (build 11146, commit …)`. */
 export function parseVersionOutput(out: string): { line: string, tag: string } {
   const line = out.split(/\r?\n/).find(l => /^version:/i.test(l.trim()))?.trim() ?? ''
-  const num = /build (\d+)/i.exec(line)?.[1] ?? /^version:\s*(\d+)\b/i.exec(line)?.[1]
+  const num = /build (\d+)/i.exec(line)?.[1] ?? /^version:\s*(\d+)\b(?!\.)/i.exec(line)?.[1]
   return { line, tag: num ? `b${num}` : '' }
 }
 

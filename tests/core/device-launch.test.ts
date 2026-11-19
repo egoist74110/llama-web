@@ -6,11 +6,12 @@ import {
   buildLaunchArgs, deviceArgs, DEFAULT_LAUNCH_DEFAULTS, normalizeDevice, paramValueOk, resolveDevice, type BuildInput, type LaunchDefaults,
 } from '../../server/core/args'
 import { DEFAULT_CPU_DEFAULTS, defaultSettings, hasDeviceSelection, normalizeModels, normalizeSettings, type ModelsDoc, type Settings } from '../../server/core/config'
-import { deviceMissing } from '../../server/core/devices'
+import { deviceMissing, parseCacheTypes, parseHelpFlags } from '../../server/core/devices'
 import { classify, diagnose } from '../../server/core/errors'
-import { LaunchConfigError, planLaunch, previewLaunch } from '../../server/core/launch'
+import { LaunchConfigError, planLaunch, previewLaunch, type DeviceInfo } from '../../server/core/launch'
 import { ProfileError, sanitizeDevice, sanitizeForm, sanitizeOverrides, saveProfile, setModelDevice } from '../../server/core/models-admin'
 import { applyDefaults, applySettingsPatch, SettingsError } from '../../server/core/settings-admin'
+import { B11146_HELP } from '../fixtures/llama-help'
 
 const defaults = (over: Partial<LaunchDefaults> = {}): LaunchDefaults => ({ ...DEFAULT_LAUNCH_DEFAULTS, extraArgs: '', ...over })
 const build = (over: Partial<BuildInput> = {}) => buildLaunchArgs({ paths: { model: 'X:\\m.gguf' }, defaults: defaults(), host: '127.0.0.1', port: 7100, ...over })
@@ -233,6 +234,35 @@ describe('previewLaunch device', () => {
     const r = previewLaunch(input('CUDA0', 'darwin'))
     expect(r.device).toBe('auto')
     expect(r.command).not.toContain('--device')
+  })
+  test('preview checks final flags and cache types only when the build help is known', () => {
+    const base = input(null)
+    const extraArgs = '--defrag-thold 0.1 -ctv F8_E4M3 --spec-draft-type-k=f8_e4m3 -ctvd f8_e4m3 -ctk F16'
+    const devices = { source: 'unavailable' as const, gpus: [] }
+    const oldInfo = { devices, splitModes: null, flags: parseHelpFlags(B11146_HELP)!, cacheTypes: parseCacheTypes(B11146_HELP)! }
+    const make = (deviceInfo: DeviceInfo) =>
+      previewLaunch({ ...base, form: { ...base.form, extraArgs }, deviceInfo })
+    const old = make(oldInfo)
+    expect(old.ok).toBe(false)
+    expect(old.warnings.filter(w => w.code === 'cache-type-unsupported')).toEqual([
+      { code: 'cache-type-unsupported', severity: 'error', flag: '-ctv', detail: 'F8_E4M3' },
+      { code: 'cache-type-unsupported', severity: 'error', flag: '--spec-draft-type-k', detail: 'f8_e4m3' },
+      { code: 'cache-type-unsupported', severity: 'error', flag: '-ctvd', detail: 'f8_e4m3' },
+    ])
+    const flags = new Set(oldInfo.flags)
+    flags.delete('--defrag-thold')
+    const newInfo = { ...oldInfo, flags, cacheTypes: [...oldInfo.cacheTypes, 'f8_e4m3'] }
+    const modern = make(newInfo)
+    expect(modern.warnings.filter(w => w.severity === 'error')).toEqual([
+      { code: 'flag-unsupported', severity: 'error', flag: '--defrag-thold' },
+    ])
+    expect(modern.ok).toBe(false)
+    expect(make({ devices, splitModes: null, flags: null, cacheTypes: null }).ok).toBe(true)
+    const m = models()
+    m.models[0]!.profiles.a!.extraArgs = extraArgs
+    const resolved = plan('a', settings(), m).resolve(newInfo)
+    expect(resolved.args(7100)).toContain('--defrag-thold')
+    expect(resolved.warnings.some(w => w.code === 'flag-unsupported' || w.code === 'cache-type-unsupported')).toBe(false)
   })
 })
 

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { GgufError, readGgufMeta } from '../../server/core/gguf'
+import { GgufError, readGguf, readGgufMeta, tensorBytes } from '../../server/core/gguf'
 import { buildGguf, modelSpec, mmprojSpec, writeGguf } from '../fixtures/gguf-builder'
 
 let dir: string
@@ -40,6 +40,36 @@ test('falls back to the dominant tensor type when file_type is missing', async (
     tensors: [{ dims: [1000], type: 12 }, { dims: [10], type: 0 }],
   })
   expect((await readGgufMeta(f)).quantization).toBe('Q4_K')
+})
+
+test.each([
+  [39, 40, 'NVFP4', 64, 36],
+  [40, 41, 'Q1_0', 128, 18],
+  [41, 42, 'Q2_0', 64, 18],
+  [42, 43, 'F8_E4M3', 1, 1],
+] as const)('file type %i and tensor type %i report %s', async (fileType, type, name, block, bytes) => {
+  const f = join(dir, 'new-type.gguf')
+  expect(tensorBytes(type, block + 1)).toBe(2 * bytes)
+  writeGguf(f, modelSpec({ fileType }))
+  expect((await readGgufMeta(f)).quantization).toBe(name)
+  writeGguf(f, { tensors: [{ dims: [block], type }] })
+  const { meta, layout } = await readGguf(f)
+  expect(meta.quantization).toBe(name)
+  expect(layout.tensorBytes).toBe(bytes)
+})
+
+test('expert tensors are also counted in layer totals and shared experts stay in the layer', async () => {
+  const f = join(dir, 'experts.gguf')
+  writeGguf(f, { tensors: [
+    { name: 'blk.0.ffn_gate_exps.weight', dims: [64], type: 40 },
+    { name: 'blk.2.ffn_up_exps.weight', dims: [1], type: 0 },
+    { name: 'blk.2.ffn_down_exps.scales', dims: [1], type: 0 },
+    { name: 'blk.2.ffn_gate_up_exps.weight', dims: [1], type: 0 },
+    { name: 'blk.2.ffn_down_shexp.weight', dims: [2], type: 0 },
+  ] })
+  const { layout } = await readGguf(f)
+  expect(layout.layerBytes).toEqual([36, 0, 20])
+  expect(layout.layerExpertBytes).toEqual([36, 0, 12])
 })
 
 test('skips large arrays and reads keys that follow them', async () => {

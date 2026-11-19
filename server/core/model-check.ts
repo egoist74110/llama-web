@@ -8,6 +8,7 @@
 //   - `device-missing`: `--device` names something the build's own list does not have ("invalid device", exit 1,
 //     seen on a real RTX 5090; see devices.ts), only judged on the build's own answer.
 //   - `split-mode-unsupported`: the build's help does not list the chosen split mode (from the launch warnings).
+//   - `flag-unsupported` / `cache-type-unsupported`: the build's help does not list a final flag or KV cache type.
 // Everything else (context above the training length, a micro-batch above the batch, ...) was run and starts, so it
 // is a `warning` only. A memory tier never refuses a save: the free memory changes, the decision is the user's.
 import { isIntegratedGpuName } from './platform'
@@ -18,7 +19,7 @@ import {
 } from './memory-estimate'
 
 export type CheckCode =
-  | 'v-cache-needs-fa' | 'device-missing' | 'split-mode-unsupported'
+  | 'v-cache-needs-fa' | 'device-missing' | 'split-mode-unsupported' | 'flag-unsupported' | 'cache-type-unsupported'
   | 'ctx-over-train' | 'ubatch-over-batch' | 'cpu-gpu-layers' | 'mmproj-on-cpu' | 'mlock-exceeds-memory' | 'slot-ctx-small'
   | 'file-missing' | 'no-estimate'
 
@@ -36,6 +37,9 @@ export interface FinalParams {
   cacheTypeV: string | null
   flashAttn: string | null
   gpuLayers: number | null
+  cpuMoe: boolean
+  nCpuMoe: number | null
+  moeCacheMiB: number | null
   batch: number | null
   ubatch: number | null
   parallel: number | null
@@ -59,7 +63,7 @@ const num = (v: string | undefined): number | null => {
 
 const FA_OFF = new Set(['off', '0', 'false', 'no', 'disabled'])
 const isFaOff = (v: string | null) => v !== null && FA_OFF.has(v.toLowerCase())
-const QUANTISED = (t: string | null) => !!t && !['f16', 'bf16', 'f32'].includes(t.toLowerCase())
+const QUANTISED = (t: string | null) => !!t && !['f16', 'bf16', 'f32', 'f8_e4m3'].includes(t.toLowerCase())
 
 /** Read the parameters out of the argument array llama-server would get. */
 export function finalParams(args: string[]): FinalParams {
@@ -95,6 +99,9 @@ export function finalParams(args: string[]): FinalParams {
     cacheTypeV: text('--cache-type-v'),
     flashAttn: fa,
     gpuLayers: gl === null || gl < 0 ? null : gl,
+    cpuMoe: last.has('--cpu-moe'),
+    nCpuMoe: num(val('--n-cpu-moe')),
+    moeCacheMiB: num(val('--moe-cache-mib')),
     batch: num(val('--batch-size')),
     ubatch: num(val('--ubatch-size')),
     parallel: num(val('--parallel')),
@@ -107,6 +114,7 @@ export function finalParams(args: string[]): FinalParams {
 
 export const toEstimateParams = (p: FinalParams): EstimateParams => ({
   ctxSize: p.ctx, cacheTypeK: p.cacheTypeK, cacheTypeV: p.cacheTypeV, flashAttn: p.flashAttn, gpuLayers: p.gpuLayers,
+  cpuMoeLayers: p.cpuMoe ? Infinity : p.nCpuMoe, moeCacheMiB: p.moeCacheMiB,
   batchSize: p.batch, ubatchSize: p.ubatch, parallel: p.parallel, swaFull: p.swaFull, kvOnHost: p.kvOnHost, mlock: p.mlock, mmprojOnHost: p.mmprojOnHost,
 })
 
@@ -191,6 +199,8 @@ export function checkLaunch(input: CheckInput): ModelCheck {
   for (const w of input.warnings ?? []) {
     if (w.severity !== 'error') continue
     if (w.code === 'split-mode-unsupported') fail('split-mode-unsupported', { mode: w.detail ?? '' })
+    if (w.code === 'flag-unsupported') fail('flag-unsupported', { flag: w.flag ?? '' })
+    if (w.code === 'cache-type-unsupported') fail('cache-type-unsupported', { flag: w.flag ?? '', type: w.detail ?? '' })
   }
   for (const kind of input.missing ?? []) warn('file-missing', { kind })
 

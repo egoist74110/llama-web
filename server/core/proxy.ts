@@ -296,7 +296,7 @@ const DROP_RESPONSE = new Set([
 export function forwardRequestHeaders(h: Headers): Headers {
   const out = new Headers()
   h.forEach((v, k) => {
-    if (DROP_REQUEST.has(k) || k.startsWith('x-llama-web-')) return
+    if (DROP_REQUEST.has(k) || k === 'origin' || k.startsWith('sec-fetch-') || k.startsWith('x-llama-web-')) return
     out.set(k, v)
   })
   return out

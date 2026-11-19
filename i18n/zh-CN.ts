@@ -70,7 +70,7 @@ export default {
       },
       params: {
         ctxSize: { hint: '--ctx-size。能记住的最多 token 数，越大越占内存；0 表示用模型自带的长度。' },
-        cacheTypeK: { hint: '--cache-type-k。注意力缓存里 K 的精度，q4_0 省内存，f16 最准。' },
+        cacheTypeK: { hint: '--cache-type-k。注意力缓存里 K 的精度，q4_0 省内存，f16 最准；f8_e4m3 占用与 q8_0 相近，需要 llama.cpp v1.0.0 及以上。' },
         flashAttn: { hint: '--flash-attn。省内存、更快；on / off / auto。' },
         gpuLayers: { label: '加速层数', hint: '--n-gpu-layers。交给系统加速的层数，999 表示全部。' },
         ubatchSize: { hint: '--ubatch-size。实际计算时的批大小，越大越快但更占内存。' },
@@ -538,6 +538,8 @@ export default {
     check: {
       issues: {
         'v-cache-needs-fa': 'V 缓存用了量化类型 {type}，但 Flash Attention 是关闭的，llama-server 会直接报错退出。把 Flash Attention 改成 on / auto，或把 V 缓存改成 f16。',
+        'flag-unsupported': '当前 llama.cpp 版本不认识参数 {flag}（可能已被移除，例如 v1.0.0 删除了 --defrag-thold），llama-server 会直接报错退出。从额外参数里删掉它，或换一个支持它的版本。',
+        'cache-type-unsupported': '当前 llama.cpp 版本不支持缓存类型 {type}（{flag}），llama-server 会直接报错退出。换一个缓存类型，或更新 llama.cpp（f8_e4m3 需要 v1.0.0 及以上）。',
         'device-missing': '所选设备 {device} 不在这个 llama.cpp 版本的设备列表里，启动会失败。换一个设备，或换一个能看到它的 llama.cpp 版本。',
         'split-mode-unsupported': '这个 llama.cpp 版本不支持切分模式 {mode}，启动会失败。换一个模式或换版本。',
         'ctx-over-train': '上下文 {ctx} 超过了模型的训练长度 {train}，又没有设置 RoPE / YaRN 缩放：能启动，但超出的部分质量会明显变差。',
@@ -760,6 +762,8 @@ export default {
           'extra-overrides-device': '额外参数里的 {flag} 覆盖了所选设备的设置，以额外参数为准。',
           'extra-multi-device': '额外参数里的 {flag} 是设备 / 切分参数，会和表单里的设备选择一起生效，以额外参数为准；多卡请优先用上面的「使用多张 GPU」，这里的设置不受检查。',
           'split-mode-unsupported': '这个 llama.cpp 版本不支持切分模式 {detail}，不能启动。换一个模式或换版本。',
+          'flag-unsupported': '这个 llama.cpp 版本不认识参数 {flag}（可能已被移除），不能启动。从额外参数里删掉它，或换版本。',
+          'cache-type-unsupported': '这个 llama.cpp 版本不支持缓存类型 {detail}（{flag}），不能启动。换一个缓存类型，或更新 llama.cpp。',
           'split-mode-unconfirmed': '切分模式 {detail} 是实验性的，这个版本 + 设备 + 模式的组合还没有确认过；在编辑页里选一次并确认后这条提示才会消失。',
           'split-mode-failed-before': '这个组合（版本 + 设备 + 切分模式）上次加载失败过（{detail}）。仍会按设置启动，不会自动改动。',
           'duplicate-in-layer': '额外参数里 {flag} 出现了多次，以最后一个为准（{layer}）。',
@@ -770,8 +774,8 @@ export default {
       },
       params: {
         ctxSize: { label: '上下文长度', hint: '--ctx-size。能记住的最多 token 数，越大越占显存；0 表示用模型自带的长度。' },
-        cacheTypeK: { label: 'K 缓存类型', hint: '--cache-type-k。注意力缓存里 K 的精度，q4_0 省显存，f16 最准。' },
-        cacheTypeV: { label: 'V 缓存类型', hint: '--cache-type-v。注意力缓存里 V 的精度。量化 V 缓存需要开启 Flash Attention。' },
+        cacheTypeK: { label: 'K 缓存类型', hint: '--cache-type-k。注意力缓存里 K 的精度，q4_0 省显存，f16 最准；f8_e4m3 占用与 q8_0 相近，需要 llama.cpp v1.0.0 及以上。' },
+        cacheTypeV: { label: 'V 缓存类型', hint: '--cache-type-v。注意力缓存里 V 的精度。量化 V 缓存需要开启 Flash Attention（f8_e4m3 不需要）。' },
         flashAttn: { label: 'Flash Attention', hint: '--flash-attn。省显存、更快；on / off / auto。' },
         gpuLayers: { label: 'GPU 层数', hint: '--n-gpu-layers。放到显卡上的层数，999 表示全部。' },
         batchSize: { label: '批大小', hint: '--batch-size。处理提示词时一次送入的 token 数。' },
@@ -1441,6 +1445,7 @@ export default {
       check: '检查更新',
       latest: '{tag}，已是最新版',
       available: '发现新版 {tag}',
+      withStable: '{stable}（{tag}）',
       release: '查看发布说明',
       download: '下载更新',
       installed: '此版本已安装，可在版本列表中手动切换。',

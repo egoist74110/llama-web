@@ -109,7 +109,14 @@ function availableFor(r: RuntimeRow): string | null {
   const c = r.accel === secondary.value?.accel ? secondary.value.check : doc.value?.check
   return c?.state === 'checked' && c.available ? c.tag : null
 }
-const needsDownload = (r: RuntimeRow) => !!availableFor(r) && !rows.value.some(v => v.kind === 'official' && v.accel === r.accel && v.tag === availableFor(r))
+/** `availableFor` with the stable release name in front when the check knows it (display only). */
+function availableLabel(r: RuntimeRow): string {
+  const tag = availableFor(r)
+  if (!tag) return ''
+  const c = r.accel === secondary.value?.accel ? secondary.value.check : doc.value?.check
+  return c?.state === 'checked' && c.stable ? fmt(s.update.withStable, { stable: c.stable, tag }) : tag
+}
+const needsDownload =(r: RuntimeRow) => !!availableFor(r) && !rows.value.some(v => v.kind === 'official' && v.accel === r.accel && v.tag === availableFor(r))
 
 function useRow(r: RuntimeRow) {
   // A hand-added build goes by its reference; the server picks the channel it becomes current on.
@@ -310,7 +317,7 @@ function dismissFallbacks() {
             <span class="min-w-0 break-all font-mono text-[13px]">{{ runtimeBaseName(r) }}</span>
             <ExperimentalBadge v-if="!ui.isMac && isExperimentalAccel(r.accel)" />
             <span v-if="r.current" class="lw-chip lw-chip-accent">{{ s.current }}</span>
-            <span v-if="availableFor(r)" class="text-xs text-primary">{{ fmt(s.update.available, { tag: availableFor(r)! }) }}</span>
+            <span v-if="availableFor(r)" class="text-xs text-primary">{{ fmt(s.update.available, { tag: availableLabel(r) }) }}</span>
             <span v-if="r.latestOfficial && !r.current" class="lw-chip">{{ m.latestOfficial }}</span>
             <span v-if="r.kind === 'custom'" class="lw-chip">{{ m.custom }}</span>
             <span v-if="r.inUse" class="lw-st lw-st-ready">{{ s.inUse }}</span>

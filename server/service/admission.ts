@@ -44,7 +44,7 @@ export async function admitTarget(target: Target, _online: Target[]): Promise<Ad
   const model = ctx.getModels().models.find(m => m.id === target.modelId)
   if (!model?.profiles[target.profile]) return admissionFrom(null)
   // Free memory is read again for every answer: what the models online take is in the reading already.
-  const check = await checkProfile(model, target.profile, undefined, { fresh: true })
+  const check = await checkProfile(model, target.profile, undefined, { fresh: true, validateArgs: false })
   return admissionFrom(check.estimate, { statsKey: check.statsKey, dropMlock: check.mlockDropped, basis: check.basis })
 }
 

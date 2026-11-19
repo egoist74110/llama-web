@@ -9,7 +9,7 @@ export interface ParamField {
   options?: string[]
 }
 
-const CACHE_TYPES = ['f32', 'f16', 'bf16', 'q8_0', 'q5_1', 'q5_0', 'q4_1', 'q4_0', 'iq4_nl']
+const CACHE_TYPES = ['f32', 'f16', 'bf16', 'f8_e4m3', 'q8_0', 'q5_1', 'q5_0', 'q4_1', 'q4_0', 'iq4_nl']
 
 export const PARAM_FIELDS: ParamField[] = [
   { key: 'ctxSize', kind: 'number' },

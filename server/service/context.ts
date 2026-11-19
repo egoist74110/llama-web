@@ -124,8 +124,8 @@ export interface AppContext {
   getSystem(opts?: { refresh?: boolean }): Promise<SystemInfo>
   /** Devices of one llama.cpp build (`runtime` = a reference, empty = the global version); `{ applicable: false }` on a Mac. */
   getDevices(opts?: { runtime?: string | null, refresh?: boolean }): Promise<DevicesView | { applicable: false }>
-  /** Device list and split modes of one build for the command preview; null on a Mac or when the build cannot be run. */
-  getDeviceInfo(runtime?: string | null): Promise<DeviceInfo | null>
+  /** Device list and split modes of one build, with optional help-based argument support (also on a Mac). */
+  getDeviceInfo(runtime?: string | null, includeArgSupport?: boolean): Promise<DeviceInfo | null>
   /**
    * What the memory check reads from the machine: the device list of one build (`runtime` = a reference, empty = the global
    * version; null when it cannot be run), the NVIDIA cards as a fallback for it, and the system memory.
@@ -854,12 +854,16 @@ function createOwnedContext(dataDir: string, dataLock: DataLock, startupClose: A
       const info = await detect(refresh)
       return describeDevices(ref, list, info.cpu, info.nvidia?.gpus ?? [], splitModes)
     },
-    async getDeviceInfo(runtime) {
-      if (!hasDeviceSelection(platform)) return null
+    async getDeviceInfo(runtime, includeArgSupport = false) {
+      const selectable = hasDeviceSelection(platform)
+      if (!selectable && !includeArgSupport) return null
       const exe = exeOf(runtime?.trim() || null)
       if (!exe) return null
-      const [devices, splitModes] = await Promise.all([deviceProbe.list(exe), deviceProbe.splitModes(exe)])
-      return { devices, splitModes }
+      const [devices, help] = await Promise.all([
+        selectable ? deviceProbe.list(exe) : { source: 'unavailable' as const, gpus: [] },
+        deviceProbe.help(exe),
+      ])
+      return includeArgSupport ? { devices, ...help } : { devices, splitModes: help.splitModes }
     },
     measure,
     async getMemoryProbe(runtime, opts) {

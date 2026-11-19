@@ -78,6 +78,9 @@ function buildDir(name = 'build', t = win, header = peX64(), extra: Record<strin
 describe('parseVersionOutput / parseGithubSource / pickAsset', () => {
   test('build number from the version line', () => {
     expect(parseVersionOutput(VERSION)).toEqual({ line: 'version: 0.5.0-dev (build 11146, commit 7fe450e19)', tag: 'b11146' })
+    expect(parseVersionOutput('version: 1.0.0 (build 12359, commit abc)').tag).toBe('b12359')
+    expect(parseVersionOutput('version: 1.0.0').tag).toBe('')
+    expect(parseVersionOutput('version: 12359 (abc1234)').tag).toBe('b12359')
     expect(parseVersionOutput('version: 4321 (abcdef0)\n')).toEqual({ line: 'version: 4321 (abcdef0)', tag: 'b4321' })
     expect(parseVersionOutput('error')).toEqual({ line: '', tag: '' })
   })

@@ -26,7 +26,7 @@ const refOrNull = (v: unknown, fallback: ModelConfig['file'] | null) => {
 export interface PreviewBody { profile?: unknown, form?: unknown, files?: Record<string, unknown> }
 
 /** Command preview of a profile with the values on screen (`form` / `files`) laid over the saved ones. */
-export async function buildPreview(model: ModelConfig, body: PreviewBody | undefined, profile: string): Promise<{ preview: LaunchPreview, shown: ModelConfig }> {
+export async function buildPreview(model: ModelConfig, body: PreviewBody | undefined, profile: string, validateArgs = true): Promise<{ preview: LaunchPreview, shown: ModelConfig }> {
   const saved = model.profiles[profile]!
   const ctx = getContext()
   // Values on screen win; the saved profile fills in what the form does not carry (its device choice is five fields, see gpu-group.ts).
@@ -44,7 +44,7 @@ export async function buildPreview(model: ModelConfig, body: PreviewBody | undef
   const preview = previewLaunch({
     dataDir: ctx.dataDir, settings: ctx.getSettings(), model: shown, host: ctx.runner.host, target: ctx.runtimeTarget, runtimeEnv: ctx.runtimes.env(),
     form: { overrides: form?.overrides ?? saved.overrides, extraArgs: form?.mtp ? mtpExtraArgs(form.extraArgs, form.mtp) : form?.extraArgs ?? saved.extraArgs, chatTemplate: form ? form.chatTemplate : saved.chatTemplate ?? null, runtime, ...gpu },
-    deviceInfo: (await ctx.getDeviceInfo(requestedRuntime(shown, runtime))) ?? undefined,
+    deviceInfo: (await ctx.getDeviceInfo(requestedRuntime(shown, runtime), validateArgs)) ?? undefined,
     comboRecord: key => ctx.splitStats.get(key),
   })
   return { preview, shown }
@@ -71,15 +71,15 @@ async function launchKey(modelId: string, profile: string, preview: LaunchPrevie
 
 /** The key `checkProfile` would give the saved profile right now (the admission compares it with the key it was made for). */
 export async function currentLaunchKey(model: ModelConfig, profile: string): Promise<string> {
-  const { preview, shown } = await buildPreview(model, undefined, profile)
+  const { preview, shown } = await buildPreview(model, undefined, profile, false)
   const settings = getContext().getSettings()
   const abs = (ref: ModelConfig['file'] | null) => (ref ? resolveFileRef(settings.modelDirs, ref) : null)
   return launchKey(model.id, profile, preview, [abs(shown.file), abs(shown.mmproj), abs(shown.draft)])
 }
 
-export async function checkProfile(model: ModelConfig, profile: string, body?: PreviewBody, opts: { fresh?: boolean } = {}): Promise<ProfileCheck> {
+export async function checkProfile(model: ModelConfig, profile: string, body?: PreviewBody, opts: { fresh?: boolean, validateArgs?: boolean } = {}): Promise<ProfileCheck> {
   const ctx = getContext()
-  const { preview, shown } = await buildPreview(model, body, profile)
+  const { preview, shown } = await buildPreview(model, body, profile, opts.validateArgs)
   const settings = ctx.getSettings()
   const abs = (ref: ModelConfig['file'] | null) => (ref ? resolveFileRef(settings.modelDirs, ref) : null)
 

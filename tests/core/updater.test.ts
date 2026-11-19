@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { versionsDir, type RuntimeStatus } from '../../server/core/llamacpp'
+import { UpdateCheckStore } from '../../server/core/update-check'
 import { pruneCandidates, UpdateError, Updater, versionOfExe, type PruneResult } from '../../server/core/updater'
 import { EXE, fakeExtract, fakeGithub, sha, type FakeOpts } from '../fixtures/fake-github'
 
@@ -117,21 +118,30 @@ test('manual checks bypass the daily limit but never install, even with automati
 test('disabled automatic installation still checks daily across restarts and restores the inline notice', async () => {
   install('b200')
   let now = Date.UTC(2026, 9, 3, 12)
-  const a = setup({ current: 'b200', autoUpdate: false, gh: { tag: 'b300' }, now: () => now })
+  const a = setup({ current: 'b200', autoUpdate: false, gh: { tag: 'b300', latestTag: 'v1.0.0' }, now: () => now })
   await a.u.run()
+  expect(a.u.getUpdateCheck()).toMatchObject({ state: 'checked', tag: 'b300', stable: 'v1.0.0' })
   await a.u.stop()
   const b = setup({ current: 'b200', autoUpdate: false, gh: { tag: 'b400' }, now: () => now })
   try {
-    expect(b.u.getUpdateCheck()).toMatchObject({ state: 'checked', tag: 'b300', available: true })
+    expect(b.u.getUpdateCheck()).toMatchObject({ state: 'checked', tag: 'b300', stable: 'v1.0.0', available: true })
     await b.u.run()
     expect(b.gh.calls).toEqual([])
     now += 24 * 60 * 60 * 1000
     await b.u.run()
     expect(b.gh.calls).toHaveLength(3)
     expect(b.u.getUpdateCheck()).toMatchObject({ state: 'checked', tag: 'b400', available: true })
+    expect(b.u.getUpdateCheck()).not.toHaveProperty('stable')
     expect(b.gh.downloads()).toEqual([])
     expect(b.cfg.current).toBe('b200')
   } finally { await b.u.stop() }
+})
+
+test('restoring an update check ignores an invalid stable version label', () => {
+  new UpdateCheckStore(data).save('llamacpp:win32', 123, { tag: 'b300', stable: 'v1.0.0-rc1' })
+  const { u } = setup()
+  expect(u.getUpdateCheck()).toMatchObject({ state: 'checked', tag: 'b300' })
+  expect(u.getUpdateCheck()).not.toHaveProperty('stable')
 })
 
 test('a daily timer checks an open service with automatic installation off and stops cleanly', async () => {

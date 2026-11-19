@@ -122,6 +122,7 @@ const OTHER_ALIASES: string[][] = [
   ['--threads-batch', '-tb'], ['--tensor-split', '-ts'], ['--device', '-dev'],
   ['--split-mode', '-sm'], ['--main-gpu', '-mg'], ['--override-tensor', '-ot'],
   ['--cont-batching', '-cb'], ['--no-cont-batching', '-nocb'],
+  ['--cpu-moe', '-cmoe'], ['--n-cpu-moe', '-ncmoe'],
 ]
 
 const CANON = new Map<string, string>()
@@ -215,6 +216,8 @@ export type ArgWarningCode =
   | 'extra-overrides-device' // an extra arg replaces a flag of the chosen device (--device / --split-mode)
   | 'extra-multi-device' // extra args spread the model over several devices (--tensor-split / --device a,b)
   | 'split-mode-unsupported' // the build does not list the chosen split mode (severity: error; only when the build's help said so)
+  | 'flag-unsupported'
+  | 'cache-type-unsupported'
   | 'split-mode-unconfirmed' // row / tensor on a build + devices + mode never confirmed (decision 45)
   | 'split-mode-failed-before' // the same combination failed to load before (detail: what the failure was)
   | 'duplicate-in-layer' // same flag twice inside one extra-args text; the last one wins

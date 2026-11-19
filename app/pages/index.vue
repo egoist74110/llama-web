@@ -50,6 +50,11 @@ const runtimeChip = computed(() => {
   if (r.state === 'ready') return tl.runtime[r.note ?? 'ready']
   return tl.runtime[r.state]
 })
+const availableTag = computed(() => {
+  const c = state.value?.llamacpp.check
+  if (c?.state !== 'checked' || !c.available) return ''
+  return c.stable ? fmt(t.llamacpp.update.withStable, { stable: c.stable, tag: c.tag }) : c.tag
+})
 
 const tunnel = computed(() => state.value?.tunnel.status)
 const tunnelPill = computed(() => {
@@ -147,7 +152,7 @@ const tokens = (n: number | null) => (n === null ? '–' : n.toLocaleString('zh-
           <div class="text-xs text-dimmed">{{ tl.llamacpp }}</div>
           <div class="flex flex-wrap items-center gap-2">
             <span class="font-mono text-[22px] font-medium">{{ llamacppCurrentName(state.llamacpp) || t.layout.llamacppNone }}</span>
-            <NuxtLink v-if="state.llamacpp.check?.state === 'checked' && state.llamacpp.check.available" to="/settings#s-llama" class="text-xs text-primary">{{ fmt(t.llamacpp.update.available, { tag: state.llamacpp.check.tag }) }}</NuxtLink>
+            <NuxtLink v-if="availableTag" to="/settings#s-llama" class="text-xs text-primary">{{ fmt(t.llamacpp.update.available, { tag: availableTag }) }}</NuxtLink>
           </div>
           <div class="flex flex-wrap gap-1.5">
             <span v-if="runtimeChip" class="lw-chip" :title="runtimeText(runtime)">{{ runtimeChip }}</span>

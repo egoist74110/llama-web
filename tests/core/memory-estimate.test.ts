@@ -5,11 +5,13 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { admissionFrom } from '../../server/core/admission'
 import { readGguf, tensorBytes, TENSOR_BLOCK, type GgufArch, type GgufLayout, type GgufMeta } from '../../server/core/gguf'
 import {
   assignLayers, assignOutput, CACHE_BYTES, estimateMemory, kvCells, layerKinds, recurrentStateBytes, systemReserveMiB, tierOf, worstTier,
   type DeviceInput, type ModelFacts,
 } from '../../server/core/memory-estimate'
+import { finalParams, toEstimateParams } from '../../server/core/model-check'
 import { modelSpec, writeGguf } from '../fixtures/gguf-builder'
 
 const MiB = 1024 * 1024
@@ -22,11 +24,11 @@ const noArch: GgufArch = {
   valueLength: null, slidingWindow: null, slidingWindowPattern: null, fullAttentionInterval: null, ssm: null, expertCount: null, vocabSize: null,
 }
 
-function facts(arch: Partial<GgufArch>, o: { architecture?: string, layerBytes?: number[], embed?: number, output?: number, tied?: boolean, ctx?: number } = {}): ModelFacts {
+function facts(arch: Partial<GgufArch>, o: { architecture?: string, layerBytes?: number[], layerExpertBytes?: number[], embed?: number, output?: number, tied?: boolean, ctx?: number } = {}): ModelFacts {
   const a = { ...noArch, ...arch }
   const layers = o.layerBytes ?? Array.from({ length: a.blockCount ?? 0 }, () => 10 * MiB)
   const layout: GgufLayout = {
-    layerBytes: layers, embedBytes: o.embed ?? 20 * MiB, outputBytes: o.output ?? 0, tiedOutput: o.tied ?? true, otherBytes: 0,
+    layerBytes: layers, layerExpertBytes: o.layerExpertBytes ?? [], embedBytes: o.embed ?? 20 * MiB, outputBytes: o.output ?? 0, tiedOutput: o.tied ?? true, otherBytes: 0,
     tensorBytes: layers.reduce((n, b) => n + b, 0) + (o.embed ?? 20 * MiB) + (o.output ?? 0),
   }
   const meta = { version: 3, fileSize: layout.tensorBytes, architecture: o.architecture ?? 'llama', contextLength: o.ctx ?? 8192, arch: a } as GgufMeta
@@ -62,7 +64,37 @@ test('K / V cache types: bytes per element match the logged sizes (q8_0 95.62, q
   expect(est(smol(), { ctxSize: 8192, parallel: 1, cacheTypeK: 'q8_0', cacheTypeV: 'f16' }).pools[0]!.kvMiB).toBeCloseTo((95.625 + 180) / 2, 2)
   expect(CACHE_BYTES.f32).toBe(4)
   expect(CACHE_BYTES.bf16).toBe(2)
+  expect(CACHE_BYTES.f8_e4m3).toBe(1)
+  expect(est(smol(), { ctxSize: 8192, parallel: 1, cacheTypeK: 'F8_E4M3', cacheTypeV: 'f8_e4m3' }).pools[0]!.kvMiB).toBeCloseTo(90, 5)
   for (const t of ['q4_1', 'q5_0', 'q5_1', 'iq4_nl']) expect(CACHE_BYTES[t]).toBeGreaterThan(0.5)
+})
+
+test('CPU MoE moves the selected expert weights to RAM and splits the cache across layer devices', () => {
+  const model = facts({ blockCount: 4 }, {
+    layerBytes: [100, 100, 100, 100].map(n => n * MiB),
+    layerExpertBytes: [60, 50, 40, 30].map(n => n * MiB),
+    embed: 0,
+  })
+  const devices: DeviceInput[] = [
+    { id: 'A', name: 'GPU A', memory: 'separate', freeMiB: 240, fixedMiB: 0, share: 3 },
+    { id: 'B', name: 'GPU B', memory: 'separate', freeMiB: 240, fixedMiB: 0, share: 2 },
+  ]
+  const estimate = (...args: string[]) => estimateMemory({ model, devices, system: sys, params: toEstimateParams(finalParams(args)) })
+  const weights = (result: ReturnType<typeof estimate>) => result.pools.map(pool => pool.weightsMiB)
+  expect(weights(estimate())).toEqual([300, 100, 0])
+  expect(weights(estimate('--n-cpu-moe', '4', '-ncmoe', '2'))).toEqual([190, 100, 110])
+  expect(weights(estimate('-cmoe'))).toEqual([150, 70, 180])
+  expect(weights(estimate('--cpu-moe', '--moe-cache-mib=80', '--moe-cache-mib=40'))).toEqual([174, 86, 180])
+  expect(weights(estimate('--n-cpu-moe', '2', '-ngl', '2', '--moe-cache-mib', '40'))).toEqual([100, 300])
+  expect(weights(estimate('--cpu-moe', '-ngl', '2', '--moe-cache-mib', '40'))).toEqual([110, 330])
+  expect(estimate('-ncmoe', '2', '--mlock').mlockMiB).toBe(110)
+  expect(admissionFrom(estimate()).tier).toBe('nofit')
+  expect(admissionFrom(estimate('-ncmoe', '2')).tier).toBe('ok')
+  const offload = toEstimateParams(finalParams(['--cpu-moe', '--moe-cache-mib', '40']))
+  expect(est(model, offload)).toEqual(est(model))
+  const dense = facts({ blockCount: 4 })
+  const draft = { facts: model }
+  expect(estimateMemory({ model: dense, draft, devices, system: sys, params: offload })).toEqual(estimateMemory({ model: dense, draft, devices, system: sys }))
 })
 
 test('--parallel: an explicit N splits the context per slot but keeps the total; automatic means 4 slots with one shared cache', () => {

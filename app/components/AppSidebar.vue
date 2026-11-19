@@ -59,7 +59,8 @@ const big = computed(() => {
 const version = computed(() => llamacppCurrentName(state.value?.llamacpp) || L.llamacppNone)
 const runtimeUpdate = computed(() => {
   const c = state.value?.llamacpp.check
-  return c?.state === 'checked' && c.available ? c.tag : null
+  if (c?.state !== 'checked' || !c.available) return null
+  return c.stable ? fmt(t.llamacpp.update.withStable, { stable: c.stable, tag: c.tag }) : c.tag
 })
 const { view: appVersion, release: appRelease } = useAppUpdate()
 

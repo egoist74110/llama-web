@@ -93,7 +93,7 @@ const facts: ModelFacts = {
     version: 3, fileSize: 1000 * MiB, architecture: 'llama', contextLength: 4096,
     arch: { blockCount: 10, embeddingLength: 64, feedForwardLength: 128, headCount: 4, headCountKv: 2, keyLength: null, valueLength: null, slidingWindow: null, slidingWindowPattern: null, fullAttentionInterval: null, ssm: null, expertCount: null, vocabSize: 100 },
   } as ModelFacts['meta'],
-  layout: { layerBytes: Array.from({ length: 10 }, () => 90 * MiB), embedBytes: 100 * MiB, outputBytes: 0, tiedOutput: true, otherBytes: 0, tensorBytes: 1000 * MiB },
+  layout: { layerBytes: Array.from({ length: 10 }, () => 90 * MiB), layerExpertBytes: [], embedBytes: 100 * MiB, outputBytes: 0, tiedOutput: true, otherBytes: 0, tensorBytes: 1000 * MiB },
   totalBytes: 1000 * MiB,
 }
 const estimate = (freeMiB: number) => estimateMemory({ model: facts, params: { ctxSize: 4096, parallel: 1 }, devices: [{ id: 'MTL0', name: 'M', memory: 'shared', freeMiB }], system: { totalMiB: 16384, availableMiB: 12000 } })

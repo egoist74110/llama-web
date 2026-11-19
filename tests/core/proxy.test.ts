@@ -25,6 +25,9 @@ interface Upstream {
   crash(): void
 }
 
+const WAV_BYTES = Uint8Array.of(0x52, 0x49, 0x46, 0x46, 0, 0xff, 0x80, 0)
+const WAV_TYPE = 'audio/wav; rate=24000'
+
 function makeUpstream(target: Target, opts: { chunks?: number, gapMs?: number, holdHeaders?: boolean, streamError?: boolean }): Upstream {
   let res!: () => void
   let rej!: (e: unknown) => void
@@ -48,6 +51,7 @@ function makeUpstream(target: Target, opts: { chunks?: number, gapMs?: number, h
         let body: any = text
         try { body = JSON.parse(text) } catch { /* raw */ }
         up.requests.push({ path: url.pathname + url.search, headers: req.headers, body })
+        if (url.pathname === '/v1/audio/speech') return new Response(WAV_BYTES, { headers: { 'content-type': WAV_TYPE } })
         if (url.pathname === '/props') return Response.json({ model: target.modelId, profile: target.profile })
         if (url.pathname === '/boom') return Response.json({ error: { message: 'bad', code: 500 } }, { status: 500 })
         // An error answer with no body of its own: whatever the client then reads comes from the
@@ -262,6 +266,27 @@ describe('/v1 routing', () => {
     expect(json.error.code).toBe('model_load_failed')
     expect(json.error.message).toContain('加载失败')
   })
+})
+
+test('speech forwards the local request and preserves binary audio and its content type', async () => {
+  const { post, ups, records } = setup()
+  const body = { model: 'Alpha', input: 'hi' }
+  const path = '/v1/audio/speech'
+  const response = await post(path, body, { headers: {
+    'content-type': 'application/json', Origin: 'https://example.com', 'Sec-Fetch-Site': 'cross-site', 'Sec-Fetch-Mode': 'cors',
+  } })
+  expect(response.status).toBe(200)
+  expect(response.headers.get('content-type')).toBe(WAV_TYPE)
+  expect(new Uint8Array(await response.arrayBuffer())).toEqual(WAV_BYTES)
+  expect(ups[0]!.requests).toHaveLength(1)
+  const forwarded = ups[0]!.requests[0]!
+  expect(forwarded.path).toBe(path)
+  expect(forwarded.body).toEqual(body)
+  expect(forwarded.headers.has('origin')).toBe(false)
+  expect(forwarded.headers.has('sec-fetch-site')).toBe(false)
+  expect(forwarded.headers.has('sec-fetch-mode')).toBe(false)
+  expect(records).toHaveLength(1)
+  expect(records[0]).toMatchObject({ path, status: 200, outcome: 'ok', modelId: 'a' })
 })
 
 describe('streaming', () => {

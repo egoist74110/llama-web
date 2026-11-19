@@ -13,7 +13,7 @@ import { t } from './i18n'
 import { targetKey } from './platform'
 import { UpdateCheckStore } from './update-check'
 import {
-  clearLeftovers, installBuild, installedDir, listInstalled, resolveLatest, RuntimeError, versionsDir,
+  clearLeftovers, installBuild, installedDir, listInstalled, resolveLatest, RuntimeError, STABLE_TAG_RE, versionsDir,
   type InstallOptions, type NetOptions, type RuntimeStatus,
 } from './llamacpp'
 import { NetworkAccess, STANDALONE_NETWORK, type DigestSource } from './net'
@@ -23,7 +23,7 @@ const TAG_RE = /^b\d+$/
 
 export type RuntimeCheck =
   | { state: 'idle' | 'checking' }
-  | { state: 'checked', at: number, tag: string, url: string, available: boolean, digestSource?: DigestSource }
+  | { state: 'checked', at: number, tag: string, stable?: string, url: string, available: boolean, digestSource?: DigestSource }
   | { state: 'error', at: number, code: string, detail: string }
 
 export interface VersionView {
@@ -126,11 +126,13 @@ export class Updater {
     this.checks = new UpdateCheckStore(opts.dataDir)
     this.checkKey = `llamacpp:${opts.target ? targetKey(opts.target) : opts.platform ?? process.platform}`
     const record = this.checks.get(this.checkKey)
-    const saved = record?.result as { tag?: string, code?: string, detail?: string, digestSource?: DigestSource, assets?: Array<{ name: string, url: string }> } | null
+    const saved = record?.result as { tag?: string, stable?: unknown, code?: string, detail?: string, digestSource?: DigestSource, assets?: Array<{ name: string, url: string }> } | null
     if (saved?.digestSource === 'github' || saved?.digestSource === 'mirror') this.digestSource = saved.digestSource
     if (Array.isArray(saved?.assets)) this.assets = saved.assets.filter(a => typeof a.name === 'string' && a.url?.startsWith('https://github.com/ggml-org/llama.cpp/releases/download/'))
-    if (record && typeof saved?.tag === 'string' && TAG_RE.test(saved.tag)) this.checked(saved.tag, record.at)
-    else if (record && typeof saved?.code === 'string' && typeof saved.detail === 'string') this.checkView = { state: 'error', at: record.at, code: saved.code, detail: saved.detail }
+    if (record && typeof saved?.tag === 'string' && TAG_RE.test(saved.tag)) {
+      const stable = typeof saved.stable === 'string' && STABLE_TAG_RE.test(saved.stable) ? saved.stable : undefined
+      this.checked(saved.tag, record.at, stable)
+    } else if (record && typeof saved?.code === 'string' && typeof saved.detail === 'string') this.checkView = { state: 'error', at: record.at, code: saved.code, detail: saved.detail }
   }
 
   getStatus(): RuntimeStatus {
@@ -141,8 +143,8 @@ export class Updater {
     return this.checkView.state === 'checked' ? { ...this.checkView, available: this.checkView.tag !== this.opts.llamacpp().current } : this.checkView
   }
 
-  private checked(tag: string, at: number): void {
-    this.checkView = { state: 'checked', at, tag, url: `https://github.com/ggml-org/llama.cpp/releases/tag/${tag}`, available: tag !== this.opts.llamacpp().current, ...(this.digestSource ? { digestSource: this.digestSource } : {}) }
+  private checked(tag: string, at: number, stable?: string): void {
+    this.checkView = { state: 'checked', at, tag, ...(stable ? { stable } : {}), url: `https://github.com/ggml-org/llama.cpp/releases/tag/${tag}`, available: tag !== this.opts.llamacpp().current, ...(this.digestSource ? { digestSource: this.digestSource } : {}) }
   }
 
   /** Reconcile a changed preference without making a request. The timer checks the fresh setting. */
@@ -296,8 +298,8 @@ export class Updater {
       const latest = await resolveLatest(fetchFn, cfg.cudaRuntime, platform, net, this.opts.target, this.opts.cudaLimits?.())
       this.digestSource = latest.digestSource
       this.assets = [latest.bin, latest.cudart].filter(a => !!a).map(a => ({ name: a!.name, url: a!.browser_download_url }))
-      this.checked(latest.tag, at)
-      this.checks.save(this.checkKey, at, { tag: latest.tag, assets: this.assets, digestSource: this.digestSource })
+      this.checked(latest.tag, at, latest.stable)
+      this.checks.save(this.checkKey, at, { tag: latest.tag, stable: latest.stable, assets: this.assets, digestSource: this.digestSource })
       if (!force && (!this.opts.llamacpp().autoUpdate || manual)) {
         this.safePrune()
         const now = this.opts.llamacpp().current

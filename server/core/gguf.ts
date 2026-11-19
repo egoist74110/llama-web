@@ -63,6 +63,8 @@ export interface GgufArch {
 export interface GgufLayout {
   /** `blk.N.*` tensor bytes, indexed by N (holes are 0). */
   layerBytes: number[]
+  /** Expert tensors within those layers, indexed by N (holes are 0). */
+  layerExpertBytes: number[]
   /** `token_embd.*`. */
   embedBytes: number
   /** `output.weight` and `output_norm.*`; 0 + `tiedOutput` when the output projection reuses the embedding. */
@@ -88,6 +90,7 @@ const FILE_TYPES: Record<number, string> = {
   22: 'IQ3_XS', 23: 'IQ3_XXS', 24: 'IQ1_S', 25: 'IQ4_NL', 26: 'IQ3_S', 27: 'IQ3_M',
   28: 'IQ2_S', 29: 'IQ2_M', 30: 'IQ4_XS', 31: 'IQ1_M', 32: 'BF16',
   36: 'TQ1_0', 37: 'TQ2_0', 38: 'MXFP4_MOE',
+  39: 'NVFP4', 40: 'Q1_0', 41: 'Q2_0', 42: 'F8_E4M3',
 }
 
 // ggml_type (tensor type)
@@ -97,6 +100,7 @@ const TENSOR_TYPES: Record<number, string> = {
   16: 'IQ2_XXS', 17: 'IQ2_XS', 18: 'IQ3_XXS', 19: 'IQ1_S', 20: 'IQ4_NL', 21: 'IQ3_S',
   22: 'IQ2_S', 23: 'IQ4_XS', 24: 'I8', 25: 'I16', 26: 'I32', 27: 'I64', 28: 'F64',
   29: 'IQ1_M', 30: 'BF16', 34: 'TQ1_0', 35: 'TQ2_0', 39: 'MXFP4',
+  40: 'NVFP4', 41: 'Q1_0', 42: 'Q2_0', 43: 'F8_E4M3',
 }
 
 /** ggml_type -> [elements per block, bytes per block]. */
@@ -106,6 +110,7 @@ export const TENSOR_BLOCK: Record<number, [number, number]> = {
   16: [256, 66], 17: [256, 74], 18: [256, 98], 19: [256, 50], 20: [32, 18], 21: [256, 110],
   22: [256, 82], 23: [256, 136], 24: [1, 1], 25: [1, 2], 26: [1, 4], 27: [1, 8], 28: [1, 8],
   29: [256, 56], 30: [1, 2], 34: [256, 54], 35: [256, 66], 39: [32, 17],
+  40: [64, 36], 41: [128, 18], 42: [64, 18], 43: [1, 1],
 }
 
 /** Bytes a tensor of `elems` elements of ggml type `type` takes in the file (unknown types: 2 bytes per element). */
@@ -275,7 +280,7 @@ export async function readGguf(file: string): Promise<{ meta: GgufMeta, layout: 
 
     let tensorParams = 0
     const byType = new Map<number, number>()
-    const layout: GgufLayout = { layerBytes: [], embedBytes: 0, outputBytes: 0, tiedOutput: true, otherBytes: 0, tensorBytes: 0 }
+    const layout: GgufLayout = { layerBytes: [], layerExpertBytes: [], embedBytes: 0, outputBytes: 0, tiedOutput: true, otherBytes: 0, tensorBytes: 0 }
     for (let i = 0; i < tensorCount; i++) {
       const name = (await r.string(256)) ?? ''
       const nDims = await r.u32()
@@ -291,8 +296,12 @@ export async function readGguf(file: string): Promise<{ meta: GgufMeta, layout: 
       const blk = /^blk\.(\d+)\./.exec(name)
       if (blk) {
         const n = Number(blk[1])
-        if (n < 100_000) layout.layerBytes[n] = (layout.layerBytes[n] ?? 0) + bytes
-        else layout.otherBytes += bytes
+        if (n < 100_000) {
+          layout.layerBytes[n] = (layout.layerBytes[n] ?? 0) + bytes
+          if (/^blk\.\d+\.ffn_[a-z_]*_exps\./.test(name)) {
+            layout.layerExpertBytes[n] = (layout.layerExpertBytes[n] ?? 0) + bytes
+          }
+        } else layout.otherBytes += bytes
       } else if (name.startsWith('token_embd.')) layout.embedBytes += bytes
       else if (name.startsWith('output')) {
         layout.outputBytes += bytes
@@ -300,6 +309,7 @@ export async function readGguf(file: string): Promise<{ meta: GgufMeta, layout: 
       } else layout.otherBytes += bytes
     }
     for (let n = 0; n < layout.layerBytes.length; n++) layout.layerBytes[n] ??= 0
+    for (let n = 0; n < layout.layerExpertBytes.length; n++) layout.layerExpertBytes[n] ??= 0
 
     const architecture = str(kv.get('general.architecture'))
     const fileType = num(kv.get('general.file_type'))

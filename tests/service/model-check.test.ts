@@ -7,9 +7,10 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { defaultSettings } from '../../server/core/config'
-import { DeviceProbe, type DeviceList } from '../../server/core/devices'
+import { DeviceProbe, parseCacheTypes, parseHelpFlags, parseSplitModes, type DeviceList } from '../../server/core/devices'
 import { customDir } from '../../server/core/runtimes'
 import { writeGguf, type FakeGguf, type KvValue } from '../fixtures/gguf-builder'
+import { B11146_HELP } from '../fixtures/llama-help'
 
 const win = process.platform === 'win32'
 const gpuId = win ? 'CUDA0' : 'MTL0'
@@ -111,6 +112,32 @@ test('a quantised V cache without flash attention is refused at save with a Chin
   expect(err.code).toBe('check-failed')
   expect(err.detail).toContain('Flash Attention')
   expect(model().profiles['默认']!.overrides).toEqual({})
+})
+
+test('save-time rejects flags and cache values absent from the selected runtime help', async () => {
+  const realHelp = DeviceProbe.prototype.help
+  DeviceProbe.prototype.help = async () => ({
+    splitModes: parseSplitModes(B11146_HELP), flags: parseHelpFlags(B11146_HELP), cacheTypes: parseCacheTypes(B11146_HELP),
+  })
+  try {
+    const body = { form: form({ extraArgs: '--unknown-option -ctv f8_e4m3' }) }
+    const check = await svc!.checkProfile(model(), '默认', body)
+    expect(check.issues.filter(i => i.severity === 'error')).toEqual([
+      { code: 'flag-unsupported', severity: 'error', detail: { flag: '--unknown-option' } },
+      { code: 'cache-type-unsupported', severity: 'error', detail: { flag: '-ctv', type: 'f8_e4m3' } },
+    ])
+    const err = await svc!.checkBeforeSave(model(), '默认', body).catch(e => e)
+    expect(err.code).toBe('check-failed')
+    expect(err.detail).toContain('--unknown-option')
+    expect(err.detail).toContain('f8_e4m3')
+    expect(model().profiles['默认']!.extraArgs).toBe('')
+
+    const admissionCheck = await svc!.checkProfile(model(), '默认', body, { validateArgs: false })
+    expect(admissionCheck.blocked).toBe(false)
+    expect(admissionCheck.estimate).not.toBeNull()
+  } finally {
+    DeviceProbe.prototype.help = realHelp
+  }
 })
 
 test('warnings and a full memory never block the save; the check comes back for the interface', async () => {

@@ -3,7 +3,7 @@
 // scheduler records them as a load failure.
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { buildLaunchArgs, cmdProgramMayExpand, formatCmdCommand, formatPosixCommand, type ArgWarning, type BuildInput, type LaunchDefaults, type LaunchParams, type ParamOverrides, type ParamValue } from './args'
+import { buildLaunchArgs, cmdProgramMayExpand, formatCmdCommand, formatPosixCommand, groupArgs, groupValue, type ArgWarning, type BuildInput, type LaunchDefaults, type LaunchParams, type ParamOverrides, type ParamValue } from './args'
 import { deviceMissing, type DeviceList } from './devices'
 import { autoPick, comboKey, requiredDevices, resolveGpuSelection, type GpuChoice, type GpuGroup, type GpuSelection } from './gpu-group'
 import { comboWarnings, type ComboRecord } from './split-stats'
@@ -37,6 +37,31 @@ export interface RuntimeUse {
 export interface DeviceInfo {
   devices: DeviceList
   splitModes: readonly string[] | null
+  flags?: ReadonlySet<string> | null
+  cacheTypes?: readonly string[] | null
+}
+
+const CACHE_TYPE_FLAGS = new Set([
+  '--cache-type-k', '-ctk', '--cache-type-v', '-ctv',
+  '--cache-type-k-draft', '-ctkd', '--cache-type-v-draft', '-ctvd',
+  '--spec-draft-type-k', '--spec-draft-type-v',
+])
+
+function helpWarnings(args: string[], info: DeviceInfo): ArgWarning[] {
+  const warnings: ArgWarning[] = []
+  const cacheTypes = info.cacheTypes?.map(type => type.toLowerCase())
+  for (const group of groupArgs(args)) {
+    const flag = group.flag
+    if (!flag) continue
+    if (info.flags && !info.flags.has(flag)) warnings.push({ code: 'flag-unsupported', severity: 'error', flag })
+    if (cacheTypes && CACHE_TYPE_FLAGS.has(flag)) {
+      const value = groupValue(group)
+      if (value && !cacheTypes.includes(value.toLowerCase())) {
+        warnings.push({ code: 'cache-type-unsupported', severity: 'error', flag, detail: value })
+      }
+    }
+  }
+  return warnings
 }
 
 export interface LaunchPlan {
@@ -234,6 +259,7 @@ export function previewLaunch(input: PreviewInput): LaunchPreview {
     if (g) { sel = { device: g.id, group: null }; built = make(sel) }
     extra.push(...comboWarnings(sel.group, sel.group ? input.comboRecord?.(comboKey(runtimeKeyOf(runtime), sel.group.devices, sel.group.splitMode)) : undefined, input.deviceInfo.splitModes))
   }
+  if (input.deviceInfo) extra.push(...helpWarnings(built.args, input.deviceInfo))
   const program = exe ?? (win ? 'llama-server.exe' : 'llama-server')
   const warnings = [...built.warnings, ...extra]
   if (win && cmdProgramMayExpand(program)) warnings.push({ code: 'preview-program-percent', severity: 'warning' })

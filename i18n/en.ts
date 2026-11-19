@@ -89,7 +89,7 @@ export const enSkeleton: PartialMessages = {
       },
       params: {
         ctxSize: { hint: '--ctx-size. The maximum number of tokens the model can remember; larger uses more memory; 0 means the model\'s own length.' },
-        cacheTypeK: { hint: '--cache-type-k. The precision of K in the attention cache; q4_0 saves memory, f16 is most accurate.' },
+        cacheTypeK: { hint: '--cache-type-k. The precision of K in the attention cache; q4_0 saves memory, f16 is most accurate; f8_e4m3 uses about as much as q8_0 and needs llama.cpp v1.0.0 or later.' },
         flashAttn: { hint: '--flash-attn. Saves memory and is faster; on / off / auto.' },
         gpuLayers: { label: 'Accelerated layers', hint: '--n-gpu-layers. How many layers are handed to system acceleration; 999 means all.' },
         ubatchSize: { hint: '--ubatch-size. The batch size actually used for computation; larger is faster but uses more memory.' },
@@ -573,6 +573,8 @@ export const enSkeleton: PartialMessages = {
     check: {
       issues: {
         'v-cache-needs-fa': 'The V cache uses the quantized type {type}, but Flash Attention is off, so llama-server would exit with an error. Set Flash Attention to on / auto, or set the V cache to f16.',
+        'flag-unsupported': 'This llama.cpp version does not know the argument {flag} (it may have been removed; v1.0.0 removed --defrag-thold, for example), so llama-server would exit with an error. Remove it from the extra arguments, or use a version that supports it.',
+        'cache-type-unsupported': 'This llama.cpp version does not support the cache type {type} ({flag}), so llama-server would exit with an error. Choose another cache type, or update llama.cpp (f8_e4m3 needs v1.0.0 or later).',
         'device-missing': 'The chosen device {device} is not in this llama.cpp version\'s device list, so starting would fail. Choose another device, or a llama.cpp version that can see it.',
         'split-mode-unsupported': 'This llama.cpp version does not support the split mode {mode}, so starting would fail. Use another mode or version.',
         'ctx-over-train': 'The context {ctx} exceeds the model\'s training length {train} with no RoPE / YaRN scaling set: it will start, but quality degrades noticeably beyond the trained length.',
@@ -795,6 +797,8 @@ export const enSkeleton: PartialMessages = {
           'extra-overrides-device': 'The {flag} in the extra arguments overrides the chosen device setting; the extra arguments win.',
           'extra-multi-device': 'The {flag} in the extra arguments is a device / split parameter; it takes effect together with the device choice in the form, and the extra arguments win; for multi-GPU prefer "Use several GPUs" above, and these settings are not checked.',
           'split-mode-unsupported': 'This llama.cpp version does not support the {detail} split mode, so it cannot start. Pick another mode or version.',
+          'flag-unsupported': 'This llama.cpp version does not know the argument {flag} (it may have been removed), so it cannot start. Remove it from the extra arguments, or use another version.',
+          'cache-type-unsupported': 'This llama.cpp version does not support the cache type {detail} ({flag}), so it cannot start. Choose another cache type, or update llama.cpp.',
           'split-mode-unconfirmed': 'The {detail} split mode is experimental, and this version + device + mode combination has not been confirmed yet; pick and confirm it once on the edit page to clear this notice.',
           'split-mode-failed-before': 'This combination (version + device + split mode) failed to load before ({detail}). It will still start as configured; nothing changes automatically.',
           'duplicate-in-layer': '{flag} appears several times in the extra arguments; the last one wins ({layer}).',
@@ -805,8 +809,8 @@ export const enSkeleton: PartialMessages = {
       },
       params: {
         ctxSize: { label: 'Context length', hint: '--ctx-size. The maximum number of tokens it can remember; larger uses more VRAM; 0 means the model\'s own length.' },
-        cacheTypeK: { label: 'K cache type', hint: '--cache-type-k. Precision of K in the attention cache; q4_0 saves VRAM, f16 is most accurate.' },
-        cacheTypeV: { label: 'V cache type', hint: '--cache-type-v. Precision of V in the attention cache. A quantized V cache requires Flash Attention.' },
+        cacheTypeK: { label: 'K cache type', hint: '--cache-type-k. Precision of K in the attention cache; q4_0 saves VRAM, f16 is most accurate; f8_e4m3 uses about as much as q8_0 and needs llama.cpp v1.0.0 or later.' },
+        cacheTypeV: { label: 'V cache type', hint: '--cache-type-v. Precision of V in the attention cache. A quantized V cache requires Flash Attention (f8_e4m3 does not).' },
         flashAttn: { label: 'Flash Attention', hint: '--flash-attn. Saves VRAM and is faster; on / off / auto.' },
         gpuLayers: { label: 'GPU layers', hint: '--n-gpu-layers. How many layers go onto the GPU; 999 means all.' },
         batchSize: { label: 'Batch size', hint: '--batch-size. Tokens fed in at once while processing the prompt.' },
@@ -1482,6 +1486,7 @@ export const enSkeleton: PartialMessages = {
       check: 'Check for updates',
       latest: '{tag}, already the latest version',
       available: 'A new version {tag} was found',
+      withStable: '{stable} ({tag})',
       release: 'View the release notes',
       download: 'Download the update',
       installed: 'This version is already installed; you can switch to it by hand in the version list.',

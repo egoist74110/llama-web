@@ -67,12 +67,56 @@ export function parseSplitModes(help: string): string[] | null {
   return m[1]!.split(',').map(x => x.trim().toLowerCase()).filter(x => /^[a-z]+$/.test(x) && x !== 'none')
 }
 
+// Aliases are comma-separated at the start of the option column, before any value placeholder.
+const HELP_OPTIONS = /^([ \t]*)(--?[A-Za-z0-9][\w-]*(?:,[ \t]*--?[A-Za-z0-9][\w-]*)*)(?=[ \t,=]|$)/
+
+function helpOptionRows(lines: string[]) {
+  let column = Infinity
+  const matches = lines.map(line => {
+    const match = HELP_OPTIONS.exec(line)
+    if (match) column = Math.min(column, match[1]!.length)
+    return match
+  })
+  // Wrapped descriptions may also start with a flag, but are to the right of the option column.
+  return matches.map(match => match && match[1]!.length === column ? match[2]!.split(',').map(flag => flag.trim()) : [])
+}
+
+export function parseHelpFlags(help: string): Set<string> | null {
+  const flags = new Set(helpOptionRows(help.split(/\r?\n/)).flat())
+  return flags.size >= 20 ? flags : null
+}
+
+export function parseCacheTypes(help: string): string[] | null {
+  const lines = help.split(/\r?\n/)
+  const start = helpOptionRows(lines).findIndex(flags => flags.includes('--cache-type-k'))
+  if (start < 0) return null
+  const indent = /^[ \t]*/.exec(lines[start]!)![0].length
+  const isContinuation = (line: string) => line.trim() && /^[ \t]*/.exec(line)![0].length > indent
+  for (let i = start; i < lines.length && (i === start || isContinuation(lines[i]!)); i++) {
+    const match = /\ballowed values:\s*(.*)/i.exec(lines[i]!)
+    if (!match) continue
+    let list = match[1]!.trim()
+    while ((!list || list.endsWith(',')) && i + 1 < lines.length && isContinuation(lines[i + 1]!)) {
+      list += ' ' + lines[++i]!.trim()
+    }
+    const values = /^[ \t]*([\w]+(?:\s*,\s*[\w]+)*)(?=\s*(?:\(|\.?\s*$))/.exec(list)?.[1]
+    return values?.split(',').map(value => value.trim().toLowerCase()) ?? null
+  }
+  return null
+}
+
+interface BuildHelp {
+  splitModes: string[] | null
+  flags: Set<string> | null
+  cacheTypes: string[] | null
+}
+
 /** Per-executable cache of the probe (the device set only changes with hardware or driver, so a minute is plenty). */
 export class DeviceProbe {
   private cache = new Map<string, { at: number, value: DeviceList }>()
   private running = new Map<string, Promise<DeviceList>>()
-  private modes = new Map<string, string[] | null>()
-  private modeRuns = new Map<string, Promise<string[] | null>>()
+  private helpCache = new Map<string, BuildHelp>()
+  private helpRuns = new Map<string, Promise<BuildHelp>>()
 
   constructor(private run: RunCmd, private ttlMs = 60_000, private now: () => number = Date.now) {}
 
@@ -90,25 +134,28 @@ export class DeviceProbe {
     return p
   }
 
-  /**
-   * Split modes of one build (`--help`). A version never changes its own help, so a readable answer is kept for good;
-   * a failed run is not remembered. Null = unknown.
-   */
-  splitModes(exe: string): Promise<string[] | null> {
-    if (this.modes.has(exe)) return Promise.resolve(this.modes.get(exe)!)
-    const busy = this.modeRuns.get(exe)
+  /** A readable answer is kept for good. Failed or unrecognizable output is retried next time. */
+  help(exe: string): Promise<BuildHelp> {
+    const hit = this.helpCache.get(exe)
+    if (hit) return Promise.resolve(hit)
+    const busy = this.helpRuns.get(exe)
     if (busy) return busy
-    const p = this.run(exe, ['--help'], 15_000).then(parseSplitModes, () => null).then((v) => {
-      if (v) this.modes.set(exe, v)
+    const p = this.run(exe, ['--help'], 15_000).catch(() => '').then((output) => {
+      const v = { splitModes: parseSplitModes(output), flags: parseHelpFlags(output), cacheTypes: parseCacheTypes(output) }
+      if (v.splitModes || v.flags || v.cacheTypes) this.helpCache.set(exe, v)
       return v
-    }).finally(() => this.modeRuns.delete(exe))
-    this.modeRuns.set(exe, p)
+    }).finally(() => this.helpRuns.delete(exe))
+    this.helpRuns.set(exe, p)
     return p
+  }
+
+  async splitModes(exe: string): Promise<string[] | null> {
+    return (await this.help(exe)).splitModes
   }
 
   forget(exe: string) {
     this.cache.delete(exe)
-    this.modes.delete(exe)
+    this.helpCache.delete(exe)
   }
 }
 

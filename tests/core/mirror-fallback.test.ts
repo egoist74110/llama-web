@@ -112,6 +112,7 @@ test('llama.cpp metadata falls back to the release pages when the API is rate-li
   const gh = llamaWeb()
   const latest = await resolveLatest(gh.fetchFn, '', 'darwin', {}, MAC)
   expect(latest.tag).toBe('b300')
+  expect(latest.stable).toBeUndefined()
   expect(latest.bin.digest).toBe(`sha256:${HEX('c')}`)
   expect(gh.calls.some(u => u.includes('expanded_assets'))).toBe(true)
   // A network failure is not worked around (the pages would be unreachable too).

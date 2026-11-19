@@ -89,7 +89,7 @@ describe('breakdown', () => {
 describe('findings of the check', () => {
   const codes = Object.keys(t.models.check.issues) as CheckCode[]
   test('every code has a text and the details are filled in', () => {
-    for (const code of codes) expect(issueText({ code, severity: 'warning', detail: { type: 'q4_0', ctx: 8, train: 4, ubatch: 2, batch: 1, layers: 99, mlockMiB: 1, availableMiB: 2, parallel: 4, perSlot: 100, kind: 'mmproj', mode: 'row', device: 'CUDA1' } }, false)).not.toMatch(/\{\w+\}/)
+    for (const code of codes) expect(issueText({ code, severity: 'warning', detail: { flag: '-ctv', type: 'q4_0', ctx: 8, train: 4, ubatch: 2, batch: 1, layers: 99, mlockMiB: 1, availableMiB: 2, parallel: 4, perSlot: 100, kind: 'mmproj', mode: 'row', device: 'CUDA1' } }, false)).not.toMatch(/\{\w+\}/)
   })
   test('on a Mac the findings that could be reached read without GPU wording', () => {
     // `device-missing` is never judged on a Mac (model-check.ts skips it), `v-cache-needs-fa` etc. carry no GPU word.

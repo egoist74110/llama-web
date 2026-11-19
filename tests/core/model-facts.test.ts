@@ -40,8 +40,8 @@ test('a missing later shard: the layout covers only part, so it is flagged and n
 
 test('mergeLayouts sums every field and keeps holes at 0', () => {
   const m = mergeLayouts([
-    { layerBytes: [1, 2], embedBytes: 3, outputBytes: 0, tiedOutput: true, otherBytes: 1, tensorBytes: 7 },
-    { layerBytes: [0, 0, 5], embedBytes: 0, outputBytes: 4, tiedOutput: false, otherBytes: 0, tensorBytes: 9 },
+    { layerBytes: [1, 2, 3], layerExpertBytes: [0, 0, 2], embedBytes: 3, outputBytes: 0, tiedOutput: true, otherBytes: 1, tensorBytes: 10 },
+    { layerBytes: [0, 0, 5], layerExpertBytes: [0, 0, 4], embedBytes: 0, outputBytes: 4, tiedOutput: false, otherBytes: 0, tensorBytes: 9 },
   ])
-  expect(m).toEqual({ layerBytes: [1, 2, 5], embedBytes: 3, outputBytes: 4, tiedOutput: false, otherBytes: 1, tensorBytes: 16 })
+  expect(m).toEqual({ layerBytes: [1, 2, 8], layerExpertBytes: [0, 0, 6], embedBytes: 3, outputBytes: 4, tiedOutput: false, otherBytes: 1, tensorBytes: 19 })
 })

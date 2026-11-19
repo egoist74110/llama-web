@@ -15,7 +15,7 @@ const noArch: GgufArch = {
 function facts(train = 8192): ModelFacts {
   const a: GgufArch = { ...noArch, blockCount: 30, embeddingLength: 576, feedForwardLength: 1536, headCount: 9, headCountKv: 3, vocabSize: 49152 }
   const layers = Array.from({ length: 30 }, () => 100 * MiB)
-  const layout: GgufLayout = { layerBytes: layers, embedBytes: 50 * MiB, outputBytes: 0, tiedOutput: true, otherBytes: 0, tensorBytes: 3050 * MiB }
+  const layout: GgufLayout = { layerBytes: layers, layerExpertBytes: [], embedBytes: 50 * MiB, outputBytes: 0, tiedOutput: true, otherBytes: 0, tensorBytes: 3050 * MiB }
   return { meta: { version: 3, fileSize: layout.tensorBytes, architecture: 'llama', contextLength: train, arch: a } as GgufMeta, layout, totalBytes: layout.tensorBytes }
 }
 const sys = { totalMiB: 65536, availableMiB: 60000 }
@@ -49,7 +49,7 @@ test('v-cache-needs-fa: a quantised V cache without flash attention is an error 
   expect(bad.blocked).toBe(true)
   expect(bad.issues.find(i => i.code === 'v-cache-needs-fa')!.severity).toBe('error')
   expect(checkLaunch(base({ args: ['-ctv', 'q8_0', '-fa', '0'] })).blocked).toBe(true)
-  for (const args of [['-ctv', 'q8_0', '-fa', 'on'], ['-ctv', 'q8_0', '-fa', 'auto'], ['-ctv', 'q8_0'], ['-ctv', 'f16', '-fa', 'off'], ['-ctk', 'q8_0', '-fa', 'off']]) {
+  for (const args of [['-ctv', 'q8_0', '-fa', 'on'], ['-ctv', 'q8_0', '-fa', 'auto'], ['-ctv', 'q8_0'], ['-ctv', 'f16', '-fa', 'off'], ['-ctv', 'f8_e4m3', '-fa', 'off'], ['-ctk', 'q8_0', '-fa', 'off']]) {
     const c = checkLaunch(base({ args }))
     expect(codes(c)).not.toContain('v-cache-needs-fa')
     expect(c.blocked).toBe(false)
@@ -74,6 +74,18 @@ test('split-mode-unsupported comes from the launch warnings and blocks; a plain 
   expect(bad.blocked).toBe(true)
   expect(bad.issues[0]).toMatchObject({ code: 'split-mode-unsupported', detail: { mode: 'tensor' } })
   expect(checkLaunch(base({ warnings: [{ code: 'split-mode-unconfirmed', severity: 'warning' }] })).blocked).toBe(false)
+})
+
+test('unsupported flags and cache types block saves with the supplied spelling and value', () => {
+  const check = checkLaunch(base({ warnings: [
+    { code: 'flag-unsupported', severity: 'error', flag: '--defrag-thold' },
+    { code: 'cache-type-unsupported', severity: 'error', flag: '-ctv', detail: 'f8_e4m3' },
+  ] }))
+  expect(check.blocked).toBe(true)
+  expect(check.issues.slice(0, 2)).toEqual([
+    { code: 'flag-unsupported', severity: 'error', detail: { flag: '--defrag-thold' } },
+    { code: 'cache-type-unsupported', severity: 'error', detail: { flag: '-ctv', type: 'f8_e4m3' } },
+  ])
 })
 
 test('ctx-over-train: above the training length without rope scaling; at the limit, with scaling, or "model\'s own" does not', () => {

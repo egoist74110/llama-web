@@ -18,9 +18,10 @@ export function shardPaths(abs: string): string[] {
 
 /** The layouts of all shards as one: every shard holds some of the tensors, so the sums over the shards are the whole model. */
 export function mergeLayouts(parts: GgufLayout[]): GgufLayout {
-  const out: GgufLayout = { layerBytes: [], embedBytes: 0, outputBytes: 0, tiedOutput: true, otherBytes: 0, tensorBytes: 0 }
+  const out: GgufLayout = { layerBytes: [], layerExpertBytes: [], embedBytes: 0, outputBytes: 0, tiedOutput: true, otherBytes: 0, tensorBytes: 0 }
   for (const l of parts) {
     for (let n = 0; n < l.layerBytes.length; n++) out.layerBytes[n] = (out.layerBytes[n] ?? 0) + (l.layerBytes[n] ?? 0)
+    for (let n = 0; n < l.layerExpertBytes.length; n++) out.layerExpertBytes[n] = (out.layerExpertBytes[n] ?? 0) + (l.layerExpertBytes[n] ?? 0)
     out.embedBytes += l.embedBytes
     out.outputBytes += l.outputBytes
     out.otherBytes += l.otherBytes

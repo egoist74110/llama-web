@@ -16,7 +16,7 @@ export const RISKY_FROM = 0.85
 
 /** Bytes per element of the KV cache types llama.cpp accepts (`--cache-type-k/v`). */
 export const CACHE_BYTES: Readonly<Record<string, number>> = {
-  f32: 4, f16: 2, bf16: 2, q8_0: 34 / 32, q4_0: 18 / 32, q4_1: 20 / 32, iq4_nl: 18 / 32, q5_0: 22 / 32, q5_1: 24 / 32,
+  f32: 4, f16: 2, bf16: 2, f8_e4m3: 1, q8_0: 34 / 32, q4_0: 18 / 32, q4_1: 20 / 32, iq4_nl: 18 / 32, q5_0: 22 / 32, q5_1: 24 / 32,
 }
 
 /** What the estimate needs to know about one model (all shards together). */
@@ -39,6 +39,9 @@ export interface EstimateParams {
   flashAttn?: string | null
   /** Null / negative = every layer. */
   gpuLayers?: number | null
+  /** Number of leading layers with experts in CPU memory (Infinity = all layers). */
+  cpuMoeLayers?: number | null
+  moeCacheMiB?: number | null
   batchSize?: number | null
   ubatchSize?: number | null
   /** Null / 0 / negative = llama-server's automatic 4 slots with one shared (unified) KV cache. */
@@ -298,8 +301,8 @@ function modelParts(f: ModelFacts, p: EstimateParams, devices: DeviceInput[], sh
   const auto = !p.parallel || p.parallel <= 0
   const slots = auto ? 4 : p.parallel!
   const unified = auto
-  const keyBytes = CACHE_BYTES[p.cacheTypeK ?? 'f16'] ?? 2
-  const valBytes = CACHE_BYTES[p.cacheTypeV ?? 'f16'] ?? 2
+  const keyBytes = CACHE_BYTES[p.cacheTypeK?.toLowerCase() ?? 'f16'] ?? 2
+  const valBytes = CACHE_BYTES[p.cacheTypeV?.toLowerCase() ?? 'f16'] ?? 2
   const owner = assignLayers(L, p.gpuLayers, shares)
   const outDev = assignOutput(L, p.gpuLayers, shares)
   // One memory for everything: a Mac / integrated device, or no device at all (CPU only).
@@ -307,7 +310,25 @@ function modelParts(f: ModelFacts, p: EstimateParams, devices: DeviceInput[], sh
 
   // Weights.
   const bucket = (d: number) => (d < 0 ? host : dev[d]!)
-  for (let il = 0; il < L; il++) into(bucket(owner[il]!), 'weightsMiB', mib(w.perLayer[il]!))
+  const expertBytes = !asDraft && !sharedPool && !guessed ? f.layout?.layerExpertBytes : undefined
+  let movedExperts = false
+  const usedDev = new Set(owner.filter(o => o >= 0))
+  for (let il = 0; il < L; il++) {
+    const d = owner[il]!
+    const moved = d >= 0 && il < (p.cpuMoeLayers ?? 0) ? (expertBytes?.[il] ?? 0) : 0
+    into(bucket(d), 'weightsMiB', mib(w.perLayer[il]! - moved))
+    if (moved > 0) {
+      into(host, 'weightsMiB', mib(moved))
+      movedExperts = true
+    }
+  }
+  const moeCache = p.moeCacheMiB ?? 0
+  if (movedExperts && moeCache > 0) {
+    const totalShare = [...usedDev].reduce((sum, d) => sum + shares[d]!, 0)
+    for (const d of usedDev) {
+      into(dev[d]!, 'weightsMiB', moeCache * (totalShare > 0 ? shares[d]! / totalShare : 1 / usedDev.size))
+    }
+  }
   if (sharedPool) {
     // One memory: each tensor counted once (the tied output projection aliases the embedding).
     into(host, 'weightsMiB', mib(w.embed + w.output + w.other))
@@ -347,7 +368,6 @@ function modelParts(f: ModelFacts, p: EstimateParams, devices: DeviceInput[], sh
     const maxCells = Math.max(cells.full, cells.swa)
     const compute = mib(ubatch * width * 20) + 12 + (fa ? 0 : mib(ubatch * maxCells * (a.headCount ?? 0) * 4))
     if (a.expertCount) notes.add('unverified-moe-compute')
-    const usedDev = new Set(owner.filter(o => o >= 0))
     for (const d of usedDev) into(dev[d]!, 'computeMiB', compute)
     if (owner.some(o => o < 0) || usedDev.size === 0) into(host, 'computeMiB', compute)
     else into(host, 'computeMiB', ubatch * 0.032)

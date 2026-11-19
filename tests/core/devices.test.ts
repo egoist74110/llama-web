@@ -1,8 +1,73 @@
 import { describe, expect, test } from 'bun:test'
 import {
-  describeDevices, DeviceProbe, deviceMissing, devicesFromNvidia, parseListDevices, probeDevices, type DeviceList,
+  describeDevices, DeviceProbe, deviceMissing, devicesFromNvidia, parseCacheTypes, parseHelpFlags, parseListDevices, probeDevices, type DeviceList,
 } from '../../server/core/devices'
 import type { RunCmd } from '../../server/core/system'
+import { B11146_HELP } from '../fixtures/llama-help'
+
+const CACHE_TYPES = ['f32', 'f16', 'bf16', 'q8_0', 'q4_0', 'q4_1', 'iq4_nl', 'q5_0', 'q5_1']
+
+test('b11146 help includes option aliases, defrag and its original KV cache list', () => {
+  const flags = parseHelpFlags(B11146_HELP)!
+  for (const flag of ['--usage', '--no-jinja', '-ctk', '--cache-type-k', '-dt', '--defrag-thold', '-ctvd']) {
+    expect(flags.has(flag)).toBe(true)
+  }
+  expect(flags.has('-1')).toBe(false)
+  expect(flags.has('--hf-repo')).toBe(false) // This excerpt has only the description's reference.
+  expect(parseCacheTypes(B11146_HELP)).toEqual(CACHE_TYPES)
+})
+
+test('v1-style help supports inline and wrapped cache values and omits the removed option', () => {
+  const help = `
+--help, -h  Show usage
+--version   Show version
+--host HOST
+--port PORT
+-m, --model FILE
+-c, --ctx-size N
+-b, --batch-size N
+-ub, --ubatch-size N
+-t, --threads N
+-fa, --flash-attn [on|off|auto]
+--jinja, --no-jinja
+-cmoe, --cpu-moe
+-ncmoe, --n-cpu-moe N
+--moe-cache-mib N
+-ctv, --cache-type-v TYPE
+-ctk, --cache-type-k TYPE   allowed values: f32, f16, bf16, f8_e4m3,
+                           q8_0, q4_0, q4_1, iq4_nl, q5_0, q5_1
+`
+  expect(parseHelpFlags(help)?.has('--defrag-thold')).toBe(false)
+  expect(parseCacheTypes(help)).toEqual([...CACHE_TYPES.slice(0, 3), 'f8_e4m3', ...CACHE_TYPES.slice(3)])
+  expect(parseCacheTypes('--cache-type-k TYPE   allowed values: f16, f8_e4m3 (default: f16)')).toEqual(['f16', 'f8_e4m3'])
+})
+
+test('unreadable flags and absent or invalid K lists stay unknown', () => {
+  expect(parseHelpFlags('--cache-type-k TYPE')).toBeNull()
+  expect(parseCacheTypes('--cache-type-k TYPE\n--cache-type-v TYPE\n   allowed values: f16')).toBeNull()
+  expect(parseCacheTypes('--cache-type-k TYPE\n   allowed values: f16, ???')).toBeNull()
+})
+
+test('help and splitModes share one run, cache readable output and retry failures', async () => {
+  let runs = 0
+  const probe = new DeviceProbe(async (_, args) => {
+    expect(args).toEqual(['--help'])
+    if (++runs === 1) throw new Error('unavailable')
+    if (runs === 2) return 'unknown output'
+    return B11146_HELP
+  })
+  expect(await probe.help('a')).toEqual({ flags: null, cacheTypes: null, splitModes: null })
+  expect(await probe.splitModes('a')).toBeNull()
+  const [help, modes] = await Promise.all([probe.help('a'), probe.splitModes('a')])
+  expect(help.flags?.has('--defrag-thold')).toBe(true)
+  expect(help.cacheTypes).toEqual(CACHE_TYPES)
+  expect(modes).toEqual(['layer', 'row', 'tensor'])
+  expect(await probe.help('a')).toBe(help)
+  expect(runs).toBe(3)
+  probe.forget('a')
+  await probe.help('a')
+  expect(runs).toBe(4)
+})
 
 // Output of `llama-server --list-devices` as printed by b11146 on one RTX 5090 (stdout only; the log goes to stderr).
 const REAL = 'Available devices:\n  CUDA0: NVIDIA GeForce RTX 5090 (32579 MiB, 30991 MiB free)\n'

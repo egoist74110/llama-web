@@ -10,6 +10,11 @@ const toast = useToast()
 const doc = ref<LlamacppDoc | null>(null)
 const busy = ref(false)
 const check = computed(() => doc.value?.check)
+const shownTag = computed(() => {
+  const c = check.value
+  if (c?.state !== 'checked') return ''
+  return c.stable ? fmt(s.withStable, { stable: c.stable, tag: c.tag }) : c.tag
+})
 const working = computed(() => state.value?.llamacpp.runtime.state === 'working' || state.value?.llamacpp.secondary?.runtime.state === 'working')
 const installed = computed(() => {
   const c = check.value
@@ -67,7 +72,7 @@ async function act(action: 'check' | 'prefs' | 'download', autoUpdate?: boolean)
     </div>
     <p class="text-xs text-muted">{{ s.hint }}</p>
     <div v-if="check?.state === 'checked'" class="flex flex-wrap items-center gap-2 text-sm">
-      <span>{{ fmt(check.available ? s.available : s.latest, { tag: check.tag }) }}</span>
+      <span>{{ fmt(check.available ? s.available : s.latest, { tag: shownTag }) }}</span>
       <ULink :to="check.url" target="_blank" class="text-xs text-primary">{{ s.release }}</ULink>
       <UButton v-if="check.available && !installed" size="xs" :disabled="busy || working" icon="i-lucide-download" @click="onDownloadClick">{{ s.download }}</UButton>
       <span v-else-if="check.available" class="text-xs text-muted">{{ s.installed }}</span>

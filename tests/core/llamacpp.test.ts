@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { extractZip, getBody, installLatest, listInstalled, pickCudaVersion, RuntimeError, versionsDir } from '../../server/core/llamacpp'
+import { extractZip, getBody, installLatest, listInstalled, pickCudaVersion, resolveLatest, RuntimeError, versionsDir } from '../../server/core/llamacpp'
 import { EXE, fakeExtract, fakeGithub, sha } from '../fixtures/fake-github'
 
 let data: string
@@ -22,6 +22,17 @@ test('GitHub rate limits are distinguished from offline errors and other HTTP fa
   await expect(getBody(async () => Response.json({ message: 'You have exceeded a secondary rate limit' }, { status: 403 }), url, 'json')).rejects.toMatchObject({ code: 'rate-limited' })
   await expect(getBody(async () => Response.json({ message: 'Forbidden' }, { status: 403 }), url, 'json')).rejects.toMatchObject({ code: 'http' })
   await expect(getBody(async () => new Response('', { status: 404 }), url, 'json')).rejects.toMatchObject({ code: 'http', detail: expect.stringContaining('404') })
+})
+
+test('latest release exposes a stable version alongside the build from nightly-tag.txt', async () => {
+  const tag = 'b12359'
+  const versioned = fakeGithub({ tag, latestTag: 'v1.0.0' })
+  expect(await resolveLatest(versioned.fetchFn, '13.3', 'win32')).toMatchObject({ tag, stable: 'v1.0.0' })
+  for (const latestTag of ['nightly', 'v1.0.0-rc1', undefined]) {
+    const build = await resolveLatest(fakeGithub({ tag, latestTag }).fetchFn, '13.3', 'win32')
+    expect(build.tag).toBe(tag)
+    expect(build.stable).toBeUndefined()
+  }
 })
 
 test('listInstalled: only bNNNN directories that contain the exe, newest first', () => {

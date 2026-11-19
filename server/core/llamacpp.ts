@@ -17,6 +17,7 @@ import { legacyWindows, targetKey, type RuntimeTarget } from './platform'
 
 const REPO = 'ggml-org/llama.cpp'
 const TAG_RE = /^b\d+$/
+export const STABLE_TAG_RE = /^v\d+\.\d+\.\d+$/
 
 export type RuntimeErrorCode =
   | 'network' | 'rate-limited' | 'http' | 'no-nightly-tag' | 'bad-tag' | 'asset-missing' | 'no-digest' | 'digest-mismatch' | 'extract-failed' | 'extract-too-large' | 'no-server-exe' | 'no-compatible-cuda' | 'disk-space'
@@ -71,6 +72,7 @@ export interface ReleaseAsset {
 
 export interface LatestBuild {
   tag: string
+  stable?: string
   bin: ReleaseAsset
   digestSource?: DigestSource
   cudart?: ReleaseAsset
@@ -185,18 +187,25 @@ export async function getBody(fetchFn: FetchFn, url: string, kind: 'json' | 'tex
   }
 }
 
-async function resolveViaApi(fetchFn: FetchFn, net: NetOptions): Promise<{ tag: string, assets: ReleaseAsset[] }> {
-  const stable = await getBody(fetchFn, `https://api.github.com/repos/${REPO}/releases/latest`, 'json', net) as { assets?: ReleaseAsset[] }
-  const pointer = stable.assets?.find(a => a.name === 'nightly-tag.txt')
+interface BuildMetadata {
+  tag: string
+  stable?: string
+  assets: ReleaseAsset[]
+}
+
+async function resolveViaApi(fetchFn: FetchFn, net: NetOptions): Promise<BuildMetadata> {
+  const latest = await getBody(fetchFn, `https://api.github.com/repos/${REPO}/releases/latest`, 'json', net) as { tag_name?: unknown, assets?: ReleaseAsset[] }
+  const pointer = latest.assets?.find(a => a.name === 'nightly-tag.txt')
   if (!pointer) throw new RuntimeError('no-nightly-tag', 'nightly-tag.txt not found in the latest release')
   const tag = String(await getBody(fetchFn, pointer.browser_download_url, 'text', net)).trim()
   if (!TAG_RE.test(tag)) throw new RuntimeError('bad-tag', 'Unexpected nightly tag', tag)
   const rel = await getBody(fetchFn, `https://api.github.com/repos/${REPO}/releases/tags/${tag}`, 'json', net) as { assets?: ReleaseAsset[] }
-  return { tag, assets: rel.assets ?? [] }
+  const stable = typeof latest.tag_name === 'string' && STABLE_TAG_RE.test(latest.tag_name) ? latest.tag_name : undefined
+  return { tag, assets: rel.assets ?? [], ...(stable ? { stable } : {}) }
 }
 
 /** Same answer without the API: the pointer file by its stable "latest download" URL, the assets from the release page. */
-async function resolveViaWeb(fetchFn: FetchFn, net: NetOptions): Promise<{ tag: string, assets: ReleaseAsset[] }> {
+async function resolveViaWeb(fetchFn: FetchFn, net: NetOptions): Promise<BuildMetadata> {
   const tag = String(await getBody(fetchFn, `https://github.com/${REPO}/releases/latest/download/nightly-tag.txt`, 'text', net)).trim()
   if (!TAG_RE.test(tag)) throw new RuntimeError('bad-tag', 'Unexpected nightly tag', tag)
   return { tag, assets: await fetchExpandedAssets(fetchFn, REPO, tag, net) }
@@ -208,7 +217,7 @@ async function resolveViaWeb(fetchFn: FetchFn, net: NetOptions): Promise<{ tag: 
  */
 export async function resolveLatest(fetchFn: FetchFn, cudaRuntime: string, platform = process.platform, net: NetOptions = {}, target?: RuntimeTarget, limits?: CudaLimits | null): Promise<LatestBuild> {
   const metadata = await officialFirst(fetchFn, async f => {
-    let found: { tag: string, assets: ReleaseAsset[] }
+    let found: BuildMetadata
     try { found = await resolveViaApi(f, net) }
     catch (e) {
       if (!(e instanceof RuntimeError) || !(apiFallbackCode(e) || e.code === 'network' && canMirror(fetchFn)) || net.signal?.aborted) throw e
@@ -222,7 +231,7 @@ export async function resolveLatest(fetchFn: FetchFn, cudaRuntime: string, platf
         build = selectBuild(found, cudaRuntime, platform, target, limits)
         if (!hasDigest(build.bin) || !hasDigest(build.cudart)) throw new RuntimeError('no-digest', 'Release asset has no SHA-256 digest')
       }
-      return build
+      return { ...build, ...(found.stable ? { stable: found.stable } : {}) }
     } catch (e) {
       if (e instanceof RuntimeError) e.assets = found.assets.filter(a => /^(llama-|cudart-)/.test(a.name) && a.browser_download_url.startsWith('https://github.com/')).map(a => ({ name: a.name, url: a.browser_download_url }))
       throw e

@@ -1,5 +1,17 @@
 # 交接记录
 
+## 2026-11-19 · 17-1：跟进 llama.cpp v0.6 – v1.0.0（决定 70，A+B 两组）· 单会话
+- 起因：llama.cpp 2026-11-13 发布 v1.0.0，上次系统适配停在 b11146（v0.5.0）。读了 v0.6.0–v1.0.0 的发布说明并逐项对照代码，用户确认做 A（必修）+ B（新能力），C 组（`/v1/models` 模态、`--load-mode dio`、PLE 分片、`/v1/realtime`、内网图片 URL）暂缓。
+- 计划：新增决定 70、阶段 17（17-1）。规格 Opus 5.5 写（会话草稿 `17-1-backend.md` / `17-1-frontend.md`，不在仓库里）；按用户要求省 Claude 额度：后端 Codex CLI `gpt-6.2-sol` medium（先做了只读探测确认模型锁定），前端 agy `gemini-4-hydrogen` medium（规格写到逐行，所以没用贵 2.38 倍的 Neon）；后台运行，带硬超时（45 / 35 分钟）和 10 分钟无变化的看护，两个都一次跑完、没有卡住。Opus 审查并补改。
+- 实现：`gguf.ts` 新类型（NVFP4 / Q1_0 / Q2_0 / F8_E4M3，文件类型 39–42、张量类型 40–43 与块大小）；`f8_e4m3` KV 缓存（估算 1 字节，不算量化、不触发 `v-cache-needs-fa`；下拉与提示）；`devices.ts` 一次 `--help` 解析出切分模式、全部参数、缓存类型，`launch.ts` 预览产生 `flag-unsupported` / `cache-type-unsupported`（error），`model-check.ts` 对应检查项，只在保存检查时判断（准入与启动传 `validateArgs: false`），读不到 help 不判断；内存估算识别 `--cpu-moe` / `--n-cpu-moe`（`GgufLayout.layerExpertBytes`，前 N 层专家权重算到内存）与 `--moe-cache-mib`（按层的份额加到显卡）；`forwardRequestHeaders` 去掉 `Origin` 与 `Sec-Fetch-*`；`/v1/audio/speech` 透传测试（原有转发已可用）；更新检查带 `stable`（`releases/latest` 的 `tag_name`，存盘并恢复），首页、侧边栏、设置页显示「v1.0.0（b12359）」；`parseVersionOutput` 不再把 `version: 1.0.0` 认成 b1。
+- 审查时我补的：命令预览警告缺新代码的文案（会显示成代码名）；侧边栏与运行库列表的「发现新版」也带稳定版号。
+- 实际运行（我复跑）：`bun test` 2023 pass / 8 skip / 0 fail（最终改动后复跑）；`bun run typecheck` exit 0；`bun run build` exit 0；`git diff --check` 通过。Codex 自己跑全量时有 56 个失败，都是它的沙盒禁止起子进程（EPERM），沙盒外全部通过。浏览器（内置，构建产物 + 临时数据目录，端口 3999）：中文，点「检查更新」得到「发现新版 v1.0.0（b12359）」，重启后侧边栏与设置页仍显示（存盘恢复正常）；K 缓存类型下拉有 `f8_e4m3`，提示文案正确。之后停了服务、删了临时目录。
+- 没有运行：任何真机 GPU 加载（v1.0.0 运行时、`f8_e4m3`、MoE 配 `--n-cpu-moe` 的实际显存）；真实 TTS 模型的 `/v1/audio/speech`；命令预览里 `flag-unsupported` 的界面显示（临时实例没有运行时，只有单元测试，其中参数解析用了本机 b11146 的真实 `--help`）；英文与深色界面没有逐页看。
+- 已知：设置页在约 800 宽时左侧分区导航压在内容上（这次没改设置页布局，看起来是原有问题，未处理）。已经保存过、含 `--defrag-thold` 的方案不会被主动标出，要等打开编辑（检查）时才报错；直接启动会由 llama-server 报「invalid argument」，归类为 `unknown-arg`。
+- 用户验证步骤：`bun scripts/launch.ts web build` →「设置」→ llama.cpp「检查更新」看到「发现新版 v1.0.0（b12359）」→ 下载并切到 b12359 →「模型」编辑一个方案：K / V 缓存选 `f8_e4m3` 保存并启动；在额外参数里加 `--defrag-thold 0.1`，检查结果应报「当前 llama.cpp 版本不认识参数」并拒绝保存；切回 b11146 再选 `f8_e4m3` 应报「不支持缓存类型」。MoE 模型在额外参数加 `--n-cpu-moe 20 --moe-cache-mib 4096`，看检查里的显存估算明显下降、能启动。有 TTS 模型（如 drama-3 + mmproj）时：`curl -X POST http://127.0.0.1:5001/v1/audio/speech -H "Content-Type: application/json" -d "{\"model\":\"<名字>\",\"input\":\"你好\"}" -o out.wav`。
+- 下一步：用户真机验证；C 组等用户决定。
+- `src-tauri/Cargo.lock` 的改动在会话开始前就有，仍未提交。
+
 ## 2026-11-16 · 15-8：知识库界面（条目、版本、回收站、变更记录、使用说明）+ key 的知识库权限 + 「接入」里的 MCP / REST 说明（决定 69）· 单会话
 - 计划：规格 Opus 5.5 写（会话草稿 `15-8-spec.md`，不在仓库里），Sonnet 5.5 实现，Opus 审查、复跑并在浏览器里检查。
 - 实现：「知识库」页选中库后分标签页（`KbDetail.vue`，`?tab=`）：条目 `KbEntries`（搜索、条目级标签筛选、加载更多）、抽屉 `KbEntryDrawer`（查看 / 编辑 / 历史 / 删除进回收站）、表单 `KbEntryForm`（计数与上限、标签输入；409 时保留草稿，可「载入最新」或「在最新版本上保存我的修改」，可展开对比）、历史 `KbEntryHistory`（任意两个版本对比、回退确认，`delete` 版本不能作回退目标）、对比 `KbDiff` + `app/utils/text-diff.ts`（LCS 行 diff，先去掉相同首尾再限 400 万格，长的未变区间折叠）；原文（原 `KbDocs`，没有原文的旧文档删除提示「不能恢复」）；回收站 `KbTrash`；变更记录 `KbChanges`（操作者用 `actorLabel`：管理界面 / 本机·局域网 / API key：名称）；使用说明 `KbGuide`（与默认全文相同时存 `''`、恢复默认确认、显示 rev）。设置里 key 行显示「知识库：全部 / N 个 · 只读 / 可写」与权限弹窗 `KeyKnowledgeModal`；「接入」页末尾 `KbAccessGuide`（本机与公网 MCP 地址、`claude mcp add` 示例、REST curl 示例、中英示例提示词）。唯一的后端改动：`GET /api/kb/:id/entries` 多返回 `tags`（未删除条目的条目级标签计数），外部 `list_entries` 输出不变。
